@@ -4,6 +4,7 @@
 !dist/webview.js
 !dist/webview-style.css
 !media/**
+!docs/screenshots/**
 !vendor/**
 !README.md
 !CHANGELOG.md

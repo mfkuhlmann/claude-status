@@ -307,7 +307,7 @@
     "watch": "node esbuild.mjs --watch",
     "check": "tsc -p . && tsc -p webview",
     "test": "node esbuild.mjs --tests && node --test out/test/*.test.js",
-    "package": "node esbuild.mjs --production && vsce package --allow-missing-repository --no-dependencies",
+    "package": "node esbuild.mjs --production && vsce package --allow-missing-repository --no-rewrite-relative-links --no-dependencies",
     "vscode:prepublish": "node esbuild.mjs --production"
   },
   "devDependencies": {
