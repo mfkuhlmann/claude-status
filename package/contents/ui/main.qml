@@ -547,9 +547,12 @@ PlasmoidItem {
         PlasmaExtras.MenuItem {
             property string profile
             property string folder
+            property bool choose: false   // ask for the folder in the folder dialog
             property string host      // an SSH host's account:
             property string command   // the command that starts the chat there
-            onClicked: host ? root.remoteOpen(host, command) : root.newChat(profile, folder)
+            onClicked: host ? root.remoteOpen(host, command)
+                     : choose ? root.newChatChoosingFolder(profile)
+                     : root.newChat(profile, folder)
         }
     }
 
@@ -559,8 +562,11 @@ PlasmoidItem {
         // clearMenuItems() also deletes the previous entries; deleting them
         // again threw and stopped the menu from opening after the first use.
         newChatMenu.clearMenuItems()
-        const folders = group.projects.slice()
-        if (!folders.some(f => f.short === "~"))
+        // Here: your recent folders, then any folder you pick in the folder
+        // dialog (it opens in your home folder). An SSH host's folders can't be
+        // browsed from here, so its home folder stays in the list.
+        const folders = host ? group.projects.slice() : group.projects.filter(f => f.short !== "~")
+        if (host && !folders.some(f => f.short === "~"))
             folders.push({ path: "", short: "~", newChatCommand: group.homeChatCommand || "" })
         const where = host ? i18nc("account on ssh host", "%1 on %2", group.title, host) : group.title
         const items = [newChatItem.createObject(newChatMenu, { section: true, text: i18n("New chat on %1 in…", where) })]
@@ -572,6 +578,13 @@ PlasmoidItem {
                 host: host || "", command: f.newChatCommand || "",
                 enabled: !host || !!f.newChatCommand
             }))
+        if (!host) {
+            if (folders.length)
+                items.push(newChatItem.createObject(newChatMenu, { separator: true }))
+            items.push(newChatItem.createObject(newChatMenu, {
+                text: i18n("Choose folder…"), icon: "folder-open", profile: group.chatProfile, choose: true
+            }))
+        }
         for (const item of items)
             newChatMenu.addMenuItem(item)
         newChatItems = items
@@ -599,6 +612,13 @@ PlasmoidItem {
     function newChat(profile, folder) {
         launcher.connectSource("python3 -I " + shellQuote(codeDir + "jump.py") + " --new-chat " + shellQuote(profile)
                                + (folder ? " --cwd " + shellQuote(folder) : "") + configDirArgs + " # " + Date.now())
+    }
+
+    // The folder dialog takes over from the popup; cancelling it does nothing
+    function newChatChoosingFolder(profile) {
+        root.expanded = false
+        launcher.connectSource("python3 -I " + shellQuote(codeDir + "jump.py") + " --new-chat " + shellQuote(profile)
+                               + " --choose-folder" + configDirArgs + " # " + Date.now())
     }
 
     // ---------------------------------------------------------------- SSH hosts

@@ -33,7 +33,7 @@ across all your accounts and SSH hosts, one click away on your panel.
 **Act on your sessions**
 
 - **Jump to a session** by clicking its name: Konsole switches to the right tab (or tmux to its pane), VS Code opens the conversation, and a background job is attached in a terminal. Finished chats reopen with `claude --resume`.
-- **Start a new chat** with the **+** next to an account: pick one of its recent project folders, and a terminal opens with Claude in it.
+- **Start a new chat** with the **+** next to an account: pick one of its recent project folders, or **Choose folder…** to pick any folder in the folder dialog, and a terminal opens with Claude in it.
 - **Stop** a background session (■; it asks first and keeps the conversation) or **hide** a finished one (－; nothing is deleted).
 - **Recent chats** per account, to reopen older conversations.
 - **Notifications** when a session needs you or finishes a long turn, with sounds from your sound theme (quiet during Do Not Disturb). Click one to jump to the session.
@@ -83,6 +83,7 @@ across all your accounts and SSH hosts, one click away on your panel.
   - **Konsole**, so that clicking a session switches to its tab. With other terminals the window is raised. New terminals open in your default terminal (System Settings → Default Applications).
   - **Qt 6.10 or newer with the QtQuick.VectorImage module**, for animated pets. Without it the pets are still images that walk, hop and react all the same.
   - **PipeWire** (`pw-play`) or PulseAudio (`paplay`) for sounds.
+  - **kdialog** (usually installed with KDE) for *Choose folder…*; `zenity` works too.
   - tmux; VS Code with the Claude Code extension.
 
 | Distribution | Extra packages |
@@ -153,7 +154,7 @@ Then paste `statusline-snippet.sh` into your status-line script, right after the
 | A session's name | Jumps to the session: its terminal tab, its VS Code window, or a terminal attached to the background job. |
 | Hovering a session | ■ stops a background session, － hides a finished one, and the share button shares a chat (with the shared-chat tool). |
 | A chat's pet | Opens its chat. |
-| **+** next to an account | Starts a new chat in one of the account's recent folders. |
+| **+** next to an account | Starts a new chat in one of the account's recent folders, or in any folder you pick with **Choose folder…** (an SSH host's menu offers its home folder instead). |
 | *Recent chats* | Unfolds the account's older conversations; click one to reopen it. |
 | Server button at the top | Picks the SSH hosts to show. |
 

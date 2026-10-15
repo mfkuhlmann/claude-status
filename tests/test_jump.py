@@ -1,4 +1,6 @@
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import shlex
@@ -253,6 +255,75 @@ class NewChatTests(Fixture):
         write(self.home / ".claude-personal/sessions/40.json", session("busy", status="idle"))
         self.assertEqual(jump.find_session(self.home, [], "busy", ".claude-personal")[0].label, "personal")
         self.assertEqual(jump.find_session(self.home, [], "busy", ".claude-work")[0].label, "work")
+
+
+class ChooseFolderTests(Fixture):
+    """New chat in a folder you pick: the desktop's folder dialog, opening in your home folder."""
+
+    def dialog(self, installed, returncode=0, stdout=""):
+        ran = []
+
+        def run(args, **kw):
+            ran.append(args)
+            return subprocess.CompletedProcess(args, returncode, stdout, "")
+        which = lambda name: f"/usr/bin/{name}" if name in installed else None
+        with Patch(shutil=type("W", (), {"which": staticmethod(which)}),
+                   subprocess=type("S", (), {"run": staticmethod(run), "DEVNULL": None, "PIPE": None,
+                                             "CompletedProcess": subprocess.CompletedProcess})):
+            return jump.choose_folder("New chat in…", self.home), ran
+
+    def test_kde_dialog_opens_in_the_home_folder(self):
+        result, [args] = self.dialog({"kdialog", "zenity"}, stdout="/home/me/repos/b\n")
+        self.assertEqual(result, ("/home/me/repos/b", ""))
+        self.assertEqual(args, ["kdialog", "--title", "New chat in…", "--getexistingdirectory", str(self.home)])
+
+    def test_cancelled(self):
+        self.assertEqual(self.dialog({"kdialog"}, returncode=1)[0], (None, ""))
+        self.assertEqual(self.dialog({"kdialog"}, stdout="  \n")[0], (None, ""))
+
+    def test_gtk_dialog_without_kdialog_and_none_at_all(self):
+        result, [args] = self.dialog({"zenity"}, stdout="/srv/x\n")
+        self.assertEqual((result, args[:3], args[-1]), (("/srv/x", ""), ["zenity", "--file-selection", "--directory"],
+                                                         f"--filename={self.home}/"))
+        self.assertEqual(self.dialog(set()), ((None, "No folder dialog found (install kdialog)"), []))
+
+    def choosing(self, dirname, chosen):
+        asked, opened = [], []
+
+        def choose(title, start):
+            asked.append((title, start))
+            return chosen
+        with Patch(choose_folder=choose, open_terminal=lambda cwd, cmd: opened.append(cwd) or True,
+                   shutil=type("W", (), {"which": staticmethod(lambda n: "/usr/bin/" + n)})):
+            return jump.new_chat_choosing_folder(self.home, [], dirname), asked, opened
+
+    def test_new_chat_in_the_chosen_folder(self):
+        folder = self.home / "repos/b"
+        folder.mkdir(parents=True)
+        (ok, msg), asked, opened = self.choosing(".claude-work", (str(folder), ""))
+        self.assertTrue(ok, msg)
+        self.assertEqual(asked, [("New Claude chat on work in…", self.home)])
+        self.assertEqual(opened, [str(folder)])
+
+    def test_cancelling_does_nothing_and_errors_are_reported(self):
+        self.assertEqual(self.choosing(".claude-work", (None, "")), ((True, ""), [("New Claude chat on work in…", self.home)], []))
+        (result, _, opened) = self.choosing(".claude-work", (None, "No folder dialog found (install kdialog)"))
+        self.assertEqual((result, opened), ((False, "No folder dialog found (install kdialog)"), []))
+        (result, _, opened) = self.choosing(".claude-work", (str(self.home / "gone"), ""))
+        self.assertEqual((result[0], opened), (False, []))
+
+    def test_unknown_profile_fails_before_asking(self):
+        (ok, msg), asked, _ = self.choosing(".claude-nope", (str(self.home), ""))
+        self.assertEqual((ok, asked), (False, []))
+
+    def test_command_line(self):
+        calls = []
+        out = io.StringIO()
+        with Patch(new_chat_choosing_folder=lambda home, extra, dirname: calls.append((dirname, extra)) or (True, "")), \
+                contextlib.redirect_stdout(out):
+            jump.main(["--new-chat", ".claude-work", "--choose-folder", "--config-dir", "/x"])
+        self.assertEqual(calls, [(".claude-work", ["/x"])])
+        self.assertEqual(json.loads(out.getvalue()), {"ok": True, "message": ""})
 
 
 class ResumeChatTests(Fixture):

@@ -5,6 +5,7 @@ a new chat (used by the Claude Status widget).
     python3 -I jump.py SESSION_ID [--config-dir DIR]...
     python3 -I jump.py --stop SESSION_ID [--config-dir DIR]...
     python3 -I jump.py --new-chat PROFILE_DIRNAME [--cwd FOLDER] [--config-dir DIR]...
+    python3 -I jump.py --new-chat PROFILE_DIRNAME --choose-folder   (ask for the folder first)
     python3 -I jump.py --dismiss SESSION_ID      (hide a finished session in the widget)
     python3 -I jump.py --undismiss-all           (show hidden ones again)
     python3 -I jump.py --resume SESSION_ID --profile PROFILE    (reopen a chat there)
@@ -639,6 +640,38 @@ def new_chat(home, extra_dirs, dirname, folder=None):
     return True, f"Opened a new {profile.label} chat in {cs.short_path(folder, home)}"
 
 
+def choose_folder(title, start):
+    """Ask for a folder in the desktop's folder dialog (KDE's, else GTK's),
+    opening at start: (folder, "") or, cancelled or failed, (None, error or "")."""
+    if shutil.which("kdialog"):
+        args = ["kdialog", "--title", title, "--getexistingdirectory", str(start)]
+    elif shutil.which("zenity"):
+        args = ["zenity", "--file-selection", "--directory", "--title", title, f"--filename={start}/"]
+    else:
+        return None, "No folder dialog found (install kdialog)"
+    r = subprocess.run(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    folder = r.stdout.strip()
+    if r.returncode != 0 or not folder:
+        return None, ""
+    return folder, ""
+
+
+def new_chat_choosing_folder(home, extra_dirs, dirname):
+    """Ask for a folder (the dialog opens in your home folder), then open a new
+    chat on the profile there. Cancelling the dialog does nothing."""
+    profile = next((p for p in cs.discover_profiles(home, extra_dirs) if matches(p, dirname)), None)
+    if profile is None:
+        return False, f"No Claude profile called {dirname}"
+    if not shutil.which("claude"):
+        return False, "The claude command isn't on PATH"
+    folder, error = choose_folder(f"New Claude chat on {profile.label} in…", home)
+    if folder is None:
+        return (False, error) if error else (True, "")
+    if not os.path.isdir(folder):
+        return False, f"Not a folder: {folder}"
+    return new_chat(home, extra_dirs, dirname, folder)
+
+
 # ---------------------------------------------------------------- shared chats
 
 
@@ -739,7 +772,7 @@ def undismiss_all(home, extra_dirs, _session_id=None):
 
 
 USAGE = ("usage: jump.py [--stop] SESSION_ID [--profile PROFILE] [--config-dir DIR]...\n"
-         "       jump.py --new-chat PROFILE_DIRNAME [--cwd FOLDER] [--config-dir DIR]...\n"
+         "       jump.py --new-chat PROFILE_DIRNAME [--cwd FOLDER | --choose-folder] [--config-dir DIR]...\n"
          "       jump.py --resume|--continue|--unshare SESSION_ID --profile PROFILE\n"
          "       jump.py --share SESSION_ID\n"
          "       jump.py --remote-vscode HOST SESSION_ID [--cwd FOLDER_ON_HOST]\n"
@@ -749,7 +782,7 @@ USAGE = ("usage: jump.py [--stop] SESSION_ID [--profile PROFILE] [--config-dir D
 def main(argv=None):
     args = sys.argv[1:] if argv is None else list(argv)
     extra, session_id, action, folder, profile_dir = [], None, jump, None, None
-    remote_host, name_arg = None, ""
+    remote_host, name_arg, choose = None, "", False
     while args:
         arg = args.pop(0)
         if arg == "--config-dir" and args:
@@ -760,6 +793,8 @@ def main(argv=None):
             action = stop
         elif arg == "--new-chat":
             action = new_chat
+        elif arg == "--choose-folder":
+            choose = True
         elif arg == "--dismiss":
             action = dismiss
         elif arg == "--undismiss-all":
@@ -785,6 +820,8 @@ def main(argv=None):
             ok, message = jump_remote_vscode(remote_host, session_id, folder or "")
         elif action == "--remote-terminal":
             ok, message = jump_remote_terminal(remote_host, name_arg)
+        elif action is new_chat and choose:
+            ok, message = new_chat_choosing_folder(Path.home(), extra, session_id)
         elif action is new_chat:
             ok, message = new_chat(Path.home(), extra, session_id, folder)
         elif action in (jump, stop, resume, continue_on, share, unshare):
