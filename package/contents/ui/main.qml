@@ -127,6 +127,10 @@ PlasmoidItem {
     }
     property var lastWindows: ({})
     readonly property string petsDir: decodeURIComponent(Qt.resolvedUrl("../pets/").toString().replace(/^file:\/\//, ""))
+    // Animated pets need Qt 6.10+ and the QtQuick.VectorImage module (on
+    // Debian/Ubuntu: qml6-module-qtquick-vectorimage); without them the pets
+    // are still images that move all the same.
+    readonly property bool animatedPets: Qt.createComponent("PetImage.qml").status === Component.Ready
     readonly property int agentsRunning: {
         let n = 0
         for (const g of allGroups)

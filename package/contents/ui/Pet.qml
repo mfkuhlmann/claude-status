@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.VectorImage
 import org.kde.plasma.components as PlasmaComponents3
 import org.kde.plasma.core as PlasmaCore
 import org.kde.kirigami as Kirigami
@@ -654,22 +653,45 @@ Item {
         opacity: (pet.lone ? 0.13 : 0.45) * (1 - Math.min(1, pet.lift / (pet.gu * 3)))
     }
 
-    VectorImage {
+    // His pose: animated (PetImage.qml) where Qt can, a still image elsewhere
+    Item {
         id: image
+        readonly property url poseUrl: Qt.resolvedUrl("../pets/clawd-" + pet.pose + ".svg")
         width: pet.imageSize
         height: width
         x: pet.px - width / 2
         y: pet.ground - height * pet.feet - pet.lift
-        source: Qt.resolvedUrl("../pets/clawd-" + pet.pose + ".svg")
-        fillMode: VectorImage.PreserveAspectFit
-        animations.loops: Animation.Infinite
-        animations.paused: !pet.live
-        assumeTrustedSource: true
         transform: Scale {
             origin.x: image.width / 2
             origin.y: image.height * pet.feet
             xScale: (pet.facingLeft ? -1 : 1) * (2 - pet.squash)
             yScale: pet.squash * pet.breath
+        }
+
+        Loader {
+            id: animated
+            anchors.fill: parent
+            active: root.animatedPets
+            source: "PetImage.qml"
+            Binding {
+                target: animated.item
+                when: animated.status === Loader.Ready
+                property: "source"
+                value: image.poseUrl
+            }
+            Binding {
+                target: animated.item
+                when: animated.status === Loader.Ready
+                property: "playing"
+                value: pet.live
+            }
+        }
+        Image {
+            anchors.fill: parent
+            visible: animated.status !== Loader.Ready
+            source: visible ? image.poseUrl : ""
+            sourceSize: Qt.size(width, height)
+            fillMode: Image.PreserveAspectFit
         }
     }
 

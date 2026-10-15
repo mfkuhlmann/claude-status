@@ -13,7 +13,7 @@ NOT_POSES = {"px", "lift", "squash", "breath", "z", "file", "chat", "bg", "inter
              "view-visible", "internet-web-browser", "dialog-messages", "list-add", "list-remove", "user-home",
              "folder", "media-playback-stop", "executable", "x-kde-display-appname", "oncall",
              "x", "y", "opacity", "notify-", "transparent", "lift", "petkey",
-             "black", "white", "label", "leaving", "hero"}
+             "black", "white", "label", "leaving", "hero", "source", "playing"}
 
 
 def quoted(text):

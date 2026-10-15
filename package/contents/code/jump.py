@@ -507,26 +507,52 @@ resume_command = cs.resume_command
 short_folder = cs.short_folder
 
 
+def kde_terminal():
+    """The terminal picked in System Settings > Default Applications, as the
+    words of its command line; [] when that's Konsole or nothing is set."""
+    path = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "kdeglobals"
+    try:
+        lines = path.read_text(errors="replace").splitlines()
+    except OSError:
+        return []
+    group = ""
+    for line in lines:
+        line = line.strip()
+        if line.startswith("["):
+            group = line
+        elif group == "[General]" and line.startswith("TerminalApplication="):
+            try:
+                words = shlex.split(line.split("=", 1)[1])
+            except ValueError:
+                return []
+            return [] if not words or Path(words[0]).name == "konsole" else words
+    return []
+
+
 def open_terminal(cwd, command):
     """Open a terminal window running command, then an interactive shell.
 
     The command goes on the terminal's command line: Konsole refuses to have
     commands typed into its tabs over DBus ("security sensitive DBus API is
     disabled"). The trap keeps Ctrl+C from closing the window, and leaving
-    Claude drops to a normal shell in the same window.
+    Claude drops to a normal shell in the same window. Konsole unless another
+    terminal is your default; other terminals get `-e`, as KDE does.
     """
     cwd = cwd if cwd and os.path.isdir(cwd) else str(Path.home())
     shell = os.environ.get("SHELL") or "/bin/bash"
     script = f"trap : INT; {command}; exec {shlex.quote(shell)}"
+    chosen = kde_terminal()
     konsole = shutil.which("konsole")
-    if konsole:
+    if chosen and shutil.which(chosen[0]):
+        args = chosen + ["-e", shell, "-c", f"cd {shlex.quote(cwd)} && {script}"]
+    elif konsole:
         args = [konsole, "--workdir", cwd, "-e", shell, "-c", script]
     else:
         terminal = shutil.which("x-terminal-emulator") or shutil.which("xterm")
         if not terminal:
             return False
         args = [terminal, "-e", shell, "-c", f"cd {shlex.quote(cwd)} && {script}"]
-    subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    subprocess.Popen(args, cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     return True
 
 

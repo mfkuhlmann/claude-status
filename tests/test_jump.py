@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -53,16 +54,53 @@ class DbusParsingTests(unittest.TestCase):
 
 
 class OpenTerminalTests(unittest.TestCase):
-    def test_command_runs_on_the_command_line_then_a_shell(self):
+    def start(self, installed, chosen=()):
+        """open_terminal's command line, with these programs installed and this default terminal."""
         started = []
-        with Patch(subprocess=type("S", (), {"Popen": lambda *a, **k: started.append(a[0]),
-                                            "DEVNULL": None})):
-            self.assertTrue(jump.open_terminal("/nonexistent", "claude attach x"))
-        (args,) = started
-        self.assertEqual(args[0].rsplit("/", 1)[-1], "konsole")
+        which = lambda name: f"/usr/bin/{name}" if name in installed else None
+        with Patch(subprocess=type("S", (), {"Popen": lambda *a, **k: started.append((a[0], k["cwd"])),
+                                            "DEVNULL": None}),
+                   shutil=type("W", (), {"which": staticmethod(which)}), kde_terminal=lambda: list(chosen)):
+            ok = jump.open_terminal("/nonexistent", "claude attach x")
+        return ok, started
+
+    def test_command_runs_on_the_command_line_then_a_shell(self):
+        ok, [(args, cwd)] = self.start({"konsole"})
+        self.assertTrue(ok)
+        self.assertEqual(args[0], "/usr/bin/konsole")
         self.assertEqual(args[1:3], ["--workdir", str(Path.home())])
-        self.assertEqual(args[-2], "-c")
+        self.assertEqual((args[-2], cwd), ("-c", str(Path.home())))
         self.assertTrue(args[-1].startswith("trap : INT; claude attach x; exec "))
+
+    def test_your_default_terminal_or_another_one(self):
+        home = shlex.quote(str(Path.home()))
+        ok, [(args, _)] = self.start({"konsole", "kitty"}, chosen=["kitty", "--single-instance"])
+        self.assertEqual(args[:3], ["kitty", "--single-instance", "-e"])
+        self.assertTrue(args[-1].startswith(f"cd {home} && trap : INT; claude attach x; exec "))
+        ok, [(args, _)] = self.start({"konsole"}, chosen=["kitty"])        # chosen one isn't installed
+        self.assertEqual(args[0], "/usr/bin/konsole")
+        ok, [(args, _)] = self.start({"xterm"})
+        self.assertEqual(args[:2], ["/usr/bin/xterm", "-e"])
+        self.assertEqual(self.start(set()), (False, []))
+
+    def test_default_terminal_from_kdeglobals(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            old = os.environ.get("XDG_CONFIG_HOME")
+            os.environ["XDG_CONFIG_HOME"] = tmp
+            try:
+                self.assertEqual(jump.kde_terminal(), [])
+                for text, words in [("[General]\nTerminalApplication=kitty -1\n", ["kitty", "-1"]),
+                                    ("[General]\nTerminalApplication=konsole\n", []),
+                                    ("[General]\nTerminalApplication=/usr/bin/konsole\n", []),
+                                    ("[KDE]\nTerminalApplication=kitty\n[General]\nfoo=1\n", []),
+                                    ("[General]\nTerminalApplication=alacritty 'oops\n", [])]:
+                    Path(tmp, "kdeglobals").write_text(text)
+                    self.assertEqual(jump.kde_terminal(), words, text)
+            finally:
+                if old is None:
+                    os.environ.pop("XDG_CONFIG_HOME")
+                else:
+                    os.environ["XDG_CONFIG_HOME"] = old
 
 
 class AttachCommandTests(unittest.TestCase):
