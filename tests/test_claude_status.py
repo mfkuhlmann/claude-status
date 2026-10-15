@@ -1,6 +1,8 @@
 import importlib.util
 import json
+import ast
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -386,6 +388,7 @@ class TokenTests(Fixture):
         self.assertEqual(today["messages"], 3)
 
 
+@unittest.skipUnless(shutil.which("jq"), "the status-line snippet needs jq")
 class SnippetTests(unittest.TestCase):
     def run_snippet(self, payload, cfg):
         with tempfile.TemporaryDirectory() as tmp:
@@ -674,6 +677,24 @@ class SharedCopiesTests(Fixture):
         fork = next(s for s in self.group(r, "work")["sessions"] if s["sessionId"] == "fork1")
         self.assertEqual((fork["shared"]["forkOf"], fork["shared"]["forkOn"]), ("chat1", "work"))
 
+
+class OldPythonTests(unittest.TestCase):
+    """claude_status.py also runs on SSH hosts, whose python3 may be as old as 3.7."""
+
+    def test_no_syntax_or_calls_newer_than_37(self):
+        source = (ROOT / "package/contents/code/claude_status.py").read_text()
+        # no := or f"{x=}" (3.7 itself parses only what it supports)
+        tree = ast.parse(source, feature_version=(3, 7)) if sys.version_info >= (3, 8) else ast.parse(source)
+        newer_methods = {"removeprefix", "removesuffix", "is_relative_to", "with_stem", "readlink", "hardlink_to"}
+        newer_calls = {("shlex", "join"), ("functools", "cache"), ("functools", "cached_property"),
+                       ("math", "prod"), ("math", "isqrt")}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.keyword):
+                self.assertNotIn(node.arg, {"missing_ok", "strict"}, f"line {node.value.lineno}: {node.arg}= needs a newer Python")
+            if isinstance(node, ast.Attribute):
+                self.assertNotIn(node.attr, newer_methods, f"line {node.lineno}: .{node.attr} needs a newer Python")
+                owner = getattr(node.value, "id", "")
+                self.assertNotIn((owner, node.attr), newer_calls, f"line {node.lineno}: {owner}.{node.attr} needs a newer Python")
 
 if __name__ == "__main__":
     unittest.main()

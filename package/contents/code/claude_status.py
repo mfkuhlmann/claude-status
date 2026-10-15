@@ -1670,7 +1670,10 @@ def prune_snapshots(snapshot_root, now):
         try:
             for f in d.iterdir():
                 if now - f.stat().st_mtime > SNAPSHOT_MAX_AGE:
-                    f.unlink(missing_ok=True)
+                    try:
+                        f.unlink()
+                    except FileNotFoundError:  # unlink(missing_ok=True) needs Python 3.8
+                        pass
         except OSError:
             continue
 
