@@ -1,10 +1,9 @@
-# Only dist/, media/, docs/screenshots/, vendor/, README, CHANGELOG and LICENSE go into the .vsix
+# Only dist/, media/, vendor/, README, CHANGELOG and LICENSE go into the .vsix (README images load from GitHub)
 **
 !dist/extension.js
 !dist/webview.js
 !dist/webview-style.css
 !media/**
-!docs/screenshots/**
 !vendor/**
 !README.md
 !CHANGELOG.md

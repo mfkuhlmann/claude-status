@@ -6,6 +6,14 @@
   "publisher": "wzaielamri",
   "author": "Wadhah Zai El Amri",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wzaielamri/claude-status-vscode.git"
+  },
+  "homepage": "https://github.com/wzaielamri/claude-status-vscode#readme",
+  "bugs": {
+    "url": "https://github.com/wzaielamri/claude-status-vscode/issues"
+  },
   "private": true,
   "engines": {
     "vscode": "^1.90.0"
@@ -307,7 +315,7 @@
     "watch": "node esbuild.mjs --watch",
     "check": "tsc -p . && tsc -p webview",
     "test": "node esbuild.mjs --tests && node --test out/test/*.test.js",
-    "package": "node esbuild.mjs --production && vsce package --allow-missing-repository --no-rewrite-relative-links --no-dependencies",
+    "package": "node esbuild.mjs --production && vsce package --no-dependencies",
     "vscode:prepublish": "node esbuild.mjs --production"
   },
   "devDependencies": {
