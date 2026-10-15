@@ -2,14 +2,15 @@
 
 # Claude Status
 
-**A KDE Plasma 6 widget that keeps all your Claude Code sessions in view.**
-Also for GNOME Shell (Ubuntu 26.04 and newer): see [On GNOME](#on-gnome).
+**A KDE Plasma 6 widget and GNOME Shell extension that keeps all your Claude Code sessions in view.**
 
 Which chats are working, which need you and how much of your plan is left,
 across all your accounts and SSH hosts, one click away on your panel.
+On GNOME (Ubuntu 26.04 and newer) it lives in the top bar: see [On GNOME](#on-gnome).
 
-[![Tests](https://github.com/wzaielamri/claude-status-plasmoid/actions/workflows/tests.yml/badge.svg)](https://github.com/wzaielamri/claude-status-plasmoid/actions/workflows/tests.yml)
+[![Tests](https://github.com/wzaielamri/claude-status/actions/workflows/tests.yml/badge.svg)](https://github.com/wzaielamri/claude-status/actions/workflows/tests.yml)
 [![KDE Plasma 6](https://img.shields.io/badge/KDE_Plasma-6-1d99f3?logo=kde&logoColor=white)](https://kde.org/plasma-desktop/)
+[![GNOME Shell 49+](https://img.shields.io/badge/GNOME_Shell-49%2B-4a86cf?logo=gnome&logoColor=white)](https://extensions.gnome.org/)
 [![Python 3.7+](https://img.shields.io/badge/python-3.7%2B-3776ab?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
@@ -99,14 +100,14 @@ across all your accounts and SSH hosts, one click away on your panel.
 ## Installation
 
 ```bash
-git clone https://github.com/wzaielamri/claude-status-plasmoid.git
-cd claude-status-plasmoid
+git clone https://github.com/wzaielamri/claude-status.git
+cd claude-status
 ./install.sh
 ```
 
 Then right-click your panel → **Add Widgets…**, search for **Claude Status** and drag it onto the panel (or onto the desktop).
 
-Each [release](https://github.com/wzaielamri/claude-status-plasmoid/releases) also has the widget as a `.plasmoid` file and the GNOME extension as a `.zip`, for installing without the repository (its notes say how). `./install.sh` is still the easiest way: it also adds the status-line snippet.
+Each [release](https://github.com/wzaielamri/claude-status/releases) also has the widget as a `.plasmoid` file and the GNOME extension as a `.zip`, for installing without the repository (its notes say how). `./install.sh` is still the easiest way: it also adds the status-line snippet.
 
 `install.sh` does two things:
 
@@ -203,7 +204,7 @@ Right-click the widget → **Configure Claude Status…**
 ## Updating
 
 ```bash
-cd claude-status-plasmoid
+cd claude-status
 git pull
 ./install.sh
 ```
@@ -234,7 +235,7 @@ The widget never changes Claude Code's own files, so nothing else is left behind
 - **The pets don't move their arms:** animated poses need Qt 6.10 and the QtQuick.VectorImage module (see [Requirements](#requirements)). Without them, the pets are still images.
 - **Something else:** run the widget in its own window to see its messages: `plasmawindowed org.wzaielamri.claudestatus`. You can also run the status script on its own: `python3 -I package/contents/code/claude_status.py --pretty`.
 
-Issues and ideas are welcome on the [issue tracker](https://github.com/wzaielamri/claude-status-plasmoid/issues).
+Issues and ideas are welcome on the [issue tracker](https://github.com/wzaielamri/claude-status/issues).
 
 ## How it works
 
