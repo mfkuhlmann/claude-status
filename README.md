@@ -4,7 +4,7 @@ Every Claude Code chat you have running, on this computer and on your SSH
 hosts, in one VS Code view: which ones need you, which are working, plan
 usage, subagents, recent chats, and Clawd, the animated pet who acts it all
 out. The VS Code companion of the
-[Claude Status widget](https://github.com/wzaielamri/claude-status-plasmoid)
+[Claude Status widget](https://github.com/wzaielamri/claude-status)
 for KDE Plasma and GNOME; all of them use the same backend.
 
 <!-- Screenshots show demo data only (Claude Status: Toggle Demo Data, or dev/harness.html), never real chats. -->
@@ -185,7 +185,7 @@ git config core.hooksPath .githooks
 
 - Clawd pet art: [clawd-pet](https://github.com/abderrahimghazali/clawd-pet),
   MIT © Abderrahim Ghazali (`vendor/pets/LICENSE`).
-- Backend: the [Claude Status widget](https://github.com/wzaielamri/claude-status-plasmoid) for KDE Plasma and GNOME.
+- Backend: the [Claude Status widget](https://github.com/wzaielamri/claude-status) for KDE Plasma and GNOME.
 
 Not affiliated with Anthropic. Claude and Claude Code are Anthropic's.
 

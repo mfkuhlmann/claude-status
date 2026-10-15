@@ -1,6 +1,6 @@
 # vendor/
 
-Copied from the [Claude Status widget](https://github.com/wzaielamri/claude-status-plasmoid) (KDE Plasma and GNOME)
+Copied from the [Claude Status widget](https://github.com/wzaielamri/claude-status) (KDE Plasma and GNOME)
 by `scripts/sync-widget.sh`, at the commit in `WIDGET_COMMIT`. Change these
 files in the widget and sync again, so the two never drift apart.
 

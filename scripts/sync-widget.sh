@@ -3,7 +3,7 @@
 #
 #   scripts/sync-widget.sh PATH_TO_WIDGET_CHECKOUT [COMMIT]
 #
-# The widget (github.com/wzaielamri/claude-status-plasmoid) is the one source
+# The widget (github.com/wzaielamri/claude-status) is the one source
 # of the Python backend and the pet art. Only committed files are copied
 # (git archive), never a working tree's uncommitted changes or __pycache__,
 # and vendor/WIDGET_COMMIT records which commit they came from.
