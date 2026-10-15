@@ -1,0 +1,87 @@
+import { duration } from "../../src/shared/model";
+import type { Group, HostState } from "../../src/shared/types";
+import { post } from "../env";
+import { groupKeyOf } from "../util/chat";
+import { Icon } from "../util/icons";
+import { useView } from "./context";
+import { GroupSection } from "./GroupSection";
+import { IconButton } from "./IconButton";
+
+// An SSH host you picked: its accounts, chats and recent chats. Its last good
+// answer is kept when a check fails: shown dimmed, under the error.
+export function HostSection({ host: h, groups }: { host: HostState; groups: Group[] }) {
+  const view = useView();
+  const now = view.now;
+  const result = h.result;
+  const stale = !h.ok && result !== null;
+  // the machine's own name, when the ssh alias differs
+  const machine = result?.host && result.host.split(".")[0] !== h.name ? result.host : "";
+  const updated =
+    h.loading && !result
+      ? "connecting…"
+      : !h.updatedAt
+        ? ""
+        : now - h.updatedAt < 60000
+          ? "updated just now"
+          : `updated ${duration(now - h.updatedAt)} ago`;
+  const dismissed = result?.dismissed ?? 0;
+
+  return (
+    <section class={"host" + (stale ? " stale" : "")} aria-label={`SSH host ${h.name}`}>
+      <div class="host-head">
+        <Icon name="server" class="host-icon" />
+        <h2 class="host-name" title={h.name + (machine ? ` (${machine})` : "")}>
+          {h.name}
+        </h2>
+        {machine ? <span class="host-machine small muted">{machine}</span> : null}
+        {h.current ? (
+          <span class="badge" title="The host this VS Code window is connected to">
+            this window
+          </span>
+        ) : null}
+        <span class="spacer" />
+        {h.loading ? <span class="spinner" role="status" aria-label={`Checking ${h.name}…`} /> : null}
+        {updated ? <span class="host-updated small muted">{updated}</span> : null}
+        {dismissed > 0 ? (
+          <IconButton
+            icon="eye"
+            label={`Show removed chats again (${dismissed})`}
+            onClick={() => post({ type: "showRemoved", host: h.name })}
+          />
+        ) : null}
+        <IconButton
+          icon="refresh"
+          label={`Refresh ${h.name}`}
+          title={`Refresh ${h.name}` + (updated ? ` (${updated})` : "")}
+          onClick={() => post({ type: "refresh", host: h.name })}
+        />
+        {!h.current ? (
+          <IconButton
+            icon="close"
+            label={`Stop showing ${h.name}`}
+            title={`Stop showing ${h.name}. Pick it again with the SSH hosts button.`}
+            onClick={() => post({ type: "hideHost", host: h.name })}
+          />
+        ) : null}
+      </div>
+
+      {h.error ? (
+        <div class="msg error">
+          {stale && h.updatedAt
+            ? `${h.error}${/[.!?]$/.test(h.error) ? "" : "."} Showing what it said ${duration(now - h.updatedAt)} ago.`
+            : h.error}
+        </div>
+      ) : null}
+
+      <div class="host-groups">
+        {groups.map((g) => (
+          <GroupSection key={groupKeyOf(g)} group={g} />
+        ))}
+      </div>
+
+      {h.ok && result && groups.length === 0 ? (
+        <div class="muted host-empty">No Claude Code config on this host (~/.claude, ~/.claude-*)</div>
+      ) : null}
+    </section>
+  );
+}

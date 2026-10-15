@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Claude Status · pets</title>
+    <!-- Bundle first: node esbuild.mjs --harness (writes dev/out/pets.js and pets.css).
+         Serve the repository over http (the pets are fetched), e.g.
+         python3 -m http.server 8766 --bind 127.0.0.1, then open /dev/pets.html?theme=light -->
+    <link rel="stylesheet" href="out/pets.css" />
+    <style>
+      /* A few of VS Code's theme variables (Dark Modern / Light Modern) */
+      body.vscode-dark {
+        --vscode-font-family: system-ui, "Segoe UI", Ubuntu, sans-serif;
+        --vscode-font-size: 13px;
+        --vscode-foreground: #cccccc;
+        --vscode-descriptionForeground: #9d9d9d;
+        --vscode-disabledForeground: #cccccc80;
+        --vscode-sideBar-background: #181818;
+        --vscode-editor-background: #1f1f1f;
+        --vscode-editorWarning-foreground: #cca700;
+        --vscode-focusBorder: #0078d4;
+        --vscode-testing-iconPassed: #73c991;
+        --vscode-errorForeground: #f85149;
+        --vscode-widget-border: #313131;
+        background: var(--vscode-sideBar-background);
+      }
+      body.vscode-light {
+        --vscode-font-family: system-ui, "Segoe UI", Ubuntu, sans-serif;
+        --vscode-font-size: 13px;
+        --vscode-foreground: #3b3b3b;
+        --vscode-descriptionForeground: #717171;
+        --vscode-disabledForeground: #61616180;
+        --vscode-sideBar-background: #f8f8f8;
+        --vscode-editor-background: #ffffff;
+        --vscode-editorWarning-foreground: #bf8803;
+        --vscode-focusBorder: #005fb8;
+        --vscode-testing-iconPassed: #388a34;
+        --vscode-errorForeground: #f85149;
+        --vscode-widget-border: #e5e5e5;
+        background: var(--vscode-sideBar-background);
+      }
+      #app {
+        max-width: 420px;
+        padding: 8px;
+        box-sizing: border-box;
+      }
+      .dev-hero {
+        height: calc(var(--cs-gu) * 6);
+      }
+      .dev-account {
+        height: calc(var(--cs-gu) * 4.5);
+      }
+      .dev-title {
+        margin: 10px 0 4px;
+        font-weight: 600;
+      }
+      .dev-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 2px 0;
+      }
+      .dev-bar {
+        width: 3px;
+        height: 16px;
+        border-radius: 2px;
+      }
+      .dev-row small {
+        color: var(--vscode-descriptionForeground);
+      }
+      .dev-buttons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-top: 12px;
+      }
+      .dev-buttons button {
+        font: inherit;
+        font-size: 12px;
+      }
+    </style>
+    <script>
+      window.acquireVsCodeApi = () => ({
+        postMessage(m) {
+          console.log(m);
+        },
+        getState() {
+          return null;
+        },
+        setState() {},
+      });
+      window.CLAUDE_STATUS = { petsBase: "../vendor/pets", editorTab: false };
+    </script>
+  </head>
+  <body>
+    <script>
+      document.body.className = new URLSearchParams(location.search).get("theme") === "light" ? "vscode-light" : "vscode-dark";
+    </script>
+    <div id="app"></div>
+    <script src="out/pets.js"></script>
+  </body>
+</html>

@@ -154,8 +154,9 @@ export class ViewHost implements vscode.WebviewViewProvider, vscode.Disposable {
     const nonce = crypto.randomBytes(16).toString("base64");
     const asset = (...p: string[]) => webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, ...p)).toString();
     const config = JSON.stringify({ petsBase: asset("vendor", "pets"), editorTab });
-    // Pets' SVGs carry their own <style>, hence 'unsafe-inline' for styles only;
-    // scripts run only with the nonce, nothing loads from outside the extension.
+    // Scripts run only with the nonce, and nothing loads from outside the
+    // extension. Styles may also be set inline (the pets move by element
+    // styles; their SVGs' own styles go into constructed stylesheets).
     const csp = [
       "default-src 'none'",
       `img-src ${webview.cspSource} data:`,
