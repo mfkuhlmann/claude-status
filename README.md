@@ -91,7 +91,16 @@ it. The bars fill in after the next reply in each account's chats.
 
 ## Install
 
-Not on the Marketplace yet. From a clone:
+Not on the Marketplace yet. Download `claude-status-<version>.vsix` from the
+[latest release](https://github.com/wzaielamri/claude-status-vscode/releases/latest),
+then in VS Code open the Extensions view, **⋯** → **Install from VSIX…**, or:
+
+```sh
+code --install-extension claude-status-<version>.vsix
+```
+
+A downloaded extension doesn't update by itself: install a newer release the
+same way. Or build it from a clone:
 
 ```sh
 npm ci
@@ -155,6 +164,14 @@ node esbuild.mjs --harness   # dev pages: look at the view with demo data in a b
 
 `vendor/` is the widget's backend and pet art, copied by
 `scripts/sync-widget.sh` from a widget commit; change them there.
+
+To release: raise `version` in `package.json`, add a `## <version>` section to
+`CHANGELOG.md`, commit, then push a tag. The Release workflow checks, tests and
+packages it and publishes the `.vsix` with those notes:
+
+```sh
+git tag v<version> && git push origin main v<version>
+```
 
 This repository is kept publishable: `scripts/check_public.py` refuses
 commits with tokens, keys, IP addresses, emails, home folders or anything

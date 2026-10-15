@@ -1,0 +1,70 @@
+name: Release
+
+# Push a tag like v0.1.2 (the version in package.json) to publish a GitHub
+# release with the .vsix to download: people install it with "Install from
+# VSIX…" in VS Code, no build tools needed.
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  release:
+    name: Build the .vsix and publish the release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # create the release; nothing else
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: The tag is package.json's version
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "Tag $GITHUB_REF_NAME doesn't match version $version in package.json"
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Release notes from CHANGELOG.md
+        run: |
+          awk -v head="## $VERSION" '$0 == head {on = 1; next} /^## / {on = 0} on' CHANGELOG.md > notes.md
+          if ! grep -q '[^[:space:]]' notes.md; then
+            echo "CHANGELOG.md has no '## $VERSION' section"
+            exit 1
+          fi
+          cat >> notes.md <<EOF
+
+          ### Install
+
+          Download \`claude-status-$VERSION.vsix\` below, then in VS Code open the
+          Extensions view, **⋯** → **Install from VSIX…** (or run
+          \`code --install-extension claude-status-$VERSION.vsix\`). It needs Python
+          3.7+; the README explains SSH hosts and the plan usage bars.
+          EOF
+
+      - run: python3 scripts/check_public.py --all --history
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - run: npm run package
+
+      - name: Nothing private in the package
+        run: |
+          mkdir vsix
+          unzip -q "claude-status-$VERSION.vsix" -d vsix
+          python3 scripts/check_public.py vsix
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha256sum "claude-status-$VERSION.vsix" > SHA256SUMS
+          gh release create "$GITHUB_REF_NAME" "claude-status-$VERSION.vsix" SHA256SUMS \
+            --title "Claude Status $VERSION" --notes-file notes.md --verify-tag
