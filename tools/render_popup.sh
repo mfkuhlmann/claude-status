@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Render the widget's popup offscreen to a PNG, from this repo's package (not
+# the installed widget), with your real Claude data. For checking QML changes.
+#
+#   tools/render_popup.sh OUT.png [seconds]
+#
+# Environment:
+#   WIN_W, WIN_H     window size (default 520x560)
+#   ONLY_GROUP=work  show only that account section
+#   SSH_HOSTS=a,b    pick SSH hosts (polled every 10 s)
+#   EXTRA='QML'      extra QML put inside the widget's root item (e.g. a Timer
+#                    that calls root.petEvent("done", "…") to see a reaction)
+# Colors and fonts are your KDE theme's (QT_QPA_PLATFORMTHEME=kde).
+# QML warnings go to OUT.log. The widget runs under a test id with its own
+# config, data and state folders, so nothing of your desktop is touched.
+set -euo pipefail
+out=$(realpath -m "$1"); secs=${2:-7}
+repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+cp -a "$repo/package" "$work/pkg"
+python3 -I - "$work/pkg" "$out" "$secs" <<'PY'
+import json, os, sys
+pkg, out, secs = sys.argv[1:4]
+meta = json.load(open(f"{pkg}/metadata.json"))
+meta["KPlugin"]["Id"] = "org.wzaielamri.claudestatus.rendertest"
+json.dump(meta, open(f"{pkg}/metadata.json", "w"), indent=2)
+full = f"{pkg}/contents/ui/FullRepresentation.qml"
+s = open(full).read()
+# plasmawindowed shows the popup inline, without the panel popup's frame
+s = s.replace("    collapseMarginsHint: true\n",
+              "    collapseMarginsHint: true\n    background: Rectangle { color: Kirigami.Theme.backgroundColor }\n", 1)
+only = os.environ.get("ONLY_GROUP")
+if only:
+    s = s.replace("model: root.groups.length", f"model: root.groups.filter(g => g.name === {only!r}).length")
+    s = s.replace("group: root.groups[index] || root.emptyGroup",
+                  f"group: root.groups.filter(g => g.name === {only!r})[index] || root.emptyGroup")
+open(full, "w").write(s)
+main = f"{pkg}/contents/ui/main.qml"
+s = open(main).read()
+grab = """
+    Timer {
+        interval: %d * 1000; running: true
+        onTriggered: {
+            const item = root.fullRepresentationItem
+            if (!item) { console.warn("RENDER: no popup"); Qt.quit(); return }
+            item.grabToImage(function(result) {
+                result.saveToFile("%s"); console.warn("RENDER: saved " + item.width + "x" + item.height); Qt.quit()
+            })
+        }
+    }
+    Item { Component.onCompleted: root.expanded = true }
+%s
+""" % (int(secs), out, os.environ.get("EXTRA", ""))
+s = s.replace("PlasmoidItem {\n    id: root\n", "PlasmoidItem {\n    id: root\n" + grab, 1)
+open(main, "w").write(s)
+PY
+mkdir -p "$work/data" "$work/config" "$work/state"
+for f in kdeglobals plasmarc; do [ -f "$HOME/.config/$f" ] && cp "$HOME/.config/$f" "$work/config/"; done
+{
+  printf '[Applets][1]\nimmutability=1\nplugin=org.wzaielamri.claudestatus.rendertest\n\n'
+  printf '[Applets][1][Configuration]\ngeometry=0,0,%s,%s\n' "${WIN_W:-520}" "${WIN_H:-560}"
+  [ -n "${SSH_HOSTS:-}" ] && printf '\n[Applets][1][Configuration][General]\nsshHosts=%s\nremotePollSeconds=10\n' "$SSH_HOSTS"
+} > "$work/config/plasmawindowedrc"
+export XDG_CONFIG_HOME="$work/config" XDG_STATE_HOME="$work/state" XDG_DATA_HOME="$work/data"
+kpackagetool6 -t Plasma/Applet -i "$work/pkg" >/dev/null
+QT_FORCE_STDERR_LOGGING=1 QT_QPA_PLATFORMTHEME=kde QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
+  timeout $((secs + 20)) plasmawindowed org.wzaielamri.claudestatus.rendertest > "${out%.png}.log" 2>&1 || true
+grep -E "RENDER|TypeError|ReferenceError|Error:" "${out%.png}.log" || echo "no RENDER line: see ${out%.png}.log"

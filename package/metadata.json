@@ -1,0 +1,19 @@
+{
+  "KPackageStructure": "Plasma/Applet",
+  "KPlugin": {
+    "Authors": [
+      {
+        "Name": "Wadhah Zai El Amri",
+        "Email": "wadhah.amri@gmail.com"
+      }
+    ],
+    "Category": "System Information",
+    "Description": "Shows whether Claude Code sessions are working, idle or waiting for your input, plus plan usage and token totals",
+    "Icon": "dialog-messages",
+    "Id": "org.wzaielamri.claudestatus",
+    "License": "MIT",
+    "Name": "Claude Status",
+    "Version": "1.1"
+  },
+  "X-Plasma-API-Minimum-Version": "6.0"
+}

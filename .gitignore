@@ -1,0 +1,22 @@
+# Python bytecode (contains absolute paths of the machine that ran it)
+__pycache__/
+*.py[cod]
+
+# Backups made by install.sh / editors
+*.bak
+*.bak.*
+*~
+.*.swp
+
+# Local tooling
+.venv/
+.idea/
+.vscode/
+
+# Claude Code config/state of any profile (~/.claude, ~/.claude-work,
+# ~/.claude-personal, ...) and local-only instructions
+.claude/
+.claude-*/
+.claude_*/
+.claude.json
+CLAUDE.local.md

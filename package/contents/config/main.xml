@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kcfg xmlns="http://www.kde.org/standards/kcfg/1.0"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.kde.org/standards/kcfg/1.0
+      http://www.kde.org/standards/kcfg/1.0/kcfg.xsd">
+  <kcfgfile name=""/>
+  <group name="General">
+    <entry name="pollInterval" type="Int">
+      <label>Milliseconds between status checks</label>
+      <default>2000</default>
+      <min>1000</min>
+      <max>60000</max>
+    </entry>
+    <entry name="extraConfigDirs" type="String">
+      <label>Extra Claude config dirs, comma separated (~/.claude and ~/.claude-* are found automatically)</label>
+      <default></default>
+    </entry>
+    <entry name="notifyWaiting" type="Bool">
+      <label>Notify when a session needs input</label>
+      <default>true</default>
+    </entry>
+    <entry name="notifyDone" type="Bool">
+      <label>Notify when a session finishes working</label>
+      <default>true</default>
+    </entry>
+    <entry name="notifyDoneMinSeconds" type="Int">
+      <label>Only notify about turns that ran at least this many seconds</label>
+      <default>30</default>
+      <min>0</min>
+      <max>3600</max>
+    </entry>
+    <entry name="notifySound" type="Bool">
+      <label>Play a sound with the notifications</label>
+      <default>true</default>
+    </entry>
+    <entry name="soundVolume" type="Int">
+      <label>Notification sound volume (percent)</label>
+      <default>70</default>
+      <min>0</min>
+      <max>100</max>
+    </entry>
+    <entry name="soundWaiting" type="String">
+      <label>Sound when a session needs input: sound theme names (comma separated, first found) or a file</label>
+      <default>message-new-instant</default>
+    </entry>
+    <entry name="soundDone" type="String">
+      <label>Sound when a session finishes</label>
+      <default>outcome-success,complete</default>
+    </entry>
+    <entry name="soundFailed" type="String">
+      <label>Sound when a background session fails</label>
+      <default>dialog-error</default>
+    </entry>
+    <entry name="recentChats" type="Int">
+      <label>Recent chats listed per account (0 = none)</label>
+      <default>5</default>
+      <min>0</min>
+      <max>20</max>
+    </entry>
+    <entry name="sshHosts" type="String">
+      <label>SSH hosts (from ~/.ssh/config) shown in the popup, comma separated</label>
+      <default></default>
+    </entry>
+    <entry name="remotePollSeconds" type="Int">
+      <label>Seconds between status checks of SSH hosts</label>
+      <default>30</default>
+      <min>10</min>
+      <max>600</max>
+    </entry>
+    <entry name="keepDoneHours" type="Int">
+      <label>Keep finished background jobs listed for this many hours (0 = hide them)</label>
+      <default>24</default>
+      <min>0</min>
+      <max>168</max>
+    </entry>
+    <entry name="showUsageInPanel" type="Bool">
+      <label>Show 5-hour usage next to the panel icon</label>
+      <default>true</default>
+    </entry>
+    <entry name="showPet" type="Bool">
+      <label>Show Clawd the pet in the popup and in notifications</label>
+      <default>true</default>
+    </entry>
+    <entry name="chatPets" type="Int">
+      <label>Pets for each account's chats in the list, at most (0 = only the big Clawd)</label>
+      <default>5</default>
+      <min>0</min>
+      <max>8</max>
+    </entry>
+    <entry name="showTokens" type="Bool">
+      <label>Show token totals from local transcripts</label>
+      <default>true</default>
+    </entry>
+  </group>
+</kcfg>

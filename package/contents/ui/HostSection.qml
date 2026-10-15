@@ -1,0 +1,136 @@
+import QtQuick
+import QtQuick.Layouts
+import org.kde.plasma.plasmoid
+import org.kde.plasma.components as PlasmaComponents3
+import org.kde.plasma.core as PlasmaCore
+import org.kde.kirigami as Kirigami
+
+// An SSH host you picked: its Claude accounts, sessions and recent chats,
+// fetched by remote.py (ssh). The host's own answer is kept when a poll
+// fails: it's shown dimmed, under the error.
+ColumnLayout {
+    id: hostSection
+
+    property string host
+    readonly property var info: root.remote[host] || ({ loading: true, ok: false, error: "", result: null, updatedAt: 0 })
+    readonly property var hostGroups: info.result ? info.result.groups : []
+    readonly property bool stale: !!info.error && info.result !== null
+
+    spacing: Kirigami.Units.smallSpacing
+
+    Kirigami.Separator {
+        Layout.fillWidth: true
+    }
+
+    RowLayout {
+        Layout.fillWidth: true
+        Layout.leftMargin: Kirigami.Units.smallSpacing
+        Layout.rightMargin: Kirigami.Units.smallSpacing
+        spacing: Kirigami.Units.smallSpacing
+
+        Kirigami.Icon {
+            source: "network-server"
+            Layout.preferredWidth: Kirigami.Units.iconSizes.small
+            Layout.preferredHeight: Kirigami.Units.iconSizes.small
+        }
+        Kirigami.Heading {
+            level: 3
+            text: hostSection.host
+            elide: Text.ElideRight
+            Layout.maximumWidth: hostSection.width / 2
+        }
+        PlasmaComponents3.Label {
+            // the machine's own name, when the ssh alias differs
+            visible: text !== ""
+            text: hostSection.info.result && hostSection.info.result.host
+                  && hostSection.info.result.host.split(".")[0] !== hostSection.host ? hostSection.info.result.host : ""
+            opacity: 0.6
+            font: Kirigami.Theme.smallFont
+            elide: Text.ElideRight
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 6
+        }
+        Item {
+            Layout.fillWidth: true
+        }
+        PlasmaComponents3.BusyIndicator {
+            visible: hostSection.info.loading
+            running: visible
+            Layout.preferredWidth: Kirigami.Units.iconSizes.small
+            Layout.preferredHeight: Kirigami.Units.iconSizes.small
+        }
+        PlasmaComponents3.Label {
+            text: hostSection.info.loading && !hostSection.info.result ? i18n("connecting…")
+                  : !hostSection.info.updatedAt ? ""
+                  : root.now - hostSection.info.updatedAt < 60000 ? i18n("updated just now")
+                  : i18n("updated %1 ago", root.duration(root.now - hostSection.info.updatedAt))
+            opacity: 0.6
+            font: Kirigami.Theme.smallFont
+        }
+        PlasmaComponents3.ToolButton {
+            icon.name: "view-visible"
+            visible: !!hostSection.info.result && (hostSection.info.result.dismissed || 0) > 0
+            display: PlasmaComponents3.AbstractButton.IconOnly
+            text: i18n("Show removed sessions again")
+            onClicked: root.remoteUndismissAll(hostSection.host)
+            PlasmaCore.ToolTipArea {
+                anchors.fill: parent
+                mainText: i18n("Show removed sessions again (%1)", hostSection.info.result ? hostSection.info.result.dismissed : 0)
+            }
+        }
+        PlasmaComponents3.ToolButton {
+            icon.name: "view-refresh"
+            display: PlasmaComponents3.AbstractButton.IconOnly
+            text: i18n("Refresh %1", hostSection.host)
+            onClicked: root.pollHost(hostSection.host)
+            PlasmaCore.ToolTipArea {
+                anchors.fill: parent
+                mainText: i18n("Refresh %1", hostSection.host)
+                subText: i18n("Checked every %1 seconds while it's shown.", Math.max(10, Plasmoid.configuration.remotePollSeconds))
+            }
+        }
+        PlasmaComponents3.ToolButton {
+            icon.name: "window-close"
+            display: PlasmaComponents3.AbstractButton.IconOnly
+            text: i18n("Hide %1", hostSection.host)
+            onClicked: root.toggleHost(hostSection.host)
+            PlasmaCore.ToolTipArea {
+                anchors.fill: parent
+                mainText: i18n("Stop showing %1", hostSection.host)
+                subText: i18n("Pick it again from the hosts menu at the top.")
+            }
+        }
+    }
+
+    PlasmaComponents3.Label {
+        visible: !!hostSection.info.error
+        Layout.fillWidth: true
+        Layout.leftMargin: Kirigami.Units.smallSpacing
+        Layout.rightMargin: Kirigami.Units.smallSpacing
+        text: hostSection.stale ? i18n("%1 Showing what it said %2 ago.", hostSection.info.error,
+                                       root.duration(root.now - hostSection.info.updatedAt))
+                                : hostSection.info.error
+        color: Kirigami.Theme.negativeTextColor
+        wrapMode: Text.Wrap
+    }
+
+    Repeater {
+        model: hostSection.hostGroups.length
+        delegate: GroupSection {
+            required property int index
+            Layout.fillWidth: true
+            opacity: hostSection.stale ? 0.5 : 1
+            group: hostSection.hostGroups[index] || root.emptyGroup
+            remoteHost: hostSection.host
+            last: true
+        }
+    }
+
+    PlasmaComponents3.Label {
+        visible: hostSection.info.ok && hostSection.hostGroups.length === 0
+        Layout.fillWidth: true
+        Layout.leftMargin: Kirigami.Units.smallSpacing
+        text: i18n("No Claude Code config on this host (~/.claude, ~/.claude-*)")
+        opacity: 0.6
+        wrapMode: Text.Wrap
+    }
+}
