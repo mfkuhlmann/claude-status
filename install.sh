@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Install or upgrade the Claude Status plasmoid and hook the Claude status line.
-#   ./install.sh              install/upgrade the widget; add the status-line snippet (asks first)
+# Install or upgrade Claude Status (the Plasma widget, or the GNOME Shell
+# extension) and hook the Claude status line.
+#   ./install.sh              install/upgrade; add the status-line snippet (asks first)
 #   ./install.sh --yes        same, without asking
-#   ./install.sh --uninstall  remove the widget and the snippet
+#   ./install.sh --uninstall  remove it and the snippet
+#   --plasma / --gnome        which one (default: the desktop you're on)
 # The snippet goes into every script a Claude profile's settings.json runs as
 # its status line (~/.claude, ~/.claude-*; a script shared by several profiles
 # is patched once). CLAUDE_WIDGET_STATUSLINE=/path/script.sh overrides that.
@@ -10,20 +12,43 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 id="org.wzaielamri.claudestatus"
+uuid="claude-status@wzaielamri.github.io"
 marker_start="# >>> claude-widget >>>"
 yes=0
 uninstall=0
+target=""
 for arg in "$@"; do
   case "$arg" in
     -y|--yes) yes=1 ;;
     --uninstall) uninstall=1 ;;
-    -h|--help) sed -n '2,8p' "$0"; exit 0 ;;
+    --plasma) target=plasma ;;
+    --gnome) target=gnome ;;
+    -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
 
-if ! command -v kpackagetool6 >/dev/null; then
-  echo "kpackagetool6 not found: Claude Status needs KDE Plasma 6 (Plasma 5 isn't supported)." >&2
+# Plasma unless only GNOME is here, or both are and this is a GNOME session
+if [ -z "$target" ]; then
+  if command -v kpackagetool6 >/dev/null; then
+    target=plasma
+    if command -v gnome-extensions >/dev/null; then
+      case ":${XDG_CURRENT_DESKTOP:-}:" in *:GNOME:*) target=gnome ;; esac
+    fi
+  elif command -v gnome-extensions >/dev/null; then
+    target=gnome
+  else
+    target=plasma
+  fi
+fi
+
+if [ "$target" = plasma ] && ! command -v kpackagetool6 >/dev/null; then
+  echo "kpackagetool6 not found: Claude Status needs KDE Plasma 6 (Plasma 5 isn't supported)," >&2
+  echo "or GNOME Shell 49 or newer (./install.sh --gnome)." >&2
+  exit 1
+fi
+if [ "$target" = gnome ] && ! command -v gnome-extensions >/dev/null; then
+  echo "gnome-extensions not found: the GNOME version needs GNOME Shell 49 or newer." >&2
   exit 1
 fi
 command -v python3 >/dev/null || echo "warning: python3 not found; the widget needs it to read Claude's files" >&2
@@ -110,10 +135,48 @@ apply_statusline() {
   rm -f "$tmp"
 }
 
+# The GNOME extension: built from this repo (gnome/build.sh), then installed
+# and turned on. A running GNOME Shell only loads new extension code at the
+# next login.
+install_gnome() {
+  local zip="$here/gnome/build/$uuid.shell-extension.zip"
+  "$here/gnome/build.sh" >/dev/null
+  if [ -d "$HOME/.local/share/gnome-shell/extensions/$uuid" ]; then upgraded=1; else upgraded=0; fi
+  gnome-extensions install --force "$zip"
+  if gnome-extensions enable "$uuid" 2>/dev/null; then
+    enabled=1
+  else
+    # not loaded yet (first install): turn it on for the next login
+    enabled=0
+    local list
+    list="$(gsettings get org.gnome.shell enabled-extensions 2>/dev/null || echo "@as []")"
+    case "$list" in
+      *"'$uuid'"*) ;;
+      "@as []"|"[]") gsettings set org.gnome.shell enabled-extensions "['$uuid']" || true ;;
+      *) gsettings set org.gnome.shell enabled-extensions "${list%]}, '$uuid']" || true ;;
+    esac
+  fi
+}
+
+uninstall_gnome() {
+  gnome-extensions uninstall "$uuid" 2>/dev/null || rm -rf "$HOME/.local/share/gnome-shell/extensions/$uuid"
+  local list
+  list="$(gsettings get org.gnome.shell enabled-extensions 2>/dev/null || true)"
+  case "$list" in
+    *"'$uuid'"*)
+      list="$(printf '%s' "$list" | sed -e "s/, '$uuid'//; s/'$uuid', //; s/'$uuid'//")"
+      gsettings set org.gnome.shell enabled-extensions "$list" || true ;;
+  esac
+}
+
 mapfile -t statuslines < <(find_statuslines)
 
 if [ "$uninstall" = 1 ]; then
-  kpackagetool6 -t Plasma/Applet -r "$id" || true
+  if [ "$target" = gnome ]; then
+    uninstall_gnome
+  else
+    kpackagetool6 -t Plasma/Applet -r "$id" || true
+  fi
   for statusline in "${statuslines[@]}"; do
     [ -f "$statusline" ] && grep -qF "$marker_start" "$statusline" && apply_statusline remove
   done
@@ -123,7 +186,9 @@ fi
 
 # 1. Widget (without Python bytecode caches a test run may have left in it)
 find "$here/package" -name __pycache__ -type d -prune -exec rm -rf {} +
-if [ -d "$HOME/.local/share/plasma/plasmoids/$id" ]; then
+if [ "$target" = gnome ]; then
+  install_gnome
+elif [ -d "$HOME/.local/share/plasma/plasmoids/$id" ]; then
   kpackagetool6 -t Plasma/Applet -u "$here/package"
   upgraded=1
 else
@@ -146,7 +211,15 @@ for statusline in "${statuslines[@]}"; do
 done
 
 echo
-if [ "$upgraded" = 1 ]; then
+if [ "$target" = gnome ]; then
+  if [ "$upgraded" = 1 ]; then
+    echo "Extension upgraded. GNOME Shell loads the new version when you log out and back in."
+  elif [ "$enabled" = 1 ]; then
+    echo "Extension installed and turned on: look for the ✳ in the top bar."
+  else
+    echo "Extension installed. Log out and back in: the ✳ then shows in the top bar."
+  fi
+elif [ "$upgraded" = 1 ]; then
   echo "Widget upgraded. If the panel still shows the old version: systemctl --user restart plasma-plasmashell"
 else
   echo "Widget installed. Right-click the panel → Add Widgets… → search \"Claude Status\"."

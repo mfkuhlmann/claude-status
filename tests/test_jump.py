@@ -114,6 +114,114 @@ class OpenTerminalTests(unittest.TestCase):
                     os.environ["XDG_CONFIG_HOME"] = old
 
 
+class DesktopTests(unittest.TestCase):
+    """Plasma keeps doing what it did; GNOME gets its own terminal, dialog and window raising."""
+
+    def on(self, value):
+        old = os.environ.get("XDG_CURRENT_DESKTOP")
+        if value is None:
+            os.environ.pop("XDG_CURRENT_DESKTOP", None)
+        else:
+            os.environ["XDG_CURRENT_DESKTOP"] = value
+        try:
+            return jump.on_gnome()
+        finally:
+            if old is None:
+                os.environ.pop("XDG_CURRENT_DESKTOP", None)
+            else:
+                os.environ["XDG_CURRENT_DESKTOP"] = old
+
+    def test_which_desktop(self):
+        self.assertTrue(self.on("GNOME"))
+        self.assertTrue(self.on("ubuntu:GNOME"))
+        self.assertFalse(self.on("KDE"))
+        self.assertFalse(self.on("GNOME-Flashback:GNOME:KDE"))
+        self.assertFalse(self.on(""))
+        self.assertFalse(self.on(None))
+
+    def raised(self, kwin, gnome):
+        """raise_window with KWin answering kwin and the GNOME extension gnome (None: not running)."""
+        calls = []
+
+        def dbus(dest, path, method, *args):
+            calls.append((dest, method, args))
+            if dest == "org.kde.KWin":
+                return kwin if method.endswith("loadScript") else None
+            return gnome
+        with Patch(dbus_call=dbus, time=type("T", (), {"sleep": staticmethod(lambda s: None)})):
+            ok = jump.raise_window([10, 1], "my tab", prefer="x")
+        return ok, calls
+
+    def test_kwin_raises_on_plasma(self):
+        ok, calls = self.raised(kwin=7, gnome=True)
+        self.assertTrue(ok)
+        self.assertEqual({dest for dest, _, _ in calls}, {"org.kde.KWin"})   # GNOME never asked
+
+    def test_gnome_extension_raises_without_kwin(self):
+        ok, calls = self.raised(kwin=None, gnome=True)
+        self.assertTrue(ok)
+        dest, method, (arg,) = calls[-1]
+        self.assertEqual((dest, method), ("org.gnome.Shell", "org.gnome.Shell.Extensions.ClaudeStatus.RaiseWindow"))
+        self.assertEqual(json.loads(json.loads(arg)), {"pids": [10, 1], "caption": "my tab",
+                                                       "require": False, "prefer": "x"})
+        self.assertFalse(self.raised(kwin=None, gnome=None)[0])     # extension not running
+        self.assertFalse(self.raised(kwin=-1, gnome=False)[0])
+
+    def test_raise_argument_is_a_gvariant_string(self):
+        try:
+            from gi.repository import GLib
+        except ImportError:
+            self.skipTest("no PyGObject")
+        want = {"pids": [1], "caption": 'a "quoted" \\ tab\n🏠 ◐', "require": True, "prefer": ""}
+        arg = json.dumps(json.dumps(want, ensure_ascii=False), ensure_ascii=False)
+        self.assertEqual(json.loads(GLib.Variant.parse(GLib.VariantType("s"), arg).unpack()), want)
+
+    def terminal(self, installed, gnome):
+        started = []
+        which = lambda name: f"/usr/bin/{name}" if name in installed else None
+        with Patch(subprocess=type("S", (), {"Popen": lambda *a, **k: started.append(a[0]), "DEVNULL": None}),
+                   shutil=type("W", (), {"which": staticmethod(which)}), kde_terminal=lambda: [],
+                   on_gnome=lambda: gnome, scope_prefix=lambda name: []):
+            ok = jump.open_terminal("/nonexistent", "claude")
+        return started[0] if ok else None
+
+    def test_gnome_terminals(self):
+        home = shlex.quote(str(Path.home()))
+        args = self.terminal({"xdg-terminal-exec", "ptyxis", "konsole"}, gnome=True)
+        self.assertEqual(args[:3], ["/usr/bin/xdg-terminal-exec", os.environ.get("SHELL") or "/bin/bash", "-c"])
+        self.assertTrue(args[3].startswith(f"cd {home} && trap : INT; claude; exec "))
+        self.assertEqual(self.terminal({"ptyxis", "gnome-terminal"}, gnome=True)[:3],
+                         ["/usr/bin/ptyxis", "--new-window", "--"])
+        self.assertEqual(self.terminal({"gnome-terminal", "kgx"}, gnome=True)[:3],
+                         ["/usr/bin/gnome-terminal", "--window", "--"])
+        self.assertEqual(self.terminal({"kgx"}, gnome=True)[:2], ["/usr/bin/kgx", "--"])
+        self.assertEqual(self.terminal({"konsole"}, gnome=True)[:2], ["/usr/bin/konsole", "--workdir"])
+        self.assertEqual(self.terminal({"xterm"}, gnome=True)[:2], ["/usr/bin/xterm", "-e"])
+        self.assertIsNone(self.terminal(set(), gnome=True))
+
+    def test_plasma_terminal_unchanged_with_gnome_terminals_installed(self):
+        args = self.terminal({"konsole", "ptyxis", "xdg-terminal-exec"}, gnome=False)
+        self.assertEqual(args[:3], ["/usr/bin/konsole", "--workdir", str(Path.home())])
+
+    def test_folder_dialog(self):
+        which = lambda name: f"/usr/bin/{name}"
+        ran = []
+        run = lambda args, **kw: ran.append(args) or subprocess.CompletedProcess(args, 1, "", "")
+        fake = type("S", (), {"run": staticmethod(run), "DEVNULL": None, "PIPE": None})
+        for gnome, first in ((True, "zenity"), (False, "kdialog")):
+            with Patch(shutil=type("W", (), {"which": staticmethod(which)}), subprocess=fake, on_gnome=lambda: gnome):
+                jump.choose_folder("t", Path("/home/me"))
+            self.assertEqual(ran.pop()[0], first)
+        with Patch(shutil=type("W", (), {"which": staticmethod(lambda n: None)}), on_gnome=lambda: True):
+            self.assertEqual(jump.choose_folder("t", Path("/")), (None, "No folder dialog found (install zenity)"))
+
+    def test_raise_hint(self):
+        with Patch(on_gnome=lambda: True):
+            self.assertEqual(jump.raise_hint(), "is the Claude Status extension enabled?")
+        with Patch(on_gnome=lambda: False):
+            self.assertEqual(jump.raise_hint(), "is KWin scripting available?")
+
+
 class AttachCommandTests(unittest.TestCase):
     def profile(self, path, default):
         p = cs.Profile.__new__(cs.Profile)

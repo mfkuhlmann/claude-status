@@ -16,6 +16,12 @@ NOT_POSES = {"px", "lift", "squash", "breath", "z", "file", "chat", "bg", "inter
              "black", "white", "label", "leaving", "hero", "source", "playing"}
 
 
+# strings in the GNOME pets.js that aren't pose names (timers, events, settings)
+GNOME_NOT_POSES = {"action", "black", "white", "brain", "bubble", "chat-pets", "show-pet", "hero", "leave", "destroy",
+                   "poses", "reaction", "scale-y", "tickle", "worries", "x", "z", "ok", "oops",
+                   "done", "failed", "stopped", "reset", "waiting", "working", "idle"}
+
+
 def quoted(text):
     return set(re.findall(r'"([a-z0-9][a-z0-9-]*)"', text))
 
@@ -30,6 +36,21 @@ class PoseTests(unittest.TestCase):
         files = {p.name[len("clawd-"):-len(".svg")] for p in PETS.glob("clawd-*.svg")}
         self.assertEqual(sorted(used - files), [], "poses the code uses but that have no file")
         self.assertEqual(sorted(files - used), [], "bundled poses nothing uses")
+
+    def test_every_pose_the_gnome_pets_use_exists(self):
+        # The GNOME extension's pets ask for the same files (single-quoted there)
+        gnome = ROOT.parent.parent / "gnome/extension"
+        pets = (gnome / "ui/pets.js").read_text()
+        logic = (gnome / "logic.js").read_text()
+        mood = logic[logic.index("export function petMood"):]
+        mood = mood[:mood.index("\n}\n")]
+        words = set(re.findall(r"'([a-z0-9][a-z0-9-]*)'", pets + mood))
+        used = {w for w in words if not w.startswith("claude-") and not w.endswith("-event")} - GNOME_NOT_POSES
+        files = {p.name[len("clawd-"):-len(".svg")] for p in PETS.glob("clawd-*.svg")}
+        self.assertEqual(sorted(used - files), [], "poses the GNOME pets use but that have no file")
+        notifier = (gnome / "notifier.js").read_text()
+        for name in re.findall(r"'(notify-[a-z]+\.svg|clawd-[a-z-]+\.svg)'", notifier):
+            self.assertTrue((PETS / name).is_file(), name)
 
     def test_notification_icons_exist(self):
         main = (ROOT / "ui/main.qml").read_text()
@@ -58,7 +79,6 @@ class ThemeTests(unittest.TestCase):
         # usage bars and the hero's light would hardly show. focusColor is the accent.
         for p in (ROOT / "ui").glob("*.qml"):
             self.assertIsNone(re.search(r"Theme\.highlightColor", p.read_text()), p.name)
-
 
 
 class PetEventTests(unittest.TestCase):

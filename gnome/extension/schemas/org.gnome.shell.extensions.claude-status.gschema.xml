@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Same settings, defaults and ranges as the Plasma widget's package/contents/config/main.xml -->
+<schemalist>
+  <schema id="org.gnome.shell.extensions.claude-status" path="/org/gnome/shell/extensions/claude-status/">
+    <key name="poll-interval" type="i">
+      <default>2000</default>
+      <range min="1000" max="60000"/>
+      <summary>Milliseconds between status checks</summary>
+    </key>
+    <key name="extra-config-dirs" type="s">
+      <default>''</default>
+      <summary>Extra Claude config dirs, comma separated (~/.claude and ~/.claude-* are found automatically)</summary>
+    </key>
+    <key name="notify-waiting" type="b">
+      <default>true</default>
+      <summary>Notify when a session needs input</summary>
+    </key>
+    <key name="notify-done" type="b">
+      <default>true</default>
+      <summary>Notify when a session finishes working</summary>
+    </key>
+    <key name="notify-done-min-seconds" type="i">
+      <default>30</default>
+      <range min="0" max="3600"/>
+      <summary>Only notify about turns that ran at least this many seconds</summary>
+    </key>
+    <key name="notify-sound" type="b">
+      <default>true</default>
+      <summary>Play a sound with the notifications</summary>
+    </key>
+    <key name="sound-volume" type="i">
+      <default>70</default>
+      <range min="0" max="100"/>
+      <summary>Notification sound volume (percent)</summary>
+    </key>
+    <key name="sound-waiting" type="s">
+      <default>'message-new-instant'</default>
+      <summary>Sound when a session needs input: sound theme names (comma separated, first found) or a file</summary>
+    </key>
+    <key name="sound-done" type="s">
+      <default>'outcome-success,complete'</default>
+      <summary>Sound when a session finishes</summary>
+    </key>
+    <key name="sound-failed" type="s">
+      <default>'dialog-error'</default>
+      <summary>Sound when a background session fails</summary>
+    </key>
+    <key name="recent-chats" type="i">
+      <default>5</default>
+      <range min="0" max="20"/>
+      <summary>Recent chats listed per account (0 = none)</summary>
+    </key>
+    <key name="ssh-hosts" type="as">
+      <default>[]</default>
+      <summary>SSH hosts (from ~/.ssh/config) shown in the popup, comma separated</summary>
+    </key>
+    <key name="remote-poll-seconds" type="i">
+      <default>30</default>
+      <range min="10" max="600"/>
+      <summary>Seconds between status checks of SSH hosts</summary>
+    </key>
+    <key name="keep-done-hours" type="i">
+      <default>24</default>
+      <range min="0" max="168"/>
+      <summary>Keep finished background jobs listed for this many hours (0 = hide them)</summary>
+    </key>
+    <key name="show-usage-in-panel" type="b">
+      <default>true</default>
+      <summary>Show 5-hour usage next to the panel icon</summary>
+    </key>
+    <key name="show-pet" type="b">
+      <default>true</default>
+      <summary>Show Clawd the pet in the popup and in notifications</summary>
+    </key>
+    <key name="chat-pets" type="i">
+      <default>5</default>
+      <range min="0" max="8"/>
+      <summary>Pets for each account's chats in the list, at most (0 = only the big Clawd)</summary>
+    </key>
+    <key name="show-tokens" type="b">
+      <default>true</default>
+      <summary>Show token totals from local transcripts</summary>
+    </key>
+  </schema>
+</schemalist>

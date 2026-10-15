@@ -1,0 +1,144 @@
+/* Claude Status. State colors: waiting (needs you) orange, working blue,
+   ok (your turn / done) green, none grey, bad red. Mid tones, so they read
+   on both the dark and the light shell theme. Working isn't the accent
+   color: Ubuntu's is orange, like "needs you". */
+
+.claude-fg-waiting { color: #f57900; }
+.claude-fg-working { color: #3584e4; }
+.claude-fg-ok { color: #33b86c; }
+.claude-fg-none { color: #9a9996; }
+.claude-fg-bad { color: #e8443a; }
+.claude-bg-waiting { background-color: #f57900; }
+.claude-bg-working { background-color: #3584e4; }
+.claude-bg-ok { background-color: #33b86c; }
+.claude-bg-none { background-color: #9a9996; }
+.claude-bg-bad { background-color: #e8443a; }
+
+/* Panel */
+.claude-panel { spacing: 8px; }
+.claude-spark { width: 16px; height: 16px; }
+.claude-spark-small { width: 14px; height: 14px; }
+.claude-badge {
+    background-color: #e01b24;
+    color: white;
+    font-size: 6pt;
+    font-weight: bold;
+    border-radius: 99px;
+    padding: 0 2px;
+    min-width: 6px;
+    text-align: center;
+}
+.claude-panel-usage { font-feature-settings: "tnum"; }
+
+/* Popup */
+.claude-popup { width: 33em; spacing: 4px; }
+.claude-header { spacing: 8px; padding: 2px 8px 6px; }
+.claude-title { font-weight: bold; }
+.claude-summary { text-align: right; }
+.claude-messages { padding: 0 8px; spacing: 4px; }
+.claude-message { padding: 2px 0; }
+.claude-scroll { padding: 0 4px; }
+.claude-list { spacing: 6px; padding: 0 4px; }
+.claude-placeholder { padding: 16px; spacing: 6px; }
+
+.claude-group { spacing: 3px; padding: 4px 0; }
+.claude-group-head { spacing: 6px; padding: 0 4px; }
+.claude-group-title { font-weight: bold; font-size: 1.05em; }
+.claude-host-title { font-weight: bold; font-size: 1.1em; }
+.claude-host { spacing: 4px; }
+.claude-limits { spacing: 2px; padding: 0 4px; }
+.claude-usage { spacing: 6px; }
+.claude-usage-label { width: 5em; }
+.claude-usage-pct { width: 2.8em; text-align: right; font-feature-settings: "tnum"; }
+.claude-usage-detail { width: 7.5em; }
+.claude-tokens { padding: 0 4px; }
+.claude-indent { padding-left: 14px; }
+.claude-side { max-width: 13em; }
+.claude-small { font-size: 0.85em; }
+.claude-strong { font-weight: bold; }
+.claude-dim { color: rgba(154, 153, 150, 1); }
+.claude-separator { height: 1px; background-color: rgba(127, 127, 127, 0.3); margin: 6px 0 2px; }
+
+.claude-meter { height: 7px; border-radius: 4px; background-color: rgba(127, 127, 127, 0.25); }
+.claude-meter-fill { border-radius: 4px; }
+.claude-context-meter { width: 40px; height: 5px; }
+
+.claude-session-row { spacing: 6px; padding: 3px 4px; border-radius: 8px; }
+.claude-session-row:hover { background-color: rgba(127, 127, 127, 0.1); }
+.claude-session-body { spacing: 1px; }
+.claude-line { spacing: 6px; }
+.claude-pet-bar { width: 3px; border-radius: 2px; }
+.claude-dot { width: 9px; height: 9px; border-radius: 5px; margin-top: 5px; }
+.claude-dot-small { width: 7px; height: 7px; border-radius: 4px; margin-top: 4px; }
+.claude-session-name { font-weight: bold; }
+.claude-state { max-width: 12em; }
+.claude-detail { color: rgba(154, 153, 150, 1); }
+.claude-agents { spacing: 2px; padding-top: 3px; }
+.claude-agent { spacing: 6px; }
+.claude-recent { padding-left: 14px; }
+
+.claude-tag {
+    font-size: 0.8em;
+    padding: 0 4px;
+    border: 1px solid rgba(127, 127, 127, 0.5);
+    border-radius: 5px;
+}
+.claude-tag-active { border-color: #3584e4; }
+.claude-clickable:hover { background-color: rgba(127, 127, 127, 0.2); }
+
+/* Buttons and links */
+.claude-icon-button { padding: 3px; border-radius: 99px; }
+.claude-icon-button:hover, .claude-icon-button:focus { background-color: rgba(127, 127, 127, 0.25); }
+.claude-button-icon { icon-size: 16px; }
+.claude-button-box { spacing: 6px; }
+.claude-text-button { padding: 3px 6px; border-radius: 8px; }
+.claude-text-button:hover, .claude-text-button:focus { background-color: rgba(127, 127, 127, 0.2); }
+.claude-expander { margin-left: 2px; }
+.claude-link { border-radius: 4px; }
+.claude-link:hover StLabel, .claude-link:focus StLabel { text-decoration: underline; }
+
+/* Inline menus (new chat, SSH hosts, share) and questions (stop, keep only) */
+.claude-inline-menu {
+    margin: 2px 4px 4px;
+    padding: 6px;
+    spacing: 1px;
+    border-radius: 10px;
+    background-color: rgba(127, 127, 127, 0.12);
+}
+.claude-menu-title { font-weight: bold; padding: 0 6px 4px; }
+.claude-menu-item { padding: 4px 8px; border-radius: 7px; }
+.claude-menu-item:hover, .claude-menu-item:focus { background-color: rgba(127, 127, 127, 0.22); }
+.claude-confirm {
+    margin: 4px 0;
+    padding: 8px;
+    spacing: 6px;
+    border-radius: 10px;
+    border: 1px solid #f57900;
+    background-color: rgba(245, 121, 0, 0.1);
+}
+.claude-confirm-buttons { spacing: 6px; }
+.claude-confirm-button { background-color: rgba(127, 127, 127, 0.2); }
+
+.claude-tooltip { max-width: 26em; }
+
+/* Pets (pets.js): the hero's stage, the accounts' stages, tags, bubbles */
+.claude-hero { margin: 0 8px; border: 1px solid; border-radius: 12px; }
+.claude-hero-glow { border-radius: 12px; }
+.claude-hero-info { spacing: 4px; }
+.claude-headline StLabel { font-weight: bold; font-size: 1.1em; }
+.claude-chips { spacing: 10px; }
+.claude-chip { spacing: 4px; }
+.claude-star { color: #8b96e0; font-size: 0.7em; }
+.claude-star-dot { font-size: 1.3em; }
+.claude-stage { margin: 0 4px; border-radius: 8px; background-color: rgba(127, 127, 127, 0.06); }
+.claude-stage-floor { background-color: rgba(127, 127, 127, 0.25); }
+.claude-pet-shadow { border-radius: 99px; }
+.claude-pet-tag { font-size: 0.75em; padding: 0 6px; border-radius: 99px; }
+.claude-bubble {
+    font-size: 0.85em;
+    padding: 2px 8px;
+    border-radius: 99px;
+    color: white;
+    background-color: rgba(36, 36, 36, 0.88);
+}
+.claude-particle { font-weight: bold; font-size: 1.1em; }

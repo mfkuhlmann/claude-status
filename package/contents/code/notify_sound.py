@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Play a notification sound for the Claude Status widget.
 
-    python3 -I notify_sound.py SOUND [--volume PERCENT] [--force]
+    python3 -I notify_sound.py SOUND [--volume PERCENT] [--force] [--theme NAME]
 
 SOUND is a name from the sound theme (message-new-instant, complete,
 dialog-error, ... as in the freedesktop sound naming spec; several, comma
 separated, play the first one found) or the path of a sound file. The theme is the desktop's (gtk-sound-theme-name, which Plasma
 keeps in sync; Ocean by default), falling back to the freedesktop theme.
+--theme names it instead (GNOME keeps it in its own settings).
 
 Nothing plays while Do Not Disturb is on, unless --force (the settings page's
 preview button). The player is started in the background: PipeWire's pw-play
@@ -124,12 +125,12 @@ def player_command(path, volume):
     return None
 
 
-def play(sound, volume=100, force=False):
+def play(sound, volume=100, force=False, theme=None):
     if volume <= 0:
         return True, "Muted"
     if not force and do_not_disturb():
         return True, "Quiet: Do Not Disturb is on"
-    path = find_sound(sound)
+    path = find_sound(sound, theme=theme)
     if path is None:
         return False, f"No sound file found for {sound!r}"
     command = player_command(path, volume)
@@ -145,7 +146,7 @@ def play(sound, volume=100, force=False):
 
 def main(argv=None):
     args = sys.argv[1:] if argv is None else list(argv)
-    sound, volume, force = None, 100, False
+    sound, volume, force, theme = None, 100, False, None
     while args:
         arg = args.pop(0)
         if arg == "--volume" and args:
@@ -155,6 +156,8 @@ def main(argv=None):
                 sys.exit(__doc__)
         elif arg == "--force":
             force = True
+        elif arg == "--theme" and args:
+            theme = args.pop(0) or None
         elif sound is None:
             sound = arg
         else:
@@ -162,7 +165,7 @@ def main(argv=None):
     if not sound:
         sys.exit(__doc__)
     try:
-        ok, message = play(sound, volume, force)
+        ok, message = play(sound, volume, force, theme) if theme else play(sound, volume, force)
     except Exception as exc:  # report, don't crash
         ok, message = False, f"{type(exc).__name__}: {exc}"
     print(json.dumps({"ok": ok, "message": message}))

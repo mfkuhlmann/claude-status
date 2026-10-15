@@ -3,6 +3,7 @@
 # Claude Status
 
 **A KDE Plasma 6 widget that keeps all your Claude Code sessions in view.**
+Also for GNOME Shell (Ubuntu 26.04 and newer): see [On GNOME](#on-gnome).
 
 Which chats are working, which need you and how much of your plan is left,
 across all your accounts and SSH hosts, one click away on your panel.
@@ -145,6 +146,26 @@ Then paste `statusline-snippet.sh` into your status-line script, right after the
 
 </details>
 
+## On GNOME
+
+The same dashboard as a GNOME Shell extension: the ✳ in the top bar, the popup with your accounts, sessions, plan usage, SSH hosts, notifications and pets. It uses the same scripts as the Plasma widget.
+
+**Requirements:** GNOME Shell 49 or 50 (Ubuntu 26.04 LTS has 50), python3, jq (`sudo apt install jq`); zenity for *Choose folder…* (Ubuntu has it).
+
+**Install:** `./install.sh` (it picks GNOME by itself in a GNOME session; `--gnome` to be sure), then log out and back in: GNOME loads new extension code only at login. Settings: the *Settings* entry at the bottom of the popup. Update the same way (`git pull`, `./install.sh`, log out and in); `./install.sh --uninstall` removes it.
+
+**What's different from Plasma:**
+
+- Jumping to a session brings its window to the front. Konsole and tmux also switch to the right tab or pane; in Ptyxis and GNOME Terminal the window comes up, but not the tab. New chats open in your default terminal (`xdg-terminal-exec`, else Ptyxis, GNOME Terminal or Console).
+- The pets are still poses: they walk, hop, breathe and react, but don't move their arms. You can't pick them up.
+- The menu at the bottom of the popup replaces the right-click menu; a middle click on the ✳ refreshes.
+- Working sessions are blue rather than your accent color (Ubuntu's orange would look like "needs you").
+- Sounds come from your GNOME sound theme and stay quiet with Do Not Disturb.
+
+**Tested** in a headless GNOME Shell 50.1 on Ubuntu 26.04 (`tools/gnome/shell.sh`: the popup, jumping, notifications, settings, pets, install and uninstall), not yet on a physical Ubuntu desktop.
+
+**Troubleshooting:** messages go to GNOME's log: `journalctl --user -f -o cat /usr/bin/gnome-shell`. If clicking a session doesn't bring it up, check that the extension is enabled (`gnome-extensions info claude-status@wzaielamri.github.io`): it's the extension that raises windows.
+
 ## Usage
 
 | Where | What it does |
@@ -261,6 +282,15 @@ kpackagetool6 -t Plasma/Applet -u package       # reinstall after changes
 plasmawindowed org.wzaielamri.claudestatus      # run the installed widget in a window
 ```
 
+GNOME extension:
+
+```bash
+gjs -m gnome/tests/test_logic.js                # its logic (no GNOME Shell needed)
+gnome/build.sh                                  # build it into gnome/build/ (zip for gnome-extensions install)
+tools/gnome/shell.sh /tmp/gnome                 # run it in a headless GNOME Shell (Ubuntu 26.04, podman) with made-up data, screenshots in /tmp/gnome
+tools/gnome/shell.sh /tmp/gnome tools/gnome/steps-actions.sh   # jumping, notifications, settings, turning it off and on
+```
+
 ```
 package/                  the widget (what install.sh installs)
 ├── metadata.json
@@ -270,9 +300,10 @@ package/                  the widget (what install.sh installs)
     ├── code/             Python: claude_status.py (status), jump.py (actions), remote.py (SSH), notify_sound.py
     ├── config/           settings schema and pages
     └── pets/             Clawd artwork (clawd-pet, MIT)
+gnome/                    the GNOME Shell extension: extension/ (GJS: indicator.js, logic.js, ui/, prefs.js), build.sh, tests/
 statusline-snippet.sh     the snippet install.sh adds to your status line
 tests/                    unit tests: they build Claude Code's files in temporary folders
-tools/                    render_popup.sh (offscreen screenshots), bake_pet_origins.py (pet artwork for Qt)
+tools/                    render_popup.sh (offscreen screenshots), bake_pet_origins.py (pet artwork for Qt), gnome/ (headless GNOME Shell test)
 ```
 
 The tests build Claude Code's files (sessions, background jobs, transcripts, shared-chat links, a switched `~/.claude` link) in temporary folders. `tests/test_remote.py` drives the SSH code through a stand-in `ssh` that runs the command locally.

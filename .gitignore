@@ -25,3 +25,6 @@ __pycache__/
 .claude_*/
 .claude.json
 CLAUDE.local.md
+
+# GNOME extension build output (gnome/build.sh)
+gnome/build/

@@ -1,0 +1,6 @@
+{
+  "uuid": "devtools@local",
+  "name": "Test helper (tools/gnome only)",
+  "description": "Turns on GNOME Shell's unsafe mode so tools/gnome/shell.sh can drive the shell (Eval) and take screenshots. Only for the throwaway test container.",
+  "shell-version": ["49", "50"]
+}

@@ -1,0 +1,15 @@
+# A headless GNOME Shell (Ubuntu 26.04) to try the extension in:
+# tools/gnome/shell.sh builds and runs it.
+FROM docker.io/library/ubuntu:26.04
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        gnome-shell gnome-shell-common gnome-settings-daemon gsettings-desktop-schemas \
+        ubuntu-session yaru-theme-gnome-shell yaru-theme-icon yaru-theme-sound \
+        dbus dbus-user-session libgl1-mesa-dri mesa-vulkan-drivers \
+        fonts-cantarell fonts-ubuntu fonts-dejavu-core \
+        python3 jq zenity ptyxis gnome-terminal tmux procps \
+        gjs libglib2.0-bin imagemagick \
+    && rm -rf /var/lib/apt/lists/*
+RUN useradd -m -s /bin/bash tester
+USER tester
+WORKDIR /home/tester

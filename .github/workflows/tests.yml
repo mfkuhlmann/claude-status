@@ -29,3 +29,19 @@ jobs:
       - uses: actions/checkout@v5
       - name: Run the tests
         run: python3 -m unittest discover -s tests -v
+
+  # The GNOME Shell extension: its logic (plain gjs, no shell needed) and
+  # that it builds (schema compiles, zip packs)
+  gnome:
+    name: GNOME extension
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install gjs
+        run: sudo apt-get update && sudo apt-get install -y gjs libglib2.0-bin
+      - name: Logic tests
+        run: gjs -m gnome/tests/test_logic.js
+      - name: Build the extension
+        run: |
+          gnome/build.sh
+          python3 -m zipfile -l gnome/build/claude-status@wzaielamri.github.io.shell-extension.zip | grep -E 'metadata.json|schemas/gschemas.compiled|code/claude_status.py'

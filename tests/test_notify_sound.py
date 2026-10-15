@@ -135,6 +135,21 @@ class PlayerTests(unittest.TestCase):
             ns.main(["complete", "--volume", "55", "--force"])
         self.assertEqual(json.loads(out.getvalue()), {"ok": True, "message": "complete 55 True"})
 
+    def test_theme_named_on_the_command_line(self):
+        """GNOME keeps its sound theme in its own settings: the extension names it."""
+        out = io.StringIO()
+        with Patch(play=lambda sound, volume, force, theme=None: (True, f"{sound} {theme}")), redirect_stdout(out):
+            ns.main(["complete", "--theme", "Yaru"])
+        self.assertEqual(json.loads(out.getvalue())["message"], "complete Yaru")
+        looked = []
+        with tempfile.NamedTemporaryFile(suffix=".oga") as f:
+            fake = type("S", (), {"Popen": staticmethod(lambda cmd, **k: None), "DEVNULL": None})
+            with Patch(do_not_disturb=lambda: False, subprocess=fake, shutil=which({"pw-play"}),
+                       find_sound=lambda sound, theme=None: looked.append(theme) or Path(f.name)):
+                ns.play("complete", 50, theme="Yaru")
+                ns.play("complete", 50)
+        self.assertEqual(looked, ["Yaru", None])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2,6 +2,7 @@
 
 ## 1.3 (unreleased)
 
+- **GNOME Shell extension** (GNOME 49 and 50, e.g. Ubuntu 26.04): the same dashboard in GNOME's top bar, with the same scripts (`gnome/`, installed by `./install.sh` on GNOME). See "On GNOME" in the README.
 - Fixed: the popup stopped updating when a plan limit reset (the pets' "limit reset!" cheer failed, and every later update with it) until Plasma restarted. Failed actions hit the same error.
 - Fixed: a shared chat that moved on to a copy which was then shared too was listed twice, with a link to itself from each account.
 - The last minute before a plan limit resets reads "resets in <1m" instead of a rounded "0m", which looked stuck.
