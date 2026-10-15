@@ -1,4 +1,4 @@
-# Only dist/, media/, vendor/, README, CHANGELOG and LICENSE go into the .vsix
+# Only dist/, media/, docs/screenshots/, vendor/, README, CHANGELOG and LICENSE go into the .vsix
 **
 !dist/extension.js
 !dist/webview.js
