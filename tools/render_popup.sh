@@ -14,7 +14,9 @@
 # QML warnings go to OUT.log. The widget runs under a test id with its own
 # config, data and state folders, so nothing of your desktop is touched.
 set -euo pipefail
+umask 077  # the PNG and log show your real chats: keep them private
 out=$(realpath -m "$1"); secs=${2:-7}
+rm -f -- "$out" "${out%.png}.log"  # new files, so an old render's wider mode doesn't stay
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT

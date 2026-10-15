@@ -13,7 +13,8 @@ Data sources (per Claude config dir, e.g. ~/.claude, ~/.claude-work):
                                   which chat a session shows: shared chats are
                                   hard-linked into several profiles)
   <cfg>/history.jsonl             prompt history (recent folders, last use)
-  <account file>                  oauthAccount.accountUuid / organizationType only
+  <account file>                  oauthAccount.accountUuid / organizationType /
+                                  displayName, and each folder's trust flag only
   ~/.cache/claude-widget/statusline/<cfg dirname>/<session_id>.json
                                   status-line input snapshots (rate limits,
                                   context window), written by statusline-snippet.sh

@@ -12,6 +12,11 @@ __pycache__/
 .venv/
 .idea/
 .vscode/
+.env
+
+# Renders from tools/render_popup.sh show your real chats; keep them and logs out
+/*.png
+*.log
 
 # Claude Code config/state of any profile (~/.claude, ~/.claude-work,
 # ~/.claude-personal, ...) and local-only instructions
