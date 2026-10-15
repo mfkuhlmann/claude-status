@@ -85,6 +85,15 @@ class OpenTerminalTests(unittest.TestCase):
         self.assertEqual(args[:2], ["/usr/bin/xterm", "-e"])
         self.assertEqual(self.start(set()), (False, []))
 
+    def test_terminal_gets_a_scope_of_its_own(self):
+        started = []
+        with Patch(subprocess=type("S", (), {"Popen": lambda *a, **k: started.append(a[0]), "DEVNULL": None}),
+                   shutil=type("W", (), {"which": staticmethod(lambda n: f"/usr/bin/{n}" if n == "konsole" else None)}),
+                   kde_terminal=lambda: [], scope_prefix=lambda name: ["systemd-run", "--user", "--scope", f"--unit={name}", "--"]):
+            self.assertTrue(jump.open_terminal("/nonexistent", "claude attach x"))
+        (args,) = started
+        self.assertEqual(args[:6], ["systemd-run", "--user", "--scope", "--unit=konsole", "--", "/usr/bin/konsole"])
+
     def test_default_terminal_from_kdeglobals(self):
         with tempfile.TemporaryDirectory() as tmp:
             old = os.environ.get("XDG_CONFIG_HOME")
@@ -255,6 +264,51 @@ class NewChatTests(Fixture):
         write(self.home / ".claude-personal/sessions/40.json", session("busy", status="idle"))
         self.assertEqual(jump.find_session(self.home, [], "busy", ".claude-personal")[0].label, "personal")
         self.assertEqual(jump.find_session(self.home, [], "busy", ".claude-work")[0].label, "work")
+
+
+class ScopeTests(unittest.TestCase):
+    """Programs the widget starts get a systemd scope of their own, where there's a systemd user manager."""
+
+    def prefix(self, name="konsole", installed=True, manager=True, check=0):
+        checks = []
+
+        def run(args, **kw):
+            checks.append(args)
+            if isinstance(check, Exception):
+                raise check
+            return subprocess.CompletedProcess(args, check)
+        with tempfile.TemporaryDirectory() as runtime:
+            if manager:
+                Path(runtime, "systemd").mkdir()
+                Path(runtime, "systemd", "private").touch()
+            old = os.environ.get("XDG_RUNTIME_DIR")
+            os.environ["XDG_RUNTIME_DIR"] = runtime
+            try:
+                which = lambda n: "/usr/bin/systemd-run" if installed and n == "systemd-run" else None
+                with Patch(shutil=type("W", (), {"which": staticmethod(which)}),
+                           subprocess=type("S", (), {"run": staticmethod(run), "DEVNULL": None,
+                                                     "TimeoutExpired": subprocess.TimeoutExpired})):
+                    return jump.scope_prefix(name), checks
+            finally:
+                if old is None:
+                    os.environ.pop("XDG_RUNTIME_DIR")
+                else:
+                    os.environ["XDG_RUNTIME_DIR"] = old
+
+    def test_scope_named_after_the_program(self):
+        prefix, [check] = self.prefix("code-insiders")
+        self.assertEqual(check, ["/usr/bin/systemd-run", "--user", "--scope", "--quiet", "--collect", "--", "true"])
+        self.assertEqual(prefix[:5], ["/usr/bin/systemd-run", "--user", "--scope", "--quiet", "--collect"])
+        self.assertRegex(prefix[5], r"^--unit=app-claudestatus-code_insiders-[0-9a-f]{8}\.scope$")
+        self.assertEqual(prefix[6:], ["--"])
+        self.assertNotEqual(self.prefix()[0][5], self.prefix()[0][5])   # a new name each time
+
+    def test_started_as_before_without_a_working_systemd(self):
+        self.assertEqual(self.prefix(installed=False), ([], []))
+        self.assertEqual(self.prefix(manager=False), ([], []))
+        self.assertEqual(self.prefix(check=1)[0], [])
+        self.assertEqual(self.prefix(check=OSError("no"))[0], [])
+        self.assertEqual(self.prefix(check=subprocess.TimeoutExpired("systemd-run", 5))[0], [])
 
 
 class ChooseFolderTests(Fixture):
@@ -663,10 +717,13 @@ class RemoteShowTests(unittest.TestCase):
         fake = type("S", (), {"Popen": staticmethod(lambda args, **k: opened.append(args)), "DEVNULL": None})
         with Patch(vscode_main_pids=lambda: [100], raise_window=lambda *a, **k: self.fail("nothing to raise"),
                    subprocess=fake, shutil=type("W", (), {"which": staticmethod(lambda n: "/usr/bin/" + n)}),
+                   scope_prefix=lambda name: ["systemd-run", f"--unit={name}", "--"],
                    **self.procs({100: []}, {100: "code"}, {100: ["code"]})):
             ok, msg = jump.jump_remote_vscode("labserver", "abc-123", "/home/me/proj")
         self.assertTrue(ok, msg)
-        self.assertEqual(opened[0], ["/usr/bin/code", "--folder-uri", "vscode-remote://ssh-remote+labserver/home/me/proj"])
+        # VS Code gets a scope of its own: restarting plasmashell mustn't stop it
+        self.assertEqual(opened[0], ["systemd-run", "--unit=code", "--", "/usr/bin/code", "--folder-uri",
+                                     "vscode-remote://ssh-remote+labserver/home/me/proj"])
         self.assertIn("vscode://anthropic.claude-code/open?session=abc-123", opened[1][-1])
 
     def test_terminal_tab_with_the_ssh_session(self):

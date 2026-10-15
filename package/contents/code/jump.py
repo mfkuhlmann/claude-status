@@ -36,6 +36,7 @@ way to activate another application's window. Prints one JSON line,
 import ast
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -453,7 +454,7 @@ def jump_remote_vscode(host, session_id, folder=""):
         return False, f"This chat runs in VS Code on {host}, and VS Code isn't installed here"
     remote_folder = f"vscode-remote://ssh-remote+{host}{folder}" if folder.startswith("/") else None
     args = [code, "--folder-uri", remote_folder] if remote_folder else [code, "--remote", f"ssh-remote+{host}"]
-    subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    start_app(args)
     # the link once the window has connected (VS Code passes it to the extension there)
     subprocess.Popen(["bash", "-c", f"sleep 10; exec {shlex.quote(opener)} {shlex.quote(url)}"],
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
@@ -530,6 +531,38 @@ def kde_terminal():
     return []
 
 
+def scope_prefix(name):
+    """systemd-run options that start a program in a systemd scope of its own
+    (named after it), or [] where that isn't possible.
+
+    The widget runs inside plasmashell, so whatever it starts lands in
+    plasmashell's systemd group, and restarting plasmashell (by hand, after an
+    update or a crash) stops every process in that group: a chat running in a
+    terminal the widget opened would be killed. KDE starts apps in scopes of
+    their own for the same reason.
+    """
+    run = shutil.which("systemd-run")
+    runtime = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+    if not run or not os.path.exists(os.path.join(runtime, "systemd", "private")):
+        return []  # no systemd user manager here
+    base = [run, "--user", "--scope", "--quiet", "--collect"]
+    try:  # make sure it works now: if it failed later, the program wouldn't start at all
+        if subprocess.run(base + ["--", "true"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                          stderr=subprocess.DEVNULL, timeout=5).returncode != 0:
+            return []
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    unit = f"app-claudestatus-{re.sub(r'[^A-Za-z0-9_.]', '_', name)}-{os.urandom(4).hex()}.scope"
+    return base + [f"--unit={unit}", "--"]
+
+
+def start_app(args, cwd=None):
+    """Start a program that lives on by itself (a terminal, VS Code), in a
+    systemd scope of its own where possible (see scope_prefix)."""
+    subprocess.Popen(scope_prefix(Path(args[0]).name) + list(args), cwd=cwd, stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+
+
 def open_terminal(cwd, command):
     """Open a terminal window running command, then an interactive shell.
 
@@ -537,7 +570,9 @@ def open_terminal(cwd, command):
     commands typed into its tabs over DBus ("security sensitive DBus API is
     disabled"). The trap keeps Ctrl+C from closing the window, and leaving
     Claude drops to a normal shell in the same window. Konsole unless another
-    terminal is your default; other terminals get `-e`, as KDE does.
+    terminal is your default; other terminals get `-e`, as KDE does. The
+    terminal gets a systemd scope of its own (start_app), so restarting
+    plasmashell doesn't kill the chat in it.
     """
     cwd = cwd if cwd and os.path.isdir(cwd) else str(Path.home())
     shell = os.environ.get("SHELL") or "/bin/bash"
@@ -553,7 +588,7 @@ def open_terminal(cwd, command):
         if not terminal:
             return False
         args = [terminal, "-e", shell, "-c", f"cd {shlex.quote(cwd)} && {script}"]
-    subprocess.Popen(args, cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    start_app(args, cwd=cwd)
     return True
 
 
