@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.3 (unreleased)
+## 1.3 (2026-10-15)
 
 - **GNOME Shell extension** (GNOME 49 and 50, e.g. Ubuntu 26.04): the same dashboard in GNOME's top bar, with the same scripts (`gnome/`, installed by `./install.sh` on GNOME). See "On GNOME" in the README.
 - Fixed: the popup stopped updating when a plan limit reset (the pets' "limit reset!" cheer failed, and every later update with it) until Plasma restarted. Failed actions hit the same error.

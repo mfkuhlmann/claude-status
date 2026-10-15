@@ -1,0 +1,54 @@
+name: release
+
+# Push a tag like v1.3 (matching the versions in package/metadata.json,
+# gnome/extension/metadata.json and CHANGELOG.md) and this builds the Plasma
+# widget (.plasmoid) and the GNOME extension (.zip) and publishes them as a
+# GitHub release, with that version's CHANGELOG entry as its notes.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: The tag matches the versions
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          grep -q "\"Version\": \"$v\"" package/metadata.json || { echo "package/metadata.json isn't $v"; exit 1; }
+          grep -q "\"version-name\": \"$v\"" gnome/extension/metadata.json || { echo "gnome/extension/metadata.json isn't $v"; exit 1; }
+          grep -q "^## $v " CHANGELOG.md || { echo "CHANGELOG.md has no $v entry"; exit 1; }
+      - name: Tests
+        run: python3 -m unittest discover -s tests
+      - name: Build
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          mkdir dist
+          (cd package && python3 -m zipfile -c "../dist/claude-status-$v.plasmoid" metadata.json contents)
+          gnome/build.sh
+          cp gnome/build/claude-status@wzaielamri.github.io.shell-extension.zip dist/
+      - name: Notes
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          awk -v head="## $v " 'index($0, head) == 1 { on = 1; next } /^## / && on { exit } on' CHANGELOG.md > notes.md
+          cat >> notes.md <<NOTES
+
+          ## Install
+
+          **Easiest:** download the source code below, unpack it and run \`./install.sh\`. It installs the Plasma widget or, in a GNOME session, the GNOME extension, and adds the status-line snippet that plan usage needs. On GNOME, log out and back in afterwards.
+
+          **Only the widget:**
+          - KDE Plasma 6: \`kpackagetool6 -t Plasma/Applet -i claude-status-$v.plasmoid\` (\`-u\` to update), then add *Claude Status* to your panel.
+          - GNOME Shell 49 or 50: \`gnome-extensions install --force claude-status@wzaielamri.github.io.shell-extension.zip\`, log out and back in, then \`gnome-extensions enable claude-status@wzaielamri.github.io\`.
+
+          This way plan usage stays empty until you add \`statusline-snippet.sh\` to your status line (see the README).
+          NOTES
+          sed -i 's/^          //' notes.md
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "Claude Status ${GITHUB_REF_NAME#v}" --notes-file notes.md

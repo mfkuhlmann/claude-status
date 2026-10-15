@@ -106,6 +106,8 @@ cd claude-status-plasmoid
 
 Then right-click your panel → **Add Widgets…**, search for **Claude Status** and drag it onto the panel (or onto the desktop).
 
+Each [release](https://github.com/wzaielamri/claude-status-plasmoid/releases) also has the widget as a `.plasmoid` file and the GNOME extension as a `.zip`, for installing without the repository (its notes say how). `./install.sh` is still the easiest way: it also adds the status-line snippet.
+
 `install.sh` does two things:
 
 1. It installs the widget for your user (into `~/.local/share/plasma/plasmoids/`) with `kpackagetool6`.
