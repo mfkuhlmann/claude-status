@@ -159,9 +159,10 @@ export class Dashboard implements vscode.Disposable {
       const { status, error } = await this.backend.status([...configDirArgs(), ...statusArgs()]);
       if (status) {
         this.errorText = status.errors.length ? status.errors.join("\n") : "";
-        this.handle(this.tracker.track("", status.groups, status.generatedAt, undefined, this.notifyOptions()));
-        this.petEvents(this.tracker.resets("", status.groups));
+        const changes = this.tracker.track("", status.groups, status.generatedAt, undefined, this.notifyOptions());
+        const resets = this.tracker.resets("", status.groups);
         this.status = status;
+        this.react(changes, resets);
       } else {
         this.errorText = error ?? "Status unavailable";
         this.log.warn(this.errorText);
@@ -190,9 +191,10 @@ export class Dashboard implements vscode.Disposable {
       if (!now) return; // unpicked while it was being checked
       if (answer.ok && answer.result) {
         const result = answer.result;
-        this.handle(this.tracker.track("ssh:" + host, result.groups, result.generatedAt, host, this.notifyOptions()));
-        this.petEvents(this.tracker.resets("ssh:" + host, result.groups));
+        const changes = this.tracker.track("ssh:" + host, result.groups, result.generatedAt, host, this.notifyOptions());
+        const resets = this.tracker.resets("ssh:" + host, result.groups);
         Object.assign(now, { loading: false, ok: true, error: "", result, updatedAt: Date.now() });
+        this.react(changes, resets);
       } else {
         // keep the last answer to show (dimmed) with the error
         Object.assign(now, { loading: false, ok: false, error: answer.error || "no answer" });
@@ -214,9 +216,16 @@ export class Dashboard implements vscode.Disposable {
     };
   }
 
-  private handle(changes: Changes): void {
-    this.petEvents(changes.petEvents);
-    if (!this.demo) this.notifier.handle(changes);
+  // Pets and notifications, once the new status is stored: a reaction that
+  // fails can't hold the dashboard back (the widget froze that way once, at
+  // every plan-limit reset).
+  private react(changes: Changes, resets: PetEvent[]): void {
+    try {
+      this.petEvents([...changes.petEvents, ...resets]);
+      if (!this.demo) this.notifier.handle(changes);
+    } catch (e) {
+      this.log.error(`A reaction to the new status failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   private petEvents(events: PetEvent[]): void {

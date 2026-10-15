@@ -29,8 +29,9 @@ its conversation is kept, and `claude attach <id>` resumes it.
   shared chat last used there): open a terminal running `claude --resume <id>`.
 
 Windows are raised with a short KWin script: on Plasma Wayland that is the
-way to activate another application's window. Prints one JSON line,
-{"ok": bool, "message": str}.
+way to activate another application's window. On GNOME the Claude Status
+extension raises them (it runs inside GNOME Shell and offers RaiseWindow on
+D-Bus). Prints one JSON line, {"ok": bool, "message": str}.
 """
 
 import ast
@@ -135,12 +136,18 @@ def ancestors(pid):
 
 def raise_window(pids, caption="", require=False, prefer=""):
     """Activate the window owned by the nearest of pids (preferring one whose
-    title has caption; only those if require; and then one that has prefer)."""
+    title has caption; only those if require; and then one that has prefer).
+    KWin does it on Plasma; without KWin, the GNOME extension does."""
+    want = {"pids": pids, "caption": caption, "require": require, "prefer": prefer}
+    return raise_window_kwin(want) or raise_window_gnome(want)
+
+
+def raise_window_kwin(want):
     fd, path = tempfile.mkstemp(prefix="claude-status-", suffix=".js")
     name = f"claude-status-jump-{os.getpid()}"
     try:
         with os.fdopen(fd, "w") as f:
-            f.write(KWIN_SCRIPT % json.dumps({"pids": pids, "caption": caption, "require": require, "prefer": prefer}))
+            f.write(KWIN_SCRIPT % json.dumps(want))
         script_id = dbus_call("org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting.loadScript", path, name)
         if not isinstance(script_id, int) or script_id < 0:
             return False
@@ -150,6 +157,30 @@ def raise_window(pids, caption="", require=False, prefer=""):
     finally:
         dbus_call("org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting.unloadScript", name)
         os.unlink(path)
+
+
+def on_gnome():
+    """Is this a GNOME session (Ubuntu's says "ubuntu:GNOME")? Plasma says "KDE"."""
+    desktops = os.environ.get("XDG_CURRENT_DESKTOP", "").split(":")
+    return "GNOME" in desktops and "KDE" not in desktops
+
+
+def raise_hint():
+    return "is the Claude Status extension enabled?" if on_gnome() else "is KWin scripting available?"
+
+
+GNOME_RAISER = ("org.gnome.Shell", "/org/gnome/Shell/Extensions/ClaudeStatus",
+                "org.gnome.Shell.Extensions.ClaudeStatus.RaiseWindow")
+
+
+def raise_window_gnome(want):
+    """Ask the Claude Status GNOME Shell extension to raise the window (the
+    same choice as KWIN_SCRIPT); False when it isn't running."""
+    dest, path, method = GNOME_RAISER
+    # gdbus reads its arguments as GVariant text: a quoted string literal
+    # (JSON's escapes are GVariant's too) so the JSON isn't read as a dict
+    argument = json.dumps(json.dumps(want, ensure_ascii=False), ensure_ascii=False)
+    return dbus_call(dest, path, method, argument) is True
 
 
 # ---------------------------------------------------------------- finding the session
@@ -372,7 +403,7 @@ def jump_terminal(entry, what="session"):
     elif any(proc_name(p) == "code" for p in pids):  # VS Code's integrated terminal
         caption = os.path.basename(entry.get("cwd") or "")
     if not raise_window(pids, caption):
-        return False, f"Couldn't raise the window of this {what} (is KWin scripting available?)"
+        return False, f"Couldn't raise the window of this {what} ({raise_hint()})"
     return True, f"Switched to the terminal running this {what}"
 
 
@@ -481,7 +512,7 @@ def jump_remote_terminal(host, name=""):
         return False, (f"This session runs in a terminal on {host}, but no terminal here has an ssh connection "
                        f"to {host} (it may run in tmux or on another computer)")
     if not show_konsole_tab(*best):
-        return False, "Couldn't raise the terminal window (is KWin scripting available?)"
+        return False, f"Couldn't raise the terminal window ({raise_hint()})"
     return True, f"Switched to the terminal with the ssh session to {host}"
 
 
@@ -577,6 +608,12 @@ def open_terminal(cwd, command):
     cwd = cwd if cwd and os.path.isdir(cwd) else str(Path.home())
     shell = os.environ.get("SHELL") or "/bin/bash"
     script = f"trap : INT; {command}; exec {shlex.quote(shell)}"
+    if on_gnome():
+        args = gnome_terminal_args(shell, cwd, script)
+        if not args:
+            return False
+        start_app(args, cwd=cwd)
+        return True
     chosen = kde_terminal()
     konsole = shutil.which("konsole")
     if chosen and shutil.which(chosen[0]):
@@ -590,6 +627,26 @@ def open_terminal(cwd, command):
         args = [terminal, "-e", shell, "-c", f"cd {shlex.quote(cwd)} && {script}"]
     start_app(args, cwd=cwd)
     return True
+
+
+# GNOME's terminals, the default first (xdg-terminal-exec runs the one you
+# picked), each with the option after which its command line follows
+GNOME_TERMINALS = (("xdg-terminal-exec", []), ("ptyxis", ["--new-window", "--"]),
+                   ("gnome-terminal", ["--window", "--"]), ("kgx", ["--"]))
+
+
+def gnome_terminal_args(shell, cwd, script):
+    """open_terminal's command line on GNOME, or None without a terminal."""
+    line = [shell, "-c", f"cd {shlex.quote(cwd)} && {script}"]
+    for name, options in GNOME_TERMINALS:
+        path = shutil.which(name)
+        if path:
+            return [path, *options, *line]
+    konsole = shutil.which("konsole")
+    if konsole:
+        return [konsole, "--workdir", cwd, "-e", shell, "-c", script]
+    terminal = shutil.which("x-terminal-emulator") or shutil.which("xterm")
+    return [terminal, "-e", *line] if terminal else None
 
 
 def jump_job(profile, job_id, job, name):
@@ -676,14 +733,14 @@ def new_chat(home, extra_dirs, dirname, folder=None):
 
 
 def choose_folder(title, start):
-    """Ask for a folder in the desktop's folder dialog (KDE's, else GTK's),
-    opening at start: (folder, "") or, cancelled or failed, (None, error or "")."""
-    if shutil.which("kdialog"):
-        args = ["kdialog", "--title", title, "--getexistingdirectory", str(start)]
-    elif shutil.which("zenity"):
-        args = ["zenity", "--file-selection", "--directory", "--title", title, f"--filename={start}/"]
-    else:
-        return None, "No folder dialog found (install kdialog)"
+    """Ask for a folder in the desktop's folder dialog (KDE's, else GTK's;
+    on GNOME GTK's first), opening at start: (folder, "") or, cancelled or
+    failed, (None, error or "")."""
+    kde = ["kdialog", "--title", title, "--getexistingdirectory", str(start)]
+    gtk = ["zenity", "--file-selection", "--directory", "--title", title, f"--filename={start}/"]
+    args = next((a for a in ([gtk, kde] if on_gnome() else [kde, gtk]) if shutil.which(a[0])), None)
+    if args is None:
+        return None, f"No folder dialog found (install {'zenity' if on_gnome() else 'kdialog'})"
     r = subprocess.run(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     folder = r.stdout.strip()
     if r.returncode != 0 or not folder:

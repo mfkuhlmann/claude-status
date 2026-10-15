@@ -11,6 +11,7 @@ import {
   overallState,
   panelWindow,
   petKeyOf,
+  resetText,
   shellQuote,
   stateText,
   summaryText,
@@ -69,5 +70,10 @@ test("formatting", () => {
   assert.equal(formatTokens(1500), "1.5k");
   assert.equal(formatTokens(2_500_000), "2.5M");
   assert.equal(stateText({ state: "done", reason: "failed", since: NOW - 120000 }, NOW), "Failed · 2m");
+  const window = { key: "five_hour", label: "5h", pct: 99, reset: false };
+  assert.equal(resetText({ ...window, resetsAt: NOW + 30000 }, NOW), "resets in <1m", "the last minute doesn't read 0m");
+  assert.equal(resetText({ ...window, resetsAt: NOW + 90 * 60000 }, NOW), "resets in 1h 30m");
+  assert.equal(resetText({ ...window, resetsAt: null }, NOW), "");
+  assert.equal(resetText({ ...window, resetsAt: NOW - 1000, reset: true }, NOW), "reset");
   assert.equal(petKeyOf({ chatId: "c", sessionId: "s", key: "k" }, "build-server"), "ssh:build-server|c");
 });

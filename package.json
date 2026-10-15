@@ -2,7 +2,7 @@
   "name": "claude-status",
   "displayName": "Claude Status",
   "description": "Every Claude Code chat on this computer and your SSH hosts in one view: who needs you, plan usage, subagents, and animated Clawd pets. Runs on your side, also in Remote-SSH windows.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "wzaielamri",
   "author": "Wadhah Zai El Amri",
   "license": "MIT",
@@ -201,7 +201,7 @@
           ],
           "enumDescriptions": [
             "Open chats in VS Code's terminal (on the right machine: here, or the host this window is connected to).",
-            "Open chats in your desktop's terminal app, like the Plasma widget does."
+            "Open chats in your desktop's terminal app, like the Plasma and GNOME widgets do."
           ],
           "default": "vscode",
           "markdownDescription": "Where chats open when you click them.",
@@ -210,7 +210,7 @@
         "claudeStatus.notifyWaiting": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Notify when a chat needs your input. (If the Plasma widget runs too, turn this off in one of them.)",
+          "markdownDescription": "Notify when a chat needs your input. (If the Plasma or GNOME widget runs too, turn this off in one of them.)",
           "order": 10
         },
         "claudeStatus.notifyDone": {

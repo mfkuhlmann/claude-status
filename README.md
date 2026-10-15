@@ -4,8 +4,8 @@ Every Claude Code chat you have running, on this computer and on your SSH
 hosts, in one VS Code view: which ones need you, which are working, plan
 usage, subagents, recent chats, and Clawd, the animated pet who acts it all
 out. The VS Code companion of the
-[Claude Status Plasma widget](https://github.com/wzaielamri/claude-status-plasmoid);
-both use the same backend.
+[Claude Status widget](https://github.com/wzaielamri/claude-status-plasmoid)
+for KDE Plasma and GNOME; all of them use the same backend.
 
 <!-- Screenshots show demo data only (Claude Status: Toggle Demo Data, or dev/harness.html), never real chats. -->
 <p>
@@ -79,8 +79,8 @@ Claude Code hands plan usage only to its status line. **Claude Status: Set Up
 Plan Usage Bars…** adds a small snippet that keeps a copy of it:
 
 - a status line that runs a script reading its input (`input=$(cat)`) gets
-  the snippet after that line, the way the Plasma widget's `install.sh` adds
-  it (the two never add it twice);
+  the snippet after that line, the way the widget's `install.sh` adds it
+  (the two never add it twice);
 - a profile without a status line, or with another kind of command, gets a
   small wrapper as its status line, which keeps the copy and then shows what
   the status line showed before.
@@ -109,7 +109,7 @@ code --install-extension claude-status-*.vsix
 | `claudeStatus.pollInterval` | `2000` | ms between checks of this computer while the view is open (10 s when hidden) |
 | `claudeStatus.extraConfigDirs` | `[]` | More Claude Code config folders |
 | `claudeStatus.openIn` | `vscode` | `system`: open chats in your desktop's terminal app instead |
-| `claudeStatus.notifyWaiting` / `notifyDone` | `true` | Notifications; turn them off here if the Plasma widget notifies too |
+| `claudeStatus.notifyWaiting` / `notifyDone` | `true` | Notifications; turn them off here if the Plasma or GNOME widget notifies too |
 | `claudeStatus.notifyDoneMinSeconds` | `30` | Shortest turn that gets a "finished" notification |
 | `claudeStatus.notifySound`, `soundVolume`, `soundWaiting`, `soundDone`, `soundFailed` | | Sounds (sound-theme names or files) |
 | `claudeStatus.showPet` / `chatPets` | `true` / `5` | Clawd, and pets per account |
@@ -133,11 +133,12 @@ ask for it, the status-line change above.
 
 - Every VS Code window runs its own copy; only the window you used last
   shows notifications and plays sounds.
-- With the Plasma widget running too, both notify: turn notifications off in
-  one of them.
+- With the Plasma widget or the GNOME extension running too, both notify:
+  turn notifications off in one of them.
 - On KDE Plasma, a chat running in a terminal outside VS Code is brought to
-  the front the way the widget does it (Konsole tab, window). Elsewhere the
-  view says where it runs.
+  the front the way the widget does it (Konsole tab, window); on GNOME too,
+  while the widget's Claude Status GNOME Shell extension is on. Elsewhere the
+  view says where it runs. On GNOME, sounds use GNOME's sound theme.
 - **Claude Status: Toggle Demo Data** shows made-up chats (for screenshots,
   or to try it without Claude Code).
 
@@ -167,7 +168,7 @@ git config core.hooksPath .githooks
 
 - Clawd pet art: [clawd-pet](https://github.com/abderrahimghazali/clawd-pet),
   MIT © Abderrahim Ghazali (`vendor/pets/LICENSE`).
-- Backend: the [Claude Status Plasma widget](https://github.com/wzaielamri/claude-status-plasmoid).
+- Backend: the [Claude Status widget](https://github.com/wzaielamri/claude-status-plasmoid) for KDE Plasma and GNOME.
 
 Not affiliated with Anthropic. Claude and Claude Code are Anthropic's.
 

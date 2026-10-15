@@ -7,6 +7,7 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import type { Backend } from "./backend";
 import { cacheDir, settings } from "./config";
+import { gnomeSoundTheme } from "./desktop";
 import type { ChatRef, Session } from "./shared/types";
 import type { Changes } from "./transitions";
 
@@ -90,7 +91,7 @@ export class Notifier implements vscode.Disposable {
     if (changes.sound && settings.notifySound()) {
       const sound =
         changes.sound === "waiting" ? settings.soundWaiting() : changes.sound === "failed" ? settings.soundFailed() : settings.soundDone();
-      if (sound) this.backend.sound(sound, settings.soundVolume());
+      if (sound) void gnomeSoundTheme().then((theme) => this.backend.sound(sound, settings.soundVolume(), theme));
     }
   }
 }

@@ -141,7 +141,9 @@ export function duration(ms: number): string {
 
 export function resetText(w: LimitWindow, now: number): string {
   if (w.reset) return "reset";
-  return w.resetsAt ? `resets in ${duration(w.resetsAt - now)}` : "";
+  if (!w.resetsAt) return "";
+  // The last minute reads "<1m": a rounded "0m" looked stuck
+  return `resets in ${w.resetsAt - now < 60000 ? "<1m" : duration(w.resetsAt - now)}`;
 }
 
 export function stateText(s: Pick<Session, "state" | "reason" | "since">, now: number): string {

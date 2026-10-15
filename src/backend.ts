@@ -144,8 +144,11 @@ export class Backend {
     return { ok: !!r.ok, message: String(r.message ?? r.error ?? "") };
   }
 
-  sound(sound: string, volume: number): void {
-    void runProcess(this.python(), ["-I", this.script("notify_sound.py"), sound, "--volume", String(volume)], { timeoutMs: 30000 });
+  // theme: the sound theme when the desktop keeps it elsewhere (GNOME)
+  sound(sound: string, volume: number, theme?: string): void {
+    const args = ["-I", this.script("notify_sound.py"), sound, "--volume", String(volume)];
+    if (theme) args.push("--theme", theme);
+    void runProcess(this.python(), args, { timeoutMs: 30000 });
   }
 
   private async json(argv: string[], timeoutMs: number): Promise<Record<string, any> | null> {

@@ -1,22 +1,20 @@
 // What clicks do: open a chat, stop or remove one, share it, start a new one,
 // pick SSH hosts. Opening happens in VS Code's terminal by default (on the
 // machine the chat is on); claudeStatus.openIn = "system" keeps the widget's
-// way (jump.py / remote.py: your desktop's terminal app, KDE window raising).
+// way (jump.py / remote.py: your desktop's terminal app; window raising on
+// KDE, and on GNOME with the widget's GNOME Shell extension).
 
 import * as os from "node:os";
 import * as vscode from "vscode";
 import type { Answer, Backend } from "./backend";
 import { configDirArgs, setSshHosts, settings } from "./config";
 import type { Dashboard } from "./dashboard";
+import { canRaiseWindows, isGnome } from "./desktop";
 import { allGroups, groupLabel, shellQuote } from "./shared/model";
 import type { ChatRef, Group } from "./shared/types";
 import { localAncestors, type Place, type Terminals } from "./terminals";
 
 const CHAT_LINK = "vscode://anthropic.claude-code/open?session=";
-
-export function isKde(env: NodeJS.ProcessEnv = process.env): boolean {
-  return (env.XDG_CURRENT_DESKTOP ?? "").split(":").some((d) => d.toUpperCase() === "KDE");
-}
 
 // The plain chat command inside "cd FOLDER 2>/dev/null; COMMAND" (how the
 // backend's in_folder() writes a command for a folder)
@@ -87,7 +85,7 @@ export class Actions {
     // A chat in the Claude Code extension: its link reveals it
     if (chat.entrypoint === "claude-vscode" && chat.pid !== null) {
       const thisWindow = host ? onWindowHost : !vscode.env.remoteName;
-      if (!thisWindow && isKde()) return this.openSystem(chat); // raises the window it's in
+      if (!thisWindow && canRaiseWindows()) return this.openSystem(chat); // raises the window it's in
       await vscode.env.openExternal(vscode.Uri.parse(CHAT_LINK + encodeURIComponent(chat.sessionId)));
       return;
     }
@@ -97,7 +95,7 @@ export class Actions {
       return;
     }
     // It runs in a terminal outside VS Code
-    if (isKde()) return this.openSystem(chat);
+    if (canRaiseWindows()) return this.openSystem(chat);
     this.fail(`${chat.name} runs in a terminal outside this VS Code window${host ? ` on ${host}` : ""}.`);
   }
 
@@ -115,6 +113,8 @@ export class Actions {
     } else {
       answer = await this.backend.action("jump.py", ["--remote-terminal", host, "--name", chat.name || ""]);
     }
+    // jump.py's "is the Claude Status extension enabled?" means GNOME's, not this one
+    if (!answer.ok && isGnome()) answer.message = answer.message.replace("Claude Status extension", "Claude Status GNOME Shell extension");
     this.report(answer, "Couldn't open the chat");
   }
 
