@@ -7,7 +7,7 @@
 Which chats are working, which need you and how much of your plan is left,
 across all your accounts and SSH hosts, one click away on your panel.
 
-[![Tests](https://github.com/wzaielamri/claude_widget/actions/workflows/tests.yml/badge.svg)](https://github.com/wzaielamri/claude_widget/actions/workflows/tests.yml)
+[![Tests](https://github.com/wzaielamri/claude-status-plasmoid/actions/workflows/tests.yml/badge.svg)](https://github.com/wzaielamri/claude-status-plasmoid/actions/workflows/tests.yml)
 [![KDE Plasma 6](https://img.shields.io/badge/KDE_Plasma-6-1d99f3?logo=kde&logoColor=white)](https://kde.org/plasma-desktop/)
 [![Python 3.7+](https://img.shields.io/badge/python-3.7%2B-3776ab?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -97,8 +97,8 @@ across all your accounts and SSH hosts, one click away on your panel.
 ## Installation
 
 ```bash
-git clone https://github.com/wzaielamri/claude_widget.git
-cd claude_widget
+git clone https://github.com/wzaielamri/claude-status-plasmoid.git
+cd claude-status-plasmoid
 ./install.sh
 ```
 
@@ -179,7 +179,7 @@ Right-click the widget → **Configure Claude Status…**
 ## Updating
 
 ```bash
-cd claude_widget
+cd claude-status-plasmoid
 git pull
 ./install.sh
 ```
@@ -210,7 +210,7 @@ The widget never changes Claude Code's own files, so nothing else is left behind
 - **The pets don't move their arms:** animated poses need Qt 6.10 and the QtQuick.VectorImage module (see [Requirements](#requirements)). Without them, the pets are still images.
 - **Something else:** run the widget in its own window to see its messages: `plasmawindowed org.wzaielamri.claudestatus`. You can also run the status script on its own: `python3 -I package/contents/code/claude_status.py --pretty`.
 
-Issues and ideas are welcome on the [issue tracker](https://github.com/wzaielamri/claude_widget/issues).
+Issues and ideas are welcome on the [issue tracker](https://github.com/wzaielamri/claude-status-plasmoid/issues).
 
 ## How it works
 

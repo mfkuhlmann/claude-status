@@ -14,8 +14,8 @@
     "License": "MIT",
     "Name": "Claude Status",
     "Version": "1.2",
-    "Website": "https://github.com/wzaielamri/claude_widget",
-    "BugReportUrl": "https://github.com/wzaielamri/claude_widget/issues"
+    "Website": "https://github.com/wzaielamri/claude-status-plasmoid",
+    "BugReportUrl": "https://github.com/wzaielamri/claude-status-plasmoid/issues"
   },
   "X-Plasma-API-Minimum-Version": "6.0"
 }
