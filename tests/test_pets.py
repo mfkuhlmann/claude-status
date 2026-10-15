@@ -60,5 +60,32 @@ class ThemeTests(unittest.TestCase):
             self.assertIsNone(re.search(r"Theme\.highlightColor", p.read_text()), p.name)
 
 
+
+class PetEventTests(unittest.TestCase):
+    def test_every_pet_event_passes_kind_text_and_key(self):
+        # petEvent(kind, text, key) called with two arguments throws "Insufficient
+        # arguments": at a limit reset that stopped every later poll from being
+        # shown (the popup froze until Plasma restarted).
+        for p in (ROOT / "ui").glob("*.qml"):
+            text = p.read_text()
+            for m in re.finditer(r"\bpetEvent\(", text):
+                if text[:m.start()].rstrip().endswith("signal"):
+                    continue
+                depth, args, i = 1, 1, m.end()
+                while depth:
+                    c = text[i]
+                    if c in "([{":
+                        depth += 1
+                    elif c in ")]}":
+                        depth -= 1
+                    elif c == "," and depth == 1:
+                        args += 1
+                    elif c == '"':   # skip string literals (they may hold commas)
+                        i = text.index('"', i + 1)
+                    i += 1
+                line = text.count("\n", 0, m.start()) + 1
+                self.assertEqual(args, 3, f"{p.name}:{line}: petEvent needs (kind, text, key)")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1173,6 +1173,20 @@ def place_chats(groups, ctx):
             note_stopped([(None, copy)], entries)
             del rows[chat]
 
+    # A finished shared chat that moved on to a chat listed anyway: its copy
+    # was shared too, so it's a shared chat of its own rather than a copy
+    listed = {i: s for g in groups for s in g["sessions"]
+              for i in (s["sessionId"], s.get("jobSessionId"), chat_id(s)) if i}
+    for chat, entries in list(rows.items()):
+        if not any(s["shared"] for _, s in entries) or not all(is_record(s) for _, s in entries):
+            continue
+        target = moved_to(chat, ctx)
+        if target is None or target == chat or target not in listed or chat_id(listed[target]) == chat:
+            continue
+        ctx.moved_on.add(chat)
+        drop(entries)
+        del rows[chat]
+
     for chat, entries in rows.items():
         shared = next((s["shared"] for _, s in entries if s["shared"] and not s["shared"].get("forkOf")), None)
         active = [(g, s) for g, s in entries if not is_record(s)]

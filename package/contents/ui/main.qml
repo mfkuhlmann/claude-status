@@ -264,7 +264,7 @@ PlasmoidItem {
             } else {
                 root.actionError = i18n("Couldn't open the session: %1", result.message)
                 actionErrorTimer.restart()
-                root.petEvent("oops", i18n("Hmm, that didn't work."))
+                root.petEvent("oops", i18n("Hmm, that didn't work."), "")
                 if (!root.expanded)
                     root.notify("jump-error", null, "error", i18n("Couldn't open the session"), result.message, "dialog-error")
             }
@@ -367,7 +367,7 @@ PlasmoidItem {
             for (const w of (g.limits ? g.limits.windows : [])) {
                 const key = source + "|" + g.id + "/" + w.key
                 if (key in lastWindows && lastWindows[key] >= 25 && w.pct < lastWindows[key] - 20)
-                    petEvent("reset", i18n("%1 limit reset!", w.label))
+                    petEvent("reset", i18n("%1 limit reset!", w.label), "")
                 next[key] = w.pct
             }
         }
@@ -785,7 +785,7 @@ PlasmoidItem {
                                  : what === "stop" ? i18n("Couldn't stop the session: %1", result.message)
                                  : result.message
                 actionErrorTimer.restart()
-                root.petEvent("oops", i18n("Hmm, that didn't work."))
+                root.petEvent("oops", i18n("Hmm, that didn't work."), "")
             }
             const host = root.remoteActionHosts[source]
             if (what !== "open" && host)
@@ -926,7 +926,7 @@ PlasmoidItem {
             if (!result.ok) {
                 root.actionError = result.message
                 actionErrorTimer.restart()
-                root.petEvent("oops", i18n("Hmm, that didn't work."))
+                root.petEvent("oops", i18n("Hmm, that didn't work."), "")
             } else if (kind === "continue") {
                 root.actionError = ""
                 root.expanded = false
@@ -1029,7 +1029,11 @@ PlasmoidItem {
     function resetText(window) {
         if (window.reset)
             return i18n("reset")
-        return window.resetsAt ? i18n("resets in %1", duration(window.resetsAt - now)) : ""
+        if (!window.resetsAt)
+            return ""
+        // The last minute reads "<1m": a rounded "0m" looked stuck
+        return i18n("resets in %1", window.resetsAt - now < 60000 ? i18nc("less than a minute", "<1m")
+                                                                   : duration(window.resetsAt - now))
     }
 
     function stateText(s) {

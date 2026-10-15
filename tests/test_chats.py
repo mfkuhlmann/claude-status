@@ -444,6 +444,19 @@ class MovedOnTests(World):
         self.assertEqual(rows, {"personal": [], "work": [("T", "bg", "done", "T", "shared")]})
         self.assertEqual(links["personal"], [("T", "work", False)])
 
+    def test_chat_that_moved_to_a_copy_that_was_shared_too(self):
+        # The copy was shared back, so it's a shared chat of its own (no
+        # forkOf); the chat it continues still moved on and isn't listed
+        # (seen 2026-10-15: listed twice, linked from both accounts)
+        self.share("S", "personal", "work")
+        self.live("work", "71", "S", status="busy")
+        self.append("work", "T", [continued("T", "S")])
+        rows, links = self.listing()
+        self.assertEqual(rows, {"personal": [], "work": [("S", "interactive", "working", "S", "shared")]})
+        self.assertEqual(links, {"personal": [("S", "work", False)], "work": []})
+        r = self.collect(recent=5)
+        self.assertNotIn("T", [c["sessionId"] for g in r["groups"] for c in g["recent"]])
+
     def test_running_chat_is_listed_even_if_it_had_moved(self):
         self.job("personal", "S", age=300, state="failed")
         self.append("work", "T", [continued("T", "S")])

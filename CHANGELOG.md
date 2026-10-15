@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3 (unreleased)
+
+- Fixed: the popup stopped updating when a plan limit reset (the pets' "limit reset!" cheer failed, and every later update with it) until Plasma restarted. Failed actions hit the same error.
+- Fixed: a shared chat that moved on to a copy which was then shared too was listed twice, with a link to itself from each account.
+- The last minute before a plan limit resets reads "resets in <1m" instead of a rounded "0m", which looked stuck.
+
 ## 1.2 (2026-10-15): first public release
 
 - A panel widget and dashboard for Claude Code: the state of every session (working, needs you, your turn, done) across your Claude profiles, accounts and SSH hosts, with plan usage, context, token totals, recent chats, notifications with sounds, and actions to jump to, start, stop, hide and share chats.
