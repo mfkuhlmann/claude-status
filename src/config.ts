@@ -1,0 +1,78 @@
+// The extension's settings (claudeStatus.*), read fresh on every use so a
+// change applies at the next poll.
+
+import * as os from "node:os";
+import * as path from "node:path";
+import * as vscode from "vscode";
+import type { ViewSettings } from "./shared/types";
+
+function cfg() {
+  return vscode.workspace.getConfiguration("claudeStatus");
+}
+
+function num(key: string, fallback: number, min: number, max: number): number {
+  const v = cfg().get<number>(key, fallback);
+  return Math.min(max, Math.max(min, typeof v === "number" && isFinite(v) ? v : fallback));
+}
+
+export function expandHome(p: string): string {
+  return p === "~" ? os.homedir() : p.startsWith("~/") ? path.join(os.homedir(), p.slice(2)) : p;
+}
+
+export const settings = {
+  pollInterval: () => num("pollInterval", 2000, 1000, 60000),
+  remotePollSeconds: () => num("remotePollSeconds", 30, 10, 600),
+  sshHosts: () => (cfg().get<string[]>("sshHosts", []) ?? []).map((h) => String(h).trim()).filter(Boolean),
+  includeCurrentRemote: () => cfg().get<boolean>("includeCurrentRemote", true),
+  openIn: () => (cfg().get<string>("openIn", "vscode") === "system" ? "system" : "vscode"),
+  notifyWaiting: () => cfg().get<boolean>("notifyWaiting", true),
+  notifyDone: () => cfg().get<boolean>("notifyDone", true),
+  notifyDoneMinSeconds: () => num("notifyDoneMinSeconds", 30, 0, 3600),
+  notifySound: () => cfg().get<boolean>("notifySound", true),
+  soundVolume: () => num("soundVolume", 70, 0, 100),
+  soundWaiting: () => cfg().get<string>("soundWaiting", "message-new-instant"),
+  soundDone: () => cfg().get<string>("soundDone", "outcome-success,complete"),
+  soundFailed: () => cfg().get<string>("soundFailed", "dialog-error"),
+  showUsageInStatusBar: () => cfg().get<boolean>("showUsageInStatusBar", true),
+  recentChats: () => num("recentChats", 5, 0, 20),
+  keepDoneHours: () => num("keepDoneHours", 24, 0, 168),
+  showTokens: () => cfg().get<boolean>("showTokens", true),
+  python: () => expandHome(cfg().get<string>("pythonPath", "python3")?.trim() || "python3"),
+};
+
+export function viewSettings(): ViewSettings {
+  return {
+    showPet: cfg().get<boolean>("showPet", true),
+    chatPets: num("chatPets", 5, 0, 8),
+    showTokens: settings.showTokens(),
+    recentChats: settings.recentChats(),
+  };
+}
+
+// Config dirs beyond ~/.claude and ~/.claude-* (which the backend finds by
+// itself): the one Claude Code itself would use here ($CLAUDE_CONFIG_DIR), and
+// any the user added.
+export function extraConfigDirs(env: NodeJS.ProcessEnv = process.env): string[] {
+  const dirs = (cfg().get<string[]>("extraConfigDirs", []) ?? []).map((d) => expandHome(String(d).trim())).filter(Boolean);
+  if (env.CLAUDE_CONFIG_DIR) dirs.unshift(expandHome(env.CLAUDE_CONFIG_DIR));
+  return [...new Set(dirs)];
+}
+
+export function configDirArgs(): string[] {
+  return extraConfigDirs().flatMap((d) => ["--config-dir", d]);
+}
+
+// Arguments of every status run, here and on hosts
+export function statusArgs(): string[] {
+  const args = ["--done-hours", String(settings.keepDoneHours()), "--recent", String(settings.recentChats())];
+  if (!settings.showTokens()) args.push("--no-tokens");
+  return args;
+}
+
+export async function setSshHosts(hosts: string[]): Promise<void> {
+  await cfg().update("sshHosts", hosts, vscode.ConfigurationTarget.Global);
+}
+
+export function cacheDir(): string {
+  return path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), ".cache"), "claude-widget");
+}

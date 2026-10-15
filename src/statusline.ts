@@ -1,0 +1,296 @@
+// Plan usage bars come from Claude Code's status line: the snippet
+// (vendor/statusline-snippet.sh) keeps a copy of what Claude passes it. This
+// adds the snippet to each profile's status line, like the widget's install.sh
+// (same marker block, so the two never add it twice):
+// - a status-line script (*.sh) that reads its input with input=$(cat) gets
+//   the snippet right after that line;
+// - a profile without a status line, or with another kind of command, gets a
+//   small wrapper script as its status line, which saves the copy and then
+//   runs the previous command, so the status line looks as it did.
+// Every change is shown first, asked for, and backed up.
+
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import * as vscode from "vscode";
+import { runProcess } from "./backend";
+import { expandHome, extraConfigDirs } from "./config";
+import { shellQuote } from "./shared/model";
+
+export const MARK_START = "# >>> claude-widget >>>";
+const BLOCK = /^# >>> claude-widget >>>\n[\s\S]*?^# <<< claude-widget <<<\n/m;
+const INPUT_LINE = /^\s*input=\$\(cat\)[^\n]*\n/m;
+
+export interface Change {
+  file: string;
+  before: string; // "" for a new file
+  after: string;
+  why: string;
+  mode?: number;
+}
+
+export function wrapperPath(env: NodeJS.ProcessEnv = process.env): string {
+  return path.join(env.XDG_DATA_HOME || path.join(os.homedir(), ".local", "share"), "claude-status", "statusline.sh");
+}
+
+export function wrapperScript(snippet: string): string {
+  return `#!/usr/bin/env bash
+# Claude Status (VS Code): keeps a copy of the status-line input for the plan
+# usage bars, then shows the status line this profile had before, if any (its
+# command is the first argument). Remove it with "Claude Status: Remove the
+# Plan Usage Status-Line Snippet".
+input=$(cat)
+${snippet.trimEnd()}
+if [ -n "\${1:-}" ]; then
+  printf '%s' "$input" | bash -c "$1"
+fi
+`;
+}
+
+// The snippet added after the input=$(cat) line, or null if there's none
+export function patchScript(text: string, snippet: string): string | null {
+  if (text.includes(MARK_START)) return text;
+  const m = INPUT_LINE.exec(text);
+  if (!m) return null;
+  const at = m.index + m[0].length;
+  return text.slice(0, at) + snippet.trimEnd() + "\n" + text.slice(at);
+}
+
+export function unpatchScript(text: string): string {
+  return text.replace(BLOCK, "");
+}
+
+// "WRAPPER 'previous command'" -> "previous command"; "WRAPPER" -> ""; else null
+export function unwrapCommand(command: string, wrapper: string): string | null {
+  const forms = [wrapper, shellQuote(wrapper), wrapper.replace(os.homedir(), "~")];
+  for (const w of forms) {
+    if (command === w) return "";
+    if (command.startsWith(w + " ")) {
+      const rest = command.slice(w.length + 1).trim();
+      if (rest.startsWith("'") && rest.endsWith("'")) return rest.slice(1, -1).replace(/'"'"'/g, "'");
+      return rest;
+    }
+  }
+  return null;
+}
+
+// The status line's own script, if its command runs one
+export function scriptOf(command: string): string | null {
+  for (const word of command.split(/\s+/)) {
+    const w = expandHome(word.replace(/^["']|["']$/g, ""));
+    if (w.endsWith(".sh") && fs.existsSync(w)) return fs.realpathSync(w);
+  }
+  return null;
+}
+
+function profileDirs(): string[] {
+  const home = os.homedir();
+  const dirs = [path.join(home, ".claude")];
+  try {
+    for (const name of fs.readdirSync(home).sort()) if (name.startsWith(".claude-")) dirs.push(path.join(home, name));
+  } catch {
+    // no home listing
+  }
+  dirs.push(...extraConfigDirs());
+  const seen = new Set<string>();
+  return dirs.filter((d) => {
+    try {
+      const st = fs.statSync(d);
+      const real = fs.realpathSync(d);
+      const isProfile = st.isDirectory() && ["sessions", "projects", "settings.json"].some((f) => fs.existsSync(path.join(d, f)));
+      if (!isProfile || seen.has(real)) return false;
+      seen.add(real);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+}
+
+function readJson(file: string): Record<string, any> | null {
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === "ENOENT" ? {} : null;
+  }
+}
+
+function indentOf(text: string): number {
+  const m = /\n( +)"/.exec(text);
+  return m ? m[1].length : 2;
+}
+
+function withStatusLine(file: string, before: string, command: string | null): string {
+  const data = before ? JSON.parse(before) : {};
+  if (command === null) delete data.statusLine;
+  else data.statusLine = { ...(data.statusLine ?? {}), type: "command", command };
+  return JSON.stringify(data, null, indentOf(before)) + "\n";
+}
+
+// What adding (or removing) the snippet would change, profile by profile
+export function plan(snippet: string, remove: boolean): { changes: Change[]; notes: string[] } {
+  const changes = new Map<string, Change>();
+  const notes: string[] = [];
+  const wrapper = wrapperPath();
+  for (const dir of profileDirs()) {
+    const label = dir.replace(os.homedir(), "~");
+    const settingsFile = path.join(dir, "settings.json");
+    const settings = readJson(settingsFile);
+    if (settings === null) {
+      notes.push(`${label}: settings.json isn't valid JSON; left alone.`);
+      continue;
+    }
+    const before = fs.existsSync(settingsFile) ? fs.readFileSync(settingsFile, "utf8") : "";
+    const command: string = typeof settings.statusLine?.command === "string" ? settings.statusLine.command.trim() : "";
+    const previous = command ? unwrapCommand(command, wrapper) : null;
+    if (remove) {
+      if (previous !== null) {
+        changes.set(settingsFile, {
+          file: settingsFile,
+          before,
+          after: withStatusLine(settingsFile, before, previous || null),
+          why: `${label}: ${previous ? "back to the previous status line" : "no status line again"}`,
+        });
+        continue;
+      }
+      const script = command ? scriptOf(command) : null;
+      if (script && !changes.has(script)) {
+        const text = fs.readFileSync(script, "utf8");
+        if (text.includes(MARK_START))
+          changes.set(script, { file: script, before: text, after: unpatchScript(text), why: `${label}: snippet removed from its status line` });
+      }
+      continue;
+    }
+    if (previous !== null) {
+      notes.push(`${label}: already set up.`);
+      continue;
+    }
+    const script = command ? scriptOf(command) : null;
+    if (script) {
+      if (changes.has(script)) continue; // a script shared by several profiles is patched once
+      const text = fs.readFileSync(script, "utf8");
+      const patched = patchScript(text, snippet);
+      if (patched === text) {
+        notes.push(`${label}: already set up.`);
+        continue;
+      }
+      if (patched !== null) {
+        changes.set(script, { file: script, before: text, after: patched, why: `${label}: snippet added to its status-line script` });
+        continue;
+      }
+    }
+    const newCommand = command ? `${shellQuote(wrapper)} ${shellQuote(command)}` : shellQuote(wrapper);
+    changes.set(settingsFile, {
+      file: settingsFile,
+      before,
+      after: withStatusLine(settingsFile, before, newCommand),
+      why: command ? `${label}: status line wrapped (it keeps showing the same)` : `${label}: a status line that only saves the usage (shows nothing)`,
+    });
+    if (!changes.has(wrapper)) {
+      const existing = fs.existsSync(wrapper) ? fs.readFileSync(wrapper, "utf8") : "";
+      const after = wrapperScript(snippet);
+      if (existing !== after) changes.set(wrapper, { file: wrapper, before: existing, after, why: "the wrapper script", mode: 0o755 });
+    }
+  }
+  return { changes: [...changes.values()], notes };
+}
+
+function stamp(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}
+
+export function apply(changes: Change[]): void {
+  for (const c of changes) {
+    fs.mkdirSync(path.dirname(c.file), { recursive: true });
+    if (c.before) fs.copyFileSync(c.file, `${c.file}.bak.${stamp()}`);
+    fs.writeFileSync(c.file, c.after, c.mode ? { mode: c.mode } : undefined);
+    if (c.mode) fs.chmodSync(c.file, c.mode);
+  }
+}
+
+// ---------------------------------------------------------------- commands
+
+class Preview implements vscode.TextDocumentContentProvider {
+  static scheme = "claude-status-preview";
+  texts = new Map<string, string>();
+  provideTextDocumentContent(uri: vscode.Uri): string {
+    return this.texts.get(uri.path) ?? "";
+  }
+}
+
+const preview = new Preview();
+
+export function registerPreview(): vscode.Disposable {
+  return vscode.workspace.registerTextDocumentContentProvider(Preview.scheme, preview);
+}
+
+async function showChanges(changes: Change[]): Promise<void> {
+  for (const c of changes) {
+    const name = path.basename(c.file);
+    preview.texts.set(`/before/${c.file}`, c.before);
+    preview.texts.set(`/after/${c.file}`, c.after);
+    await vscode.commands.executeCommand(
+      "vscode.diff",
+      vscode.Uri.from({ scheme: Preview.scheme, path: `/before/${c.file}` }),
+      vscode.Uri.from({ scheme: Preview.scheme, path: `/after/${c.file}` }),
+      `${name} (proposed)`,
+      { preview: false },
+    );
+  }
+}
+
+export async function setUpUsageBars(extensionUri: vscode.Uri, remove = false): Promise<void> {
+  if (!remove) {
+    const jq = await runProcess("jq", ["--version"], { timeoutMs: 10000 });
+    if (jq.spawnError) {
+      void vscode.window.showErrorMessage(
+        "The usage bars need jq (it reads the status line's input). Install it (e.g. `sudo apt install jq`, `sudo dnf install jq`, `brew install jq`) and run this again.",
+      );
+      return;
+    }
+  }
+  const snippet = fs.readFileSync(vscode.Uri.joinPath(extensionUri, "vendor", "statusline-snippet.sh").fsPath, "utf8");
+  let result: ReturnType<typeof plan>;
+  try {
+    result = plan(snippet, remove);
+  } catch (e) {
+    void vscode.window.showErrorMessage(`Couldn't read the Claude Code settings: ${(e as Error).message}`);
+    return;
+  }
+  const { changes, notes } = result;
+  if (!changes.length) {
+    void vscode.window.showInformationMessage(
+      (remove ? "Nothing to remove." : "Plan usage bars are already set up.") + (notes.length ? " " + notes.join(" ") : ""),
+    );
+    return;
+  }
+  const detail =
+    changes.map((c) => `• ${c.why}\n   ${c.file.replace(os.homedir(), "~")}`).join("\n") +
+    (notes.length ? "\n\n" + notes.join("\n") : "") +
+    "\n\nEach changed file is backed up next to itself (.bak.<time>).";
+  for (;;) {
+    const choice = await vscode.window.showInformationMessage(
+      remove ? "Remove the plan-usage snippet from Claude Code's status line?" : "Set up plan usage bars? This changes Claude Code's status line:",
+      { modal: true, detail },
+      "Apply",
+      "Show Changes",
+    );
+    if (choice === "Show Changes") {
+      await showChanges(changes);
+      continue;
+    }
+    if (choice !== "Apply") return;
+    break;
+  }
+  try {
+    apply(changes);
+  } catch (e) {
+    void vscode.window.showErrorMessage(`Couldn't change the files: ${(e as Error).message}`);
+    return;
+  }
+  void vscode.window.showInformationMessage(
+    remove ? "Removed. Usage bars stop updating." : "Done. Usage bars fill in after the next reply in each account's chats.",
+  );
+}

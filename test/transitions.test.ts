@@ -1,0 +1,65 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { demoState } from "../src/shared/demo";
+import type { Group, SessionState } from "../src/shared/types";
+import { TransitionTracker } from "../src/transitions";
+
+const NOW = 1_800_000_000_000;
+const OPTS = { notifyWaiting: true, notifyDone: true, notifyDoneMinSeconds: 30 };
+
+function oneChat(state: SessionState, since: number, reason = ""): Group[] {
+  const g = demoState(NOW).status!.groups[0];
+  const s = { ...g.sessions[0], key: "chat-1", name: "Fix the parser", state, since, reason };
+  return [{ ...g, sessions: [s] }];
+}
+
+test("the first poll only learns; later changes notify", () => {
+  const t = new TransitionTracker();
+  assert.deepEqual(t.track("", oneChat("working", NOW - 60000), NOW, undefined, OPTS).notices, []);
+  const done = t.track("", oneChat("idle", NOW + 120000), NOW + 120000, undefined, OPTS);
+  assert.equal(done.notices.length, 1);
+  assert.equal(done.notices[0].kind, "done");
+  assert.match(done.notices[0].title, /finished/);
+  assert.match(done.notices[0].body, /Took 3m/);
+  assert.equal(done.sound, "done");
+  assert.deepEqual(done.petEvents.map((e) => e.kind), ["done"]);
+});
+
+test("a short turn makes the pet happy but sends no notification", () => {
+  const t = new TransitionTracker();
+  t.track("", oneChat("working", NOW), NOW, undefined, OPTS);
+  const r = t.track("", oneChat("idle", NOW + 5000), NOW + 5000, undefined, OPTS);
+  assert.equal(r.notices.length, 0);
+  assert.equal(r.sound, "");
+  assert.equal(r.petEvents.length, 1);
+});
+
+test("waiting notifies at most once a minute per chat, and failures sound different", () => {
+  const t = new TransitionTracker();
+  t.track("", oneChat("working", NOW), NOW, undefined, OPTS);
+  const w = t.track("", oneChat("waiting", NOW + 1000), NOW + 1000, undefined, OPTS);
+  assert.equal(w.notices[0].kind, "waiting");
+  assert.equal(w.sound, "waiting");
+  t.track("", oneChat("working", NOW + 2000), NOW + 2000, undefined, OPTS);
+  assert.equal(t.track("", oneChat("waiting", NOW + 3000), NOW + 3000, undefined, OPTS).notices.length, 0);
+  t.track("", oneChat("working", NOW + 4000), NOW + 4000, undefined, OPTS);
+  const failed = t.track("", oneChat("done", NOW + 90000, "failed"), NOW + 90000, undefined, OPTS);
+  assert.equal(failed.sound, "failed");
+  assert.match(failed.notices[0].title, /failed/);
+});
+
+test("an SSH host's chats are tracked apart and name the host", () => {
+  const t = new TransitionTracker();
+  t.track("ssh:build-server", oneChat("working", NOW), NOW, "build-server", OPTS);
+  const r = t.track("ssh:build-server", oneChat("waiting", NOW + 1000), NOW + 1000, "build-server", OPTS);
+  assert.match(r.notices[0].body, /build-server/);
+  assert.equal(r.petEvents[0].key, "ssh:build-server|" + oneChat("waiting", 0)[0].sessions[0].chatId);
+});
+
+test("a plan limit that drops a lot is celebrated as a reset", () => {
+  const t = new TransitionTracker();
+  const groups = demoState(NOW).status!.groups;
+  assert.deepEqual(t.resets("", groups), []);
+  const reset = groups.map((g) => ({ ...g, limits: { ...g.limits!, windows: g.limits!.windows.map((w) => ({ ...w, pct: 2 })) } }));
+  assert.deepEqual(t.resets("", reset).map((e) => e.text), ["5h limit reset!", "7d limit reset!"]);
+});

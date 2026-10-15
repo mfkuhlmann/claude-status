@@ -32,3 +32,6 @@ __pycache__/
 .claude-*/
 .claude.json
 CLAUDE.local.md
+
+# Dev harness bundles
+dev/out/

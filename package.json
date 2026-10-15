@@ -1,0 +1,320 @@
+{
+  "name": "claude-status",
+  "displayName": "Claude Status",
+  "description": "Every Claude Code chat on this computer and your SSH hosts in one view: who needs you, plan usage, subagents, and animated Clawd pets. Runs on your side, also in Remote-SSH windows.",
+  "version": "0.1.0",
+  "publisher": "wzaielamri",
+  "author": "Wadhah Zai El Amri",
+  "license": "MIT",
+  "private": true,
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "claude",
+    "claude code",
+    "ssh",
+    "remote",
+    "status"
+  ],
+  "extensionKind": [
+    "ui"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "claudeStatus",
+          "title": "Claude Status",
+          "icon": "media/spark.svg"
+        }
+      ]
+    },
+    "views": {
+      "claudeStatus": [
+        {
+          "type": "webview",
+          "id": "claudeStatus.view",
+          "name": "Chats"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "claudeStatus.refresh",
+        "title": "Refresh",
+        "category": "Claude Status",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "claudeStatus.pickHosts",
+        "title": "Show Claude on SSH Hosts…",
+        "category": "Claude Status",
+        "icon": "$(remote-explorer)"
+      },
+      {
+        "command": "claudeStatus.openInEditor",
+        "title": "Open in Editor Tab",
+        "category": "Claude Status",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "claudeStatus.newChat",
+        "title": "New Chat…",
+        "category": "Claude Status",
+        "icon": "$(add)"
+      },
+      {
+        "command": "claudeStatus.showRemoved",
+        "title": "Show Removed Chats Again",
+        "category": "Claude Status"
+      },
+      {
+        "command": "claudeStatus.setupUsageBars",
+        "title": "Set Up Plan Usage Bars…",
+        "category": "Claude Status"
+      },
+      {
+        "command": "claudeStatus.removeUsageBars",
+        "title": "Remove the Plan Usage Status-Line Snippet…",
+        "category": "Claude Status"
+      },
+      {
+        "command": "claudeStatus.openUsagePage",
+        "title": "Open Usage Page on claude.ai",
+        "category": "Claude Status"
+      },
+      {
+        "command": "claudeStatus.toggleDemo",
+        "title": "Toggle Demo Data (for Screenshots)",
+        "category": "Claude Status"
+      },
+      {
+        "command": "claudeStatus.showLog",
+        "title": "Show Log",
+        "category": "Claude Status"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "claudeStatus.newChat",
+          "when": "view == claudeStatus.view",
+          "group": "navigation@1"
+        },
+        {
+          "command": "claudeStatus.pickHosts",
+          "when": "view == claudeStatus.view",
+          "group": "navigation@2"
+        },
+        {
+          "command": "claudeStatus.refresh",
+          "when": "view == claudeStatus.view",
+          "group": "navigation@3"
+        },
+        {
+          "command": "claudeStatus.openInEditor",
+          "when": "view == claudeStatus.view",
+          "group": "more@1"
+        },
+        {
+          "command": "claudeStatus.showRemoved",
+          "when": "view == claudeStatus.view",
+          "group": "more@2"
+        },
+        {
+          "command": "claudeStatus.setupUsageBars",
+          "when": "view == claudeStatus.view",
+          "group": "more@3"
+        },
+        {
+          "command": "claudeStatus.openUsagePage",
+          "when": "view == claudeStatus.view",
+          "group": "more@4"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Claude Status",
+      "properties": {
+        "claudeStatus.sshHosts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "SSH hosts (names from `~/.ssh/config`) whose Claude Code chats are shown too. Use **Claude Status: Show Claude on SSH Hosts…** to pick them. Needs key-based login (the check never asks for a password) and `python3` 3.7+ on the host; nothing is installed there.",
+          "order": 1
+        },
+        "claudeStatus.includeCurrentRemote": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "In a Remote-SSH window, also show the chats of the host the window is connected to.",
+          "order": 2
+        },
+        "claudeStatus.remotePollSeconds": {
+          "type": "number",
+          "default": 30,
+          "minimum": 10,
+          "maximum": 600,
+          "markdownDescription": "How often SSH hosts are checked, in seconds.",
+          "order": 3
+        },
+        "claudeStatus.pollInterval": {
+          "type": "number",
+          "default": 2000,
+          "minimum": 1000,
+          "maximum": 60000,
+          "markdownDescription": "How often this computer's chats are checked while the view is open, in milliseconds (every 10 s while it's hidden).",
+          "order": 4
+        },
+        "claudeStatus.extraConfigDirs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "More Claude Code config folders to read. `~/.claude`, every `~/.claude-*` folder and `$CLAUDE_CONFIG_DIR` are found without this.",
+          "order": 5
+        },
+        "claudeStatus.openIn": {
+          "type": "string",
+          "enum": [
+            "vscode",
+            "system"
+          ],
+          "enumDescriptions": [
+            "Open chats in VS Code's terminal (on the right machine: here, or the host this window is connected to).",
+            "Open chats in your desktop's terminal app, like the Plasma widget does."
+          ],
+          "default": "vscode",
+          "markdownDescription": "Where chats open when you click them.",
+          "order": 6
+        },
+        "claudeStatus.notifyWaiting": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Notify when a chat needs your input. (If the Plasma widget runs too, turn this off in one of them.)",
+          "order": 10
+        },
+        "claudeStatus.notifyDone": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Notify when a chat finishes a turn that took at least `#claudeStatus.notifyDoneMinSeconds#` seconds.",
+          "order": 11
+        },
+        "claudeStatus.notifyDoneMinSeconds": {
+          "type": "number",
+          "default": 30,
+          "minimum": 0,
+          "maximum": 3600,
+          "markdownDescription": "Shortest turn, in seconds, that gets a \"finished\" notification.",
+          "order": 12
+        },
+        "claudeStatus.notifySound": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Play a sound with notifications (Linux: PipeWire, PulseAudio or ALSA; nothing plays while Do Not Disturb is on).",
+          "order": 13
+        },
+        "claudeStatus.soundVolume": {
+          "type": "number",
+          "default": 70,
+          "minimum": 0,
+          "maximum": 100,
+          "markdownDescription": "Notification sound volume, in percent.",
+          "order": 14
+        },
+        "claudeStatus.soundWaiting": {
+          "type": "string",
+          "default": "message-new-instant",
+          "markdownDescription": "Sound when a chat needs you: sound-theme names (comma-separated, the first one found plays) or a sound file.",
+          "order": 15
+        },
+        "claudeStatus.soundDone": {
+          "type": "string",
+          "default": "outcome-success,complete",
+          "markdownDescription": "Sound when a chat finishes.",
+          "order": 16
+        },
+        "claudeStatus.soundFailed": {
+          "type": "string",
+          "default": "dialog-error",
+          "markdownDescription": "Sound when a chat fails.",
+          "order": 17
+        },
+        "claudeStatus.showPet": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show Clawd, the animated pet.",
+          "order": 20
+        },
+        "claudeStatus.chatPets": {
+          "type": "number",
+          "default": 5,
+          "minimum": 0,
+          "maximum": 8,
+          "markdownDescription": "Pets per account, one for each running chat (0 = none).",
+          "order": 21
+        },
+        "claudeStatus.showTokens": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show today's and this week's token totals per account.",
+          "order": 22
+        },
+        "claudeStatus.showUsageInStatusBar": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show the 5-hour plan usage next to the status bar item.",
+          "order": 23
+        },
+        "claudeStatus.recentChats": {
+          "type": "number",
+          "default": 5,
+          "minimum": 0,
+          "maximum": 20,
+          "markdownDescription": "How many recent chats to list per account.",
+          "order": 24
+        },
+        "claudeStatus.keepDoneHours": {
+          "type": "number",
+          "default": 24,
+          "minimum": 0,
+          "maximum": 168,
+          "markdownDescription": "Keep finished background chats listed for this many hours (0 = drop them right away).",
+          "order": 25
+        },
+        "claudeStatus.pythonPath": {
+          "type": "string",
+          "default": "python3",
+          "markdownDescription": "Python 3.7+ used to read Claude Code's files on this computer.",
+          "order": 30
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "check": "tsc -p . && tsc -p webview",
+    "test": "node esbuild.mjs --tests && node --test out/test/*.test.js",
+    "package": "node esbuild.mjs --production && vsce package --allow-missing-repository --no-dependencies",
+    "vscode:prepublish": "node esbuild.mjs --production"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "@types/vscode": "~1.90.0",
+    "@vscode/vsce": "^3.6.0",
+    "esbuild": "^0.25.0",
+    "preact": "^10.27.0",
+    "typescript": "^5.9.0"
+  }
+}

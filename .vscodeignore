@@ -1,0 +1,12 @@
+# Only dist/, media/, vendor/, README, CHANGELOG and LICENSE go into the .vsix
+**
+!dist/extension.js
+!dist/webview.js
+!dist/webview-style.css
+!media/**
+!vendor/**
+!README.md
+!CHANGELOG.md
+!LICENSE
+!package.json
+vendor/**/__pycache__/**
