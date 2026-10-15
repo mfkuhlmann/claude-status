@@ -1,0 +1,31 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.9", "3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Run the tests
+        run: python -m unittest discover -s tests -v
+
+  # The status script also runs on SSH hosts, whose python3 can be as old as 3.7
+  python37:
+    name: Python 3.7 (SSH hosts)
+    runs-on: ubuntu-latest
+    container: python:3.7-slim
+    steps:
+      - uses: actions/checkout@v5
+      - name: Run the tests
+        run: python3 -m unittest discover -s tests -v

@@ -8,12 +8,14 @@
       }
     ],
     "Category": "System Information",
-    "Description": "Shows whether Claude Code sessions are working, idle or waiting for your input, plus plan usage and token totals",
+    "Description": "Keeps all your Claude Code sessions in view: which are working, which need you, plan usage and tokens, across accounts and SSH hosts",
     "Icon": "dialog-messages",
     "Id": "org.wzaielamri.claudestatus",
     "License": "MIT",
     "Name": "Claude Status",
-    "Version": "1.1"
+    "Version": "1.2",
+    "Website": "https://github.com/wzaielamri/claude_widget",
+    "BugReportUrl": "https://github.com/wzaielamri/claude_widget/issues"
   },
   "X-Plasma-API-Minimum-Version": "6.0"
 }

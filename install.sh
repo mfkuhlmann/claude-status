@@ -22,6 +22,12 @@ for arg in "$@"; do
   esac
 done
 
+if ! command -v kpackagetool6 >/dev/null; then
+  echo "kpackagetool6 not found: Claude Status needs KDE Plasma 6 (Plasma 5 isn't supported)." >&2
+  exit 1
+fi
+command -v python3 >/dev/null || echo "warning: python3 not found; the widget needs it to read Claude's files" >&2
+
 confirm() {
   [ "$yes" = 1 ] && return 0
   if [ ! -t 0 ]; then
