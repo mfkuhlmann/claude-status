@@ -1,6 +1,6 @@
 // The vendored backend on a stock machine: just ~/.claude (no ~/.claude-*
-// profiles, no profile-switching tools, no shared-chats tool), and with a
-// custom CLAUDE_CONFIG_DIR. Runs the real Python against made-up files.
+// profiles, no profile-switching tools), and with a custom CLAUDE_CONFIG_DIR.
+// Runs the real Python against made-up files.
 
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -56,7 +56,7 @@ test("a stock ~/.claude is all it takes", { skip: !linux && "sessions are detect
   const { status, error } = await backend.status(["--done-hours", "24", "--recent", "5"]);
   assert.equal(error, undefined);
   assert.ok(status);
-  assert.equal(status.canShare, false, "no shared-chats tool, no sharing");
+  assert.equal(status.canShare, true, "sharing is built in; the view offers it with two or more accounts");
   assert.equal(status.groups.length, 1);
   const g = status.groups[0];
   assert.equal(g.profiles.length, 1);
@@ -85,6 +85,37 @@ test("a custom CLAUDE_CONFIG_DIR is found when passed along", { skip: !linux && 
   assert.equal(sessions.length, 1);
   assert.equal(sessions[0].state, "waiting");
   assert.equal(sessions[0].reason, "permission");
+});
+
+test("a chat is shared between a stock ~/.claude and ~/.claude-work", async () => {
+  const home = fakeHome();
+  process.env.XDG_DATA_HOME = path.join(home, ".local", "share");
+  const id = "33333333-3333-4333-8333-333333333333";
+  const folder = path.join(home, "project");
+  const key = folder.replace(/[^A-Za-z0-9]/g, "-");
+  const chat = path.join(home, ".claude", "projects", key, `${id}.jsonl`);
+  fs.mkdirSync(path.dirname(chat), { recursive: true });
+  fs.writeFileSync(chat, JSON.stringify({ type: "user", cwd: folder, sessionId: id }) + "\n");
+  fs.writeFileSync(path.join(home, ".claude.json"), JSON.stringify({ oauthAccount: { accountUuid: "00000000-0000-4000-8000-000000000001" } }));
+  fs.mkdirSync(path.join(home, ".claude-work", "sessions"), { recursive: true });
+  fs.writeFileSync(
+    path.join(home, ".claude-work", ".claude.json"),
+    JSON.stringify({ oauthAccount: { accountUuid: "00000000-0000-4000-8000-000000000002" } }),
+  );
+  const backend = new Backend(path.resolve("."), () => "python3");
+  const answer = await backend.action("jump.py", ["--share", id, "--profile", ".claude"]);
+  assert.equal(answer.ok, true, answer.message);
+  const there = path.join(home, ".claude-work", "projects", key, `${id}.jsonl`);
+  assert.equal(fs.statSync(there).ino, fs.statSync(chat).ino, "one file in both profiles");
+  const { status } = await backend.status(["--recent", "5"]);
+  assert.ok(status);
+  assert.equal(status.canShare, true);
+  assert.deepEqual(status.groups.map((g) => g.shareProfile).sort(), [".claude", ".claude-work"]);
+  assert.ok(status.groups.flatMap((g) => g.recent).some((r) => r.sessionId === id && r.shared));
+  const back = await backend.action("jump.py", ["--unshare", id, "--profile", ".claude"]);
+  assert.equal(back.ok, true, back.message);
+  assert.equal(fs.existsSync(there), false);
+  assert.equal(fs.statSync(chat).nlink, 1);
 });
 
 test("a missing Python is explained", async () => {

@@ -6,6 +6,9 @@ a new chat (used by the Claude Status widget).
     python3 -I jump.py --stop SESSION_ID [--config-dir DIR]...
     python3 -I jump.py --new-chat PROFILE_DIRNAME [--cwd FOLDER] [--config-dir DIR]...
     python3 -I jump.py --new-chat PROFILE_DIRNAME --choose-folder   (ask for the folder first)
+    python3 -I jump.py --new-chat PROFILE_DIRNAME [--cwd FOLDER | --choose-folder] --vscode
+                                                 (in VS Code's Claude extension instead)
+    python3 -I jump.py --remote-new-vscode HOST [--cwd FOLDER_ON_HOST]   (the same on an SSH host)
     python3 -I jump.py --dismiss SESSION_ID      (hide a finished session in the widget)
     python3 -I jump.py --undismiss-all           (show hidden ones again)
     python3 -I jump.py --resume SESSION_ID --profile PROFILE    (reopen a chat there)
@@ -13,8 +16,8 @@ a new chat (used by the Claude Status widget).
     python3 -I jump.py --share SESSION_ID                       (share it with every account)
     python3 -I jump.py --unshare SESSION_ID --profile PROFILE   (keep it only there)
 
-Sharing is done by ~/.claude-shared/profile-tools/shared-chats.sh; a chat
-that's open in a session isn't touched (it can be open in one at a time).
+Sharing is done by sharing.py; a chat that's open in a session isn't touched
+(it can be open in one at a time).
 
 `--stop` runs `claude stop <id>` for a background session: it's interrupted,
 its conversation is kept, and `claude attach <id>` resumes it.
@@ -50,6 +53,7 @@ from urllib.parse import urlencode
 sys.dont_write_bytecode = True  # no __pycache__ inside the installed widget
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # -I leaves the script dir off sys.path
 import claude_status as cs  # noqa: E402
+import sharing  # noqa: E402
 
 KWIN_SCRIPT = """\
 const want = %s;
@@ -748,38 +752,103 @@ def choose_folder(title, start):
     return folder, ""
 
 
-def new_chat_choosing_folder(home, extra_dirs, dirname):
+def new_chat_choosing_folder(home, extra_dirs, dirname, vscode=False):
     """Ask for a folder (the dialog opens in your home folder), then open a new
-    chat on the profile there. Cancelling the dialog does nothing."""
+    chat on the profile there, in a terminal or in VS Code. Cancelling the
+    dialog does nothing."""
     profile = next((p for p in cs.discover_profiles(home, extra_dirs) if matches(p, dirname)), None)
     if profile is None:
         return False, f"No Claude profile called {dirname}"
-    if not shutil.which("claude"):
+    if not vscode and not shutil.which("claude"):
         return False, "The claude command isn't on PATH"
     folder, error = choose_folder(f"New Claude chat on {profile.label} in…", home)
     if folder is None:
         return (False, error) if error else (True, "")
     if not os.path.isdir(folder):
         return False, f"Not a folder: {folder}"
-    return new_chat(home, extra_dirs, dirname, folder)
+    return (new_chat_vscode if vscode else new_chat)(home, extra_dirs, dirname, folder)
+
+
+# ---------------------------------------------------------------- new chats in VS Code
+
+VSCODE_NEW_CHAT = "vscode://anthropic.claude-code/open"   # without a session: a new conversation
+
+
+def later(task):
+    """Run task in a process of its own once this script has answered (the
+    widget waits until our output ends, so it mustn't inherit it)."""
+    try:
+        pid = os.fork()
+    except OSError:
+        return
+    if pid:
+        return
+    try:
+        os.setsid()
+        devnull = os.open(os.devnull, os.O_RDWR)
+        for fd in (0, 1, 2):
+            os.dup2(devnull, fd)
+        task()
+    except Exception:
+        pass
+    finally:
+        os._exit(0)
+
+
+def open_vscode_chat(caption, wait, prefer=""):
+    """After wait seconds (VS Code opening the folder): bring up its window
+    whose title has caption, then ask the Claude extension for a new chat. A
+    vscode:// link goes to the VS Code window that was active last."""
+    time.sleep(wait)
+    raise_window(vscode_main_pids(), caption, require=True, prefer=prefer)
+    time.sleep(0.3)  # let VS Code see its window focused, so the link opens there
+    opener = shutil.which("xdg-open")
+    if opener:
+        subprocess.Popen([opener, VSCODE_NEW_CHAT], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True)
+
+
+def new_chat_vscode(home, extra_dirs, dirname, folder=None):
+    """Open folder in VS Code and a new chat in its Claude extension, when
+    that runs on this profile: VS Code's environment and settings decide
+    which one (claude_status.vscode_profile), so other profiles are refused."""
+    profiles = cs.discover_profiles(home, extra_dirs)
+    profile = next((p for p in profiles if matches(p, dirname)), None)
+    if profile is None:
+        return False, f"No Claude profile called {dirname}"
+    code, _ = cs.vscode_app()
+    if code is None:
+        return False, "VS Code isn't installed"
+    if not shutil.which("xdg-open"):
+        return False, "xdg-open is missing; can't hand the new chat to VS Code"
+    _, there = cs.vscode_profile(home, profiles)
+    if there is None or there.real != profile.real:
+        where = there.label if there is not None else "another Claude folder"
+        return False, f"VS Code's Claude runs on {where}, not {profile.label}: switch its profile first"
+    folder = folder if folder and os.path.isdir(folder) else str(home)
+    wait = 2.5 if vscode_main_pids() else 8   # a window of a running VS Code, or VS Code starting up
+    start_app([code, folder])
+    later(lambda: open_vscode_chat(os.path.basename(folder.rstrip("/")) or folder, wait))
+    return True, f"Opening a new {profile.label} chat in VS Code ({cs.short_path(folder, home)})"
+
+
+def new_chat_remote_vscode(host, folder=""):
+    """VS Code connected to an SSH host (Remote-SSH), in folder there or its
+    home folder, then a new chat in its Claude extension once connected."""
+    code, _ = cs.vscode_app()
+    if code is None:
+        return False, f"VS Code isn't installed here, so it can't connect to {host}"
+    if not shutil.which("xdg-open"):
+        return False, "xdg-open is missing; can't hand the new chat to VS Code"
+    if folder.startswith("/"):
+        start_app([code, "--folder-uri", f"vscode-remote://ssh-remote+{host}{folder}"])
+    else:
+        start_app([code, "--remote", f"ssh-remote+{host}"])
+    later(lambda: open_vscode_chat(f"[SSH: {host}]", 10, prefer=os.path.basename(folder.rstrip("/"))))
+    return True, f"Opening VS Code on {host}; the new chat starts once it's connected"
 
 
 # ---------------------------------------------------------------- shared chats
-
-
-def run_share_tool(home, args):
-    """Run shared-chats.sh; (ok, what it said)."""
-    tool = cs.share_tool(home)
-    if tool is None:
-        return False, "The shared-chats tool isn't installed (~/.claude-shared/profile-tools/shared-chats.sh)"
-    try:
-        # it works on $HOME: make that the home we're looking at
-        r = subprocess.run(["bash", str(tool), *args], cwd=str(home), stdin=subprocess.DEVNULL,
-                           env=dict(os.environ, HOME=str(home)), capture_output=True, text=True, timeout=60)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return False, f"shared-chats.sh didn't finish: {exc}"
-    text = " ".join((r.stdout.strip() or r.stderr.strip()).split())
-    return r.returncode == 0, text or f"shared-chats.sh stopped (exit {r.returncode})"
 
 
 def open_somewhere(home, extra_dirs, session_id):
@@ -804,20 +873,21 @@ def resume(home, extra_dirs, session_id, profile_dir=None):
 
 
 def continue_on(home, extra_dirs, session_id, profile_dir):
-    """Continue a chat on another account: share it if that account doesn't
-    have it yet, then reopen it there."""
+    """Continue a chat on another account: share it with that account if it
+    doesn't have it yet, then reopen it there."""
     target = profile_named(home, extra_dirs, profile_dir)
     if target is None:
         return False, f"No Claude profile called {profile_dir}"
     busy = open_somewhere(home, extra_dirs, session_id)
     if busy:
         return False, f"It's open in a session on {busy}. A chat can be open in one session at a time: exit that one first."
-    copies = [path for p in cs.discover_profiles(home, extra_dirs) for path in [cs.transcript_path(p, session_id)] if path]
+    profiles = cs.discover_profiles(home, extra_dirs)
+    copies = [path for p in profiles for path in [cs.transcript_path(p, session_id)] if path]
     if not copies:
         return False, "That chat has no transcript on this computer"
     there = cs.transcript_path(target, session_id)
     if there is None:
-        ok, message = run_share_tool(home, ["share", session_id])
+        ok, message = sharing.share(profiles, session_id, [target], sharing.store_root(home))
         if not ok:
             return False, message
         there = cs.transcript_path(target, session_id)
@@ -828,21 +898,25 @@ def continue_on(home, extra_dirs, session_id, profile_dir):
     return resume_chat(target, there, session_id, home)
 
 
-def share(home, extra_dirs, session_id, _profile_dir=None):
-    """Share a chat with every account (shared-chats.sh share)."""
-    return run_share_tool(home, ["share", session_id])
+def share(home, extra_dirs, session_id, profile_dir=None):
+    """Share a chat with every profile (from profile_dir's copy, if given)."""
+    busy = open_somewhere(home, extra_dirs, session_id)
+    if busy:
+        return False, f"It's open in a session on {busy}. Exit that session first."
+    profiles = cs.discover_profiles(home, extra_dirs)
+    return sharing.share(profiles, session_id, profiles, sharing.store_root(home),
+                         profile_named(home, extra_dirs, profile_dir))
 
 
 def unshare(home, extra_dirs, session_id, profile_dir):
     """Make a shared chat a normal chat of one profile again; the others lose it."""
     keep = profile_named(home, extra_dirs, profile_dir)
-    name = cs.share_name(keep, home) if keep else None
-    if not name:
-        return False, f"{profile_dir} isn't a profile the shared-chats tool knows"
+    if keep is None:
+        return False, f"No Claude profile called {profile_dir}"
     busy = open_somewhere(home, extra_dirs, session_id)
     if busy:
         return False, f"It's open in a session on {busy}. Exit that session first."
-    return run_share_tool(home, ["unshare", session_id, name])
+    return sharing.keep_only(cs.discover_profiles(home, extra_dirs), session_id, keep, sharing.store_root(home))
 
 
 def dismiss(home, extra_dirs, session_id):
@@ -864,17 +938,18 @@ def undismiss_all(home, extra_dirs, _session_id=None):
 
 
 USAGE = ("usage: jump.py [--stop] SESSION_ID [--profile PROFILE] [--config-dir DIR]...\n"
-         "       jump.py --new-chat PROFILE_DIRNAME [--cwd FOLDER | --choose-folder] [--config-dir DIR]...\n"
+         "       jump.py --new-chat PROFILE_DIRNAME [--cwd FOLDER | --choose-folder] [--vscode] [--config-dir DIR]...\n"
          "       jump.py --resume|--continue|--unshare SESSION_ID --profile PROFILE\n"
          "       jump.py --share SESSION_ID\n"
          "       jump.py --remote-vscode HOST SESSION_ID [--cwd FOLDER_ON_HOST]\n"
-         "       jump.py --remote-terminal HOST [--name SESSION_NAME]")
+         "       jump.py --remote-terminal HOST [--name SESSION_NAME]\n"
+         "       jump.py --remote-new-vscode HOST [--cwd FOLDER_ON_HOST]")
 
 
 def main(argv=None):
     args = sys.argv[1:] if argv is None else list(argv)
     extra, session_id, action, folder, profile_dir = [], None, jump, None, None
-    remote_host, name_arg, choose = None, "", False
+    remote_host, name_arg, choose, vscode = None, "", False, False
     while args:
         arg = args.pop(0)
         if arg == "--config-dir" and args:
@@ -887,11 +962,13 @@ def main(argv=None):
             action = new_chat
         elif arg == "--choose-folder":
             choose = True
+        elif arg == "--vscode":
+            vscode = True
         elif arg == "--dismiss":
             action = dismiss
         elif arg == "--undismiss-all":
             action, session_id = undismiss_all, session_id or "-"
-        elif arg in ("--remote-vscode", "--remote-terminal") and args:
+        elif arg in ("--remote-vscode", "--remote-terminal", "--remote-new-vscode") and args:
             action, remote_host = arg, args.pop(0)
         elif arg == "--name" and args:
             name_arg = args.pop(0)
@@ -903,7 +980,7 @@ def main(argv=None):
             session_id = arg
         else:
             sys.exit(USAGE)
-    if action == "--remote-terminal":
+    if action in ("--remote-terminal", "--remote-new-vscode"):
         session_id = session_id or "-"
     if not session_id or (action in (continue_on, unshare) and not profile_dir):
         sys.exit(USAGE)
@@ -912,10 +989,13 @@ def main(argv=None):
             ok, message = jump_remote_vscode(remote_host, session_id, folder or "")
         elif action == "--remote-terminal":
             ok, message = jump_remote_terminal(remote_host, name_arg)
+        elif action == "--remote-new-vscode":
+            ok, message = new_chat_remote_vscode(remote_host, folder or "")
         elif action is new_chat and choose:
-            ok, message = new_chat_choosing_folder(Path.home(), extra, session_id)
+            ok, message = (new_chat_choosing_folder(Path.home(), extra, session_id, vscode=True) if vscode
+                           else new_chat_choosing_folder(Path.home(), extra, session_id))
         elif action is new_chat:
-            ok, message = new_chat(Path.home(), extra, session_id, folder)
+            ok, message = (new_chat_vscode if vscode else new_chat)(Path.home(), extra, session_id, folder)
         elif action in (jump, stop, resume, continue_on, share, unshare):
             ok, message = action(Path.home(), extra, session_id, profile_dir)
         else:

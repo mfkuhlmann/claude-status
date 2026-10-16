@@ -187,8 +187,8 @@ export class Actions {
   // ---------------------------------------------------------------- shared chats
 
   // Share a chat with your other accounts, continue it on one, or keep it on
-  // one only (jump.py runs ~/.claude-shared/profile-tools/shared-chats.sh; the
-  // view only offers this when that tool is installed).
+  // one only (jump.py does it, through the widget's sharing.py; the view
+  // offers this with two or more accounts on this computer).
   async share(chat: ChatRef): Promise<void> {
     if (this.demoOnly()) return;
     const groups = this.dash.state().status?.groups ?? [];
@@ -217,7 +217,9 @@ export class Actions {
       if (ok !== "Keep Only There") return;
     }
     const flag = { continue: "--continue", share: "--share", keeponly: "--unshare" }[pick.kind2];
-    const profile = pick.group?.shareProfile ? ["--profile", pick.group.shareProfile] : [];
+    // the account it goes to; for "all accounts", the one whose copy is shared
+    const profile = pick.group?.shareProfile ? ["--profile", pick.group.shareProfile]
+      : chat.profileDir ? ["--profile", chat.profileDir] : [];
     const answer = await this.backend.action("jump.py", [flag, chat.chatId || chat.sessionId, ...profile, ...configDirArgs()]);
     if (this.report(answer, "Couldn't share it") && pick.kind2 !== "continue") this.dash.setActionInfo(answer.message);
     void this.dash.refresh();

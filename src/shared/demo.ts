@@ -112,7 +112,6 @@ function personal(now: number, phase: number): Group {
     tokens: { today: totals(1), week: totals(5.3), models: [{ model: "Opus", total: 8100000 }, { model: "Sonnet", total: 2570000 }] },
     chatProfile: ".claude",
     shareProfile: null,
-    shareName: null,
     projects: [
       { path: "/home/alice/projects/webapp", short: "~/projects/webapp", newChatCommand: "echo 'Demo mode'" },
       { path: "/home/alice/projects/api-server", short: "~/projects/api-server", newChatCommand: "echo 'Demo mode'" },
@@ -168,7 +167,6 @@ function buildServer(now: number, phase: number): Status {
         tokens: { today: totals(0.6), week: totals(2.2), models: [{ model: "Opus", total: 6400000 }] },
         chatProfile: ".claude",
         shareProfile: null,
-        shareName: null,
         projects: [{ path: "/home/alice/experiments/ranking", short: "~/experiments/ranking", newChatCommand: "echo 'Demo mode'" }],
         sharedHere: [],
         recent: [],
