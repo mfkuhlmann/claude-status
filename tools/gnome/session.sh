@@ -5,6 +5,7 @@ uuid=claude-status@wzaielamri.github.io
 gsettings set org.gnome.shell disable-user-extensions false
 gsettings set org.gnome.shell enabled-extensions "['$uuid', 'devtools@local']"
 export XDG_CURRENT_DESKTOP=ubuntu:GNOME XDG_SESSION_TYPE=wayland
+export PATH="$HOME/.local/bin:$PATH"   # where steps can put stand-ins (steps-vscode.sh)
 gnome-shell --headless --virtual-monitor 1280x1000 --mode=ubuntu > /out/shell.log 2>&1 &
 shell=$!
 for _ in $(seq 60); do

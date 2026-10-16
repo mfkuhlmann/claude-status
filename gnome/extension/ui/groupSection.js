@@ -3,6 +3,7 @@
 // chats shared with it that run elsewhere, and recent chats. With remoteHost
 // set, the account is on that SSH host and its actions run there.
 
+import Clutter from 'gi://Clutter';
 import St from 'gi://St';
 
 import * as L from '../logic.js';
@@ -92,23 +93,50 @@ export function buildGroupSection(ctx, group, {last = false, remoteHost = ''} = 
     return section;
 }
 
-// New chat on this account: its recent folders, then any folder you pick
+// New chat on this account: its recent folders, then any folder you pick. A
+// folder opens a terminal with Claude there; its VS Code button starts the
+// chat in VS Code's Claude extension, on the account that runs on.
 function buildNewChatMenu(ctx, group, host) {
     const menu = column('claude-inline-menu', {x_expand: true});
     menu.add_child(label(L.fmt('New chat on %1 in…', host ? L.fmt('%1 on %2', group.title, host) : group.title),
         'claude-menu-title'));
+    const row = (item, onVscode) => {
+        const line = box('claude-menu-row', {x_expand: true});
+        item.x_expand = true;
+        line.add_child(item);
+        if (ctx.vscodeInstalled)
+            line.add_child(vscodeButton(ctx, group, host, onVscode));
+        return line;
+    };
     for (const f of L.newChatFolders(group, host)) {
         const item = textButton(f.short === '~' ? 'Home folder (~)' : f.short,
             () => (host ? ctx.remoteOpen(host, f.newChatCommand || '') : ctx.newChat(group.chatProfile, f.path)),
             'claude-menu-item', f.short === '~' ? 'user-home-symbolic' : 'folder-symbolic');
         item.reactive = !host || !!f.newChatCommand;
-        menu.add_child(item);
+        menu.add_child(row(item, () => (host ? ctx.remoteNewChatVscode(host, f.path)
+            : ctx.newChat(group.chatProfile, f.path, true))));
     }
     if (!host) {
-        menu.add_child(textButton('Choose folder…', () => ctx.newChatChoosingFolder(group.chatProfile),
-            'claude-menu-item', 'folder-open-symbolic'));
+        menu.add_child(row(textButton('Choose folder…', () => ctx.newChatChoosingFolder(group.chatProfile),
+            'claude-menu-item', 'folder-open-symbolic'), () => ctx.newChatChoosingFolder(group.chatProfile, true)));
     }
     return menu;
+}
+
+// "VS Code" next to a folder: greyed out on the accounts VS Code's Claude
+// doesn't run on, with a tooltip saying why (on a wrapper, so it shows then too)
+function vscodeButton(ctx, group, host, onClick) {
+    const here = !!group.vscodeHere;
+    const content = box('claude-button-box');
+    content.add_child(new St.Icon({icon_name: 'vscode', fallback_icon_name: 'text-editor-symbolic',
+        style_class: 'claude-button-icon'}));
+    content.add_child(label('VS Code'));
+    const button = new St.Button({style_class: 'claude-text-button claude-vscode-button', child: content,
+        reactive: here, can_focus: here, opacity: here ? 255 : 110});
+    button.connect('clicked', onClick);
+    const wrap = new St.Bin({child: button, y_align: Clutter.ActorAlign.CENTER});
+    ctx.tips.add(wrap, [here ? 'New chat in VS Code' : 'Not on this account', L.vscodeHint(group, host, ctx._status)]);
+    return wrap;
 }
 
 function buildSharedLine(ctx, chat, remoteHost) {

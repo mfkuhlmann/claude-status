@@ -2090,6 +2090,121 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
     }
 
 
+# ---------------------------------------------------------------- VS Code
+#
+# "New chat in VS Code" starts a chat in VS Code's Claude extension. The
+# extension runs Claude with VS Code's environment plus its own
+# claudeCode.environmentVariables setting, so those decide the account (the
+# Claude config folder), not the widget: it only offers the button on the
+# account VS Code will use.
+
+VSCODE_APPS = (("code", "Code"), ("code-insiders", "Code - Insiders"), ("codium", "VSCodium"),
+               ("code-oss", "Code - OSS"))
+
+
+def vscode_app():
+    """(command, settings folder name) of the installed VS Code, or (None, None)."""
+    import shutil
+    for command, folder in VSCODE_APPS:
+        path = shutil.which(command)
+        if path:
+            return path, folder
+    return None, None
+
+
+def jsonc(text):
+    """Parse a VS Code settings file: JSON with comments and trailing commas."""
+    out, i, n = [], 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == '"':
+            j = i + 1
+            while j < n and text[j] != '"':
+                j += 2 if text[j] == "\\" else 1
+            out.append(text[i:j + 1])
+            i = j + 1
+        elif text.startswith("//", i):
+            j = text.find("\n", i)
+            i = n if j < 0 else j
+        elif text.startswith("/*", i):
+            j = text.find("*/", i + 2)
+            i = n if j < 0 else j + 2
+        else:
+            out.append(c)
+            i += 1
+    return json.loads(re.sub(r",(\s*[}\]])", r"\1", "".join(out)))
+
+
+def vscode_setting_config_dir(home, settings_folder):
+    """CLAUDE_CONFIG_DIR from the Claude extension's environmentVariables
+    setting in VS Code's user settings, or None."""
+    config = Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config")
+    try:
+        settings = jsonc((config / settings_folder / "User" / "settings.json").read_text(encoding="utf-8", errors="replace"))
+    except (OSError, ValueError):
+        return None
+    entries = settings.get("claudeCode.environmentVariables") if isinstance(settings, dict) else None
+    for e in entries if isinstance(entries, list) else []:
+        if isinstance(e, dict) and e.get("name") == "CLAUDE_CONFIG_DIR" and isinstance(e.get("value"), str) and e["value"]:
+            return e["value"]
+    return None
+
+
+def vscode_running_config_dir():
+    """(VS Code runs, CLAUDE_CONFIG_DIR in its environment or None). Only the
+    main process counts: helpers run as node (ELECTRON_RUN_AS_NODE) inherit
+    the extensions' environment."""
+    names = {Path(c).name for c, _ in VSCODE_APPS}
+    try:
+        pids = [p for p in os.listdir("/proc") if p.isdigit()]
+    except OSError:
+        return False, None
+    for pid in pids:
+        try:
+            if Path(f"/proc/{pid}/comm").read_text().strip() not in names:
+                continue
+            argv = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+            env = dict(item.partition(b"=")[::2] for item in Path(f"/proc/{pid}/environ").read_bytes().split(b"\0") if item)
+        except OSError:
+            continue
+        if any(a.startswith(b"--type=") for a in argv) or b"ELECTRON_RUN_AS_NODE" in env:
+            continue
+        value = env.get(b"CLAUDE_CONFIG_DIR")
+        return True, value.decode(errors="replace") if value else None
+    return False, None
+
+
+def vscode_profile(home, profiles, remote=False):
+    """(VS Code installed, the profile a new chat in VS Code's Claude would
+    use or None). On an SSH host (remote) the VS Code server's Claude uses the
+    host's ~/.claude; whether VS Code is installed is up to the other side."""
+    installed, value = None, None
+    if not remote:
+        command, settings_folder = vscode_app()
+        if command is None:
+            return False, None
+        installed = True
+        value = vscode_setting_config_dir(home, settings_folder)
+        if value is None:
+            running, env_value = vscode_running_config_dir()
+            # not running: the widget starts it, with its own environment
+            value = env_value if running else os.environ.get("CLAUDE_CONFIG_DIR")
+    try:
+        real = (Path(value).expanduser() if value else home / ".claude").resolve()
+    except (OSError, RuntimeError):
+        return installed, None
+    return installed, next((p for p in profiles if p.real == real), None)
+
+
+def add_vscode(result, home, extra_dirs=(), remote=False):
+    """Which account a new chat in VS Code would be on: result["vscode"] =
+    {installed, on (its label)} and each group's vscodeHere."""
+    installed, profile = vscode_profile(home, discover_profiles(home, extra_dirs), remote)
+    result["vscode"] = {"installed": installed, "on": profile.label if profile else None}
+    for g in result.get("groups", []):
+        g["vscodeHere"] = profile is not None and profile.key in g.get("profileKeys", [])
+
+
 # ---------------------------------------------------------------- remote hosts
 #
 # The widget runs this script on an SSH host (`ssh host python3 -I - --remote`
@@ -2214,6 +2329,10 @@ def main(argv=None):
         try:
             result = collect(home, cache_root, config_dirs, with_tokens=with_tokens, keep_done_hours=done_hours,
                              recent=recent)
+            try:
+                add_vscode(result, home, config_dirs, remote)
+            except Exception as exc:
+                result["errors"].append(f"VS Code: {exc}")
             if remote:
                 result["host"] = os.uname().nodename
                 add_remote_commands(result, home, config_dirs)

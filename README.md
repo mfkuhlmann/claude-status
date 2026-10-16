@@ -35,7 +35,7 @@ On GNOME (Ubuntu 26.04 and newer) it lives in the top bar: see [On GNOME](#on-gn
 **Act on your sessions**
 
 - **Jump to a session** by clicking its name: Konsole switches to the right tab (or tmux to its pane), VS Code opens the conversation, and a background job is attached in a terminal. Finished chats reopen with `claude --resume`.
-- **Start a new chat** with the **+** next to an account: pick one of its recent project folders, or **Choose folder…** to pick any folder in the folder dialog, and a terminal opens with Claude in it.
+- **Start a new chat** with the **+** next to an account: pick one of its recent project folders, or **Choose folder…** to pick any folder in the folder dialog, and a terminal opens with Claude in it. The **VS Code** button next to a folder starts the chat in VS Code's Claude panel instead.
 - **Stop** a background session (■; it asks first and keeps the conversation) or **hide** a finished one (－; nothing is deleted).
 - **Recent chats** per account, to reopen older conversations.
 - **Notifications** when a session needs you or finishes a long turn, with sounds from your sound theme (quiet during Do Not Disturb). Click one to jump to the session.
@@ -69,6 +69,7 @@ On GNOME (Ubuntu 26.04 and newer) it lives in the top bar: see [On GNOME](#on-gn
   - notification icons show him with a warning sign (needs input), a trophy (finished) or a rain cloud (failed)
   - they only move while the popup is open
 - **Jumping, in detail:** terminal sessions: Konsole switches to the tab running it (or tmux to its pane) and the window comes to the front. VS Code sessions: the conversation opens in the VS Code window of that project. Background jobs: the terminal already showing the job comes to the front; if there is none, a new terminal runs `claude attach <id>` in the job's folder. A finished background job is reopened the same way; if it ran in a folder Claude doesn't trust yet (always so for your home folder), Claude first asks whether you trust it, with "No, exit" preselected, and the terminal says so before the question comes up.
+- **New chats in VS Code:** VS Code opens the folder (or brings up the window that has it), then the Claude extension opens a new conversation there. Which account it runs on is up to VS Code, not the widget: its `claudeCode.environmentVariables` setting (`CLAUDE_CONFIG_DIR`), else VS Code's own environment, else `~/.claude`. So the button only works on that account; on the others it's greyed out and says which account VS Code is on. For an SSH host, VS Code connects to it (Remote-SSH) and the chat starts once it's connected.
 - **Hiding finished sessions** only hides them in the widget; nothing is deleted, and you can still resume the conversation. A hidden session comes back by itself if it runs again, and right-click → *Show removed sessions again* brings all of them back. The widget deliberately has no real "delete": that can't be undone, and Claude's `claude rm` also removes a background session's worktree.
 - **Stopping** runs `claude stop <id>`: the conversation is kept and `claude attach <id>` resumes it. A session that is *working* is interrupted mid-step, and anything it started in the background stops too. Terminal sessions have no stop button; close their window instead.
 - **Notifications:** when a session needs you (a permission prompt, a question, or a background job that stopped to ask you something; closed again once you answer), and when a session finishes a turn that took at least 30 seconds (configurable, or off). Sounds: one each for "needs input", "finished" and "failed", from your sound theme, a sound file of your own, or none. They go through PipeWire's notification stream, so the system's notification volume applies. When several sessions change at once, only the most urgent sound plays.
@@ -178,7 +179,7 @@ The same dashboard as a GNOME Shell extension: the ✳ in the top bar, the popup
 | A session's name | Jumps to the session: its terminal tab, its VS Code window, or a terminal attached to the background job. |
 | Hovering a session | ■ stops a background session, － hides a finished one, and the share button shares a chat (with the shared-chat tool). |
 | A chat's pet | Opens its chat. |
-| **+** next to an account | Starts a new chat in one of the account's recent folders, or in any folder you pick with **Choose folder…** (an SSH host's menu offers its home folder instead). |
+| **+** next to an account | Lists the account's recent folders and **Choose folder…** (an SSH host's: its home folder instead). Click one for a new chat in a terminal there, or its **VS Code** button to start it in VS Code. |
 | *Recent chats* | Unfolds the account's older conversations; click one to reopen it. |
 | Server button at the top | Picks the SSH hosts to show. |
 
@@ -264,7 +265,7 @@ Issues and ideas are welcome on the [issue tracker](https://github.com/wzaielamr
 
 ## Privacy
 
-- The widget reads the files Claude Code writes, on your computer and on the SSH hosts you pick (through your own SSH login). Besides those it reads only your `~/.ssh/config` host list, the desktop settings it needs (default terminal, sound theme, Do Not Disturb) and process and window info (`/proc`, Konsole, tmux, KWin) to find where a session runs; of a Claude process's environment it keeps only `CLAUDE_CONFIG_DIR` and `HOME`. It never opens credential files.
+- The widget reads the files Claude Code writes, on your computer and on the SSH hosts you pick (through your own SSH login). Besides those it reads only your `~/.ssh/config` host list, the desktop settings it needs (default terminal, sound theme, Do Not Disturb) and process and window info (`/proc`, Konsole, tmux, KWin) to find where a session runs; of a Claude process's environment it keeps only `CLAUDE_CONFIG_DIR` and `HOME`. To know which account VS Code's Claude uses, it reads `CLAUDE_CONFIG_DIR` from VS Code's settings (`claudeCode.environmentVariables`) or from VS Code's environment, nothing else. It never opens credential files.
 - It doesn't call any Anthropic API and sends no data anywhere. *Open Usage Page on claude.ai* just opens that page in your browser.
 - Everything it stores lives in `~/.cache/claude-widget`, which only your user can read (mode 0700). Its JSON output replaces account ids with a one-way hash.
 

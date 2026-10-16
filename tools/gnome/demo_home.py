@@ -24,15 +24,17 @@ def write(path, data):
     path.write_text(data if isinstance(data, str) else json.dumps(data))
 
 
-def alive():
-    """(pid, procStart) of a new process that sleeps for good."""
-    p = subprocess.Popen(["sleep", "infinity"], start_new_session=True)
+def alive(profile):
+    """(pid, procStart) of a new process that sleeps for good, on profile (its
+    CLAUDE_CONFIG_DIR, as a claude started there has)."""
+    env = dict(os.environ, CLAUDE_CONFIG_DIR=str(home / profile))
+    p = subprocess.Popen(["sleep", "infinity"], start_new_session=True, env=env)
     stat = Path(f"/proc/{p.pid}/stat").read_text()
     return p.pid, stat[stat.rfind(")") + 2:].split()[19]
 
 
 def session(profile, sid, name, folder, status, minutes_ago, **extra):
-    pid, start = alive()
+    pid, start = alive(profile)
     cwd = str(home / folder)
     os.makedirs(cwd, exist_ok=True)
     write(home / profile / "sessions" / f"{pid}.json", {

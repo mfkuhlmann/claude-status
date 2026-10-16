@@ -307,18 +307,32 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         this.runHelper(['--dismiss', sessionId]);
     }
 
-    async newChat(profile, folder) {
+    // vscode: in VS Code's Claude extension instead of a terminal
+    async newChat(profile, folder, vscode = false) {
         this.ui.openMenu = null;
         const cwd = folder ? ['--cwd', folder] : [];
-        this._newChatDone(await this._helper('jump.py', ['--new-chat', profile, ...cwd, ...this._configDirArgs]));
+        this._newChatDone(await this._helper('jump.py',
+            ['--new-chat', profile, ...cwd, ...vscode ? ['--vscode'] : [], ...this._configDirArgs]));
     }
 
     // The folder dialog takes over from the popup; cancelling it does nothing
-    async newChatChoosingFolder(profile) {
+    async newChatChoosingFolder(profile, vscode = false) {
         this.ui.openMenu = null;
         this.menu.close();
         this._newChatDone(await this._helper('jump.py',
-            ['--new-chat', profile, '--choose-folder', ...this._configDirArgs]));
+            ['--new-chat', profile, '--choose-folder', ...vscode ? ['--vscode'] : [], ...this._configDirArgs]));
+    }
+
+    // VS Code connected to an SSH host, with a new chat (in folder there, or home)
+    async remoteNewChatVscode(host, folder) {
+        this.ui.openMenu = null;
+        const cwd = folder ? ['--cwd', folder] : [];
+        this._newChatDone(await this._helper('jump.py', ['--remote-new-vscode', host, ...cwd]));
+    }
+
+    // VS Code is here (its button shows; only the account it runs on can use it)
+    get vscodeInstalled() {
+        return this._status?.vscode?.installed === true;
     }
 
     _newChatDone(result) {

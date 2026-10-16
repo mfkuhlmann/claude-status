@@ -537,59 +537,40 @@ PlasmoidItem {
         expandedRecent = Object.assign({}, expandedRecent, { [groupKey]: !wasOpen })
     }
 
-    // New chat: a menu of the account's recent folders, then jump.py --new-chat
-    PlasmaExtras.Menu {
-        id: newChatMenu
+    // New chat: the + next to an account unfolds its folders under its name
+    // (GroupSection.qml). A folder opens a terminal with Claude there; its
+    // VS Code button starts the chat in VS Code's Claude extension instead.
+    property string newChatGroup: ""   // group key of the account whose folders are open
+    onExpandedChanged: if (!root.expanded) newChatGroup = ""
+
+    function toggleNewChat(groupKey) {
+        newChatGroup = newChatGroup === groupKey ? "" : groupKey
     }
 
-    Component {
-        id: newChatItem
-        PlasmaExtras.MenuItem {
-            property string profile
-            property string folder
-            property bool choose: false   // ask for the folder in the folder dialog
-            property string host      // an SSH host's account:
-            property string command   // the command that starts the chat there
-            onClicked: host ? root.remoteOpen(host, command)
-                     : choose ? root.newChatChoosingFolder(profile)
-                     : root.newChat(profile, folder)
-        }
-    }
-
-    property var newChatItems: []
-
-    function openNewChatMenu(group, button, host) {
-        // clearMenuItems() also deletes the previous entries; deleting them
-        // again threw and stopped the menu from opening after the first use.
-        newChatMenu.clearMenuItems()
-        // Here: your recent folders, then any folder you pick in the folder
-        // dialog (it opens in your home folder). An SSH host's folders can't be
-        // browsed from here, so its home folder stays in the list.
+    // Here: your recent folders, then any folder you pick in the folder dialog
+    // (it opens in your home folder). An SSH host's folders can't be browsed
+    // from here, so its home folder stays in the list.
+    function newChatFolders(group, host) {
         const folders = host ? group.projects.slice() : group.projects.filter(f => f.short !== "~")
         if (host && !folders.some(f => f.short === "~"))
             folders.push({ path: "", short: "~", newChatCommand: group.homeChatCommand || "" })
-        const where = host ? i18nc("account on ssh host", "%1 on %2", group.title, host) : group.title
-        const items = [newChatItem.createObject(newChatMenu, { section: true, text: i18n("New chat on %1 in…", where) })]
-        for (const f of folders)
-            items.push(newChatItem.createObject(newChatMenu, {
-                text: f.short === "~" ? i18n("Home folder (~)") : f.short,
-                icon: f.short === "~" ? "user-home" : "folder",
-                profile: group.chatProfile, folder: f.path,
-                host: host || "", command: f.newChatCommand || "",
-                enabled: !host || !!f.newChatCommand
-            }))
-        if (!host) {
-            if (folders.length)
-                items.push(newChatItem.createObject(newChatMenu, { separator: true }))
-            items.push(newChatItem.createObject(newChatMenu, {
-                text: i18n("Choose folder…"), icon: "folder-open", profile: group.chatProfile, choose: true
-            }))
-        }
-        for (const item of items)
-            newChatMenu.addMenuItem(item)
-        newChatItems = items
-        newChatMenu.visualParent = button
-        newChatMenu.openRelative()
+        return folders
+    }
+
+    // VS Code's Claude extension runs on the account its own environment and
+    // settings say (claude_status.py: vscode_profile), so its button is only
+    // on that account (an SSH host's: the host's ~/.claude)
+    readonly property bool vscodeInstalled: status !== null && !!status.vscode && status.vscode.installed === true
+
+    function vscodeHint(group, host) {
+        if (group.vscodeHere)
+            return host ? i18n("Opens VS Code connected to %1 (Remote-SSH) with a new chat in its Claude panel.", host)
+                        : i18n("Opens the folder in VS Code with a new chat in its Claude panel.")
+        if (host)
+            return i18n("VS Code's Claude on %1 runs on another account (the host's ~/.claude).", host)
+        const on = status && status.vscode ? status.vscode.on : null
+        return on ? i18n("VS Code's Claude runs on %1, not %2: switch its profile to start a chat on this account there.", on, group.title)
+                  : i18n("VS Code's Claude doesn't run on this account.")
     }
 
     P5Support.DataSource {
@@ -609,16 +590,27 @@ PlasmoidItem {
         }
     }
 
-    function newChat(profile, folder) {
+    // vscode: in VS Code's Claude extension instead of a terminal
+    function newChat(profile, folder, vscode) {
+        newChatGroup = ""
         launcher.connectSource("python3 -I " + shellQuote(codeDir + "jump.py") + " --new-chat " + shellQuote(profile)
-                               + (folder ? " --cwd " + shellQuote(folder) : "") + configDirArgs + " # " + Date.now())
+                               + (folder ? " --cwd " + shellQuote(folder) : "") + (vscode ? " --vscode" : "")
+                               + configDirArgs + " # " + Date.now())
     }
 
     // The folder dialog takes over from the popup; cancelling it does nothing
-    function newChatChoosingFolder(profile) {
+    function newChatChoosingFolder(profile, vscode) {
+        newChatGroup = ""
         root.expanded = false
         launcher.connectSource("python3 -I " + shellQuote(codeDir + "jump.py") + " --new-chat " + shellQuote(profile)
-                               + " --choose-folder" + configDirArgs + " # " + Date.now())
+                               + " --choose-folder" + (vscode ? " --vscode" : "") + configDirArgs + " # " + Date.now())
+    }
+
+    // VS Code connected to an SSH host, with a new chat (in folder there, or home)
+    function remoteNewChatVscode(host, folder) {
+        newChatGroup = ""
+        launcher.connectSource("python3 -I " + shellQuote(codeDir + "jump.py") + " --remote-new-vscode " + shellQuote(host)
+                               + (folder ? " --cwd " + shellQuote(folder) : "") + " # " + Date.now())
     }
 
     // ---------------------------------------------------------------- SSH hosts

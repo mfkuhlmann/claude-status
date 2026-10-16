@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **New chats in VS Code:** the + next to an account now unfolds its folders under its name, each with a **VS Code** button next to it: VS Code opens the folder and its Claude extension a new chat there (on an SSH host through Remote-SSH). The button works on the account VS Code's Claude runs on (its `CLAUDE_CONFIG_DIR` setting, else `~/.claude`) and says so on the others. Clicking a folder still opens a terminal. Both on Plasma and GNOME.
+
 ## 1.3 (2026-10-15)
 
 - **GNOME Shell extension** (GNOME 49 and 50, e.g. Ubuntu 26.04): the same dashboard in GNOME's top bar, with the same scripts (`gnome/`, installed by `./install.sh` on GNOME). See "On GNOME" in the README.

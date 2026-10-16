@@ -512,3 +512,18 @@ export function pickWindow(windows, want) {
     }
     return best;
 }
+
+// The VS Code button of a new chat (port of main.qml's vscodeHint): VS Code's
+// Claude extension runs on one account (status.vscode.on; an SSH host's: its
+// ~/.claude), so the button only works there
+export function vscodeHint(group, host, status) {
+    if (group.vscodeHere) {
+        return host ? fmt('Opens VS Code connected to %1 (Remote-SSH) with a new chat in its Claude panel.', host)
+            : 'Opens the folder in VS Code with a new chat in its Claude panel.';
+    }
+    if (host)
+        return fmt("VS Code's Claude on %1 runs on another account (the host's ~/.claude).", host);
+    const on = status && status.vscode ? status.vscode.on : null;
+    return on ? fmt("VS Code's Claude runs on %1, not %2: switch its profile to start a chat on this account there.", on, group.title)
+        : "VS Code's Claude doesn't run on this account.";
+}
