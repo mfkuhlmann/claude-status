@@ -338,6 +338,10 @@ The widget shows chats shared across profiles by any tool that hard-links one tr
 
 The Clawd pet artwork (`package/contents/pets/`) comes from [clawd-pet](https://github.com/abderrahimghazali/clawd-pet) by Abderrahim Ghazali, used under the MIT License (see the `LICENSE` and `README.md` in that folder). `tools/bake_pet_origins.py` adapts the SVGs for Qt's renderer: it bakes each CSS pivot (`transform-origin`) into wrapper groups, because otherwise rotating limbs fly off the character. [Claude Usage Widget](https://github.com/projectvelox/claude-usage-widget) inspired how Clawd reacts to usage and clicks.
 
+## Author
+
+Made by Wadhah Zai El Amri: more of my projects and work are on [my website](https://wzaielamri.github.io).
+
 ## License
 
 [MIT](LICENSE) © 2026 Wadhah Zai El Amri
