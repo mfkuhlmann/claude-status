@@ -36,7 +36,7 @@ test("the same folder as the widget's remote.py", { skip: !posix && "Unix socket
   const tmp = fs.mkdtempSync("/tmp/cs-test-");
   try {
     const script = "import sys; sys.path.insert(0, sys.argv[1]); import remote; print(remote.control_dir())";
-    const r = spawnSync("python3", ["-I", "-c", script, path.resolve("vendor/code")], {
+    const r = spawnSync("python3", ["-I", "-B", "-c", script, path.resolve("vendor/code")], {
       env: { PATH: process.env.PATH, HOME: tmp, XDG_RUNTIME_DIR: tmp },
       encoding: "utf8",
     });
