@@ -195,6 +195,11 @@ git config core.hooksPath .githooks
 
 Not affiliated with Anthropic. Claude and Claude Code are Anthropic's.
 
+## Author
+
+Made by [Wadhah Zai El Amri](https://wzaielamri.github.io/): more of my
+projects and work are on my website.
+
 ## License
 
 MIT
