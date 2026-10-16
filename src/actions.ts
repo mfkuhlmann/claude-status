@@ -8,6 +8,7 @@ import * as os from "node:os";
 import * as vscode from "vscode";
 import type { Answer, Backend } from "./backend";
 import { configDirArgs, setSshHosts, settings } from "./config";
+import { claudePanelAvailable, localPanelProfileKey, openPanelChat } from "./claudePanel";
 import type { Dashboard } from "./dashboard";
 import { canRaiseWindows, isGnome } from "./desktop";
 import { allGroups, groupLabel, shellQuote } from "./shared/model";
@@ -251,7 +252,7 @@ export class Actions {
     // browsed unless this window is connected to it: its home folder is listed.
     const folders = host ? group.projects.slice() : group.projects.filter((f) => f.short !== "~");
     if (host && !folders.some((f) => f.short === "~")) folders.push({ path: "", short: "~", newChatCommand: home });
-    type Item = vscode.QuickPickItem & { command?: string; choose?: "dialog" | "type" };
+    type Item = vscode.QuickPickItem & { command?: string; choose?: "dialog" | "type"; panel?: true };
     const items: Item[] = folders.map((f) => ({
       label: `$(${f.short === "~" ? "home" : "folder"}) ${f.short === "~" ? "Home folder (~)" : f.short}`,
       command: f.newChatCommand ?? inFolder(f.path, chat),
@@ -259,9 +260,13 @@ export class Actions {
     items.push({ label: "", kind: vscode.QuickPickItemKind.Separator });
     const canBrowse = !host || host === this.dash.currentHost;
     items.push(canBrowse ? { label: "$(folder-opened) Choose folder…", choose: "dialog" } : { label: "$(edit) Type a folder…", choose: "type" });
+    const panel = await this.panelChoice(group);
+    if (panel.length) items.unshift({ label: "In a terminal", kind: vscode.QuickPickItemKind.Separator });
+    items.push(...panel);
     const where = host ? `${group.title} on ${host}` : group.title;
     const pick = await vscode.window.showQuickPick(items, { placeHolder: `New chat on ${where} in…` });
     if (!pick) return;
+    if (pick.panel) return this.panelChat();
     let command = pick.command;
     if (pick.choose === "dialog") {
       const remoteHome = host ? folderOf(home) : null;
@@ -282,16 +287,51 @@ export class Actions {
   }
 
   private async newChatSystem(group: Group): Promise<void> {
-    const pick = await vscode.window.showQuickPick(
-      [
-        ...group.projects.filter((f) => f.short !== "~").map((f) => ({ label: `$(folder) ${f.short}`, folder: f.path as string | null })),
-        { label: "$(folder-opened) Choose folder…", folder: null },
-      ],
-      { placeHolder: `New chat on ${group.title} in…` },
-    );
+    type Item = vscode.QuickPickItem & { folder?: string | null; panel?: true };
+    const items: Item[] = [
+      ...group.projects.filter((f) => f.short !== "~").map((f) => ({ label: `$(folder) ${f.short}`, folder: f.path as string | null })),
+      { label: "$(folder-opened) Choose folder…", folder: null },
+    ];
+    const panel = await this.panelChoice(group);
+    if (panel.length) items.unshift({ label: "In a terminal", kind: vscode.QuickPickItemKind.Separator });
+    items.push(...panel);
+    const pick = await vscode.window.showQuickPick(items, { placeHolder: `New chat on ${group.title} in…` });
     if (!pick) return;
+    if (pick.panel) return this.panelChat();
     const args = ["--new-chat", group.chatProfile, ...(pick.folder ? ["--cwd", pick.folder] : ["--choose-folder"]), ...configDirArgs()];
     this.report(await this.backend.action("jump.py", args, 600000), "Couldn't open a new chat");
+  }
+
+  // The Claude Code extension's chat, offered for an account on this window's
+  // machine: it starts in the window's folder, on the account its own
+  // settings give it, which the menu names when it isn't the one picked.
+  private async panelChoice(group: Group): Promise<(vscode.QuickPickItem & { panel?: true })[]> {
+    const host = group.host;
+    const sameMachine = host ? host === this.dash.currentHost : !vscode.env.remoteName;
+    if (!sameMachine || !(await claudePanelAvailable())) return [];
+    const folder = vscode.workspace.workspaceFolders?.[0]?.name;
+    let note = folder ? `in ${folder}` : "in this window";
+    if (host) {
+      note += ` · the account Claude Code has on ${host}`;
+    } else {
+      const key = localPanelProfileKey();
+      if (!group.profileKeys.includes(key)) {
+        const other = (this.dash.state().status?.groups ?? []).find((g) => g.profileKeys.includes(key));
+        note += ` · it uses ${other ? other.title : key}, not ${group.title}`;
+      }
+    }
+    return [
+      { label: "In VS Code", kind: vscode.QuickPickItemKind.Separator },
+      { label: "$(comment-discussion) Claude Code chat tab", description: note, panel: true },
+    ];
+  }
+
+  private async panelChat(): Promise<void> {
+    try {
+      await openPanelChat();
+    } catch (e) {
+      this.fail(`Couldn't open a Claude Code chat: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   // ---------------------------------------------------------------- SSH hosts

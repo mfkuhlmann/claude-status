@@ -2,7 +2,7 @@
   "name": "claude-status",
   "displayName": "Claude Status",
   "description": "Every Claude Code chat on this computer and your SSH hosts in one view: who needs you, plan usage, subagents, and animated Clawd pets. Runs on your side, also in Remote-SSH windows.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "wzaielamri",
   "author": "Wadhah Zai El Amri",
   "license": "MIT",

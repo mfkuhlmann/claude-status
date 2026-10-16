@@ -61,6 +61,12 @@ on the window's host, or through `ssh -t` for another host. A chat already
 running in one of this window's terminals is brought to the front; a chat of
 the Claude Code extension is revealed in it.
 
+**New chat** (＋) asks where: in a terminal, in one of the account's recent
+folders or any other, or as a Claude Code chat tab in this window. The chat
+tab is offered for accounts on the window's own machine (this computer, or the
+Remote-SSH host); it starts in the window's folder, on the account the Claude
+Code extension is set to, and the menu says so when that's another account.
+
 ## Requirements
 
 - VS Code 1.90 or newer.

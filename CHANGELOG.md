@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.2
+
+- New chat asks where: in a terminal as before, or as a Claude Code chat tab
+  in this window (the Claude Code extension's own chat). The tab is offered
+  for accounts on the window's machine and opens in the window's folder; the
+  menu says when the extension is set to another account than the one picked.
+
 ## 0.1.1
 
 From the widget's latest fixes (backend synced to its GNOME release):
