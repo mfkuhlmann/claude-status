@@ -47,9 +47,10 @@ fi
 `;
 }
 
-// The snippet added after the input=$(cat) line, or null if there's none
+// The snippet added after the input=$(cat) line, or null if there's none. An
+// older copy of it is replaced (the first ones only ran in bash scripts).
 export function patchScript(text: string, snippet: string): string | null {
-  if (text.includes(MARK_START)) return text;
+  if (BLOCK.test(text)) return text.replace(BLOCK, () => snippet.trimEnd() + "\n");
   const m = INPUT_LINE.exec(text);
   if (!m) return null;
   const at = m.index + m[0].length;
@@ -175,7 +176,8 @@ export function plan(snippet: string, remove: boolean): { changes: Change[]; not
         continue;
       }
       if (patched !== null) {
-        changes.set(script, { file: script, before: text, after: patched, why: `${label}: snippet added to its status-line script` });
+        const why = text.includes(MARK_START) ? "snippet in its status-line script updated" : "snippet added to its status-line script";
+        changes.set(script, { file: script, before: text, after: patched, why: `${label}: ${why}` });
         continue;
       }
     }

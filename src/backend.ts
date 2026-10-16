@@ -27,6 +27,7 @@ export interface SshHost {
 export interface Answer {
   ok: boolean;
   message: string;
+  command?: string; // jump.py --print-command: the shell command to run instead
 }
 
 // The environment for helpers: VS Code's own variables would leak into the
@@ -141,7 +142,7 @@ export class Backend {
   async action(scriptName: "jump.py" | "remote.py" | "claude_status.py", args: string[], timeoutMs = 90000): Promise<Answer> {
     const r = await this.json([scriptName, ...args], timeoutMs);
     if (!r) return { ok: false, message: "the helper gave no answer" };
-    return { ok: !!r.ok, message: String(r.message ?? r.error ?? "") };
+    return { ok: !!r.ok, message: String(r.message ?? r.error ?? ""), ...(typeof r.command === "string" ? { command: r.command } : {}) };
   }
 
   // theme: the sound theme when the desktop keeps it elsewhere (GNOME)

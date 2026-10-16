@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- **Continue on …** opens the chat on the other account in VS Code's
+  terminal, like every other chat, instead of always in your desktop's
+  terminal (`claudeStatus.openIn` = `system` keeps that).
+- From the widget's backend:
+  - `claude` is found beyond PATH: in `~/.local/bin`, npm's, bun's, Volta's,
+    pnpm's and nvm's folders, or on your login shell's PATH.
+  - SSH hosts work with any home folder: the shared-connection sockets moved
+    to `$XDG_RUNTIME_DIR` (a long home folder name made their path too long).
+  - The status-line snippet is plain POSIX sh (it broke status lines run by
+    `sh`); **Set Up Plan Usage Bars…** replaces an older copy.
+  - Sharing checks for one filesystem first, instead of failing half-way.
+  - Lighter status checks: token totals are summed per day when transcripts
+    are read, not on every check.
+
 ## 0.1.3
 
 - Sharing chats between your accounts is built in (the widget 1.4's

@@ -8,16 +8,15 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
-import { cacheDir } from "./config";
 import { shellQuote } from "./shared/model";
+import { controlOptions } from "./sshControl";
 
 export type Place = { kind: "local" } | { kind: "windowHost" } | { kind: "ssh"; host: string };
 
 // The same connection sharing as remote.py, without batch mode: ssh may ask
 // for a password or a host key in the terminal.
 export function sshCommand(host: string, command: string): string {
-  const control = path.join(cacheDir(), "ssh", "%C");
-  const opts = ["-o", "ControlMaster=auto", "-o", `ControlPath=${control}`, "-o", "ControlPersist=300", "-o", "ServerAliveInterval=10"];
+  const opts = [...controlOptions(), "-o", "ServerAliveInterval=10"];
   return ["ssh", ...opts, "-t", host, command].map(shellQuote).join(" ");
 }
 

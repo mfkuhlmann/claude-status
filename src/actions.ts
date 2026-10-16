@@ -220,8 +220,15 @@ export class Actions {
     // the account it goes to; for "all accounts", the one whose copy is shared
     const profile = pick.group?.shareProfile ? ["--profile", pick.group.shareProfile]
       : chat.profileDir ? ["--profile", chat.profileDir] : [];
-    const answer = await this.backend.action("jump.py", [flag, chat.chatId || chat.sessionId, ...profile, ...configDirArgs()]);
-    if (this.report(answer, "Couldn't share it") && pick.kind2 !== "continue") this.dash.setActionInfo(answer.message);
+    const id = chat.chatId || chat.sessionId;
+    // Continuing it opens it like any chat: in VS Code's terminal, unless
+    // openIn says the desktop's (then jump.py opens that itself)
+    const vscodeTerminal = pick.kind2 === "continue" && settings.openIn() !== "system";
+    const answer = await this.backend.action("jump.py", [flag, id, ...profile, ...(vscodeTerminal ? ["--print-command"] : []), ...configDirArgs()]);
+    if (this.report(answer, "Couldn't share it")) {
+      if (answer.command) await this.terminals.run(`|${id}|${pick.group?.shareProfile ?? ""}`, chat.name, answer.command, { kind: "local" });
+      else if (pick.kind2 !== "continue") this.dash.setActionInfo(answer.message);
+    }
     void this.dash.refresh();
   }
 

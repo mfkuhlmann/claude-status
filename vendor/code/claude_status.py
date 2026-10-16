@@ -1530,9 +1530,19 @@ def config_env(profile, home=None, job=None):
     return "env -u CLAUDE_CONFIG_DIR" if value is None else f"CLAUDE_CONFIG_DIR={shlex.quote(value)}"
 
 
+def claude_words(claude):
+    """Shell words that run claude: its name or path, with its folder first on
+    PATH when Node lives there too (an npm install under nvm runs
+    `#!/usr/bin/env node`, and a terminal's shell may not have that folder)."""
+    folder = os.path.dirname(claude)
+    if folder and os.path.isfile(os.path.join(folder, "node")):
+        return f'PATH={shlex.quote(folder)}:"$PATH" {shlex.quote(claude)}'
+    return shlex.quote(claude)
+
+
 def claude_command(profile, args, home=None, job=None, folder=None, claude="claude"):
     """Shell command running claude with args on this profile, in folder."""
-    command = f"{config_env(profile, home, job)} {shlex.quote(claude)} {' '.join(shlex.quote(a) for a in args)}"
+    command = f"{config_env(profile, home, job)} {claude_words(claude)} {' '.join(shlex.quote(a) for a in args)}"
     if isinstance(folder, str) and folder and not folder_trusted(profile, folder, home):
         # The question that comes up has "No, exit" preselected: say what it is
         note = (f"Claude will ask whether you trust {short_folder(folder, home)} before it reopens this session. "
@@ -1555,12 +1565,12 @@ def new_chat_command(profile, home=None, claude="claude"):
     """Shell command starting a new chat on this profile. With background
     sessions around, plain `claude` opens the agent view (where a task becomes
     a new background session): ask for a normal chat."""
-    return f"CLAUDE_CODE_DISABLE_AGENT_VIEW=1 {config_env(profile, home)} {shlex.quote(claude)}"
+    return f"CLAUDE_CODE_DISABLE_AGENT_VIEW=1 {config_env(profile, home)} {claude_words(claude)}"
 
 
 def stop_command(profile, job_id, home=None, job=None, claude="claude"):
     """Shell command stopping a background job (its conversation is kept)."""
-    return f"{config_env(profile, home, job)} {shlex.quote(claude)} stop {shlex.quote(job_id)}"
+    return f"{config_env(profile, home, job)} {claude_words(claude)} stop {shlex.quote(job_id)}"
 
 
 def short_folder(folder, home=None):
@@ -1826,7 +1836,25 @@ def scan_transcripts(profile, cache, now):
         files[str(path)] = {"offset": offset, "ino": st.st_ino}
 
     cache["files"], cache["messages"], cache["scannedAt"] = files, messages, now
+    cache["days"], cache["daysAt"] = day_totals(messages), now
     return cache
+
+
+def day_totals(messages):
+    """The messages summed per day and model: {day: {model: [input, output,
+    cacheRead, cacheWrite, messages, shared tokens]}}. Kept with the cache, so
+    a status check (every 2 s) adds up a few rows, not every message of the
+    week (thousands for a busy week)."""
+    days = {}
+    for day, model, *rest in messages.values():
+        vals, shared = rest[:4], bool(rest[4]) if len(rest) > 4 else False
+        row = days.setdefault(day, {}).setdefault(model, [0, 0, 0, 0, 0, 0])
+        for i, v in enumerate(vals):
+            row[i] += v
+        row[4] += 1
+        if shared:
+            row[5] += sum(vals)
+    return days
 
 
 def load_token_cache(cache_root, profile, now, lock_held):
@@ -1854,19 +1882,25 @@ def token_totals(caches, now):
     totals = {"today": zero(), "week": zero()}
     models = {}
     for cache in caches:
-        for day, model, *rest in cache["messages"].values():
-            if day < week_start:
+        days = cache.get("days")
+        if not isinstance(days, dict) or cache.get("daysAt") != cache.get("scannedAt"):
+            # saved before the sums were kept, or rescanned by an older version
+            days = day_totals(cache["messages"])
+        for day, by_model in days.items():
+            if day < week_start or not isinstance(by_model, dict):
                 continue
-            vals, shared = rest[:4], bool(rest[4]) if len(rest) > 4 else False
             buckets = [totals["week"]] + ([totals["today"]] if day == today else [])
-            for b in buckets:
-                for k, v in zip(keys, vals):
-                    b[k] += v
-                b["total"] += sum(vals)
-                b["messages"] += 1
-                if shared:
-                    b["shared"] += sum(vals)
-            models[model] = models.get(model, 0) + sum(vals)
+            for model, row in by_model.items():
+                if not isinstance(row, list) or len(row) != 6:
+                    continue
+                vals, count, shared = row[:4], row[4], row[5]
+                for b in buckets:
+                    for k, v in zip(keys, vals):
+                        b[k] += v
+                    b["total"] += sum(vals)
+                    b["messages"] += count
+                    b["shared"] += shared
+                models[model] = models.get(model, 0) + sum(vals)
     totals["models"] = [{"model": m, "total": t} for m, t in sorted(models.items(), key=lambda x: -x[1])]
     return totals
 
@@ -2150,21 +2184,61 @@ def vscode_running_config_dir():
     return False, None
 
 
-def vscode_profile(home, profiles, remote=False):
+VSCODE_CHECK_INTERVAL = 30  # seconds between looks at VS Code (see cached_vscode_lookup)
+
+
+def vscode_lookup(home):
+    """(VS Code installed, the CLAUDE_CONFIG_DIR its Claude would run with or None)."""
+    command, settings_folder = vscode_app()
+    if command is None:
+        return False, None
+    value = vscode_setting_config_dir(home, settings_folder)
+    if value is None:
+        running, env_value = vscode_running_config_dir()
+        # not running: the widget starts it, with its own environment
+        value = env_value if running else os.environ.get("CLAUDE_CONFIG_DIR")
+    return True, value
+
+
+def vscode_stamp(home):
+    """When VS Code's settings files and the folders on PATH last changed: a
+    new setting, or VS Code just installed, counts at once."""
+    config = Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config")
+    settings = [config / folder / "User" / "settings.json" for _, folder in VSCODE_APPS]
+    folders = [Path(d) for d in os.environ.get("PATH", "").split(os.pathsep) if d]
+    return [mtime(p) for p in settings + folders]
+
+
+def cached_vscode_lookup(home, cache_root, now):
+    """vscode_lookup, redone at most every VSCODE_CHECK_INTERVAL seconds or when
+    VS Code's settings or the folders on PATH change: it searches PATH and
+    maybe every process, too much to repeat in a status check every 2 s."""
+    path = cache_root / "vscode.json"
+    stamp = vscode_stamp(home)
+    saved = read_json(path)
+    if (isinstance(saved, dict) and saved.get("stamp") == stamp
+            and 0 <= now - (number(saved.get("at")) or 0) < VSCODE_CHECK_INTERVAL):
+        value = saved.get("value")
+        return saved.get("installed") is True, value if isinstance(value, str) else None
+    installed, value = vscode_lookup(home)
+    try:
+        private_dir(cache_root)
+        write_json_atomic(path, {"at": now, "stamp": stamp, "installed": installed, "value": value})
+    except OSError:
+        pass
+    return installed, value
+
+
+def vscode_profile(home, profiles, remote=False, cache_root=None):
     """(VS Code installed, the profile a new chat in VS Code's Claude would
     use or None). On an SSH host (remote) the VS Code server's Claude uses the
     host's ~/.claude; whether VS Code is installed is up to the other side."""
     installed, value = None, None
     if not remote:
-        command, settings_folder = vscode_app()
-        if command is None:
+        installed, value = (cached_vscode_lookup(home, cache_root, time.time()) if cache_root is not None
+                            else vscode_lookup(home))
+        if not installed:
             return False, None
-        installed = True
-        value = vscode_setting_config_dir(home, settings_folder)
-        if value is None:
-            running, env_value = vscode_running_config_dir()
-            # not running: the widget starts it, with its own environment
-            value = env_value if running else os.environ.get("CLAUDE_CONFIG_DIR")
     try:
         real = (Path(value).expanduser() if value else home / ".claude").resolve()
     except (OSError, RuntimeError):
@@ -2172,10 +2246,10 @@ def vscode_profile(home, profiles, remote=False):
     return installed, next((p for p in profiles if p.real == real), None)
 
 
-def add_vscode(result, home, extra_dirs=(), remote=False):
+def add_vscode(result, home, extra_dirs=(), remote=False, cache_root=None):
     """Which account a new chat in VS Code would be on: result["vscode"] =
     {installed, on (its label)} and each group's vscodeHere."""
-    installed, profile = vscode_profile(home, discover_profiles(home, extra_dirs), remote)
+    installed, profile = vscode_profile(home, discover_profiles(home, extra_dirs), remote, cache_root)
     result["vscode"] = {"installed": installed, "on": profile.label if profile else None}
     for g in result.get("groups", []):
         g["vscodeHere"] = profile is not None and profile.key in g.get("profileKeys", [])
@@ -2189,16 +2263,52 @@ def add_vscode(result, home, extra_dirs=(), remote=False):
 # run it in a local terminal as `ssh -t host <command>`.
 
 REMOTE_MARK = "@@claude-status@@"
-CLAUDE_PLACES = (".local/bin", ".claude/local", ".npm-global/bin", ".bun/bin", "bin", ".volta/bin")
+# Where claude is often installed besides PATH: Claude's installer, its old
+# local install, npm, bun, ~/bin, Volta, pnpm, mise and asdf; then nvm's
+# Node versions (newest first) and the system-wide places
+CLAUDE_PLACES = (".local/bin", ".claude/local", ".npm-global/bin", ".bun/bin", "bin", ".volta/bin",
+                 ".local/share/pnpm", ".local/share/mise/shims", ".asdf/shims")
+SYSTEM_PLACES = ("/usr/local/bin", "/home/linuxbrew/.linuxbrew/bin", "/opt/homebrew/bin")  # check-public: ok (Homebrew's prefix)
 
 
-def find_claude(home):
-    """Absolute path of the claude command: a command run over ssh doesn't
-    read the login files that usually put ~/.local/bin on PATH."""
-    path = os.environ.get("PATH", "")
-    extra = [str(home / d) for d in CLAUDE_PLACES] + ["/usr/local/bin", "/opt/homebrew/bin"]
+def version_key(name):
+    """v20.11.1 -> (20, 11, 1)"""
+    return tuple(int(n) for n in re.findall(r"\d+", name))
+
+
+def claude_places(home):
+    nvm = sorted((home / ".nvm/versions/node").glob("*/bin"), key=lambda p: version_key(p.parent.name), reverse=True)
+    return [str(home / d) for d in CLAUDE_PLACES] + [str(p) for p in nvm] + list(SYSTEM_PLACES)
+
+
+def login_shell_path(home):
+    """PATH as your login shell sets it up (from ~/.profile, ~/.bashrc,
+    ~/.zshrc and the like, where installers add their folders), or "".
+    `env` prints it the same way whatever the shell."""
+    import subprocess
+    shell = os.environ.get("SHELL") or "/bin/sh"
+    try:
+        r = subprocess.run([shell, "-l", "-i", "-c", "env"], cwd=str(home), stdin=subprocess.DEVNULL,
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=10)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return ""
+    lines = r.stdout.decode(errors="replace").splitlines()
+    return next((line[len("PATH="):] for line in reversed(lines) if line.startswith("PATH=")), "")
+
+
+def find_claude(home, ask_shell=False):
+    """Absolute path of the claude command, or "claude" if it isn't found.
+
+    The desktop session and commands run over ssh don't read the shell
+    startup files that usually put claude's folder on PATH. So after PATH
+    come the usual install places and, with ask_shell (it starts your login
+    shell: only for a click, never for a status check), its PATH."""
     import shutil
-    return shutil.which("claude", path=os.pathsep.join([path, *extra])) or "claude"
+    found = shutil.which("claude", path=os.pathsep.join([os.environ.get("PATH", ""), *claude_places(home)]))
+    if not found and ask_shell:
+        shell_path = login_shell_path(home)
+        found = shutil.which("claude", path=shell_path) if shell_path else None
+    return found or "claude"
 
 
 def in_folder(folder, command):
@@ -2306,7 +2416,7 @@ def main(argv=None):
             result = collect(home, cache_root, config_dirs, with_tokens=with_tokens, keep_done_hours=done_hours,
                              recent=recent)
             try:
-                add_vscode(result, home, config_dirs, remote)
+                add_vscode(result, home, config_dirs, remote, cache_root)
             except Exception as exc:
                 result["errors"].append(f"VS Code: {exc}")
             if remote:
