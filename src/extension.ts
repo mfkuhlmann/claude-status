@@ -4,6 +4,7 @@
 // all, whichever machine the window is connected to.
 
 import * as vscode from "vscode";
+import { AccountSwitch } from "./accountSwitch";
 import { Actions } from "./actions";
 import { Backend } from "./backend";
 import { settings } from "./config";
@@ -26,6 +27,7 @@ export function activate(context: vscode.ExtensionContext): void {
   actions = new Actions(backend, dash, terminals, log);
   const view = new ViewHost(context.extensionUri, dash, actions);
   const statusBar = new StatusBar();
+  const account = new AccountSwitch(dash);
   const a = actions;
 
   context.subscriptions.push(
@@ -35,12 +37,15 @@ export function activate(context: vscode.ExtensionContext): void {
     dash,
     view,
     statusBar,
+    account,
     registerPreview(),
     vscode.window.registerWebviewViewProvider(ViewHost.viewId, view, { webviewOptions: { retainContextWhenHidden: true } }),
     dash.onState((state) => {
       statusBar.update(state);
+      account.update(state);
       view.setBadge(countStates(allGroups(state.status, state.hosts)).waiting);
     }),
+    vscode.commands.registerCommand("claudeStatus.switchAccount", () => account.switch()),
     vscode.commands.registerCommand("claudeStatus.refresh", () => dash.refreshAll()),
     vscode.commands.registerCommand("claudeStatus.pickHosts", () => a.pickHosts()),
     vscode.commands.registerCommand("claudeStatus.openInEditor", () => view.openInEditor()),

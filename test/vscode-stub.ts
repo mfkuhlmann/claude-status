@@ -39,7 +39,7 @@ export const window = {
   onDidChangeWindowState: disposable,
   createOutputChannel: logChannel,
   createStatusBarItem: () => {
-    const item = { text: "", tooltip: undefined as unknown, backgroundColor: undefined as unknown, show() {}, dispose() {} };
+    const item = { text: "", tooltip: undefined as unknown, backgroundColor: undefined as unknown, show() {}, hide() {}, dispose() {} };
     recorded.statusBarItems.push(item);
     return item;
   },

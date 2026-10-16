@@ -112,6 +112,12 @@
         "command": "claudeStatus.showLog",
         "title": "Show Log",
         "category": "Claude Status"
+      },
+      {
+        "command": "claudeStatus.switchAccount",
+        "title": "Use Account for VS Code's Claude…",
+        "category": "Claude Status",
+        "icon": "$(account)"
       }
     ],
     "menus": {
@@ -150,6 +156,11 @@
           "command": "claudeStatus.openUsagePage",
           "when": "view == claudeStatus.view",
           "group": "more@4"
+        },
+        {
+          "command": "claudeStatus.switchAccount",
+          "when": "view == claudeStatus.view",
+          "group": "more@5"
         }
       ]
     },

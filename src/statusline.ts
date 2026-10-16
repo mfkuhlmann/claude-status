@@ -84,7 +84,7 @@ export function scriptOf(command: string): string | null {
   return null;
 }
 
-function profileDirs(): string[] {
+export function profileDirs(): string[] {
   const home = os.homedir();
   const dirs = [path.join(home, ".claude")];
   try {

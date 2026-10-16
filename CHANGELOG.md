@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Switch VS Code's Claude between your accounts:** the status bar shows
+  which account the Claude Code panel runs on (**Claude: work**); click it,
+  or run **Use Account for VS Code's Claude…**, and the window reloads on
+  the one you pick. It changes only VS Code's `claudeCode.environmentVariables`.
+  With `claudeStatus.moveClaudeLink` on and `~/.claude` a link to one of your
+  profiles, it moves the link too, so plain `claude` follows (only when
+  nothing runs through it).
 - **Continue on …** opens the chat on the other account in VS Code's
   terminal, like every other chat, instead of always in your desktop's
   terminal (`claudeStatus.openIn` = `system` keeps that).

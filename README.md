@@ -27,7 +27,9 @@ As an editor tab (**Claude Status: Open in Editor Tab**):
 - **SSH hosts**: the chats on the hosts you pick, side by side with this
   computer's.
 - **Notifications** (and a sound) when a chat needs you or finishes a long turn.
-- **The status bar**: how many chats need you, the 5-hour usage.
+- **The status bar**: how many chats need you, the 5-hour usage, and with
+  two or more accounts which one VS Code's Claude runs on (**Claude: work**):
+  click it to switch.
 - **Clawd**: one pet for the whole dashboard, one per chat, each acting out
   its chat. Click a pet to open its chat, drag one around, double-click the
   big one.
@@ -174,6 +176,12 @@ ask for it, the status-line change above and the links of the chats you share
   **Continue on …** opens the chat like any other: in VS Code's terminal, or
   your desktop's with `claudeStatus.openIn` = `system`. Chats on SSH hosts
   aren't shared from here.
+- **Switching VS Code's Claude** (click **Claude: …** in the status bar, or
+  run **Claude Status: Use Account for VS Code's Claude…**) sets
+  `CLAUDE_CONFIG_DIR` in VS Code's `claudeCode.environmentVariables` and
+  reloads the window; other windows offer to reload. Plain `claude` in a
+  terminal isn't affected (it keeps whatever account it uses). Remote-SSH windows read that VS Code setting too: on a host without the
+  folder, set `"claudeCode.environmentVariables": []` in its Remote Settings.
 - **A second account to share with** is a second Claude config folder logged
   into a *different* Claude account (profiles on the same account count as
   one): run `CLAUDE_CONFIG_DIR=~/.claude-work claude` once and log in there
