@@ -1,14 +1,16 @@
 # >>> claude-widget >>>
-# Snapshot for the Claude Status Plasma widget (plan limits + context window).
+# Snapshot for the Claude Status widget (plan limits + context window).
 # Needs $input to hold the status-line JSON; silent and atomic, so it can't
-# break the status line. The profile dir comes from the transcript path
+# break the status line. Plain POSIX sh, so it works in sh (dash), bash and
+# zsh scripts. The profile dir comes from the transcript path
 # (<cfg>/projects/<project>/<session>.jsonl), else CLAUDE_CONFIG_DIR, links resolved.
 # Runs in a subshell so the private umask and variables stay local.
 (
   umask 077
-  IFS=$'\t' read -r cw_sid cw_tp < <(jq -r '[.session_id // "", .transcript_path // ""] | @tsv' <<<"$input")
+  cw_sid='' cw_tp=''
+  eval "$(printf '%s' "$input" | jq -r '@sh "cw_sid=\(.session_id // "") cw_tp=\(.transcript_path // "")"')"
   cw_cfg="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-  [[ "$cw_tp" == */projects/* ]] && cw_cfg="${cw_tp%/projects/*}"
+  case "$cw_tp" in */projects/*) cw_cfg="${cw_tp%/projects/*}" ;; esac
   cw_cfg="${cw_cfg%/}"
   # A link like ~/.claude can be switched to another profile: file the
   # snapshot under the real folder, so it can't be credited to the wrong one.

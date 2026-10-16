@@ -649,7 +649,7 @@ class RemoteModeTests(World):
         claude = fake_bin / "claude"
         claude.write_text("#!/bin/sh\n")
         claude.chmod(0o755)
-        env = {"HOME": str(self.home), "PATH": ":".join([*path_dirs, "/usr/bin", "/bin"]),
+        env = {"HOME": str(self.home), "PATH": ":".join([*path_dirs, str(self.home / "no-bin")]),
                "XDG_CACHE_HOME": str(self.cache), "XDG_STATE_HOME": str(self.state)}
         out = subprocess.run([sys.executable, "-I", "-", "--remote", "--no-tokens", *args], env=env,
                              input=(ROOT / "package/contents/code/claude_status.py").read_text(),

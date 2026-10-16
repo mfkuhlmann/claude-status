@@ -35,7 +35,7 @@ On GNOME (Ubuntu 26.04 and newer) it lives in the top bar: see [On GNOME](#on-gn
 **Act on your sessions**
 
 - **Jump to a session** by clicking its name: Konsole switches to the right tab (or tmux to its pane), VS Code opens the conversation, and a background job is attached in a terminal. Finished chats reopen with `claude --resume`.
-- **Start a new chat** with the **+** next to an account: pick one of its recent project folders, or **Choose folder…** to pick any folder in the folder dialog, and a terminal opens with Claude in it. The **VS Code** button next to a folder starts the chat in VS Code's Claude panel instead.
+- **Start a new chat** with the **+** next to an account: pick one of its recent project folders, or **Choose folder…** to pick any folder in the folder dialog, and a terminal opens with Claude in it. Or switch the **Terminal | VS Code** switch at the top of the list to VS Code, and the chat starts in VS Code's Claude panel instead (the switch is kept for next time).
 - **Stop** a background session (■; it asks first and keeps the conversation) or **hide** a finished one (－; nothing is deleted).
 - **Recent chats** per account, to reopen older conversations.
 - **Notifications** when a session needs you or finishes a long turn, with sounds from your sound theme (quiet during Do Not Disturb). Click one to jump to the session.
@@ -69,7 +69,7 @@ On GNOME (Ubuntu 26.04 and newer) it lives in the top bar: see [On GNOME](#on-gn
   - notification icons show him with a warning sign (needs input), a trophy (finished) or a rain cloud (failed)
   - they only move while the popup is open
 - **Jumping, in detail:** terminal sessions: Konsole switches to the tab running it (or tmux to its pane) and the window comes to the front. VS Code sessions: the conversation opens in the VS Code window of that project. Background jobs: the terminal already showing the job comes to the front; if there is none, a new terminal runs `claude attach <id>` in the job's folder. A finished background job is reopened the same way; if it ran in a folder Claude doesn't trust yet (always so for your home folder), Claude first asks whether you trust it, with "No, exit" preselected, and the terminal says so before the question comes up.
-- **New chats in VS Code:** VS Code opens the folder (or brings up the window that has it), then the Claude extension opens a new conversation there. Which account it runs on is up to VS Code, not the widget: its `claudeCode.environmentVariables` setting (`CLAUDE_CONFIG_DIR`), else VS Code's own environment, else `~/.claude`. So the button only works on that account; on the others it's greyed out and says which account VS Code is on. For an SSH host, VS Code connects to it (Remote-SSH) and the chat starts once it's connected.
+- **New chats in VS Code:** VS Code opens the folder (or brings up the window that has it), then the Claude extension opens a new conversation there. Which account it runs on is up to VS Code, not the widget: its `claudeCode.environmentVariables` setting (`CLAUDE_CONFIG_DIR`), else VS Code's own environment, else `~/.claude`. So **VS Code** in the switch only works on that account; on the others it's greyed out and says which account VS Code is on, and their new chats open in a terminal. For an SSH host, VS Code connects to it (Remote-SSH) and the chat starts once it's connected.
 - **Hiding finished sessions** only hides them in the widget; nothing is deleted, and you can still resume the conversation. A hidden session comes back by itself if it runs again, and right-click → *Show removed sessions again* brings all of them back. The widget deliberately has no real "delete": that can't be undone, and Claude's `claude rm` also removes a background session's worktree.
 - **Stopping** runs `claude stop <id>`: the conversation is kept and `claude attach <id>` resumes it. A session that is *working* is interrupted mid-step, and anything it started in the background stops too. Terminal sessions have no stop button; close their window instead.
 - **Notifications:** when a session needs you (a permission prompt, a question, or a background job that stopped to ask you something; closed again once you answer), and when a session finishes a turn that took at least 30 seconds (configurable, or off). Sounds: one each for "needs input", "finished" and "failed", from your sound theme, a sound file of your own, or none. They go through PipeWire's notification stream, so the system's notification volume applies. When several sessions change at once, only the most urgent sound plays.
@@ -79,7 +79,7 @@ On GNOME (Ubuntu 26.04 and newer) it lives in the top bar: see [On GNOME](#on-gn
 ## Requirements
 
 - **KDE Plasma 6** (6.0 or newer). Plasma 5 isn't supported: Kubuntu 24.04 LTS, for example, ships Plasma 5.27.
-- **Claude Code** (the `claude` command), signed in.
+- **Claude Code** (the `claude` command), signed in. The widget finds it on PATH, in `~/.local/bin` (Claude's installer) and npm's, bun's, Volta's, pnpm's or nvm's folders, or else on the PATH your login shell sets up.
 - **python3**, 3.7 or newer. Every Plasma 6 distribution already has it.
 - **jq**, for the status-line snippet that supplies plan usage and context.
 - Optional:
@@ -87,6 +87,7 @@ On GNOME (Ubuntu 26.04 and newer) it lives in the top bar: see [On GNOME](#on-gn
   - **Qt 6.10 or newer with the QtQuick.VectorImage module**, for animated pets. Without it the pets are still images that walk, hop and react all the same.
   - **PipeWire** (`pw-play`) or PulseAudio (`paplay`) for sounds.
   - **kdialog** (usually installed with KDE) for *Choose folder…*; `zenity` works too.
+  - **gdbus** (`libglib2.0-bin` on Debian and Kubuntu, `glib2-tools` on openSUSE; Fedora and Arch have it) for switching Konsole tabs and raising windows, and **xdg-open** (`xdg-utils`) for opening chats in VS Code.
   - tmux; VS Code with the Claude Code extension.
 
 | Distribution | Extra packages |
@@ -113,7 +114,7 @@ Each [release](https://github.com/wzaielamri/claude-status/releases) also has th
 `install.sh` does two things:
 
 1. It installs the widget for your user (into `~/.local/share/plasma/plasmoids/`) with `kpackagetool6`.
-2. It adds a small snippet to the status-line script of each Claude profile (the script that `statusLine` in `~/.claude*/settings.json` runs). It shows the change and asks first (`--yes` skips the question), and keeps a backup next to the script. The snippet saves the status-line data (plan limits, context) for the widget. What your status line shows stays the same.
+2. It adds a small snippet to the status-line script of each Claude profile (the script that `statusLine` in `~/.claude*/settings.json` runs). It shows the change and asks first (`--yes` skips the question), and keeps a backup next to the script. The snippet is plain POSIX sh, so it works in sh, bash and zsh scripts; running `./install.sh` again replaces an older copy. The snippet saves the status-line data (plan limits, context) for the widget. What your status line shows stays the same.
 
 <details>
 <summary><b>No status line yet?</b></summary>
@@ -179,7 +180,7 @@ The same dashboard as a GNOME Shell extension: the ✳ in the top bar, the popup
 | A session's name | Jumps to the session: its terminal tab, its VS Code window, or a terminal attached to the background job. |
 | Hovering a session | ■ stops a background session, － hides a finished one, and the share button shares a chat with your other accounts. |
 | A chat's pet | Opens its chat. |
-| **+** next to an account | Lists the account's recent folders and **Choose folder…** (an SSH host's: its home folder instead). Click one for a new chat in a terminal there, or its **VS Code** button to start it in VS Code. |
+| **+** next to an account | Lists the account's recent folders and **Choose folder…** (an SSH host's: its home folder instead). Click one for a new chat there: in a terminal, or in VS Code (the switch at the top of the list). |
 | *Recent chats* | Unfolds the account's older conversations; click one to reopen it. |
 | Server button at the top | Picks the SSH hosts to show. |
 
@@ -191,11 +192,14 @@ With two or more Claude accounts on this computer (say `~/.claude` and `~/.claud
 - **Share with all accounts:** the chat shows up in every account's past chats.
 - **Keep only on personal…** (asks first): the chat becomes a normal chat of that account again; the others lose it.
 
+**A second account to share with** is a second Claude config folder, logged into a *different* Claude account: profiles logged into the same account count as one, and sharing needs two. Make one with `CLAUDE_CONFIG_DIR=~/.claude-work claude` and log in there (`/login`) with the other account; an alias like `alias claude-work='CLAUDE_CONFIG_DIR=~/.claude-work claude'` keeps it handy. The widget finds every `~/.claude-*` folder by itself. For its plan usage bars, give it a status line as well: copy the `statusLine` entry from `~/.claude/settings.json` into `~/.claude-work/settings.json`, then run `./install.sh` again.
+
 A shared chat is one transcript file hard-linked into each profile's `projects/<project>/` folder, so whichever account continues it writes to the same file and nothing is copied. Its subagent folder and undo checkpoints move to `~/.local/share/claude-status/shared-chats/<project>/`, and each profile links to them. Sharing uses no tokens and installs no hooks or settings.
 
 - **One session at a time.** Two sessions on one chat would both write to its transcript. The widget doesn't share or unshare a chat while a session has it open, but nothing stops you from resuming it on a second account yourself: close it on one before you open it on the other.
 - **The chat goes with it.** Everything in a chat is sent to whichever account continues it, work content included.
 - If Claude forks a shared chat (e.g. when a background session takes it over), the fork is a chat of its own on that account, tagged **⇄ shared copy**.
+- **One filesystem.** A hard link can't cross filesystems, so your Claude folders and `~/.local/share` must be on the same disk or partition (or btrfs subvolume). The widget checks first and says so otherwise, leaving everything as it was.
 - Chats on SSH hosts can't be shared from here.
 - To undo sharing, use **Keep only on …**. Before you delete `~/.local/share/claude-status`, keep each shared chat on one account: their subagent folders and undo checkpoints are in there.
 
@@ -206,6 +210,7 @@ Right-click the widget → **Configure Claude Status…**
 | Setting | Default | |
 |---|---|---|
 | Check every | 2000 ms | How often sessions are checked |
+| …while nothing runs | 10000 ms | How often while no chat runs and the popup is closed (never more often than above; opening the popup checks at once) |
 | Extra config dirs | – | Claude config folders besides `~/.claude` and `~/.claude-*` |
 | Notify | both on | When a session needs input, and when it finishes a turn… |
 | …if the turn took at least | 30 s | …that ran at least this long |
@@ -247,6 +252,7 @@ Apart from the chats you share, the widget never changes Claude Code's own files
 - **"No plan usage yet":** plan usage comes from the status line, so it shows up after the next reply in a session of that account. If it never does, check that `jq` is installed and that the snippet is in your status-line script (`./install.sh` adds it). Saved snapshots are in `~/.cache/claude-widget/statusline/`.
 - **Claude Status isn't in the widget list:** it needs Plasma 6. Check that it's installed: `kpackagetool6 -t Plasma/Applet --list | grep claude`.
 - **The old version is still showing after an update:** `systemctl --user restart plasma-plasmashell`.
+- **"Can't find the claude command":** the widget looks on PATH, in the usual install folders and on your login shell's PATH. If Claude is somewhere else, add its folder to PATH in `~/.profile` (not only `~/.bashrc`) and log in again.
 - **Clicking a session doesn't switch to its tab:** tab switching works with Konsole and tmux. With other terminals the window is raised.
 - **An SSH host refuses the login:** the widget logs in without a terminal, so it needs key-based login. Load your key with `ssh-add`, or log in once with `ssh <host>` to accept its host key. The host also needs `python3`.
 - **The pets don't move their arms:** animated poses need Qt 6.10 and the QtQuick.VectorImage module (see [Requirements](#requirements)). Without them, the pets are still images.
@@ -271,20 +277,20 @@ Issues and ideas are welcome on the [issue tracker](https://github.com/wzaielamr
   - Background jobs use the same rules as `claude agents --all`. The live status wins over the job record; a job needs you only when its `tempo` is `blocked` or the session itself waits.
   - Interactive sessions follow Claude Code's terminal status. A dialog you opened yourself (`/model`, `/effort`, …) doesn't count as "needs input", and a background shell still running after the turn counts as working.
 - **Plan limits and context** come from the JSON that Claude Code passes to the status line (`rate_limits`, `context_window`). `statusline-snippet.sh` saves a copy of it per session, under the profile's real folder name. Older copies filed under a link's name only count if they're newer than the link: before it was last switched, that name meant another profile.
-- **Token totals** are read incrementally from transcripts (at most once a minute, cached per profile in `~/.cache/claude-widget/tokens-*.json`). Lines are de-duplicated per message. Linked folders are followed, so a shared chat's subagents count too.
+- **Token totals** are read incrementally from transcripts (at most once a minute, cached per profile in `~/.cache/claude-widget/tokens-*.json`). Lines are de-duplicated per message, and summed per day, so a status check adds up a few numbers instead of every message of the week. Linked folders are followed, so a shared chat's subagents count too.
 - **Subagents** are read from `projects/<project>/<session>/subagents/agent-*.jsonl` and their `.meta.json`. An agent is done when its transcript ends with its final answer, running otherwise, and stopped if its session ended first.
 - **Shared chats** are transcripts with the same file (inode) in several profiles. Each row knows which conversation it shows: a background session that took a chat over counts as that chat while its own transcript holds no messages; a transcript that starts with a shared chat's history is a copy of it. Claude's own rule decides whether a chat moved on (its last `continued-in` record comes after its last finished reply). Where a finished shared chat was used last comes from the status-line snapshots, the prompt history (`history.jsonl`) and, if you use hooks that hold a shared chat to one session, their lock file (`~/.local/state/claude-shared-chats/lock-<id>`).
 - **Sharing** (`package/contents/code/sharing.py`): hard links the transcript into each profile and the store, moves the chat's `projects/<project>/<id>/` and `file-history/<id>/` folders into the store and symlinks them back. A chat shared the same way by another tool, into a store of its own, is found through its links and handled where it is.
 - **Jumping to a session** (`package/contents/code/jump.py`) finds the window through the session's process tree. Konsole tabs are switched over Konsole's D-Bus API. A window is raised with a short KWin script loaded over D-Bus, which is how one app can bring another's window to the front on Plasma Wayland. VS Code conversations open through the Claude extension's `vscode://anthropic.claude-code/open?session=…` link. Background jobs are attached under the same config-folder name as the running background service, because Claude keys that service by the folder's *name*. Terminals and VS Code windows the widget opens get a systemd scope of their own (like the apps KDE starts), so restarting Plasma doesn't kill the chats running in them.
-- **SSH hosts** (`package/contents/code/remote.py`): `ssh -o BatchMode=yes … <host> python3 -I - --remote`, with `claude_status.py` on stdin. In `--remote` mode every row also carries the command that opens it on the host, and the JSON follows a marker line, so login scripts that print a banner can't break it. Connections are shared through `ControlMaster` sockets in `~/.cache/claude-widget/ssh`.
+- **SSH hosts** (`package/contents/code/remote.py`): `ssh -o BatchMode=yes … <host> python3 -I - --remote`, with `claude_status.py` on stdin. In `--remote` mode every row also carries the command that opens it on the host, and the JSON follows a marker line, so login scripts that print a banner can't break it. Connections are shared through `ControlMaster` sockets in `$XDG_RUNTIME_DIR/claude-status-ssh` (else a folder of yours in `/tmp`): a short path, since a socket's may have at most 107 characters.
 
 </details>
 
 ## Privacy
 
-- The widget reads the files Claude Code writes, on your computer and on the SSH hosts you pick (through your own SSH login). Besides those it reads only your `~/.ssh/config` host list, the desktop settings it needs (default terminal, sound theme, Do Not Disturb) and process and window info (`/proc`, Konsole, tmux, KWin) to find where a session runs; of a Claude process's environment it keeps only `CLAUDE_CONFIG_DIR` and `HOME`. To know which account VS Code's Claude uses, it reads `CLAUDE_CONFIG_DIR` from VS Code's settings (`claudeCode.environmentVariables`) or from VS Code's environment, nothing else. It never opens credential files.
+- The widget reads the files Claude Code writes, on your computer and on the SSH hosts you pick (through your own SSH login). Besides those it reads only your `~/.ssh/config` host list, the desktop settings it needs (default terminal, sound theme, Do Not Disturb) and process and window info (`/proc`, Konsole, tmux, KWin) to find where a session runs; of a Claude process's environment it keeps only `CLAUDE_CONFIG_DIR` and `HOME`. To know which account VS Code's Claude uses, it reads `CLAUDE_CONFIG_DIR` from VS Code's settings (`claudeCode.environmentVariables`) or from VS Code's environment, nothing else. It never opens credential files. When `claude` isn't on the desktop's PATH or in the usual install folders, a click on a chat runs your login shell once (`$SHELL -l -i -c env`) to read the PATH it sets up, nothing else.
 - It doesn't call any Anthropic API and sends no data anywhere. *Open Usage Page on claude.ai* just opens that page in your browser.
-- Everything it stores lives in `~/.cache/claude-widget`, plus shared chats' folders in `~/.local/share/claude-status/shared-chats`; only your user can read either (mode 0700). Its JSON output replaces account ids with a one-way hash.
+- Everything it stores lives in `~/.cache/claude-widget`, plus shared chats' folders in `~/.local/share/claude-status/shared-chats`; only your user can read either (mode 0700). SSH connection sockets go to `$XDG_RUNTIME_DIR/claude-status-ssh`, which is cleared when you log out. Its JSON output replaces account ids with a one-way hash.
 - It changes Claude Code's files only when you share a chat: it links the chat into your other profiles, or out of them again.
 
 ## Limitations

@@ -7,6 +7,12 @@
       <range min="1000" max="60000"/>
       <summary>Milliseconds between status checks</summary>
     </key>
+    <key name="idle-poll-interval" type="i">
+      <default>10000</default>
+      <range min="1000" max="300000"/>
+      <summary>Milliseconds between status checks while nothing runs and the menu is closed</summary>
+      <description>Never more often than poll-interval.</description>
+    </key>
     <key name="extra-config-dirs" type="s">
       <default>''</default>
       <summary>Extra Claude config dirs, comma separated (~/.claude and ~/.claude-* are found automatically)</summary>
@@ -80,6 +86,11 @@
     <key name="show-tokens" type="b">
       <default>true</default>
       <summary>Show token totals from local transcripts</summary>
+    </key>
+    <key name="new-chat-in-vscode" type="b">
+      <default>false</default>
+      <summary>New chats from the + start in VS Code</summary>
+      <description>Instead of a terminal; set with the switch at the top of the new-chat list.</description>
     </key>
   </schema>
 </schemalist>

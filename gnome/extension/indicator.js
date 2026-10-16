@@ -53,7 +53,8 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         this._pets = new Pets(this);
 
         this._settingsIds = [
-            this._settings.connect('changed::poll-interval', () => this._restartPollTimer()),
+            ...['poll-interval', 'idle-poll-interval'].map(key =>
+                this._settings.connect(`changed::${key}`, () => this._restartPollTimer())),
             this._settings.connect('changed::remote-poll-seconds', () => this._restartRemoteTimer()),
             this._settings.connect('changed::ssh-hosts', () => this._onHostsChanged()),
             ...['extra-config-dirs', 'keep-done-hours', 'recent-chats', 'show-tokens'].map(key =>
@@ -124,14 +125,27 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
 
     // ---------------------------------------------------------------- polling
 
-    _restartPollTimer() {
+    _restartPollTimer(refreshNow = true) {
         this._clearTimer('poll');
-        const interval = Math.max(1000, this._settings.get_int('poll-interval'));
-        this._timers.poll = GLib.timeout_add(GLib.PRIORITY_DEFAULT, interval, () => {
+        this._pollMs = this._pollInterval();
+        this._timers.poll = GLib.timeout_add(GLib.PRIORITY_DEFAULT, this._pollMs, () => {
             this.refresh();
             return GLib.SOURCE_CONTINUE;
         });
-        this.refresh();
+        if (refreshNow)
+            this.refresh();
+    }
+
+    // Less often while nothing runs and the menu is closed (L.pollInterval)
+    _pollInterval() {
+        const overall = this._status ? L.overall(this.allGroups) : '';
+        return L.pollInterval(this._settings.get_int('poll-interval'), this._settings.get_int('idle-poll-interval'),
+            overall, this.menu.isOpen);
+    }
+
+    _adjustPollTimer() {
+        if (this._pollInterval() !== this._pollMs)
+            this._restartPollTimer(false);
     }
 
     _restartRemoteTimer() {
@@ -185,6 +199,7 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
             this._track('', result.status.groups, result.status.generatedAt, '');
         }
         this._render();
+        this._adjustPollTimer();
     }
 
     // Notifications, pet reactions and the sound when sessions change state.
@@ -333,6 +348,16 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
     // VS Code is here (its button shows; only the account it runs on can use it)
     get vscodeInstalled() {
         return this._status?.vscode?.installed === true;
+    }
+
+    // Where new chats start: the switch at the top of the new-chat list
+    get newChatInVscode() {
+        return this._settings.get_boolean('new-chat-in-vscode');
+    }
+
+    setNewChatInVscode(on) {
+        this._settings.set_boolean('new-chat-in-vscode', on);
+        this.rerender();
     }
 
     _newChatDone(result) {
@@ -648,12 +673,14 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
                 this._scroll.style = `max-height: ${Math.round(area.height * 0.62)}px;`;
                 this._loadHosts();
                 this.rerender();
+                this.refresh();  // it may have been checked a while ago (see _pollInterval)
             } else {
                 this.tips.hide();
                 this.ui.openMenu = null;
                 this.ui.stopConfirm = '';
             }
             this._pets.setActive(open);
+            this._adjustPollTimer();
         });
     }
 

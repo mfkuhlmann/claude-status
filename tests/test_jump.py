@@ -62,7 +62,8 @@ class OpenTerminalTests(unittest.TestCase):
         which = lambda name: f"/usr/bin/{name}" if name in installed else None
         with Patch(subprocess=type("S", (), {"Popen": lambda *a, **k: started.append((a[0], k["cwd"])),
                                             "DEVNULL": None}),
-                   shutil=type("W", (), {"which": staticmethod(which)}), kde_terminal=lambda: list(chosen)):
+                   shutil=type("W", (), {"which": staticmethod(which)}), kde_terminal=lambda: list(chosen),
+                   on_gnome=lambda: False):
             ok = jump.open_terminal("/nonexistent", "claude attach x")
         return ok, started
 
@@ -311,7 +312,7 @@ class FindSessionTests(Fixture):
         calls = []
         with Patch(jump_terminal=lambda e, what="session": calls.append(("terminal", e["sessionId"])) or (True, ""),
                    jump_vscode=lambda e: calls.append(("vscode", e["sessionId"])) or (True, ""),
-                   jump_job=lambda p, jid, job, name: calls.append(("job", jid)) or (True, "")):
+                   jump_job=lambda p, jid, job, name, home=None: calls.append(("job", jid)) or (True, "")):
             for sid in ("busy", "vscode", "bgperm"):
                 jump.jump(self.home, [], sid)
         self.assertEqual(calls, [("terminal", "busy"), ("vscode", "vscode"), ("job", "job5")])
@@ -429,7 +430,7 @@ class ChooseFolderTests(Fixture):
             ran.append(args)
             return subprocess.CompletedProcess(args, returncode, stdout, "")
         which = lambda name: f"/usr/bin/{name}" if name in installed else None
-        with Patch(shutil=type("W", (), {"which": staticmethod(which)}),
+        with Patch(shutil=type("W", (), {"which": staticmethod(which)}), on_gnome=lambda: False,
                    subprocess=type("S", (), {"run": staticmethod(run), "DEVNULL": None, "PIPE": None,
                                              "CompletedProcess": subprocess.CompletedProcess})):
             return jump.choose_folder("New chat in…", self.home), ran
@@ -634,6 +635,65 @@ class LinkedProfileTests(unittest.TestCase):
 
 
 
+class FindClaudeTests(unittest.TestCase):
+    """claude is found where the desktop session's PATH doesn't reach."""
+
+    CHAT = "7c1e0000-0000-4000-8000-000000000001"
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.home = Path(tmp.name)
+        (self.home / "empty").mkdir()
+        saved = {k: os.environ.get(k) for k in ("PATH", "SHELL")}
+        self.addCleanup(lambda: [os.environ.__setitem__(k, v) if v is not None else os.environ.pop(k, None)
+                                 for k, v in saved.items()])
+        os.environ["PATH"] = str(self.home / "empty")  # nothing on PATH
+        os.environ["SHELL"] = str(self.home / "no-shell")
+
+    def exe(self, path, text="#!/bin/sh\n"):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+        path.chmod(0o755)
+        return path
+
+    def test_install_places_and_the_newest_nvm_node(self):
+        self.assertEqual(cs.find_claude(self.home), "claude")  # nowhere
+        self.exe(self.home / ".nvm/versions/node/v9.11.2/bin/claude")
+        newest = self.exe(self.home / ".nvm/versions/node/v20.3.0/bin/claude")
+        self.assertEqual(cs.find_claude(self.home), str(newest))
+        installer = self.exe(self.home / ".local/bin/claude")
+        self.assertEqual(cs.find_claude(self.home), str(installer))  # Claude's installer comes first
+
+    def test_the_login_shells_path_only_when_asked(self):
+        claude = self.exe(self.home / "tools/bin/claude")
+        os.environ["SHELL"] = str(self.exe(self.home / "login-shell",
+                                           f"#!/bin/sh\necho Welcome back\necho PATH={claude.parent}:/usr/bin\n"))
+        self.assertEqual(cs.find_claude(self.home), "claude")  # status checks never start a shell
+        self.assertEqual(cs.find_claude(self.home, ask_shell=True), str(claude))
+
+    def test_node_next_to_claude_goes_on_path(self):
+        claude = self.exe(self.home / ".nvm/versions/node/v20.3.0/bin/claude")
+        self.assertEqual(cs.claude_words("claude"), "claude")
+        self.assertEqual(cs.claude_words(str(claude)), str(claude))
+        self.exe(claude.parent / "node")
+        self.assertEqual(cs.claude_words(str(claude)), f'PATH={claude.parent}:"$PATH" {claude}')
+
+    def test_reopening_runs_it_by_its_full_path_or_says_what_to_do(self):
+        folder = self.home / "proj"
+        folder.mkdir()
+        write(self.home / ".claude/projects/-proj" / f"{self.CHAT}.jsonl",
+              json.dumps({"type": "user", "cwd": str(folder), "sessionId": self.CHAT}) + "\n")
+        opened = []
+        with Patch(open_terminal=lambda cwd, cmd: opened.append(cmd) or True,
+                   shutil=type("W", (), {"which": staticmethod(lambda n: None)})):  # not on the desktop's PATH
+            self.assertEqual(jump.resume(self.home, [], self.CHAT), (False, jump.NO_CLAUDE))
+            claude = self.exe(self.home / ".local/bin/claude")
+            self.assertEqual(jump.resume(self.home, [], self.CHAT), (True, "Reopened the chat in a terminal"))
+        self.assertEqual(len(opened), 1)
+        self.assertTrue(opened[0].endswith(f"env -u CLAUDE_CONFIG_DIR {claude} --resume {self.CHAT}"), opened[0])
+
+
 class SharedChatActionTests(unittest.TestCase):
     """Share, continue on another account and unshare (sharing.py), on a stock
     ~/.claude next to ~/.claude-work: no .profile-name files, no other tools."""
@@ -809,6 +869,33 @@ class SharedChatActionTests(unittest.TestCase):
         self.assert_gone(".claude-lab")
         self.assertFalse(other.exists())
         self.assertTrue(mine.is_dir())
+
+    def test_one_filesystem_or_nothing_happens(self):
+        real = jump.sharing.device
+        jump.sharing.device = lambda p: -1 if ".claude-work" in str(p) else real(p)  # work on another disk
+        try:
+            (ok, msg), opened = self.run_action(jump.continue_on, ".claude-work")
+        finally:
+            jump.sharing.device = real
+        self.assertFalse(ok)
+        self.assertIn("work is on another disk or partition than this chat", msg)
+        self.assertEqual(opened, [])
+        self.assert_own(".claude")
+        self.assertFalse(self.store.exists())
+
+    def test_continue_can_hand_back_the_command(self):
+        """For the VS Code extension: shared, no terminal opened, the command to run instead."""
+        opened = []
+        with Patch(open_terminal=lambda cwd, cmd: opened.append(cmd) or True,
+                   shutil=type("W", (), {"which": staticmethod(lambda n: "/usr/bin/" + n)})):
+            ok, msg, command = jump.continue_command(self.home, [], self.CHAT, ".claude-work")
+        self.assertEqual((ok, msg, opened), (True, "Continuing it on work", []))
+        self.assert_linked(".claude-work")
+        work = (self.home / ".claude-work").resolve()
+        self.assertEqual(command, f"cd {self.folder} 2>/dev/null; CLAUDE_CONFIG_DIR={work} claude --resume {self.CHAT}")
+        out = subprocess.run([sys.executable, "-I", str(CODE / "jump.py"), "--share", self.CHAT, "--print-command"],
+                             capture_output=True, text=True)
+        self.assertIn("usage", out.stderr)  # only with --continue
 
     def test_command_line(self):
         out = subprocess.run([sys.executable, "-I", str(CODE / "jump.py"), "--continue", self.CHAT],

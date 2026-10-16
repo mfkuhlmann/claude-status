@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **Works beyond the author's setup:**
+  - Opening, attaching, stopping and starting chats no longer need `claude` on the desktop session's PATH: it's also found in `~/.local/bin`, npm's, bun's, Volta's, pnpm's and nvm's folders, or on your login shell's PATH (nvm installs get their Node too). When it's nowhere, the message says what to do.
+  - SSH hosts work with any home folder: the shared-connection sockets moved to `$XDG_RUNTIME_DIR` (a home folder name over 24 characters made their path too long, and every check failed).
+  - The status-line snippet is plain POSIX sh: it broke status lines run by `sh` (dash on Debian and Ubuntu). `./install.sh` replaces an older copy.
+  - Sharing checks that the chat, your other account and the shared-chat folder are on one filesystem before it changes anything, instead of failing half-way.
+- **New chat:** one **Terminal | VS Code** switch at the top of an account's folders, kept for next time, instead of a VS Code button on every folder.
+- **Lighter:** while nothing runs and the popup is closed, the widget checks every 10 s instead of every 2 s (a new setting, *…while nothing runs*; opening the popup checks at once). Token totals are summed per day when transcripts are read (once a minute), and VS Code is looked for at most every 30 s (or when its settings or PATH change), instead of on every check.
+- Tests pass when run from a GNOME session, with `claude` in `/usr/bin`, and don't touch your real state folders.
+
 ## 1.4 (2026-10-16)
 
 - **Sharing chats is built in:** with two or more Claude accounts on this computer, the share button on a finished chat (**Continue on …**, **Share with all accounts**, **Keep only on …**) works out of the box, with any profiles (`~/.claude`, `~/.claude-*`, extra config folders). It used to need the author's own script. A shared chat is one transcript hard-linked into each profile; its folders live in `~/.local/share/claude-status/shared-chats`. **Continue on …** now shares the chat with that account only. See "Sharing chats" in the README.

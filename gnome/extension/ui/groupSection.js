@@ -21,8 +21,8 @@ export function buildGroupSection(ctx, group, {last = false, remoteHost = ''} = 
     head.add_child(label(group.title, 'claude-group-title'));
     const add = iconButton('list-add-symbolic', () => ctx.toggleNewChat(groupKey));
     tips.add(add, [L.fmt('New chat on %1', group.title), remoteHost
-        ? L.fmt('Opens a terminal with a new Claude chat on this account on %1 (over ssh), in the folder you pick.', remoteHost)
-        : 'Opens a terminal with a new Claude chat on this account, in the folder you pick.']);
+        ? L.fmt("Lists this account's folders on %1: start a new Claude chat in one, in a terminal (over ssh) or in VS Code.", remoteHost)
+        : "Lists this account's recent folders: start a new Claude chat in one, in a terminal or in VS Code."]);
     head.add_child(add);
     head.add_child(new St.Widget({x_expand: true}));
     if (multiProfile)
@@ -93,50 +93,63 @@ export function buildGroupSection(ctx, group, {last = false, remoteHost = ''} = 
     return section;
 }
 
-// New chat on this account: its recent folders, then any folder you pick. A
-// folder opens a terminal with Claude there; its VS Code button starts the
-// chat in VS Code's Claude extension, on the account that runs on.
+// New chat on this account: its recent folders, then any folder you pick.
+// One switch at the top says where a chat starts (kept between uses): a
+// terminal with Claude in the folder you click, or VS Code's Claude extension,
+// which runs on one account only (greyed out on the others).
 function buildNewChatMenu(ctx, group, host) {
     const menu = column('claude-inline-menu', {x_expand: true});
     menu.add_child(label(L.fmt('New chat on %1 in…', host ? L.fmt('%1 on %2', group.title, host) : group.title),
         'claude-menu-title'));
-    const row = (item, onVscode) => {
-        const line = box('claude-menu-row', {x_expand: true});
-        item.x_expand = true;
-        line.add_child(item);
-        if (ctx.vscodeInstalled)
-            line.add_child(vscodeButton(ctx, group, host, onVscode));
-        return line;
-    };
+    const vscodeHere = ctx.vscodeInstalled && !!group.vscodeHere;
+    const inVscode = vscodeHere && ctx.newChatInVscode;
+    if (ctx.vscodeInstalled)
+        menu.add_child(openInSwitch(ctx, group, host, inVscode, vscodeHere));
     for (const f of L.newChatFolders(group, host)) {
-        const item = textButton(f.short === '~' ? 'Home folder (~)' : f.short,
-            () => (host ? ctx.remoteOpen(host, f.newChatCommand || '') : ctx.newChat(group.chatProfile, f.path)),
-            'claude-menu-item', f.short === '~' ? 'user-home-symbolic' : 'folder-symbolic');
-        item.reactive = !host || !!f.newChatCommand;
-        menu.add_child(row(item, () => (host ? ctx.remoteNewChatVscode(host, f.path)
-            : ctx.newChat(group.chatProfile, f.path, true))));
+        const item = textButton(f.short === '~' ? 'Home folder (~)' : f.short, () => {
+            if (host && inVscode)
+                ctx.remoteNewChatVscode(host, f.path);
+            else if (host)
+                ctx.remoteOpen(host, f.newChatCommand || '');
+            else
+                ctx.newChat(group.chatProfile, f.path, inVscode);
+        }, 'claude-menu-item', f.short === '~' ? 'user-home-symbolic' : 'folder-symbolic');
+        item.x_expand = true;
+        item.reactive = !host || inVscode || !!f.newChatCommand;
+        menu.add_child(item);
     }
     if (!host) {
-        menu.add_child(row(textButton('Choose folder…', () => ctx.newChatChoosingFolder(group.chatProfile),
-            'claude-menu-item', 'folder-open-symbolic'), () => ctx.newChatChoosingFolder(group.chatProfile, true)));
+        const choose = textButton('Choose folder…', () => ctx.newChatChoosingFolder(group.chatProfile, inVscode),
+            'claude-menu-item', 'folder-open-symbolic');
+        choose.x_expand = true;
+        menu.add_child(choose);
     }
     return menu;
 }
 
-// "VS Code" next to a folder: greyed out on the accounts VS Code's Claude
+// Terminal | VS Code. VS Code is greyed out on the accounts its Claude
 // doesn't run on, with a tooltip saying why (on a wrapper, so it shows then too)
-function vscodeButton(ctx, group, host, onClick) {
-    const here = !!group.vscodeHere;
-    const content = box('claude-button-box');
-    content.add_child(new St.Icon({icon_name: 'vscode', fallback_icon_name: 'text-editor-symbolic',
-        style_class: 'claude-button-icon'}));
-    content.add_child(label('VS Code'));
-    const button = new St.Button({style_class: 'claude-text-button claude-vscode-button', child: content,
-        reactive: here, can_focus: here, opacity: here ? 255 : 110});
-    button.connect('clicked', onClick);
-    const wrap = new St.Bin({child: button, y_align: Clutter.ActorAlign.CENTER});
-    ctx.tips.add(wrap, [here ? 'New chat in VS Code' : 'Not on this account', L.vscodeHint(group, host, ctx._status)]);
-    return wrap;
+function openInSwitch(ctx, group, host, inVscode, vscodeHere) {
+    const line = box('claude-menu-row claude-open-in', {x_expand: true});
+    line.add_child(label('Open in:', 'claude-small claude-dim', {y_align: Clutter.ActorAlign.CENTER}));
+    const half = (icon, fallback, text, checked, enabled, onClick, tip) => {
+        const content = box('claude-button-box');
+        content.add_child(new St.Icon({icon_name: icon, fallback_icon_name: fallback, style_class: 'claude-button-icon'}));
+        content.add_child(label(text));
+        const button = new St.Button({style_class: 'claude-text-button claude-switch-button', child: content,
+            checked, reactive: enabled, can_focus: enabled, opacity: enabled ? 255 : 110});
+        button.connect('clicked', onClick);
+        const wrap = new St.Bin({child: button, y_align: Clutter.ActorAlign.CENTER});
+        ctx.tips.add(wrap, tip);
+        return wrap;
+    };
+    line.add_child(half('utilities-terminal-symbolic', 'utilities-terminal', 'Terminal', !inVscode, true,
+        () => ctx.setNewChatInVscode(false),
+        ['New chats in a terminal', 'A terminal opens with Claude in the folder you click.']));
+    line.add_child(half('vscode', 'text-editor-symbolic', 'VS Code', inVscode, vscodeHere,
+        () => ctx.setNewChatInVscode(true),
+        [vscodeHere ? 'New chats in VS Code' : 'Not on this account', L.vscodeHint(group, host, ctx._status)]));
+    return line;
 }
 
 function buildSharedLine(ctx, chat, remoteHost) {

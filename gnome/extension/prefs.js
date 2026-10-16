@@ -48,6 +48,8 @@ export default class ClaudeStatusPreferences extends ExtensionPreferences {
         const sessions = new Adw.PreferencesGroup({title: 'Sessions',
             description: '~/.claude and ~/.claude-* are found automatically.'});
         sessions.add(spin('poll-interval', 'Check every', 'milliseconds', 1000, 60000, 500));
+        sessions.add(spin('idle-poll-interval', '…while nothing runs',
+            'milliseconds, while no chat runs and the menu is closed', 1000, 300000, 1000));
         const dirs = new Adw.EntryRow({title: 'Extra config folders (comma separated)', show_apply_button: true,
             text: settings.get_string('extra-config-dirs')});
         dirs.connect('apply', () => settings.set_string('extra-config-dirs', dirs.text));

@@ -653,7 +653,30 @@ def gnome_terminal_args(shell, cwd, script):
     return [terminal, "-e", *line] if terminal else None
 
 
-def jump_job(profile, job_id, job, name):
+# ---------------------------------------------------------------- finding claude
+#
+# The desktop session's PATH often lacks claude's folder (~/.local/bin, an
+# npm or nvm folder): installers add it in shell startup files the desktop
+# never reads. So past PATH, claude is looked for where it's usually
+# installed, and then on the PATH your login shell sets up.
+
+NO_CLAUDE = ("Can't find the claude command: it isn't on the desktop's PATH, in ~/.local/bin or npm's or nvm's "
+             "folders, nor on your login shell's PATH. Add its folder to PATH in ~/.profile, then log in again")
+
+
+def claude_path(home):
+    """Full path of the claude command, or None."""
+    found = shutil.which("claude") or cs.find_claude(home, ask_shell=True)
+    return found if found != "claude" else None
+
+
+def claude_in_terminal(home):
+    """How a terminal we open runs claude: by name when it's on our PATH (the
+    terminal inherits that), else by its full path; None if there's none."""
+    return "claude" if shutil.which("claude") else claude_path(home)
+
+
+def jump_job(profile, job_id, job, name, home=None):
     # A terminal already showing the job: bring that one up instead of
     # attaching a second client.
     for entry in live_entries(profile):
@@ -662,19 +685,21 @@ def jump_job(profile, job_id, job, name):
     tab = find_attached_tab(job_id, name, profile.path.resolve())
     if tab and show_konsole_tab(*tab):
         return True, "Switched to the terminal showing this background job"
-    if not shutil.which("claude"):
-        return False, "The claude command isn't on PATH; can't attach to the background job"
-    if not open_terminal((job or {}).get("cwd"), attach_command(profile, job_id, job=job)):
+    claude = claude_in_terminal(home or Path.home())
+    if claude is None:
+        return False, NO_CLAUDE
+    if not open_terminal((job or {}).get("cwd"), attach_command(profile, job_id, home, job, claude)):
         return False, "No terminal found to open the background job in"
     return True, "Opened the background job in a terminal"
 
 
 def resume_chat(profile, path, session_id, home):
     """Open a terminal that reopens a finished chat with `claude --resume`."""
-    if not shutil.which("claude"):
-        return False, "The claude command isn't on PATH; can't reopen the chat"
+    claude = claude_in_terminal(home)
+    if claude is None:
+        return False, NO_CLAUDE
     folder = chat_folder(path)
-    if not open_terminal(folder, resume_command(profile, session_id, home, folder)):
+    if not open_terminal(folder, resume_command(profile, session_id, home, folder, claude)):
         return False, "No terminal found to reopen the chat in"
     return True, "Reopened the chat in a terminal"
 
@@ -692,7 +717,7 @@ def jump(home, extra_dirs, session_id, profile_dir=None):
         return jump_terminal(entry)
     if job_id:
         name = (entry or {}).get("name") or (job or {}).get("name") or ""
-        return jump_job(profile, job_id, job, name if isinstance(name, str) else "")
+        return jump_job(profile, job_id, job, name if isinstance(name, str) else "", home)
     return False, "Don't know how to open this session"
 
 
@@ -703,15 +728,18 @@ def stop(home, extra_dirs, session_id, profile_dir=None):
         return False, "That session isn't running any more"
     if not job_id:
         return False, "Only background sessions can be stopped here; close a terminal session's window to end it"
-    claude = shutil.which("claude")
+    claude = claude_path(home)
     if not claude:
-        return False, "The claude command isn't on PATH"
+        return False, NO_CLAUDE
     env = dict(os.environ)
     value = config_dir_value(profile, home, job)
     if value is None:
         env.pop("CLAUDE_CONFIG_DIR", None)
     else:
         env["CLAUDE_CONFIG_DIR"] = value
+    folder = os.path.dirname(claude)
+    if os.path.isfile(os.path.join(folder, "node")):  # an npm install under nvm needs its node
+        env["PATH"] = os.pathsep.join([folder, env.get("PATH", "")])
     try:
         r = subprocess.run([claude, "stop", job_id], env=env, cwd=str(home), stdin=subprocess.DEVNULL,
                            capture_output=True, text=True, timeout=60)
@@ -728,10 +756,11 @@ def new_chat(home, extra_dirs, dirname, folder=None):
     profile = next((p for p in cs.discover_profiles(home, extra_dirs) if matches(p, dirname)), None)
     if profile is None:
         return False, f"No Claude profile called {dirname}"
-    if not shutil.which("claude"):
-        return False, "The claude command isn't on PATH"
+    claude = claude_in_terminal(home)
+    if claude is None:
+        return False, NO_CLAUDE
     folder = folder if folder and os.path.isdir(folder) else str(home)
-    if not open_terminal(folder, cs.new_chat_command(profile, home)):
+    if not open_terminal(folder, cs.new_chat_command(profile, home, claude)):
         return False, "No terminal found to open the chat in"
     return True, f"Opened a new {profile.label} chat in {cs.short_path(folder, home)}"
 
@@ -759,8 +788,8 @@ def new_chat_choosing_folder(home, extra_dirs, dirname, vscode=False):
     profile = next((p for p in cs.discover_profiles(home, extra_dirs) if matches(p, dirname)), None)
     if profile is None:
         return False, f"No Claude profile called {dirname}"
-    if not vscode and not shutil.which("claude"):
-        return False, "The claude command isn't on PATH"
+    if not vscode and claude_in_terminal(home) is None:
+        return False, NO_CLAUDE
     folder, error = choose_folder(f"New Claude chat on {profile.label} in…", home)
     if folder is None:
         return (False, error) if error else (True, "")
@@ -872,30 +901,54 @@ def resume(home, extra_dirs, session_id, profile_dir=None):
     return resume_chat(profile, path, session_id, home)
 
 
-def continue_on(home, extra_dirs, session_id, profile_dir):
-    """Continue a chat on another account: share it with that account if it
-    doesn't have it yet, then reopen it there."""
+def give_to(home, extra_dirs, session_id, profile_dir):
+    """Give another account a chat, shared if it doesn't have it yet:
+    (its profile, its transcript of the chat), or (None, why not)."""
     target = profile_named(home, extra_dirs, profile_dir)
     if target is None:
-        return False, f"No Claude profile called {profile_dir}"
+        return None, f"No Claude profile called {profile_dir}"
     busy = open_somewhere(home, extra_dirs, session_id)
     if busy:
-        return False, f"It's open in a session on {busy}. A chat can be open in one session at a time: exit that one first."
+        return None, f"It's open in a session on {busy}. A chat can be open in one session at a time: exit that one first."
     profiles = cs.discover_profiles(home, extra_dirs)
     copies = [path for p in profiles for path in [cs.transcript_path(p, session_id)] if path]
     if not copies:
-        return False, "That chat has no transcript on this computer"
+        return None, "That chat has no transcript on this computer"
     there = cs.transcript_path(target, session_id)
     if there is None:
         ok, message = sharing.share(profiles, session_id, [target], sharing.store_root(home))
         if not ok:
-            return False, message
+            return None, message
         there = cs.transcript_path(target, session_id)
         if there is None:
-            return False, f"It wasn't added to {target.label}: {message}"
+            return None, f"It wasn't added to {target.label}: {message}"
     elif any(not os.path.samefile(there, other) for other in copies):
-        return False, f"{target.label} has a different chat with the same id; left everything as it is"
+        return None, f"{target.label} has a different chat with the same id; left everything as it is"
+    return target, there
+
+
+def continue_on(home, extra_dirs, session_id, profile_dir):
+    """Continue a chat on another account: share it with that account if it
+    doesn't have it yet, then reopen it there in a terminal."""
+    target, there = give_to(home, extra_dirs, session_id, profile_dir)
+    if target is None:
+        return False, there
     return resume_chat(target, there, session_id, home)
+
+
+def continue_command(home, extra_dirs, session_id, profile_dir):
+    """The same, but hand back the command that reopens it there instead of
+    opening a terminal (the VS Code extension runs it in one of its own):
+    (ok, message, command or None)."""
+    target, there = give_to(home, extra_dirs, session_id, profile_dir)
+    if target is None:
+        return False, there, None
+    claude = claude_in_terminal(home)
+    if claude is None:
+        return False, NO_CLAUDE, None
+    folder = chat_folder(there)
+    command = cs.in_folder(folder, resume_command(target, session_id, home, folder, claude))
+    return True, f"Continuing it on {target.label}", command
 
 
 def share(home, extra_dirs, session_id, profile_dir=None):
@@ -940,6 +993,7 @@ def undismiss_all(home, extra_dirs, _session_id=None):
 USAGE = ("usage: jump.py [--stop] SESSION_ID [--profile PROFILE] [--config-dir DIR]...\n"
          "       jump.py --new-chat PROFILE_DIRNAME [--cwd FOLDER | --choose-folder] [--vscode] [--config-dir DIR]...\n"
          "       jump.py --resume|--continue|--unshare SESSION_ID --profile PROFILE\n"
+         "       jump.py --continue SESSION_ID --profile PROFILE --print-command   (share it; print the command, no terminal)\n"
          "       jump.py --share SESSION_ID\n"
          "       jump.py --remote-vscode HOST SESSION_ID [--cwd FOLDER_ON_HOST]\n"
          "       jump.py --remote-terminal HOST [--name SESSION_NAME]\n"
@@ -949,11 +1003,13 @@ USAGE = ("usage: jump.py [--stop] SESSION_ID [--profile PROFILE] [--config-dir D
 def main(argv=None):
     args = sys.argv[1:] if argv is None else list(argv)
     extra, session_id, action, folder, profile_dir = [], None, jump, None, None
-    remote_host, name_arg, choose, vscode = None, "", False, False
+    remote_host, name_arg, choose, vscode, print_command = None, "", False, False, False
     while args:
         arg = args.pop(0)
         if arg == "--config-dir" and args:
             extra.append(args.pop(0))
+        elif arg == "--print-command":
+            print_command = True
         elif arg == "--profile" and args:
             profile_dir = args.pop(0)
         elif arg == "--stop":
@@ -984,8 +1040,13 @@ def main(argv=None):
         session_id = session_id or "-"
     if not session_id or (action in (continue_on, unshare) and not profile_dir):
         sys.exit(USAGE)
+    if print_command and action is not continue_on:
+        sys.exit(USAGE)
+    command = None
     try:
-        if action == "--remote-vscode":
+        if print_command:
+            ok, message, command = continue_command(Path.home(), extra, session_id, profile_dir)
+        elif action == "--remote-vscode":
             ok, message = jump_remote_vscode(remote_host, session_id, folder or "")
         elif action == "--remote-terminal":
             ok, message = jump_remote_terminal(remote_host, name_arg)
@@ -1002,7 +1063,7 @@ def main(argv=None):
             ok, message = action(Path.home(), extra, session_id)
     except Exception as exc:  # report, don't crash: the widget shows the message
         ok, message = False, f"{type(exc).__name__}: {exc}"
-    print(json.dumps({"ok": ok, "message": message}))
+    print(json.dumps({"ok": ok, "message": message, **({"command": command} if command else {})}))
 
 
 if __name__ == "__main__":
