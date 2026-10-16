@@ -31,6 +31,9 @@ As an editor tab (**Claude Status: Open in Editor Tab**):
 - **Clawd**: one pet for the whole dashboard, one per chat, each acting out
   its chat. Click a pet to open its chat, drag one around, double-click the
   big one.
+- **Shared chats**: with two or more Claude accounts on this computer, a
+  finished chat's share button continues it on another account (say, when
+  one hits its limit), shares it with all of them, or keeps it on one again.
 
 ## Your side, also over Remote-SSH
 
@@ -142,7 +145,8 @@ token totals, chat titles and subagents), `history.jsonl` (recent folders),
 the account name and plan from `.claude.json`, and the status-line copies in
 `~/.cache/claude-widget/statusline`. It writes only to
 `~/.cache/claude-widget` (caches, the list of chats you removed) and, if you
-ask for it, the status-line change above.
+ask for it, the status-line change above and the links of the chats you share
+(see below).
 
 ## Good to know
 
@@ -156,6 +160,14 @@ ask for it, the status-line change above.
   view says where it runs. On GNOME, sounds use GNOME's sound theme.
 - **Claude Status: Toggle Demo Data** shows made-up chats (for screenshots,
   or to try it without Claude Code).
+- **Sharing a chat** hard-links its transcript into each account's profile,
+  so whichever account continues it writes to the same file; its subagent
+  folder and undo checkpoints move to `~/.local/share/claude-status/shared-chats`.
+  No tokens, hooks or settings are involved. A shared chat can be open in one
+  session at a time: the view won't share or unshare one that's open, so
+  close it on one account before you resume it on another. Everything in the
+  chat goes to the account that continues it. **Keep only on …** undoes it.
+  Chats on SSH hosts aren't shared from here.
 
 ## Development
 

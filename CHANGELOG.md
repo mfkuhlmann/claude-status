@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Sharing chats between your accounts is built in (backend synced from the
+  widget): with two or more Claude accounts on this computer, a finished
+  chat's share button offers **Continue on …**, **Share with all accounts**
+  and **Keep only on …**, with any profiles and no extra tool. It used to
+  appear only where the author's own sharing script was installed.
+  **Continue on …** shares the chat with that account only.
+
 ## 0.1.2
 
 - New chat asks where: in a terminal as before, or as a Claude Code chat tab

@@ -129,7 +129,6 @@ export interface Group {
   tokens: Tokens | null;
   chatProfile: string;
   shareProfile: string | null;
-  shareName: string | null;
   projects: Project[];
   sharedHere: SharedPointer[];
   recent: RecentChat[];
