@@ -634,59 +634,33 @@ class LinkedProfileTests(unittest.TestCase):
 
 
 
-FAKE_SHARE_TOOL = r"""#!/usr/bin/env bash
-# Stand-in for shared-chats.sh with the same command line: share ID, unshare ID NAME
-set -u
-C=$HOME/.claude-shared/chats
-echo "$*" >> "$HOME/share-tool.log"
-case "$1" in
-  share)
-    f=$(ls "$HOME"/.claude-*/projects/*/"$2".jsonl 2>/dev/null | head -1)
-    [ -n "$f" ] || { echo "No chat $2 in any profile."; exit 1; }
-    K=$(basename "$(dirname "$f")"); mkdir -p "$C/$K"; ln -f "$f" "$C/$K/$2.jsonl"
-    for d in "$HOME"/.claude-*/; do
-      [ -f "$d.profile-name" ] || continue
-      mkdir -p "$d/projects/$K"; [ -e "$d/projects/$K/$2.jsonl" ] || ln "$f" "$d/projects/$K/$2.jsonl"
-    done
-    echo "Chat shared, no tokens used." ;;
-  unshare)
-    f=$(ls "$C"/*/"$2".jsonl 2>/dev/null | head -1)
-    [ -n "$f" ] || { echo "This chat isn't shared."; exit 1; }
-    K=$(basename "$(dirname "$f")")
-    for d in "$HOME"/.claude-*/; do
-      [ "$(basename "$d")" = ".claude-$3" ] && continue
-      rm -f "$d/projects/$K/$2.jsonl"
-    done
-    rm -f "$f"; echo "This chat is now a normal chat of '$3' again." ;;
-esac
-"""
-
-
 class SharedChatActionTests(unittest.TestCase):
-    """Share, continue on another account and unshare, through shared-chats.sh."""
+    """Share, continue on another account and unshare (sharing.py), on a stock
+    ~/.claude next to ~/.claude-work: no .profile-name files, no other tools."""
 
     CHAT = "9a8b7c6d-0000-4000-8000-000000000001"
+    KEY = "-repos-app"
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.home = Path(self.tmp.name)
         self.folder = self.home / "repos/app"
         self.folder.mkdir(parents=True)
-        for name in ("personal", "work"):
-            d = self.home / f".claude-{name}"
-            write(d / ".profile-name", name)
-            write(d / ".claude.json", {"oauthAccount": {"accountUuid": name},
-                                       "projects": {str(self.folder): {"hasTrustDialogAccepted": True}}})
-            (d / "sessions").mkdir()
-        write(self.home / ".claude-personal/projects/-repos-app" / f"{self.CHAT}.jsonl",
+        trusted = {"projects": {str(self.folder): {"hasTrustDialogAccepted": True}}}
+        write(self.home / ".claude.json", {"oauthAccount": {"accountUuid": "personal"}, **trusted})
+        write(self.home / ".claude-work/.claude.json", {"oauthAccount": {"accountUuid": "work"}, **trusted})
+        for d in (".claude", ".claude-work"):
+            (self.home / d / "sessions").mkdir(parents=True)
+        mine = self.home / ".claude"
+        write(mine / "projects" / self.KEY / f"{self.CHAT}.jsonl",
               json.dumps({"type": "user", "cwd": str(self.folder), "sessionId": self.CHAT}) + "\n")
-        tool = self.home / ".claude-shared/profile-tools/shared-chats.sh"
-        write(tool, FAKE_SHARE_TOOL)
-        tool.chmod(0o755)
-        self.state = Path(self.tmp.name) / "state"
-        old = os.environ.get("XDG_STATE_HOME")
-        os.environ["XDG_STATE_HOME"] = str(self.state)
-        self.addCleanup(lambda: os.environ.__setitem__("XDG_STATE_HOME", old) if old else os.environ.pop("XDG_STATE_HOME", None))
+        write(mine / "projects" / self.KEY / self.CHAT / "subagents/agent-1.jsonl", "{}\n")
+        write(mine / "file-history" / self.CHAT / "abc@v1", "old text\n")
+        self.store = self.home / ".local/share/claude-status/shared-chats" / self.KEY
+        env = {k: os.environ.get(k) for k in ("XDG_STATE_HOME", "XDG_DATA_HOME")}
+        os.environ["XDG_STATE_HOME"] = str(self.home / "state")
+        os.environ.pop("XDG_DATA_HOME", None)
+        self.addCleanup(lambda: [os.environ.__setitem__(k, v) if v else os.environ.pop(k, None) for k, v in env.items()])
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -698,90 +672,149 @@ class SharedChatActionTests(unittest.TestCase):
             result = action(self.home, [], self.CHAT, *args)
         return result, opened
 
-    def in_work(self):
-        return cs.transcript_path(next(p for p in cs.discover_profiles(self.home) if p.label == "work"), self.CHAT)
+    def part(self, profile, what):
+        base = self.home / profile
+        return {"chat": base / "projects" / self.KEY / f"{self.CHAT}.jsonl",
+                "folder": base / "projects" / self.KEY / self.CHAT,
+                "history": base / "file-history" / self.CHAT}[what]
+
+    def assert_linked(self, profile):
+        """The profile has the shared chat: the same file, its folders through the store."""
+        self.assertTrue(os.path.samefile(self.part(profile, "chat"), self.store / f"{self.CHAT}.jsonl"))
+        self.assertEqual(Path(os.readlink(self.part(profile, "folder"))), self.store / self.CHAT)
+        self.assertEqual(Path(os.readlink(self.part(profile, "history"))), self.store / f"{self.CHAT}.file-history")
+
+    def assert_own(self, profile):
+        """The profile has the chat as a normal chat of its own."""
+        for what in ("chat", "folder", "history"):
+            self.assertFalse(self.part(profile, what).is_symlink(), what)
+        self.assertEqual(os.stat(self.part(profile, "chat")).st_nlink, 1)
+        self.assertEqual((self.part(profile, "folder") / "subagents/agent-1.jsonl").read_text(), "{}\n")
+        self.assertEqual((self.part(profile, "history") / "abc@v1").read_text(), "old text\n")
+
+    def assert_gone(self, profile):
+        for what in ("chat", "folder", "history"):
+            self.assertFalse(os.path.lexists(self.part(profile, what)), what)
 
     def test_continue_on_another_account_shares_then_resumes_there(self):
         (ok, msg), opened = self.run_action(jump.continue_on, ".claude-work")
         self.assertEqual((ok, msg), (True, "Reopened the chat in a terminal"))
-        self.assertIsNotNone(self.in_work())
+        self.assert_linked(".claude")
+        self.assert_linked(".claude-work")
+        self.assertEqual((self.part(".claude-work", "folder") / "subagents/agent-1.jsonl").read_text(), "{}\n")
+        self.assertEqual(self.store.stat().st_mode & 0o077, 0)  # only you can read the store
         work = (self.home / ".claude-work").resolve()
         self.assertEqual(opened, [(str(self.folder), f"CLAUDE_CONFIG_DIR={work} claude --resume {self.CHAT}")])
-        # already shared: no second share, just reopen
+        # already shared: just reopened
         (ok, _), opened = self.run_action(jump.continue_on, ".claude-work")
         self.assertTrue(ok)
-        self.assertEqual((self.home / "share-tool.log").read_text().count("share "), 1)
+        self.assertEqual(len(opened), 1)
+        self.assert_linked(".claude-work")
+
+    def test_continue_shares_with_that_account_only(self):
+        (self.home / ".claude-lab/sessions").mkdir(parents=True)
+        (ok, msg), _ = self.run_action(jump.continue_on, ".claude-work")
+        self.assertTrue(ok, msg)
+        self.assert_gone(".claude-lab")
+
+    def test_shared_chat_shows_as_shared(self):
+        self.run_action(jump.share)
+        r = cs.collect(self.home, self.home / "cache", with_tokens=False)
+        self.assertTrue(r["canShare"])
+        self.assertEqual(sorted(g["shareProfile"] for g in r["groups"]), [".claude", ".claude-work"])
+        shared = [c for g in r["groups"] for c in g["recent"] if c["sessionId"] == self.CHAT]
+        self.assertTrue(shared and all(c["shared"] for c in shared))
 
     def test_refuses_while_open_in_a_session(self):
-        write(self.home / ".claude-personal/sessions/50.json",
+        write(self.home / ".claude/sessions/50.json",
               {"pid": os.getpid(), "procStart": cs.proc_start_time(os.getpid()), "sessionId": self.CHAT,
                "kind": "interactive", "status": "idle"})
-        for action, args in ((jump.continue_on, (".claude-work",)), (jump.unshare, (".claude-personal",))):
+        for action, args in ((jump.continue_on, (".claude-work",)), (jump.share, ()), (jump.unshare, (".claude",))):
             (ok, msg), opened = self.run_action(action, *args)
             self.assertFalse(ok)
-            self.assertIn("open in a session on personal", msg)
+            self.assertIn("open in a session on default", msg)
             self.assertEqual(opened, [])
-        self.assertFalse((self.home / "share-tool.log").exists())
+        self.assertFalse(self.store.exists())
+        self.assert_own(".claude")
 
     def test_share_then_keep_only_on_one_account(self):
         (ok, msg), _ = self.run_action(jump.share)
-        self.assertEqual((ok, msg), (True, "Chat shared, no tokens used."))
-        self.assertIsNotNone(self.in_work())
-        (ok, msg), _ = self.run_action(jump.unshare, ".claude-personal")
-        self.assertEqual((ok, msg), (True, "This chat is now a normal chat of 'personal' again."))
-        self.assertIsNone(self.in_work())
-        self.assertIn(f"unshare {self.CHAT} personal", (self.home / "share-tool.log").read_text())
+        self.assertEqual((ok, msg), (True, "Chat shared: it's now on default, work."))
+        (ok, msg), _ = self.run_action(jump.share)
+        self.assertEqual((ok, msg), (True, "This chat is already shared with default, work."))
+        (ok, msg), _ = self.run_action(jump.unshare, ".claude")
+        self.assertEqual((ok, msg), (True, "This chat is now a normal chat of default again. Removed from work."))
+        self.assert_own(".claude")
+        self.assert_gone(".claude-work")
+        self.assertFalse(self.store.exists())
 
-    def test_unshare_needs_a_profile_the_tool_knows(self):
+    def test_keep_only_on_the_other_account(self):
+        self.run_action(jump.share)
+        (ok, msg), _ = self.run_action(jump.unshare, ".claude-work")
+        self.assertTrue(ok, msg)
+        self.assert_own(".claude-work")
+        self.assert_gone(".claude")
+        self.assertFalse(self.store.exists())
+
+    def test_unshare_needs_a_shared_chat_and_a_profile(self):
+        (ok, msg), _ = self.run_action(jump.unshare, ".claude")
+        self.assertEqual((ok, msg), (False, "This chat isn't shared"))
         (ok, msg), _ = self.run_action(jump.unshare, ".claude-nope")
-        self.assertFalse(ok)
-        self.assertIn("isn't a profile the shared-chats tool knows", msg)
+        self.assertEqual((ok, msg), (False, "No Claude profile called .claude-nope"))
+        self.assert_own(".claude")
 
     def test_different_chat_with_the_same_id_left_alone(self):
-        write(self.home / ".claude-work/projects/-repos-app" / f"{self.CHAT}.jsonl", "{}\n")  # its own file
+        write(self.part(".claude-work", "chat"), "{}\n")  # its own file
         (ok, msg), opened = self.run_action(jump.continue_on, ".claude-work")
         self.assertFalse(ok)
         self.assertIn("different chat with the same id", msg)
-
-    def test_tool_not_installed(self):
-        (self.home / ".claude-shared/profile-tools/shared-chats.sh").unlink()
         (ok, msg), _ = self.run_action(jump.share)
         self.assertFalse(ok)
-        self.assertIn("isn't installed", msg)
+        self.assertIn("Different chats have this id", msg)
+        (ok, msg), _ = self.run_action(jump.share, ".claude")  # this copy: the other profile is skipped
+        self.assertEqual((ok, msg), (False, "Not shared: work already has a different chat with the same id"))
+        self.assertEqual(self.part(".claude-work", "chat").read_text(), "{}\n")
+
+    def test_left_over_store_folder(self):
+        write(self.store / self.CHAT / "stale.txt", "?")
+        (ok, msg), _ = self.run_action(jump.share)
+        self.assertFalse(ok)
+        self.assertIn("is already there", msg)
+        self.assertFalse(self.part(".claude", "folder").is_symlink())
+
+    def test_chat_shared_into_another_store(self):
+        """Shared the same way by another tool, into its own store: handled where it is."""
+        other = self.home / "elsewhere" / self.KEY
+        other.mkdir(parents=True)
+        mine = self.home / ".claude"
+        os.link(self.part(".claude", "chat"), other / f"{self.CHAT}.jsonl")
+        for what, name in (("folder", self.CHAT), ("history", f"{self.CHAT}.file-history")):
+            os.rename(self.part(".claude", what), other / name)
+            os.symlink(other / name, self.part(".claude", what))
+        (self.home / ".claude-work/projects" / self.KEY).mkdir(parents=True)
+        os.link(other / f"{self.CHAT}.jsonl", self.part(".claude-work", "chat"))
+        os.symlink(other / self.CHAT, self.part(".claude-work", "folder"))
+        # a third account joins: linked to that store
+        (self.home / ".claude-lab/sessions").mkdir(parents=True)
+        (ok, msg), _ = self.run_action(jump.continue_on, ".claude-lab")
+        self.assertTrue(ok, msg)
+        self.assertEqual(Path(os.readlink(self.part(".claude-lab", "folder"))), other / self.CHAT)
+        self.assertEqual(Path(os.readlink(self.part(".claude-lab", "history"))), other / f"{self.CHAT}.file-history")
+        self.assertFalse(self.store.exists())
+        # and kept only on work: its folders come back from there
+        (ok, msg), _ = self.run_action(jump.unshare, ".claude-work")
+        self.assertTrue(ok, msg)
+        self.assert_own(".claude-work")
+        self.assert_gone(".claude")
+        self.assert_gone(".claude-lab")
+        self.assertFalse(other.exists())
+        self.assertTrue(mine.is_dir())
 
     def test_command_line(self):
         out = subprocess.run([sys.executable, "-I", str(CODE / "jump.py"), "--continue", self.CHAT],
                              capture_output=True, text=True)
         self.assertNotEqual(out.returncode, 0)  # --continue needs --profile
         self.assertIn("usage", out.stderr)
-
-
-@unittest.skipUnless((Path.home() / ".claude-shared/profile-tools/shared-chats.sh").is_file(),
-                     "the real shared-chats.sh isn't installed here")
-class RealShareToolTests(SharedChatActionTests):
-    """The same, with the real shared-chats.sh (copied into a temporary home)."""
-
-    def setUp(self):
-        super().setUp()
-        tool = self.home / ".claude-shared/profile-tools/shared-chats.sh"
-        tool.write_text((Path.home() / ".claude-shared/profile-tools/shared-chats.sh").read_text())
-
-    def test_share_then_keep_only_on_one_account(self):
-        (ok, msg), _ = self.run_action(jump.share)
-        self.assertTrue(ok, msg)
-        self.assertIn("Chat shared", msg)
-        store = self.home / ".claude-shared/chats/-repos-app" / f"{self.CHAT}.jsonl"
-        self.assertTrue(os.path.samefile(store, self.in_work()))
-        (ok, msg), _ = self.run_action(jump.unshare, ".claude-personal")
-        self.assertTrue(ok, msg)
-        self.assertIsNone(self.in_work())
-        self.assertFalse(store.exists())
-
-    def test_continue_on_another_account_shares_then_resumes_there(self):
-        (ok, msg), opened = self.run_action(jump.continue_on, ".claude-work")
-        self.assertTrue(ok, msg)
-        self.assertIsNotNone(self.in_work())
-        self.assertEqual(len(opened), 1)
 
 
 class RemoteShowTests(unittest.TestCase):

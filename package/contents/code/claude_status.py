@@ -775,9 +775,9 @@ class AgentCache:
 # ---------------------------------------------------------------- shared chats
 #
 # A chat shared across profiles is one transcript file hard-linked into each
-# profile's projects/ folder (as ~/.claude-shared/profile-tools/shared-chats.sh
-# does). Every row knows which conversation it shows (chatId: the transcript it
-# writes) and how that relates to a shared chat:
+# profile's projects/ folder (as sharing.py does). Every row knows which
+# conversation it shows (chatId: the transcript it writes) and how that
+# relates to a shared chat:
 #   - the shared chat itself, maybe through a background session of its own
 #     whose own file holds no messages (`continues`);
 #   - a copy: Claude forked the shared chat into a transcript of its own, which
@@ -1096,7 +1096,7 @@ def moved_to(chat, ctx):
 
 def chat_activity(chat, ids, ctx):
     """{profile: last time (ms) this chat was used there}, from the status-line
-    snapshots, the prompt history and shared-chats.sh's lock."""
+    snapshots, the prompt history and a sharing hook's lock."""
     seen = {}
     ids = [i for i in dict.fromkeys([chat, *ids]) if valid_id(i)]
     for p in ctx.profiles:
@@ -1269,13 +1269,19 @@ def link_shared_elsewhere(groups):
                 })
 
 
+# Hooks can hold a shared chat to one session at a time: the session using it
+# writes ~/.local/state/claude-shared-chats/lock-<id> on each prompt and tool
+# call. The widget doesn't install such hooks; where they are set up, their
+# lock tells it who has the chat open and where it was used last.
+
+
 def lock_path(session_id):
     state = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state") / "claude-shared-chats"
     return state / f"lock-{session_id}"
 
 
 def read_lock(session_id):
-    """(pid, start, config dir, mtime) from shared-chats.sh's lock
+    """(pid, start, config dir, mtime) from a shared chat's lock
     (`<pid>-<start> <config dir>`), or None."""
     if not valid_id(session_id):
         return None
@@ -1299,8 +1305,8 @@ def profile_of(folder, all_profiles):
 
 
 def shared_holder(session_id, all_profiles):
-    """Profile whose session holds a shared chat open, from shared-chats.sh's
-    lock, if that process is still alive."""
+    """Profile whose session holds a shared chat open, from its lock, if that
+    process is still alive."""
     lock = read_lock(session_id)
     if lock is None or not is_alive({"pid": lock[0], "procStart": lock[1]}):
         return None
@@ -1439,35 +1445,6 @@ def recent_chats(groups, ctx, limit=RECENT_CHATS):
             "profileDir": home.key,
             "shared": bool(shared),
         })
-
-
-# ---------------------------------------------------------------- shared-chat tool
-#
-# Sharing itself is done by ~/.claude-shared/profile-tools/shared-chats.sh
-# (the widget calls it through jump.py); it shares into every ~/.claude-<name>
-# folder with a .profile-name file and names profiles by that <name>.
-
-SHARE_TOOL = ".claude-shared/profile-tools/shared-chats.sh"
-SHARE_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
-
-
-def share_tool(home):
-    path = home / SHARE_TOOL
-    return path if path.is_file() else None
-
-
-def share_name(profile, home):
-    """The name shared-chats.sh knows this profile by (work for ~/.claude-work),
-    or None if it doesn't take part in sharing."""
-    try:
-        home_real = home.resolve()
-    except (OSError, RuntimeError):
-        home_real = home
-    real = profile.real
-    if real.parent != home_real or not real.name.startswith(".claude-") or not (real / ".profile-name").is_file():
-        return None
-    name = real.name[len(".claude-"):]
-    return name if SHARE_NAME.match(name) else None
 
 
 # ---------------------------------------------------------------- opening sessions
@@ -2015,9 +1992,8 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
                 "tokens": None,
                 # for "new chat": the profile folder name jump.py --new-chat takes
                 "chatProfile": named.key,
-                # for sharing a chat with this account (shared-chats.sh): its profile and name there
-                "shareProfile": next((p.key for p in members if share_name(p, home)), None),
-                "shareName": next((share_name(p, home) for p in members if share_name(p, home)), None),
+                # for sharing a chat with this account: the profile it goes to (jump.py --profile)
+                "shareProfile": named.key,
                 "projects": recent_projects([histories[p.real] for p in members], home),
             }
             try:
@@ -2085,7 +2061,7 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
         "counts": counts,
         "groups": groups,
         "dismissed": hidden,
-        "canShare": share_tool(home) is not None,  # the shared-chats tool is installed
+        "canShare": True,  # jump.py shares chats between this computer's profiles (sharing.py)
         "errors": errors,
     }
 

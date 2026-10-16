@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Sharing chats is built in:** with two or more Claude accounts on this computer, the share button on a finished chat (**Continue on …**, **Share with all accounts**, **Keep only on …**) works out of the box, with any profiles (`~/.claude`, `~/.claude-*`, extra config folders). It used to need the author's own script. A shared chat is one transcript hard-linked into each profile; its folders live in `~/.local/share/claude-status/shared-chats`. **Continue on …** now shares the chat with that account only. See "Sharing chats" in the README.
 - **New chats in VS Code:** the + next to an account now unfolds its folders under its name, each with a **VS Code** button next to it: VS Code opens the folder and its Claude extension a new chat there (on an SSH host through Remote-SSH). The button works on the account VS Code's Claude runs on (its `CLAUDE_CONFIG_DIR` setting, else `~/.claude`) and says so on the others. Clicking a folder still opens a terminal. Both on Plasma and GNOME.
 
 ## 1.3 (2026-10-15)

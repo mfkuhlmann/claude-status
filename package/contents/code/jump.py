@@ -16,8 +16,8 @@ a new chat (used by the Claude Status widget).
     python3 -I jump.py --share SESSION_ID                       (share it with every account)
     python3 -I jump.py --unshare SESSION_ID --profile PROFILE   (keep it only there)
 
-Sharing is done by ~/.claude-shared/profile-tools/shared-chats.sh; a chat
-that's open in a session isn't touched (it can be open in one at a time).
+Sharing is done by sharing.py; a chat that's open in a session isn't touched
+(it can be open in one at a time).
 
 `--stop` runs `claude stop <id>` for a background session: it's interrupted,
 its conversation is kept, and `claude attach <id>` resumes it.
@@ -53,6 +53,7 @@ from urllib.parse import urlencode
 sys.dont_write_bytecode = True  # no __pycache__ inside the installed widget
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # -I leaves the script dir off sys.path
 import claude_status as cs  # noqa: E402
+import sharing  # noqa: E402
 
 KWIN_SCRIPT = """\
 const want = %s;
@@ -850,21 +851,6 @@ def new_chat_remote_vscode(host, folder=""):
 # ---------------------------------------------------------------- shared chats
 
 
-def run_share_tool(home, args):
-    """Run shared-chats.sh; (ok, what it said)."""
-    tool = cs.share_tool(home)
-    if tool is None:
-        return False, "The shared-chats tool isn't installed (~/.claude-shared/profile-tools/shared-chats.sh)"
-    try:
-        # it works on $HOME: make that the home we're looking at
-        r = subprocess.run(["bash", str(tool), *args], cwd=str(home), stdin=subprocess.DEVNULL,
-                           env=dict(os.environ, HOME=str(home)), capture_output=True, text=True, timeout=60)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return False, f"shared-chats.sh didn't finish: {exc}"
-    text = " ".join((r.stdout.strip() or r.stderr.strip()).split())
-    return r.returncode == 0, text or f"shared-chats.sh stopped (exit {r.returncode})"
-
-
 def open_somewhere(home, extra_dirs, session_id):
     """Label of the profile where a running session has this chat open, or None."""
     profiles = cs.discover_profiles(home, extra_dirs)
@@ -887,20 +873,21 @@ def resume(home, extra_dirs, session_id, profile_dir=None):
 
 
 def continue_on(home, extra_dirs, session_id, profile_dir):
-    """Continue a chat on another account: share it if that account doesn't
-    have it yet, then reopen it there."""
+    """Continue a chat on another account: share it with that account if it
+    doesn't have it yet, then reopen it there."""
     target = profile_named(home, extra_dirs, profile_dir)
     if target is None:
         return False, f"No Claude profile called {profile_dir}"
     busy = open_somewhere(home, extra_dirs, session_id)
     if busy:
         return False, f"It's open in a session on {busy}. A chat can be open in one session at a time: exit that one first."
-    copies = [path for p in cs.discover_profiles(home, extra_dirs) for path in [cs.transcript_path(p, session_id)] if path]
+    profiles = cs.discover_profiles(home, extra_dirs)
+    copies = [path for p in profiles for path in [cs.transcript_path(p, session_id)] if path]
     if not copies:
         return False, "That chat has no transcript on this computer"
     there = cs.transcript_path(target, session_id)
     if there is None:
-        ok, message = run_share_tool(home, ["share", session_id])
+        ok, message = sharing.share(profiles, session_id, [target], sharing.store_root(home))
         if not ok:
             return False, message
         there = cs.transcript_path(target, session_id)
@@ -911,21 +898,25 @@ def continue_on(home, extra_dirs, session_id, profile_dir):
     return resume_chat(target, there, session_id, home)
 
 
-def share(home, extra_dirs, session_id, _profile_dir=None):
-    """Share a chat with every account (shared-chats.sh share)."""
-    return run_share_tool(home, ["share", session_id])
+def share(home, extra_dirs, session_id, profile_dir=None):
+    """Share a chat with every profile (from profile_dir's copy, if given)."""
+    busy = open_somewhere(home, extra_dirs, session_id)
+    if busy:
+        return False, f"It's open in a session on {busy}. Exit that session first."
+    profiles = cs.discover_profiles(home, extra_dirs)
+    return sharing.share(profiles, session_id, profiles, sharing.store_root(home),
+                         profile_named(home, extra_dirs, profile_dir))
 
 
 def unshare(home, extra_dirs, session_id, profile_dir):
     """Make a shared chat a normal chat of one profile again; the others lose it."""
     keep = profile_named(home, extra_dirs, profile_dir)
-    name = cs.share_name(keep, home) if keep else None
-    if not name:
-        return False, f"{profile_dir} isn't a profile the shared-chats tool knows"
+    if keep is None:
+        return False, f"No Claude profile called {profile_dir}"
     busy = open_somewhere(home, extra_dirs, session_id)
     if busy:
         return False, f"It's open in a session on {busy}. Exit that session first."
-    return run_share_tool(home, ["unshare", session_id, name])
+    return sharing.keep_only(cs.discover_profiles(home, extra_dirs), session_id, keep, sharing.store_root(home))
 
 
 def dismiss(home, extra_dirs, session_id):

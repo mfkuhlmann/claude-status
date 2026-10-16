@@ -833,7 +833,7 @@ PlasmoidItem {
 
     // ---------------------------------------------------------------- shared chats
     // Share a chat with your other accounts, continue it on one of them, or
-    // keep it on one only: jump.py runs ~/.claude-shared/profile-tools/shared-chats.sh.
+    // keep it on one only: jump.py does it (sharing.py).
 
     readonly property bool canShareChats: status !== null && status.canShare === true
     readonly property var shareAccounts: groups.filter(g => !!g.shareProfile)
