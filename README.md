@@ -33,7 +33,8 @@ As an editor tab (**Claude Status: Open in Editor Tab**):
   big one.
 - **Shared chats**: with two or more Claude accounts on this computer, a
   finished chat's share button continues it on another account (say, when
-  one hits its limit), shares it with all of them, or keeps it on one again.
+  one hits its limit), shares it with all of them, or keeps it on one again
+  (see "Good to know" for adding a second account).
 
 ## Your side, also over Remote-SSH
 
@@ -76,10 +77,13 @@ Code extension is set to, and the menu says so when that's another account.
 - Python 3.7+ on this computer (`python3`, or set `claudeStatus.pythonPath`)
   and on every SSH host you pick.
 - Linux on this computer for its running chats to show (they are found
-  through `/proc`); SSH hosts work from macOS too.
+  through `/proc`); SSH hosts work from macOS too. VS Code installed as a
+  package (`.deb`, `.rpm`, Arch's): a Flatpak VS Code runs extensions in a
+  sandbox that can't see Claude's sessions.
 - Claude Code. A plain `~/.claude` is all it needs; more profiles
   (`~/.claude-*`, `$CLAUDE_CONFIG_DIR`, `claudeStatus.extraConfigDirs`) are
-  picked up as well.
+  picked up as well. `claude` is found on PATH, in `~/.local/bin` and npm's,
+  bun's, Volta's, pnpm's and nvm's folders, or on your login shell's PATH.
 - For plan usage bars: `jq`, and the status-line snippet (next section).
 
 ## Plan usage bars
@@ -167,7 +171,15 @@ ask for it, the status-line change above and the links of the chats you share
   session at a time: the view won't share or unshare one that's open, so
   close it on one account before you resume it on another. Everything in the
   chat goes to the account that continues it. **Keep only on …** undoes it.
-  Chats on SSH hosts aren't shared from here.
+  **Continue on …** opens the chat like any other: in VS Code's terminal, or
+  your desktop's with `claudeStatus.openIn` = `system`. Chats on SSH hosts
+  aren't shared from here.
+- **A second account to share with** is a second Claude config folder logged
+  into a *different* Claude account (profiles on the same account count as
+  one): run `CLAUDE_CONFIG_DIR=~/.claude-work claude` once and log in there
+  with the other account. Sharing needs your Claude folders and
+  `~/.local/share` on one filesystem (hard links can't cross disks or
+  partitions); it checks first and says so otherwise.
 
 ## Development
 

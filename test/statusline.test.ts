@@ -30,6 +30,10 @@ test("the snippet goes right after input=$(cat), once, and comes out again", () 
   assert.equal(patchScript(patched, SNIPPET), patched);
   assert.equal(unpatchScript(patched), SCRIPT);
   assert.equal(patchScript("#!/bin/sh\necho hi\n", SNIPPET), null);
+  // an older copy (bash-only, say) is replaced by the current one
+  const older = patched.replace(/^\(\n[\s\S]*?^\) 2>\/dev\/null\n/m, "(\n  echo old $'\\t'\n) 2>/dev/null\n");
+  assert.notEqual(older, patched);
+  assert.equal(patchScript(older, SNIPPET), patched);
 });
 
 test("wrapped commands give back the previous command", () => {
