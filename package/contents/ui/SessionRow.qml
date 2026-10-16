@@ -19,7 +19,7 @@ RowLayout {
     readonly property string rowKey: (remoteHost ? remoteHost + "|" : "") + session.key
     readonly property bool confirmingStop: session.key !== "" && root.stopConfirmSession === rowKey
     // A finished chat on this computer can be shared, continued on another account
-    // or kept on one (shared-chats.sh); not while a session has it open.
+    // or kept on one (jump.py); not while a session has it open.
     readonly property bool canShare: root.canShareChats && !remoteHost && session.pid === null && session.state === "done"
                                      && !!session.chatId && root.shareAccounts.length >= 2
     readonly property bool confirmingKeepOnly: session.key !== "" && root.shareConfirm.key === rowKey
@@ -168,7 +168,7 @@ RowLayout {
                 PlasmaCore.ToolTipArea {
                     anchors.fill: parent
                     mainText: i18n("Continue on another account")
-                    subText: i18n("Share this chat with your other accounts (shared-chats.sh) and pick it up there, or keep it on one account only.")
+                    subText: i18n("Share this chat with your other accounts and pick it up there, or keep it on one account only.")
                 }
             }
             PlasmaComponents3.ToolButton {

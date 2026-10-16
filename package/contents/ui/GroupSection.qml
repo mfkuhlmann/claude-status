@@ -446,7 +446,7 @@ ColumnLayout {
                     PlasmaCore.ToolTipArea {
                         anchors.fill: parent
                         mainText: i18n("Continue on another account")
-                        subText: i18n("Share this chat with your other accounts (shared-chats.sh) and pick it up there, or keep it on one account only.")
+                        subText: i18n("Share this chat with your other accounts and pick it up there, or keep it on one account only.")
                     }
                 }
             }

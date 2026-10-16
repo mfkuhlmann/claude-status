@@ -73,7 +73,7 @@ export function buildSessionRow(ctx, session, {showProfile = false, remoteHost =
             shared: !!s.shared && !s.shared.forkOf,
         }));
         tips.add(share, ['Continue on another account',
-            'Share this chat with your other accounts (shared-chats.sh) and pick it up there, or keep it on one account only.']);
+            'Share this chat with your other accounts and pick it up there, or keep it on one account only.']);
         hoverButtons.push(share);
         line1.add_child(share);
     }
@@ -207,7 +207,7 @@ export function confirmBox(text, buttons) {
 }
 
 // Share a chat with your other accounts, continue it on one of them, or
-// keep it on one only (shared-chats.sh, through jump.py)
+// keep it on one only (jump.py)
 export function buildShareMenu(ctx, chat, rowKey) {
     const menu = column('claude-inline-menu', {x_expand: true});
     menu.add_child(label(chat.name, 'claude-menu-title'));

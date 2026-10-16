@@ -44,7 +44,7 @@ On GNOME (Ubuntu 26.04 and newer) it lives in the top bar: see [On GNOME](#on-gn
 
 - **SSH hosts:** pick hosts from your `~/.ssh/config`, and their Claude accounts, sessions, usage and recent chats join the dashboard. Nothing is installed on the host.
 - **Several profiles and accounts:** every `~/.claude` and `~/.claude-*` config folder is found automatically, including linked ones such as `~/.claude` → `~/.claude-work`.
-- **Shared chats:** a chat shared between profiles is listed once, where it runs, with a pointer from the other accounts.
+- **Share chats between accounts:** continue a finished chat on another account, e.g. when one hits its limit (see [Sharing chats](#sharing-chats)). A shared chat is listed once, where it runs, with a pointer from the other accounts.
 
 <p align="center"><img src="docs/screenshots/ssh-host.png" alt="An SSH host in the popup: its Claude account with pets, plan usage, sessions and recent chats" width="500"></p>
 
@@ -61,7 +61,7 @@ On GNOME (Ubuntu 26.04 and newer) it lives in the top bar: see [On GNOME](#on-gn
 - **Shared chats:** a chat shared across profiles (one transcript hard-linked into each profile) gets a **⇄ shared** tag. Its tooltip lists the profiles and, when known, which one has it open. It's listed once, under the account it runs on, or, once it's finished, the account it was used on last. Every other account it's shared with shows a short line pointing there (e.g. *⇄ my chat · on personal · Working*), and clicking it jumps to the chat.
   - When Claude forks a shared chat into a chat of its own (e.g. when a background session takes it over), that copy gets a **⇄ shared copy** tag: its new messages are only on that account. If the shared chat continued in the copy, the copy is listed instead of the chat, and the other accounts point to it (*copy on personal*).
   - A shared chat's tokens appear in every profile it's shared with, since a transcript doesn't record which account paid; the token tooltip shows how much that is.
-  - **Share from the widget** (only with the [shared-chat tool](#shared-chat-tool)): hover a finished chat (or a recent one) and press its share button: **Continue on work** (shares it if needed and opens it there with `claude --resume`, the quick way on when one account hits its limit), **Share with all accounts**, or **Keep only on personal…** (asks first). Nothing is done to a chat while a session has it open.
+  - **Share from the widget:** hover a finished chat (or a recent one) and press its share button: **Continue on work** (shares it if needed and opens it there with `claude --resume`, the quick way on when one account hits its limit), **Share with all accounts**, or **Keep only on personal…** (asks first). Nothing is done to a chat while a session has it open. See [Sharing chats](#sharing-chats).
 - **Pets:**
   - a chat's pet stays the same pet, with the same color and on the same spot, as long as the chat is in the list, even while it finishes and runs again; a new chat's pet lines up on the right. When the chat leaves the list (you hide it, its terminal closes, or it gets old), the pet waves and walks off. Up to 5 pets per account (configurable); with more chats, the ones that need you get a pet first, and "+N" counts the rest.
   - the big Clawd (93 poses) takes the news that isn't about one chat's pet, such as limit resets. While Claude works he types, thinks, tests, reviews, debugs or talks to his rubber duck; at ≥ 90% of the 5-hour limit he's mind-blown or overheated now and then, and at 100% he shows a **429**. When things are quiet he wanders, takes coffee breaks and has hobbies (reading, music, gaming, gardening, stargazing, …), dresses for the season and greets you on holidays.
@@ -177,11 +177,27 @@ The same dashboard as a GNOME Shell extension: the ✳ in the top bar, the popup
 | Panel icon | Left-click opens the popup, middle-click refreshes. Right-click: *Refresh*, *Show removed sessions again*, *Open Usage Page on claude.ai*, and the settings. |
 | The big Clawd | Click his headline (*… needs you*) to go to that chat. Click him to pet him, double-click to make him dance, drag him around. |
 | A session's name | Jumps to the session: its terminal tab, its VS Code window, or a terminal attached to the background job. |
-| Hovering a session | ■ stops a background session, － hides a finished one, and the share button shares a chat (with the shared-chat tool). |
+| Hovering a session | ■ stops a background session, － hides a finished one, and the share button shares a chat with your other accounts. |
 | A chat's pet | Opens its chat. |
 | **+** next to an account | Lists the account's recent folders and **Choose folder…** (an SSH host's: its home folder instead). Click one for a new chat in a terminal there, or its **VS Code** button to start it in VS Code. |
 | *Recent chats* | Unfolds the account's older conversations; click one to reopen it. |
 | Server button at the top | Picks the SSH hosts to show. |
+
+## Sharing chats
+
+With two or more Claude accounts on this computer (say `~/.claude` and `~/.claude-work`), a finished chat can move between them. Hover it (or one of your recent chats), press its share button and pick:
+
+- **Continue on work:** shares the chat with that account and reopens it there with `claude --resume`. The quick way on when one account hits its limit.
+- **Share with all accounts:** the chat shows up in every account's past chats.
+- **Keep only on personal…** (asks first): the chat becomes a normal chat of that account again; the others lose it.
+
+A shared chat is one transcript file hard-linked into each profile's `projects/<project>/` folder, so whichever account continues it writes to the same file and nothing is copied. Its subagent folder and undo checkpoints move to `~/.local/share/claude-status/shared-chats/<project>/`, and each profile links to them. Sharing uses no tokens and installs no hooks or settings.
+
+- **One session at a time.** Two sessions on one chat would both write to its transcript. The widget doesn't share or unshare a chat while a session has it open, but nothing stops you from resuming it on a second account yourself: close it on one before you open it on the other.
+- **The chat goes with it.** Everything in a chat is sent to whichever account continues it, work content included.
+- If Claude forks a shared chat (e.g. when a background session takes it over), the fork is a chat of its own on that account, tagged **⇄ shared copy**.
+- Chats on SSH hosts can't be shared from here.
+- To undo sharing, use **Keep only on …**. Before you delete `~/.local/share/claude-status`, keep each shared chat on one account: their subagent folders and undo checkpoints are in there.
 
 ## Settings
 
@@ -224,7 +240,7 @@ If the panel keeps showing the old version, restart Plasma's shell: `systemctl -
    This removes the widget and takes the snippet out of your status-line scripts (it shows the change and keeps a backup).
 3. Optionally delete the widget's cache: `rm -rf ~/.cache/claude-widget`.
 
-The widget never changes Claude Code's own files, so nothing else is left behind.
+Apart from the chats you share, the widget never changes Claude Code's own files, so nothing else is left behind. Shared chats stay shared: use **Keep only on …** first if you want them back as normal chats (see [Sharing chats](#sharing-chats)).
 
 ## Troubleshooting
 
@@ -257,7 +273,8 @@ Issues and ideas are welcome on the [issue tracker](https://github.com/wzaielamr
 - **Plan limits and context** come from the JSON that Claude Code passes to the status line (`rate_limits`, `context_window`). `statusline-snippet.sh` saves a copy of it per session, under the profile's real folder name. Older copies filed under a link's name only count if they're newer than the link: before it was last switched, that name meant another profile.
 - **Token totals** are read incrementally from transcripts (at most once a minute, cached per profile in `~/.cache/claude-widget/tokens-*.json`). Lines are de-duplicated per message. Linked folders are followed, so a shared chat's subagents count too.
 - **Subagents** are read from `projects/<project>/<session>/subagents/agent-*.jsonl` and their `.meta.json`. An agent is done when its transcript ends with its final answer, running otherwise, and stopped if its session ended first.
-- **Shared chats** are transcripts with the same file (inode) in several profiles. Each row knows which conversation it shows: a background session that took a chat over counts as that chat while its own transcript holds no messages; a transcript that starts with a shared chat's history is a copy of it. Claude's own rule decides whether a chat moved on (its last `continued-in` record comes after its last finished reply). Where a finished shared chat was used last comes from the status-line snapshots, the prompt history (`history.jsonl`) and the shared-chat tool's lock file.
+- **Shared chats** are transcripts with the same file (inode) in several profiles. Each row knows which conversation it shows: a background session that took a chat over counts as that chat while its own transcript holds no messages; a transcript that starts with a shared chat's history is a copy of it. Claude's own rule decides whether a chat moved on (its last `continued-in` record comes after its last finished reply). Where a finished shared chat was used last comes from the status-line snapshots, the prompt history (`history.jsonl`) and, if you use hooks that hold a shared chat to one session, their lock file (`~/.local/state/claude-shared-chats/lock-<id>`).
+- **Sharing** (`package/contents/code/sharing.py`): hard links the transcript into each profile and the store, moves the chat's `projects/<project>/<id>/` and `file-history/<id>/` folders into the store and symlinks them back. A chat shared the same way by another tool, into a store of its own, is found through its links and handled where it is.
 - **Jumping to a session** (`package/contents/code/jump.py`) finds the window through the session's process tree. Konsole tabs are switched over Konsole's D-Bus API. A window is raised with a short KWin script loaded over D-Bus, which is how one app can bring another's window to the front on Plasma Wayland. VS Code conversations open through the Claude extension's `vscode://anthropic.claude-code/open?session=…` link. Background jobs are attached under the same config-folder name as the running background service, because Claude keys that service by the folder's *name*. Terminals and VS Code windows the widget opens get a systemd scope of their own (like the apps KDE starts), so restarting Plasma doesn't kill the chats running in them.
 - **SSH hosts** (`package/contents/code/remote.py`): `ssh -o BatchMode=yes … <host> python3 -I - --remote`, with `claude_status.py` on stdin. In `--remote` mode every row also carries the command that opens it on the host, and the JSON follows a marker line, so login scripts that print a banner can't break it. Connections are shared through `ControlMaster` sockets in `~/.cache/claude-widget/ssh`.
 
@@ -267,7 +284,8 @@ Issues and ideas are welcome on the [issue tracker](https://github.com/wzaielamr
 
 - The widget reads the files Claude Code writes, on your computer and on the SSH hosts you pick (through your own SSH login). Besides those it reads only your `~/.ssh/config` host list, the desktop settings it needs (default terminal, sound theme, Do Not Disturb) and process and window info (`/proc`, Konsole, tmux, KWin) to find where a session runs; of a Claude process's environment it keeps only `CLAUDE_CONFIG_DIR` and `HOME`. To know which account VS Code's Claude uses, it reads `CLAUDE_CONFIG_DIR` from VS Code's settings (`claudeCode.environmentVariables`) or from VS Code's environment, nothing else. It never opens credential files.
 - It doesn't call any Anthropic API and sends no data anywhere. *Open Usage Page on claude.ai* just opens that page in your browser.
-- Everything it stores lives in `~/.cache/claude-widget`, which only your user can read (mode 0700). Its JSON output replaces account ids with a one-way hash.
+- Everything it stores lives in `~/.cache/claude-widget`, plus shared chats' folders in `~/.local/share/claude-status/shared-chats`; only your user can read either (mode 0700). Its JSON output replaces account ids with a one-way hash.
+- It changes Claude Code's files only when you share a chat: it links the chat into your other profiles, or out of them again.
 
 ## Limitations
 
@@ -301,7 +319,8 @@ package/                  the widget (what install.sh installs)
 └── contents/
     ├── ui/               QML: main.qml (data, actions), FullRepresentation.qml (popup), GroupSection.qml (account),
     │                     SessionRow.qml, PetStrip.qml + Pet.qml (pets), …
-    ├── code/             Python: claude_status.py (status), jump.py (actions), remote.py (SSH), notify_sound.py
+    ├── code/             Python: claude_status.py (status), jump.py (actions), sharing.py (shared chats), remote.py (SSH),
+    │                     notify_sound.py
     ├── config/           settings schema and pages
     └── pets/             Clawd artwork (clawd-pet, MIT)
 gnome/                    the GNOME Shell extension: extension/ (GJS: indicator.js, logic.js, ui/, prefs.js), build.sh, tests/
@@ -322,17 +341,13 @@ I built this widget to make my own day-to-day work with Claude Code easier. With
 
 This is an independent, personal project. It is not affiliated with, endorsed by, sponsored by or otherwise connected to Anthropic, PBC, and building it does not make me a representative of Anthropic in any way. "Claude" and "Claude Code" are trademarks of Anthropic, PBC; they appear here only to describe what the widget works with.
 
-The widget only reads files that Claude Code writes on your own computer. It does not call any Anthropic API, and it sends no data anywhere. The *Open Usage Page on claude.ai* menu entry just opens that page in your browser.
+The widget only reads files that Claude Code writes on your own computer, and changes them only when you share a chat between your accounts. It does not call any Anthropic API, and it sends no data anywhere. The *Open Usage Page on claude.ai* menu entry just opens that page in your browser.
 
 ### AI-assisted development
 
 The code, tests and documentation in this repository were largely generated with an AI coding assistant (Claude Code, using Anthropic's Claude models) under my direction. I defined what the widget should do, made the design decisions, and reviewed and tested the result on my own machine (Fedora, KDE Plasma 6).
 
 As with any open-source code, please read it before you run it. It is provided under the MIT License, "as is", without warranty of any kind.
-
-## Shared-chat tool
-
-The widget shows chats shared across profiles by any tool that hard-links one transcript into several profiles. Its share buttons call `~/.claude-shared/profile-tools/shared-chats.sh share <id>` / `unshare <id> <profile>`, which is the author's own tool and not part of this repository; without it the buttons don't appear.
 
 ## Credits
 

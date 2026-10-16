@@ -184,7 +184,7 @@ function buildRecentLine(ctx, chat, remoteHost) {
             chatId: chat.sessionId, name: chat.name, profileDir: chat.profileDir, shared: chat.shared,
         }));
         ctx.tips.add(share, ['Continue on another account',
-            'Share this chat with your other accounts (shared-chats.sh) and pick it up there, or keep it on one account only.']);
+            'Share this chat with your other accounts and pick it up there, or keep it on one account only.']);
         share.opacity = 0;
         line.connect('notify::hover', () => {
             share.opacity = line.hover ? 255 : 0;
