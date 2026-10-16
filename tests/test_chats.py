@@ -143,8 +143,10 @@ class World(unittest.TestCase):
             env["CLAUDE_CONFIG_DIR"] = str(env_dir)
         child = subprocess.Popen(["sleep", "120"], env=env)
         self.children.append(child)
-        for _ in range(100):
-            if cs.proc_start_time(child.pid):
+        # Popen returns before exec has set up the new environment, and
+        # /proc/<pid>/environ reads empty until it has
+        for _ in range(500):
+            if cs.proc_start_time(child.pid) and cs.process_config_dir(child.pid):
                 break
             time.sleep(0.01)
         return child.pid, cs.proc_start_time(child.pid)

@@ -7,6 +7,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -551,9 +552,11 @@ class SwitchedLinkTests(unittest.TestCase):
             env["CLAUDE_CONFIG_DIR"] = str(home / ".claude")
             child = subprocess.Popen(["sleep", "60"], env=env)
             try:
-                for _ in range(100):
-                    if cs.proc_start_time(child.pid):
+                # Popen returns before exec has set up the new environment
+                for _ in range(500):
+                    if cs.proc_start_time(child.pid) and cs.process_config_dir(child.pid):
                         break
+                    time.sleep(0.01)
                 start = cs.proc_start_time(child.pid)
                 write(home / f".claude-work/sessions/{child.pid}.json",
                       {"pid": child.pid, "procStart": start, "sessionId": "s1", "kind": "interactive", "status": "busy"})
