@@ -209,7 +209,8 @@ Right-click the widget → **Configure Claude Status…**
 
 | Setting | Default | |
 |---|---|---|
-| Check every | 2000 ms | How often sessions are checked (five times less often while nothing runs and the popup is closed) |
+| Check every | 2000 ms | How often sessions are checked |
+| …while nothing runs | 10000 ms | How often while no chat runs and the popup is closed (never more often than above; opening the popup checks at once) |
 | Extra config dirs | – | Claude config folders besides `~/.claude` and `~/.claude-*` |
 | Notify | both on | When a session needs input, and when it finishes a turn… |
 | …if the turn took at least | 30 s | …that ran at least this long |

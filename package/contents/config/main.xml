@@ -11,6 +11,12 @@
       <min>1000</min>
       <max>60000</max>
     </entry>
+    <entry name="idlePollInterval" type="Int">
+      <label>Milliseconds between status checks while nothing runs and the popup is closed (never more often than pollInterval)</label>
+      <default>10000</default>
+      <min>1000</min>
+      <max>300000</max>
+    </entry>
     <entry name="extraConfigDirs" type="String">
       <label>Extra Claude config dirs, comma separated (~/.claude and ~/.claude-* are found automatically)</label>
       <default></default>

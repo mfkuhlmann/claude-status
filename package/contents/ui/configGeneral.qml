@@ -9,6 +9,7 @@ KCM.SimpleKCM {
     id: page
 
     property alias cfg_pollInterval: pollInterval.value
+    property alias cfg_idlePollInterval: idlePollInterval.value
     property alias cfg_extraConfigDirs: extraDirs.text
     property alias cfg_notifyWaiting: notifyWaiting.checked
     property alias cfg_notifyDone: notifyDone.checked
@@ -30,6 +31,7 @@ KCM.SimpleKCM {
     // Plasma passes the defaults in too; declaring them avoids
     // "SimpleKCM does not have a property called cfg_…Default" warnings.
     property int cfg_pollIntervalDefault
+    property int cfg_idlePollIntervalDefault
     property string cfg_extraConfigDirsDefault
     property bool cfg_notifyWaitingDefault
     property bool cfg_notifyDoneDefault
@@ -71,6 +73,16 @@ KCM.SimpleKCM {
             from: 1000
             to: 60000
             stepSize: 500
+        }
+
+        QQC2.SpinBox {
+            id: idlePollInterval
+            Kirigami.FormData.label: i18n("…while nothing runs (ms):")
+            from: 1000
+            to: 300000
+            stepSize: 1000
+            QQC2.ToolTip.visible: hovered
+            QQC2.ToolTip.text: i18n("While no chat runs and the popup is closed. Never more often than above; opening the popup checks at once.")
         }
 
         QQC2.TextField {

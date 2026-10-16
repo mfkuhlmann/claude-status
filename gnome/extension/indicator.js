@@ -53,7 +53,8 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         this._pets = new Pets(this);
 
         this._settingsIds = [
-            this._settings.connect('changed::poll-interval', () => this._restartPollTimer()),
+            ...['poll-interval', 'idle-poll-interval'].map(key =>
+                this._settings.connect(`changed::${key}`, () => this._restartPollTimer())),
             this._settings.connect('changed::remote-poll-seconds', () => this._restartRemoteTimer()),
             this._settings.connect('changed::ssh-hosts', () => this._onHostsChanged()),
             ...['extra-config-dirs', 'keep-done-hours', 'recent-chats', 'show-tokens'].map(key =>
@@ -138,7 +139,8 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
     // Less often while nothing runs and the menu is closed (L.pollInterval)
     _pollInterval() {
         const overall = this._status ? L.overall(this.allGroups) : '';
-        return L.pollInterval(this._settings.get_int('poll-interval'), overall, this.menu.isOpen);
+        return L.pollInterval(this._settings.get_int('poll-interval'), this._settings.get_int('idle-poll-interval'),
+            overall, this.menu.isOpen);
     }
 
     _adjustPollTimer() {

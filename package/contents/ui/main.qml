@@ -329,13 +329,15 @@ PlasmoidItem {
     }
 
     // Every pollInterval while a chat runs (here or on a host) or the popup is
-    // open; with nothing running, five times as long. An idle panel then costs
-    // a fifth, and a chat that starts still shows within seconds (opening the
-    // popup checks at once). The GNOME extension does the same (logic.js).
+    // open; with nothing running, every idlePollInterval (never more often).
+    // An idle panel then costs less, and a chat that starts still shows
+    // within seconds (opening the popup checks at once). The GNOME extension
+    // does the same (logic.js).
     readonly property bool quiet: status !== null && overall === "none" && !root.expanded
+    readonly property int pollMs: Math.max(1000, Plasmoid.configuration.pollInterval)
 
     Timer {
-        interval: Math.max(1000, Plasmoid.configuration.pollInterval) * (root.quiet ? 5 : 1)
+        interval: root.quiet ? Math.max(root.pollMs, Plasmoid.configuration.idlePollInterval) : root.pollMs
         running: true
         repeat: true
         triggeredOnStart: true
