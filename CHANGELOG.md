@@ -1,7 +1,8 @@
 # Changelog
 
-## Unreleased
+## 1.5.0 (2026-10-17)
 
+- The Plasma widget, the GNOME extension and the VS Code extension now share their version numbers: all three are 1.5.0.
 - **Works beyond the author's setup:**
   - Opening, attaching, stopping and starting chats no longer need `claude` on the desktop session's PATH: it's also found in `~/.local/bin`, npm's, bun's, Volta's, pnpm's and nvm's folders, or on your login shell's PATH (nvm installs get their Node too). When it's nowhere, the message says what to do.
   - SSH hosts work with any home folder: the shared-connection sockets moved to `$XDG_RUNTIME_DIR` (a home folder name over 24 characters made their path too long, and every check failed).
