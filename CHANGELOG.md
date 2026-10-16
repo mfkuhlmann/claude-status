@@ -1,9 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.1.3
 
-- Sharing chats between your accounts is built in (backend synced from the
-  widget): with two or more Claude accounts on this computer, a finished
+- Sharing chats between your accounts is built in (the widget 1.4's
+  backend): with two or more Claude accounts on this computer, a finished
   chat's share button offers **Continue on …**, **Share with all accounts**
   and **Keep only on …**, with any profiles and no extra tool. It used to
   appear only where the author's own sharing script was installed.
