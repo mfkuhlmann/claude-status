@@ -388,17 +388,40 @@ class TokenTests(Fixture):
         self.assertEqual(today["messages"], 3)
 
 
+# The shells a status-line script may be written for (on Debian and Ubuntu, sh is dash)
+SHELLS = [s for s in ("sh", "dash", "bash", "zsh") if shutil.which(s)]
+
+
 @unittest.skipUnless(shutil.which("jq"), "the status-line snippet needs jq")
 class SnippetTests(unittest.TestCase):
     def run_snippet(self, payload, cfg):
-        with tempfile.TemporaryDirectory() as tmp:
-            script = 'input=$(cat)\n' + (ROOT / "statusline-snippet.sh").read_text() + 'echo ok\n'
-            env = {**os.environ, "HOME": tmp, "XDG_CACHE_HOME": tmp + "/cache", "CLAUDE_CONFIG_DIR": cfg}
-            out = subprocess.run(["bash", "-c", script], input=json.dumps(payload), env=env,
-                                 capture_output=True, text=True, check=True)
-            files = sorted((str(p.relative_to(tmp)), p.stat().st_mode & 0o777)
-                           for p in Path(tmp).rglob("*") if p.is_file())
-            return out.stdout, out.stderr, files
+        """Runs the snippet in every shell here; all must do the same."""
+        results = set()
+        for shell in SHELLS:
+            with tempfile.TemporaryDirectory() as tmp:
+                script = 'input=$(cat)\n' + (ROOT / "statusline-snippet.sh").read_text() + 'echo ok\n'
+                env = {**os.environ, "HOME": tmp, "XDG_CACHE_HOME": tmp + "/cache", "CLAUDE_CONFIG_DIR": cfg}
+                out = subprocess.run([shell, "-c", script], input=json.dumps(payload), env=env,
+                                     capture_output=True, text=True, check=True)
+                files = tuple(sorted((str(p.relative_to(tmp)), p.stat().st_mode & 0o777)
+                                     for p in Path(tmp).rglob("*") if p.is_file()))
+                results.add((out.stdout, out.stderr, files))
+        self.assertEqual(len(results), 1, f"the shells disagree: {results}")
+        out, err, files = results.pop()
+        return out, err, list(files)
+
+    def test_plain_posix_sh(self):
+        """No bash-only syntax: the snippet also goes into #!/bin/sh scripts."""
+        code = [line for line in (ROOT / "statusline-snippet.sh").read_text().splitlines()
+                if not line.lstrip().startswith("#")]
+        for bashism in ("[[", "<<<", "<(", "$'", "==", "function ", "local "):
+            self.assertFalse(any(bashism in line for line in code), bashism)
+
+    def test_quotes_and_spaces_in_paths(self):
+        payload = {"session_id": "s3", "transcript_path": "/h/it's a $(dir)/.claude-personal/projects/-x/s3.jsonl"}
+        out, err, files = self.run_snippet(payload, "/x/.claude-work")
+        self.assertEqual((out, err), ("ok\n", ""))
+        self.assertEqual([f for f, _ in files], ["cache/claude-widget/statusline/.claude-personal/s3.json"])
 
     def test_writes_snapshot_per_profile(self):
         out, err, files = self.run_snippet({"session_id": "abc-123", "rate_limits": {}}, "/x/.claude-work/")
@@ -695,6 +718,64 @@ class OldPythonTests(unittest.TestCase):
                 self.assertNotIn(node.attr, newer_methods, f"line {node.lineno}: .{node.attr} needs a newer Python")
                 owner = getattr(node.value, "id", "")
                 self.assertNotIn((owner, node.attr), newer_calls, f"line {node.lineno}: {owner}.{node.attr} needs a newer Python")
+
+class StatusCheckCostTests(unittest.TestCase):
+    """What a status check (every 2 s) no longer redoes each time."""
+
+    def test_day_sums_give_the_same_totals(self):
+        from datetime import date, timedelta
+        now = 1_800_000_000
+
+        def day(n):
+            return (date.fromtimestamp(now) - timedelta(days=n)).isoformat()
+        messages = {"a": [day(0), "opus", 1, 2, 3, 4, 0], "b": [day(0), "opus", 5, 6, 7, 8, 1],
+                    "c": [day(3), "sonnet", 10, 20, 0, 0, 0], "d": [day(9), "opus", 99, 99, 99, 99, 0]}
+        from_messages = cs.token_totals([{"messages": messages}], now)  # a cache saved before the sums
+        from_days = cs.token_totals([{"messages": {}, "days": cs.day_totals(messages), "scannedAt": 5, "daysAt": 5}],
+                                    now)
+        self.assertEqual(from_days, from_messages)
+        # sums an older version didn't update when it rescanned: the messages count
+        stale = cs.token_totals([{"messages": messages, "days": {}, "scannedAt": 6, "daysAt": 5}], now)
+        self.assertEqual(stale, from_messages)
+        self.assertEqual((from_days["today"]["messages"], from_days["today"]["shared"]), (2, 5 + 6 + 7 + 8))
+        self.assertEqual(from_days["week"]["messages"], 3)  # day 9 is past the week
+
+    def test_vscode_looked_up_at_most_every_30_seconds(self):
+        calls = []
+        real = cs.vscode_lookup
+        cs.vscode_lookup = lambda home: calls.append(home) or (True, "/x/.claude-work")
+        self.addCleanup(setattr, cs, "vscode_lookup", real)
+        saved = os.environ.get("XDG_CONFIG_HOME")
+        self.addCleanup(lambda: os.environ.__setitem__("XDG_CONFIG_HOME", saved) if saved is not None
+                        else os.environ.pop("XDG_CONFIG_HOME", None))
+        with tempfile.TemporaryDirectory() as tmp:
+            home, cache = Path(tmp), Path(tmp) / "cache"
+            os.environ["XDG_CONFIG_HOME"] = str(home / ".config")
+            self.assertEqual(cs.cached_vscode_lookup(home, cache, 1000), (True, "/x/.claude-work"))
+            self.assertEqual(cs.cached_vscode_lookup(home, cache, 1010), (True, "/x/.claude-work"))
+            self.assertEqual(len(calls), 1)
+            settings = home / ".config/Code/User/settings.json"
+            settings.parent.mkdir(parents=True)
+            settings.write_text("{}")  # a setting changed: looked up again at once
+            cs.cached_vscode_lookup(home, cache, 1011)
+            cs.cached_vscode_lookup(home, cache, 1012)
+            self.assertEqual(len(calls), 2)
+            cs.cached_vscode_lookup(home, cache, 1011 + cs.VSCODE_CHECK_INTERVAL)
+            self.assertEqual(len(calls), 3)
+            # VS Code just installed (a new file in a folder on PATH): looked up again at once
+            saved_path = os.environ.get("PATH")
+            self.addCleanup(os.environ.__setitem__, "PATH", saved_path or "")
+            bin_dir = home / "bin"
+            bin_dir.mkdir()
+            os.environ["PATH"] = str(bin_dir)
+            cs.cached_vscode_lookup(home, cache, 1050)
+            cs.cached_vscode_lookup(home, cache, 1051)
+            looked = len(calls)
+            time.sleep(0.05)
+            (bin_dir / "code").write_text("")
+            cs.cached_vscode_lookup(home, cache, 1052)
+            self.assertEqual(len(calls), looked + 1)
+
 
 if __name__ == "__main__":
     unittest.main()

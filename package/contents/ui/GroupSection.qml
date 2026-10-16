@@ -51,8 +51,8 @@ ColumnLayout {
                 anchors.fill: parent
                 mainText: i18n("New chat on %1", section.group.title)
                 subText: section.remoteHost
-                         ? i18n("Lists this account's folders on %1: open a terminal with a new Claude chat in one (over ssh), or start it in VS Code.", section.remoteHost)
-                         : i18n("Lists this account's recent folders: open a terminal with a new Claude chat in one, or start it in VS Code.")
+                         ? i18n("Lists this account's folders on %1: start a new Claude chat in one, in a terminal (over ssh) or in VS Code.", section.remoteHost)
+                         : i18n("Lists this account's recent folders: start a new Claude chat in one, in a terminal or in VS Code.")
             }
         }
         Item {
@@ -66,15 +66,17 @@ ColumnLayout {
         }
     }
 
-    // New chat (the + above): the account's folders. A folder opens a
-    // terminal with Claude there; its VS Code button starts the chat in VS
-    // Code's Claude extension, on the account that runs on (root.vscodeHint).
+    // New chat (the + above): the account's folders. One switch at the top
+    // says where a chat starts (kept between uses): a terminal with Claude in
+    // the folder you click, or VS Code's Claude extension, which runs on one
+    // account only (greyed out on the others: root.vscodeHint).
     Rectangle {
         id: newChatBox
         readonly property bool open: root.newChatGroup === section.groupKey
         readonly property var folders: open ? root.newChatFolders(section.group, section.remoteHost) : []
         readonly property bool vscodeShown: root.vscodeInstalled
         readonly property bool vscodeHere: !!section.group.vscodeHere
+        readonly property bool inVscode: vscodeShown && vscodeHere && Plasmoid.configuration.newChatInVscode
         readonly property string vscodeTip: open ? root.vscodeHint(section.group, section.remoteHost) : ""
 
         visible: open
@@ -104,35 +106,60 @@ ColumnLayout {
                 elide: Text.ElideRight
             }
 
+            // Where it starts: Terminal | VS Code, for every folder below
+            RowLayout {
+                visible: newChatBox.vscodeShown
+                Layout.fillWidth: true
+                Layout.leftMargin: Kirigami.Units.smallSpacing
+                spacing: Kirigami.Units.smallSpacing
+
+                PlasmaComponents3.Label {
+                    text: i18n("Open in:")
+                    opacity: 0.7
+                }
+                PlasmaComponents3.ToolButton {
+                    icon.name: "utilities-terminal"
+                    text: i18n("Terminal")
+                    display: PlasmaComponents3.AbstractButton.TextBesideIcon
+                    checked: !newChatBox.inVscode
+                    onClicked: Plasmoid.configuration.newChatInVscode = false
+
+                    PlasmaCore.ToolTipArea {
+                        anchors.fill: parent
+                        mainText: i18n("New chats in a terminal")
+                        subText: i18n("A terminal opens with Claude in the folder you click.")
+                    }
+                }
+                VscodeButton {
+                    here: newChatBox.vscodeHere
+                    checked: newChatBox.inVscode
+                    hint: newChatBox.vscodeTip
+                    onClicked: Plasmoid.configuration.newChatInVscode = true
+                }
+                Item {
+                    Layout.fillWidth: true
+                }
+            }
+
             Repeater {
                 model: newChatBox.folders.length
-                delegate: RowLayout {
+                delegate: PlasmaComponents3.ItemDelegate {
                     id: folderRow
                     required property int index
                     readonly property var folder: newChatBox.folders[index] || ({ path: "", short: "", newChatCommand: "" })
                     Layout.fillWidth: true
-                    spacing: Kirigami.Units.smallSpacing
-
-                    PlasmaComponents3.ItemDelegate {
-                        Layout.fillWidth: true
-                        icon.name: folderRow.folder.short === "~" ? "user-home" : "folder"
-                        text: folderRow.folder.short === "~" ? i18n("Home folder (~)") : folderRow.folder.short
-                        enabled: !section.remoteHost || !!folderRow.folder.newChatCommand
-                        onClicked: {
-                            if (section.remoteHost) {
-                                root.newChatGroup = ""
-                                root.remoteOpen(section.remoteHost, folderRow.folder.newChatCommand)
-                            } else {
-                                root.newChat(section.group.chatProfile, folderRow.folder.path)
-                            }
+                    icon.name: folderRow.folder.short === "~" ? "user-home" : "folder"
+                    text: folderRow.folder.short === "~" ? i18n("Home folder (~)") : folderRow.folder.short
+                    enabled: !section.remoteHost || newChatBox.inVscode || !!folderRow.folder.newChatCommand
+                    onClicked: {
+                        if (section.remoteHost && newChatBox.inVscode) {
+                            root.remoteNewChatVscode(section.remoteHost, folderRow.folder.path)
+                        } else if (section.remoteHost) {
+                            root.newChatGroup = ""
+                            root.remoteOpen(section.remoteHost, folderRow.folder.newChatCommand)
+                        } else {
+                            root.newChat(section.group.chatProfile, folderRow.folder.path, newChatBox.inVscode)
                         }
-                    }
-                    VscodeButton {
-                        visible: newChatBox.vscodeShown
-                        here: newChatBox.vscodeHere
-                        hint: newChatBox.vscodeTip
-                        onClicked: section.remoteHost ? root.remoteNewChatVscode(section.remoteHost, folderRow.folder.path)
-                                                      : root.newChat(section.group.chatProfile, folderRow.folder.path, true)
                     }
                 }
             }
@@ -145,23 +172,12 @@ ColumnLayout {
             }
 
             // Any folder, picked in the folder dialog (not on an SSH host)
-            RowLayout {
+            PlasmaComponents3.ItemDelegate {
                 visible: !section.remoteHost
                 Layout.fillWidth: true
-                spacing: Kirigami.Units.smallSpacing
-
-                PlasmaComponents3.ItemDelegate {
-                    Layout.fillWidth: true
-                    icon.name: "folder-open"
-                    text: i18n("Choose folder…")
-                    onClicked: root.newChatChoosingFolder(section.group.chatProfile)
-                }
-                VscodeButton {
-                    visible: newChatBox.vscodeShown
-                    here: newChatBox.vscodeHere
-                    hint: newChatBox.vscodeTip
-                    onClicked: root.newChatChoosingFolder(section.group.chatProfile, true)
-                }
+                icon.name: "folder-open"
+                text: i18n("Choose folder…")
+                onClicked: root.newChatChoosingFolder(section.group.chatProfile, newChatBox.inVscode)
             }
         }
     }

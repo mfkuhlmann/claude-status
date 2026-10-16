@@ -108,7 +108,9 @@
 .claude-menu-title { font-weight: bold; padding: 0 6px 4px; }
 .claude-menu-item { padding: 4px 8px; border-radius: 7px; }
 .claude-menu-row { spacing: 4px; }
-.claude-vscode-button { font-size: 0.9em; }
+.claude-switch-button { font-size: 0.9em; }
+.claude-switch-button:checked { background-color: rgba(127, 127, 127, 0.28); }
+.claude-open-in { padding: 0 6px 4px; }
 .claude-menu-item:hover, .claude-menu-item:focus { background-color: rgba(127, 127, 127, 0.22); }
 .claude-confirm {
     margin: 4px 0;

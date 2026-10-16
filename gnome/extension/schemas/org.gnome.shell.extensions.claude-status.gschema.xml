@@ -81,5 +81,10 @@
       <default>true</default>
       <summary>Show token totals from local transcripts</summary>
     </key>
+    <key name="new-chat-in-vscode" type="b">
+      <default>false</default>
+      <summary>New chats from the + start in VS Code</summary>
+      <description>Instead of a terminal; set with the switch at the top of the new-chat list.</description>
+    </key>
   </schema>
 </schemalist>

@@ -225,10 +225,34 @@ class ActionTests(FakeSSH):
         self.assertEqual(out.stdout.strip(), "done")
         self.assertEqual(self.calls()[-1], ["lab", command])
 
-    def test_control_socket_folder_is_private(self):
-        d = remote.control_dir()
-        self.assertEqual(d.stat().st_mode & 0o777, 0o700)
-        self.assertIn(f"ControlPath={d}/%C", remote.ssh_options())
+    def test_control_socket_folder_is_short_and_only_yours(self):
+        saved = (os.environ.get("XDG_RUNTIME_DIR"), remote.SOCKET_TMP)
+
+        def restore():
+            os.environ.pop("XDG_RUNTIME_DIR", None)
+            if saved[0] is not None:
+                os.environ["XDG_RUNTIME_DIR"] = saved[0]
+            remote.SOCKET_TMP = saved[1]
+        self.addCleanup(restore)
+        with tempfile.TemporaryDirectory(dir="/tmp") as tmp:
+            os.environ["XDG_RUNTIME_DIR"] = tmp
+            d = remote.control_dir()
+            self.assertEqual(d, Path(tmp) / "claude-status-ssh")
+            self.assertEqual(d.stat().st_mode & 0o777, 0o700)
+            self.assertIn(f"ControlPath={d}/%C", remote.ssh_options())
+            self.assertLessEqual(len(f"{d}/{'0' * 40}.{'x' * 16}"), 107)  # what ssh binds
+            # no runtime folder: one in /tmp, unless it's a link (or someone else's)
+            del os.environ["XDG_RUNTIME_DIR"]
+            remote.SOCKET_TMP = tmp
+            self.assertEqual(remote.control_dir(), Path(tmp) / f"claude-status-ssh-{os.getuid()}")
+            os.rmdir(str(remote.control_dir()))
+            os.symlink(tmp, str(Path(tmp) / f"claude-status-ssh-{os.getuid()}"))
+            self.assertIsNone(remote.control_dir())
+            self.assertNotIn("ControlMaster=auto", remote.ssh_options())
+            # a runtime folder so long that the socket path wouldn't fit: none either
+            os.environ["XDG_RUNTIME_DIR"] = str(Path(tmp) / ("r" * 60))
+            os.mkdir(os.environ["XDG_RUNTIME_DIR"])
+            self.assertIsNone(remote.control_dir())
 
 
 if __name__ == "__main__":

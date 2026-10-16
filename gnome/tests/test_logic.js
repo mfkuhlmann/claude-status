@@ -39,6 +39,14 @@ test('counts and overall state', () => {
     eq(L.overall([group([session('c', 'done')])]), 'idle', 'finished but its process runs');
 });
 
+test('polls less often while nothing runs', () => {
+    eq(L.pollInterval(2000, 'none', false), 10000, 'idle panel');
+    eq(L.pollInterval(2000, 'none', true), 2000, 'menu open');
+    for (const state of ['idle', 'working', 'waiting'])
+        eq(L.pollInterval(2000, state, false), 2000, state);
+    eq(L.pollInterval(200, 'working', false), 1000, 'at least a second');
+});
+
 test('headline and summary', () => {
     eq(L.headline(null, 'boom', {}), 'Status unavailable');
     eq(L.headline(null, '', {}), 'Looking for your chats…');

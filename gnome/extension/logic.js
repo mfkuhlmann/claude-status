@@ -32,6 +32,17 @@ export function overall(groups, c = counts(groups)) {
         ? 'idle' : 'none';
 }
 
+// Milliseconds between status checks: the setting while a chat runs (here or
+// on a host) or the menu is open; with nothing running, five times as long.
+// An idle panel then costs a fifth, and a chat that starts still shows within
+// seconds (the menu opening checks at once).
+export const QUIET_POLL_FACTOR = 5;
+
+export function pollInterval(settingMs, overallState, menuOpen) {
+    const ms = Math.max(1000, settingMs);
+    return overallState === 'none' && !menuOpen ? ms * QUIET_POLL_FACTOR : ms;
+}
+
 // The accounts of the hosts that answered, each marked with its host
 export function remoteGroups(shownHosts, remote) {
     const out = [];

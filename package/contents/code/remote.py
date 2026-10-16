@@ -21,6 +21,7 @@ import json
 import os
 import re
 import shlex
+import stat
 import subprocess
 import sys
 import time
@@ -96,17 +97,41 @@ def ssh_hosts(path=None):
 # ---------------------------------------------------------------- talking to a host
 
 
+SOCKET_TMP = "/tmp"
+SOCKET_DIR_MAX = 49  # a socket path may have 107 characters; ssh adds 58 (/%C and a temporary suffix)
+
+
 def control_dir():
-    d = cs.cache_dir(Path.home()) / "ssh"
-    cs.private_dir(d)
+    """Folder for ssh's shared connections (one per host), or None to go
+    without. Short on purpose: under ~/.cache a long home folder name made
+    the socket path too long. $XDG_RUNTIME_DIR (/run/user/<uid>) is short and
+    private; else a folder in /tmp that only you own. The VS Code extension
+    uses the same folder (sshControl.ts), so both share the connections."""
+    runtime = os.environ.get("XDG_RUNTIME_DIR", "")
+    if os.path.isabs(runtime) and os.path.isdir(runtime):
+        d = Path(runtime) / "claude-status-ssh"
+    else:
+        d = Path(SOCKET_TMP) / f"claude-status-ssh-{os.getuid()}"
+    if len(str(d)) > SOCKET_DIR_MAX:
+        return None
+    try:
+        d.mkdir(mode=0o700, exist_ok=True)
+        st = os.lstat(str(d))
+        if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid():
+            return None  # a link, or someone else's: no sockets there
+        if st.st_mode & 0o077:
+            os.chmod(str(d), 0o700)
+    except OSError:
+        return None
     return d
 
 
 def ssh_options(batch=True):
     """Options for every connection: batch mode (never ask, never hang), keep
     one connection per host open for reuse, no X11/agent forwarding."""
-    opts = ["-o", "ControlMaster=auto", "-o", f"ControlPath={control_dir()}/%C", "-o", "ControlPersist=300",
-            "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=3"]
+    d = control_dir()
+    opts = ["-o", "ControlMaster=auto", "-o", f"ControlPath={d}/%C", "-o", "ControlPersist=300"] if d else []
+    opts += ["-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=3"]
     if batch:
         opts += ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "ForwardX11=no", "-o", "ForwardAgent=no"]
     return opts

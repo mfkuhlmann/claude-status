@@ -328,8 +328,14 @@ PlasmoidItem {
         }
     }
 
+    // Every pollInterval while a chat runs (here or on a host) or the popup is
+    // open; with nothing running, five times as long. An idle panel then costs
+    // a fifth, and a chat that starts still shows within seconds (opening the
+    // popup checks at once). The GNOME extension does the same (logic.js).
+    readonly property bool quiet: status !== null && overall === "none" && !root.expanded
+
     Timer {
-        interval: Math.max(1000, Plasmoid.configuration.pollInterval)
+        interval: Math.max(1000, Plasmoid.configuration.pollInterval) * (root.quiet ? 5 : 1)
         running: true
         repeat: true
         triggeredOnStart: true
@@ -541,7 +547,12 @@ PlasmoidItem {
     // (GroupSection.qml). A folder opens a terminal with Claude there; its
     // VS Code button starts the chat in VS Code's Claude extension instead.
     property string newChatGroup: ""   // group key of the account whose folders are open
-    onExpandedChanged: if (!root.expanded) newChatGroup = ""
+    onExpandedChanged: {
+        if (!root.expanded)
+            newChatGroup = ""
+        else
+            refresh()  // it may have been checked a while ago (see quiet)
+    }
 
     function toggleNewChat(groupKey) {
         newChatGroup = newChatGroup === groupKey ? "" : groupKey

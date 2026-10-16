@@ -124,6 +124,25 @@ def store_paths(sharers, key, chat_id, root):
     return paths
 
 
+def device(path):
+    """The filesystem (st_dev) a path is on, or would be on: that of its
+    nearest folder that exists."""
+    for p in (path, *path.parents):
+        try:
+            return os.stat(str(p)).st_dev
+        except OSError:
+            continue
+    return None
+
+
+def elsewhere(path, places):
+    """Labels of the places (label, path) on another filesystem than path:
+    hard links can't cross filesystems (another disk, partition or btrfs
+    subvolume)."""
+    here = device(path)
+    return [label for label, p in places if device(p) != here]
+
+
 def link_into(link, stored):
     """A profile's hard link to the transcript, or symlink to a folder."""
     link.parent.mkdir(parents=True, exist_ok=True)
@@ -152,6 +171,13 @@ def share(profiles, chat_id, into, root, source=None):
     sharers = [p for p, _ in chat]
     have = {p.real for p in sharers}
     store = store_paths(sharers, key, chat_id, root)
+    # Checked first, so nothing is left half-done
+    apart = elsewhere(path, [("the shared-chat folder", store[TRANSCRIPT])] +
+                      [(q.label, in_profile(q, key, chat_id, TRANSCRIPT)) for q in into if q.real not in have])
+    if apart:
+        return False, (f"Can't share it: {', '.join(apart)} {'is' if len(apart) == 1 else 'are'} on another disk or "
+                       f"partition than this chat, and a shared chat is one file linked into each account. "
+                       f"Keep the Claude folders and {store[TRANSCRIPT].parent.parent} on one filesystem")
     old_umask = os.umask(0o077)  # the store holds chats: only you can read it
     try:
         if not present(store[TRANSCRIPT]):
