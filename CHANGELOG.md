@@ -1,7 +1,8 @@
 # Changelog
 
-## Unreleased
+## 1.6.0
 
+- The same version as the widget and the GNOME extension: all three are 1.6.0.
 - **Stop idle chats:** a chat in a terminal whose turn is over gets the ■
   stop button too (it asks first). Claude quits as when its terminal closes:
   the terminal stays open, and the chat is kept and moves to Recent chats. One
