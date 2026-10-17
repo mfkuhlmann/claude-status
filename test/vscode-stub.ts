@@ -58,7 +58,10 @@ export const commands = {
     return disposable();
   },
   executeCommand: async () => undefined,
+  getCommands: async () => [] as string[],
 };
+
+export const extensions = { onDidChange: disposable };
 
 export const env = { remoteName: undefined as string | undefined, openExternal: async () => true };
 

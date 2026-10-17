@@ -5,6 +5,7 @@
 import * as crypto from "node:crypto";
 import * as vscode from "vscode";
 import type { Actions } from "./actions";
+import { setReopenIn } from "./config";
 import type { Dashboard } from "./dashboard";
 import type { HostMessage, WebviewMessage } from "./shared/types";
 
@@ -115,6 +116,12 @@ export class ViewHost implements vscode.WebviewViewProvider, vscode.Disposable {
         break;
       case "open":
         void this.actions.open(m.chat);
+        break;
+      case "openInClaudeCode":
+        void this.actions.openInClaudeCode(m.chat);
+        break;
+      case "setReopenIn":
+        void setReopenIn(m.where);
         break;
       case "stop":
         void this.actions.stop(m.chat);

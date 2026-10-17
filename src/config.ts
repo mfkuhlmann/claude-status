@@ -4,7 +4,7 @@
 import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
-import type { ViewSettings } from "./shared/types";
+import type { ReopenIn, ViewSettings } from "./shared/types";
 
 function cfg() {
   return vscode.workspace.getConfiguration("claudeStatus");
@@ -25,6 +25,7 @@ export const settings = {
   sshHosts: () => (cfg().get<string[]>("sshHosts", []) ?? []).map((h) => String(h).trim()).filter(Boolean),
   includeCurrentRemote: () => cfg().get<boolean>("includeCurrentRemote", true),
   openIn: () => (cfg().get<string>("openIn", "vscode") === "system" ? "system" : "vscode"),
+  reopenIn: (): ReopenIn => (cfg().get<string>("reopenIn", "terminal") === "claudeCode" ? "claudeCode" : "terminal"),
   notifyWaiting: () => cfg().get<boolean>("notifyWaiting", true),
   notifyDone: () => cfg().get<boolean>("notifyDone", true),
   notifyDoneMinSeconds: () => num("notifyDoneMinSeconds", 30, 0, 3600),
@@ -46,6 +47,7 @@ export function viewSettings(): ViewSettings {
     chatPets: num("chatPets", 5, 0, 8),
     showTokens: settings.showTokens(),
     recentChats: settings.recentChats(),
+    reopenIn: settings.reopenIn(),
   };
 }
 
@@ -71,6 +73,10 @@ export function statusArgs(): string[] {
 
 export async function setSshHosts(hosts: string[]): Promise<void> {
   await cfg().update("sshHosts", hosts, vscode.ConfigurationTarget.Global);
+}
+
+export async function setReopenIn(where: ReopenIn): Promise<void> {
+  await cfg().update("reopenIn", where, vscode.ConfigurationTarget.Global);
 }
 
 export function cacheDir(): string {

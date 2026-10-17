@@ -11,7 +11,7 @@ import { configDirArgs, setSshHosts, settings } from "./config";
 import { claudePanelAvailable, localPanelProfileKey, openPanelChat } from "./claudePanel";
 import type { Dashboard } from "./dashboard";
 import { canRaiseWindows, isGnome } from "./desktop";
-import { allGroups, groupLabel, shellQuote } from "./shared/model";
+import { allGroups, canEndChat, cliInstalled, groupLabel, shellQuote } from "./shared/model";
 import type { ChatRef, Group } from "./shared/types";
 import { localAncestors, type Place, type Terminals } from "./terminals";
 
@@ -119,6 +119,34 @@ export class Actions {
     this.report(answer, "Couldn't open the chat");
   }
 
+  // A recent chat, reopened in a Claude Code tab (the switch above the recent
+  // chats). This window does it when it has the chat's folder open, on the
+  // chat's machine and account; else VS Code opens that folder (the window
+  // that has it, or a new one; a host's through Remote-SSH) and the chat
+  // there (jump.py, which also refuses an account Claude Code isn't on).
+  async openInClaudeCode(chat: ChatRef): Promise<void> {
+    if (this.demoOnly()) return;
+    const id = chat.chatId || chat.sessionId;
+    const host = chat.host;
+    const here = host ? true : chat.profileDir === localPanelProfileKey();
+    if (here && chat.cwd && this.windowHasFolder(chat.cwd, host)) {
+      await vscode.env.openExternal(vscode.Uri.parse(CHAT_LINK + encodeURIComponent(id)));
+      return;
+    }
+    const answer = host
+      ? await this.backend.action("jump.py", ["--remote-resume-vscode", host, id, ...(chat.cwd ? ["--cwd", chat.cwd] : [])])
+      : await this.backend.action("jump.py", ["--resume", id, "--profile", chat.profileDir, "--vscode", ...configDirArgs()]);
+    this.report(answer, "Couldn't open the chat in Claude Code");
+  }
+
+  // This window is on the machine of a chat (here, or the host it's connected
+  // to) and has its folder open
+  private windowHasFolder(folder: string, host?: string): boolean {
+    const sameMachine = host ? host === this.dash.currentHost : !vscode.env.remoteName;
+    const want = folder.replace(/\/+$/, "");
+    return sameMachine && (vscode.workspace.workspaceFolders ?? []).some((f) => f.uri.path.replace(/\/+$/, "") === want);
+  }
+
   // The process ids from pid up to init on the host (to find its terminal here)
   private async remoteAncestors(host: string, pid: number): Promise<Set<number>> {
     const script = `p=${Math.trunc(pid)}; out=; while [ -n "$p" ] && [ "$p" -gt 1 ]; do out="$out $p"; p=$(ps -o ppid= -p "$p" | tr -d ' '); done; echo $out`;
@@ -130,16 +158,27 @@ export class Actions {
 
   // ---------------------------------------------------------------- stop / remove
 
+  // A background session (`claude stop`), or an idle chat in a terminal: its
+  // claude quits as when the terminal closes (the backend looks again first,
+  // and leaves one that got back to work)
   async stop(chat: ChatRef): Promise<void> {
     if (this.demoOnly()) return;
+    const idleChat = canEndChat(chat);
     const choice = await vscode.window.showWarningMessage(
       `Stop “${chat.name}”?`,
-      { modal: true, detail: "It's interrupted; its conversation is kept, and `claude attach` resumes it." },
+      {
+        modal: true,
+        detail: idleChat
+          ? "It's idle, so nothing is interrupted: Claude quits and its terminal stays open. The chat is kept; reopen it from Recent chats."
+          : "It's interrupted; its conversation is kept, and `claude attach` resumes it.",
+      },
       "Stop",
     );
     if (choice !== "Stop") return;
     let answer: Answer;
-    if (chat.host) {
+    if (chat.host && idleChat) {
+      answer = await this.backend.action("remote.py", ["--end", chat.host, chat.sessionId, ...(chat.profileDir ? [chat.profileDir] : [])]);
+    } else if (chat.host) {
       if (!chat.stopCommand) return this.fail(`${chat.name} can't be stopped from here.`);
       answer = await this.backend.action("remote.py", ["--run", chat.host, chat.stopCommand]);
     } else {
@@ -253,6 +292,7 @@ export class Actions {
       if (!group) return;
     }
     host = group.host;
+    if (!this.cliOn(host)) return this.newChatWithoutCli(group);
     if (settings.openIn() === "system" && !host) return this.newChatSystem(group);
     const home = group.homeChatCommand ?? "";
     const chat = chatCommandOf(home);
@@ -293,6 +333,29 @@ export class Actions {
       command = inFolder(folder.trim(), chat);
     }
     if (command) await this.terminals.run(`new|${Date.now()}`, "new chat", command, this.place(host));
+  }
+
+  // There's a claude command on the machine (here, or that host) for chats in a terminal
+  private cliOn(host?: string): boolean {
+    const state = this.dash.state();
+    return cliInstalled(host ? state.hosts.find((h) => h.name === host)?.result : state.status);
+  }
+
+  // No claude command there: a terminal can't start one, so the menu says so
+  // and offers the Claude Code chat tab where that works
+  private async newChatWithoutCli(group: Group): Promise<void> {
+    const where = group.host ? `on ${group.host}` : "on this computer";
+    const why = `Claude Code's claude command isn't installed ${where}: it isn't on PATH, in ~/.local/bin, npm's or nvm's folders, nor on the login shell's PATH.`;
+    const panel = await this.panelChoice(group);
+    if (!panel.length) return this.fail(`Can't start a chat in a terminal: ${why}`);
+    type Item = vscode.QuickPickItem & { panel?: true };
+    const items: Item[] = [
+      { label: "In a terminal", kind: vscode.QuickPickItemKind.Separator },
+      { label: "$(warning) No claude command", description: where, detail: why },
+      ...panel,
+    ];
+    const pick = await vscode.window.showQuickPick(items, { placeHolder: `New chat on ${group.title} in…` });
+    if (pick?.panel) return this.panelChat();
   }
 
   private async newChatSystem(group: Group): Promise<void> {

@@ -1,4 +1,4 @@
-import { petKeyOf, reasonText, stateText, usageLevel } from "../../src/shared/model";
+import { canEndChat, petKeyOf, reasonText, stateText, usageLevel } from "../../src/shared/model";
 import type { Session } from "../../src/shared/types";
 import { post } from "../env";
 import { pets } from "../pets";
@@ -121,12 +121,21 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
             />
           ) : null}
           {stop ? (
-            <IconButton
-              icon="stop"
-              label="Stop this background session…"
-              title="Stop this background session. Asks first; the conversation is kept and claude attach resumes it."
-              onClick={() => post({ type: "stop", chat })}
-            />
+            canEndChat(s) ? (
+              <IconButton
+                icon="stop"
+                label="Stop this chat…"
+                title="Stop this chat. Asks first; Claude quits and its terminal stays open. The chat is kept and shows under Recent chats."
+                onClick={() => post({ type: "stop", chat })}
+              />
+            ) : (
+              <IconButton
+                icon="stop"
+                label="Stop this background session…"
+                title="Stop this background session. Asks first; the conversation is kept and claude attach resumes it."
+                onClick={() => post({ type: "stop", chat })}
+              />
+            )
           ) : null}
         </div>
       ) : null}

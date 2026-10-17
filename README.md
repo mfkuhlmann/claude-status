@@ -72,6 +72,22 @@ folders or any other, or as a Claude Code chat tab in this window. The chat
 tab is offered for accounts on the window's own machine (this computer, or the
 Remote-SSH host); it starts in the window's folder, on the account the Claude
 Code extension is set to, and the menu says so when that's another account.
+Without the `claude` command on that machine, the menu says so and offers only
+the chat tab.
+
+**Recent chats** reopen in a terminal (`claude --resume`) or in a Claude Code
+tab: the **Terminal | Claude Code tab** switch above them picks which (kept in
+`claudeStatus.reopenIn`). A Claude Code tab opens in the window that has the
+chat's folder: this one, another, or a new one (an SSH host's chat: connected
+to it). A half is greyed out where it can't work, and its tooltip says why: no
+`claude` command on the chat's machine (the chats then reopen in Claude Code),
+or Claude Code not installed or on another account.
+
+**Stopping** (■, asks first): a background session is stopped with
+`claude stop`. An idle chat in a terminal (its turn is over, nothing runs) can
+be stopped too: Claude quits as when its terminal closes, the terminal stays
+open, and the chat moves to Recent chats. One that got back to work meanwhile
+isn't touched. Chats in a Claude Code tab are closed there instead.
 
 ## Requirements
 
@@ -133,6 +149,7 @@ code --install-extension claude-status-*.vsix
 | `claudeStatus.pollInterval` | `2000` | ms between checks of this computer while the view is open (10 s when hidden) |
 | `claudeStatus.extraConfigDirs` | `[]` | More Claude Code config folders |
 | `claudeStatus.openIn` | `vscode` | `system`: open chats in your desktop's terminal app instead |
+| `claudeStatus.reopenIn` | `terminal` | `claudeCode`: reopen recent chats in a Claude Code tab (the switch above them) |
 | `claudeStatus.notifyWaiting` / `notifyDone` | `true` | Notifications; turn them off here if the Plasma or GNOME widget notifies too |
 | `claudeStatus.notifyDoneMinSeconds` | `30` | Shortest turn that gets a "finished" notification |
 | `claudeStatus.notifySound`, `soundVolume`, `soundWaiting`, `soundDone`, `soundFailed` | | Sounds (sound-theme names or files) |

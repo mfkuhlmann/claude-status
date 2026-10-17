@@ -829,6 +829,39 @@ button:focus-visible {
   transform: rotate(90deg);
 }
 
+/* Where they reopen: Terminal | Claude Code tab */
+.open-in {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 2px 0 2px 16px;
+}
+
+.open-in-half {
+  color: inherit;
+  font-family: inherit;
+}
+
+.open-in-half[aria-pressed="true"] {
+  border-color: var(--vscode-focusBorder, #0078d4);
+  background: var(--cs-hover);
+}
+
+.open-in-half.unavailable,
+.recent-item.unavailable .recent-name {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.recent-item.unavailable .recent-name:hover {
+  text-decoration: none;
+}
+
+.open-in-why {
+  margin: 0 0 2px 16px;
+}
+
 .recent-list {
   margin: 0;
   padding: 0 0 0 16px;

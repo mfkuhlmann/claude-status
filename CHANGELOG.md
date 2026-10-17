@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+- **Stop idle chats:** a chat in a terminal whose turn is over gets the ■
+  stop button too (it asks first). Claude quits as when its terminal closes:
+  the terminal stays open, and the chat is kept and moves to Recent chats. One
+  that got back to work meanwhile isn't touched. Also on SSH hosts. Not for
+  chats in a Claude Code tab, where it would show as an error.
+- **Recent chats in a Claude Code tab:** a **Terminal | Claude Code tab**
+  switch above an account's recent chats (`claudeStatus.reopenIn`). In Claude
+  Code, a chat reopens in the window that has its folder (opened if needed;
+  an SSH host's through Remote-SSH).
+- **Terminal or Claude Code, whichever is there:** without the `claude`
+  command on a chat's machine, Terminal is greyed out and recent chats reopen
+  in Claude Code; **New chat** says so and offers the chat tab. Claude Code
+  tab is greyed out when the extension isn't there or runs on another
+  account. The tooltips say why.
+- From the widget's backend: `claude_status.py` reports whether the `claude`
+  command is there; `jump.py --stop` stops idle chats, and `jump.py --resume
+  … --vscode` reopens a chat in VS Code.
+
 ## 1.5.0
 
 - From now on this extension has the same version as the Plasma widget and the GNOME

@@ -2,7 +2,7 @@
 // extension does the work (open, stop, share, menus); the webview only says
 // which chat, as a ChatRef.
 
-import { petKeyOf } from "../../src/shared/model";
+import { canEndChat, petKeyOf } from "../../src/shared/model";
 import type { ChatRef, Group, RecentChat, Session, SharedPointer, Status } from "../../src/shared/types";
 import type { StageChat } from "../pets/api";
 
@@ -28,6 +28,7 @@ export function chatRefOf(s: Session, host?: string): ChatRef {
     pid: s.pid,
     cwd: s.cwd,
     kind: s.kind,
+    state: s.state,
     jobId: s.jobId,
     openCommand: s.openCommand ?? null,
     stopCommand: s.stopCommand ?? null,
@@ -117,10 +118,10 @@ export function canRemove(s: Session): boolean {
   return s.state === "done" && s.pid === null;
 }
 
-// Background jobs with a running process (`claude stop`); a host's come with
-// the command that stops them there
+// Background jobs with a running process (`claude stop`; a host's come with
+// the command that stops them there), and idle chats in a terminal (canEndChat)
 export function canStop(s: Session, host?: string): boolean {
-  return !!s.stopCommand || (!host && !!s.jobId && s.pid !== null);
+  return canEndChat(s) || !!s.stopCommand || (!host && !!s.jobId && s.pid !== null);
 }
 
 export function isBackground(s: Session): boolean {

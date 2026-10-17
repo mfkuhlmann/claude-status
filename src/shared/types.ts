@@ -133,6 +133,9 @@ export interface Group {
   sharedHere: SharedPointer[];
   recent: RecentChat[];
   homeChatCommand?: string;
+  // VS Code's Claude runs on this account (the backend's view of it; an SSH
+  // host's: its ~/.claude)
+  vscodeHere?: boolean;
   // Set by the extension for an SSH host's accounts
   host?: string;
 }
@@ -148,6 +151,8 @@ export interface Status {
   errors: string[];
   host?: string;
   claude?: string;
+  // Whether the claude command is on this machine (missing when unsure)
+  cli?: { installed: boolean };
 }
 
 export interface Counts {
@@ -175,6 +180,16 @@ export interface ViewSettings {
   chatPets: number;
   showTokens: boolean;
   recentChats: number;
+  reopenIn: ReopenIn; // where recent chats reopen (the switch above them)
+}
+
+export type ReopenIn = "terminal" | "claudeCode";
+
+// The Claude Code extension in this window: whether it's there, and the
+// account (profile key) it runs on for this computer's chats
+export interface ClaudeCodeInfo {
+  available: boolean;
+  profileKey: string | null;
 }
 
 // Everything the webview draws
@@ -185,6 +200,7 @@ export interface ViewState {
   settings: ViewSettings;
   demo: boolean;
   platformNote: string; // e.g. local sessions need Linux
+  claudeCode: ClaudeCodeInfo;
   actionError: string;
   actionInfo: string;
   now: number;
@@ -203,6 +219,7 @@ export interface ChatRef {
   pid?: number | null;
   cwd?: string;
   kind?: string;
+  state?: SessionState;
   jobId?: string | null;
   openCommand?: string | null;
   stopCommand?: string | null;
@@ -213,6 +230,8 @@ export interface ChatRef {
 export type WebviewMessage =
   | { type: "ready" }
   | { type: "open"; chat: ChatRef }
+  | { type: "openInClaudeCode"; chat: ChatRef }
+  | { type: "setReopenIn"; where: ReopenIn }
   | { type: "stop"; chat: ChatRef }
   | { type: "dismiss"; chat: ChatRef }
   | { type: "share"; chat: ChatRef }

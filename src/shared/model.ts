@@ -1,7 +1,7 @@
 // The dashboard's derived values, shared by the extension (status bar,
 // notifications) and the webview. Ported from the widget's main.qml.
 
-import type { Counts, Group, HostState, LimitWindow, Overall, Session, Status, ViewState } from "./types";
+import type { ClaudeCodeInfo, Counts, Group, HostState, LimitWindow, Overall, ReopenIn, Session, Status, ViewState } from "./types";
 
 // This computer's accounts, then the hosts' (each marked with its host).
 export function allGroups(status: Status | null, hosts: HostState[]): Group[] {
@@ -10,6 +10,53 @@ export function allGroups(status: Status | null, hosts: HostState[]): Group[] {
     if (h.result) for (const g of h.result.groups) out.push({ ...g, host: h.name });
   }
   return out;
+}
+
+// An idle chat in a terminal can be stopped too (besides background
+// sessions): its claude quits and the chat is kept. Not one in the Claude Code
+// extension: it would show that as an error in its tab.
+export function canEndChat(s: { kind?: string; entrypoint?: string; state?: string; pid?: number | null }): boolean {
+  return s.kind === "interactive" && s.entrypoint !== "claude-vscode" && s.state === "idle" && s.pid != null;
+}
+
+// The claude command is on the machine a status came from (when unsure: no
+// answer yet, or an older backend, it counts as there)
+export function cliInstalled(status: Pick<Status, "cli"> | null | undefined): boolean {
+  return status?.cli?.installed !== false;
+}
+
+// The Claude Code extension can reopen this account's chats: it's in this
+// window, on the account its settings give it (an SSH host's: the host's
+// ~/.claude, through Remote-SSH)
+export function claudeCodeHere(g: Pick<Group, "host" | "vscodeHere" | "profileKeys">, info: ClaudeCodeInfo): boolean {
+  if (!info.available) return false;
+  return g.host ? !!g.vscodeHere : !!info.profileKey && g.profileKeys.includes(info.profileKey);
+}
+
+// Where recent chats reopen: in a Claude Code tab when you picked that, or
+// when there's no claude command for a terminal
+export function reopensInClaudeCode(prefer: ReopenIn, cliHere: boolean, codeHere: boolean): boolean {
+  return codeHere && (prefer === "claudeCode" || !cliHere);
+}
+
+// The recent chats' switch: what each half does, or why it's greyed out
+export function terminalReopenHint(host: string | undefined, cliHere: boolean): string {
+  if (!cliHere)
+    return `Claude Code's claude command isn't installed ${host ? `on ${host}` : "here"}: it isn't on PATH, in ~/.local/bin, npm's or nvm's folders, nor on the login shell's PATH.`;
+  return host ? `Reopens the chat on ${host} in a terminal (ssh, claude --resume).` : "Reopens the chat in a terminal (claude --resume).";
+}
+
+export function claudeCodeReopenHint(g: Pick<Group, "host" | "vscodeHere" | "profileKeys" | "title">, info: ClaudeCodeInfo, groups: Group[]): string {
+  if (!info.available) return "The Claude Code extension isn't installed or enabled in this window.";
+  if (g.host)
+    return g.vscodeHere
+      ? `Opens the chat in a Claude Code tab, in a VS Code window connected to ${g.host} (Remote-SSH) on the chat's folder.`
+      : `Claude Code on ${g.host} runs on another account (the host's ~/.claude).`;
+  if (!claudeCodeHere(g, info)) {
+    const on = groups.find((o) => !o.host && !!info.profileKey && o.profileKeys.includes(info.profileKey));
+    return `Claude Code runs on ${on ? on.title : info.profileKey || "another account"}, not ${g.title}: switch it with “Use Account for VS Code's Claude…” to reopen this account's chats there.`;
+  }
+  return "Opens the chat in a Claude Code tab, in the VS Code window that has the chat's folder (opened if it isn't).";
 }
 
 export function countStates(groups: Group[]): Counts {

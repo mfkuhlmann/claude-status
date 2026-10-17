@@ -5,11 +5,12 @@
 
 import * as vscode from "vscode";
 import type { Backend } from "./backend";
+import { claudePanelAvailable, localPanelProfileKey } from "./claudePanel";
 import { settings, statusArgs, configDirArgs, viewSettings } from "./config";
 import type { Notifier } from "./notify";
 import { currentRemoteHost } from "./remoteHost";
 import { demoState } from "./shared/demo";
-import type { HostState, PetEventKind, Status, ViewState } from "./shared/types";
+import type { ClaudeCodeInfo, HostState, PetEventKind, Status, ViewState } from "./shared/types";
 import { TransitionTracker, type Changes, type PetEvent } from "./transitions";
 
 const HIDDEN_POLL_MS = 10000;
@@ -34,6 +35,7 @@ export class Dashboard implements vscode.Disposable {
   private disposables: vscode.Disposable[] = [];
   private disposed = false;
   private windowHost: string | undefined;
+  private claudeCodeAvailable = false;
   private readonly onStateEmitter = new vscode.EventEmitter<ViewState>();
   private readonly onPetEventEmitter = new vscode.EventEmitter<PetEvent>();
   readonly onState = this.onStateEmitter.event;
@@ -54,7 +56,10 @@ export class Dashboard implements vscode.Disposable {
         this.scheduleLocal(0);
         this.scheduleHosts(0);
       }),
+      // the Claude Code extension installed, removed or (in a new folder) enabled
+      vscode.extensions.onDidChange(() => void this.checkClaudeCode()),
       vscode.workspace.onDidChangeWorkspaceFolders(() => {
+        void this.checkClaudeCode();
         const host = currentRemoteHost(vscode);
         if (host !== this.windowHost) {
           this.windowHost = host;
@@ -75,6 +80,7 @@ export class Dashboard implements vscode.Disposable {
   }
 
   async start(): Promise<void> {
+    void this.checkClaudeCode();
     const problem = await this.backend.checkPython();
     if (problem) {
       this.errorText = problem;
@@ -97,6 +103,20 @@ export class Dashboard implements vscode.Disposable {
     clearTimeout(this.messageTimers.error);
     clearTimeout(this.messageTimers.info);
     for (const d of this.disposables) d.dispose();
+  }
+
+  // Whether the Claude Code extension can open chats in this window (its
+  // commands are registered wherever it runs)
+  private async checkClaudeCode(): Promise<void> {
+    const available = await claudePanelAvailable();
+    if (available === this.claudeCodeAvailable || this.disposed) return;
+    this.claudeCodeAvailable = available;
+    this.emit();
+  }
+
+  // The Claude Code extension here, and the account it runs this computer's chats on
+  claudeCodeInfo(): ClaudeCodeInfo {
+    return { available: this.claudeCodeAvailable, profileKey: this.claudeCodeAvailable ? localPanelProfileKey() : null };
   }
 
   setVisible(visible: boolean): void {
@@ -300,6 +320,7 @@ export class Dashboard implements vscode.Disposable {
         process.platform === "linux"
           ? ""
           : "Running chats on this computer are only detected on Linux for now; SSH hosts still work.",
+      claudeCode: this.claudeCodeInfo(),
       actionError: this.actionError,
       actionInfo: this.actionInfo,
       now,
