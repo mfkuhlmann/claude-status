@@ -13,8 +13,12 @@ RowLayout {
 
     readonly property string tag: session.entrypoint === "claude-vscode" ? i18n("VS Code")
                                   : session.kind === "bg" ? i18n("background") : ""
-    // A background session with a running process can be stopped (`claude stop`)
-    readonly property bool canStop: session.kind === "bg" && session.pid !== null && (!remoteHost || !!session.stopCommand)
+    // A background session with a running process can be stopped (`claude stop`),
+    // and so can an idle chat in a terminal: its claude quits, the chat is kept
+    // (not VS Code's: the extension would show that as an error)
+    readonly property bool canEnd: session.kind === "interactive" && session.entrypoint !== "claude-vscode"
+                                   && session.state === "idle" && session.pid !== null
+    readonly property bool canStop: canEnd || (session.kind === "bg" && session.pid !== null && (!remoteHost || !!session.stopCommand))
     // Kept in root by row key: rows are refreshed with new data every poll.
     readonly property string rowKey: (remoteHost ? remoteHost + "|" : "") + session.key
     readonly property bool confirmingStop: session.key !== "" && root.stopConfirmSession === rowKey
@@ -201,8 +205,9 @@ RowLayout {
 
                 PlasmaCore.ToolTipArea {
                     anchors.fill: parent
-                    mainText: i18n("Stop this background session")
-                    subText: i18n("Asks first. The conversation is kept; claude attach resumes it.")
+                    mainText: row.canEnd ? i18n("Stop this chat") : i18n("Stop this background session")
+                    subText: row.canEnd ? i18n("Asks first. Claude quits and its terminal stays open; the chat is kept and shows under Recent chats.")
+                                        : i18n("Asks first. The conversation is kept; claude attach resumes it.")
                 }
             }
         }
@@ -349,7 +354,9 @@ RowLayout {
             Layout.fillWidth: true
             visible: row.confirmingStop && row.canStop
             type: Kirigami.MessageType.Warning
-            text: row.session.state === "working"
+            text: row.canEnd
+                  ? i18n("Stop “%1”? It's idle, so nothing is interrupted: Claude quits and its terminal stays open. The chat is kept; reopen it from Recent chats.", row.session.name)
+                  : row.session.state === "working"
                   ? i18n("Stop “%1”? It's working right now: the current step is interrupted and anything it started in the background stops too. The conversation is kept; claude attach resumes it.", row.session.name)
                   : row.session.state === "waiting"
                   ? i18n("Stop “%1”? It's waiting for you. The conversation is kept; claude attach resumes it.", row.session.name)
@@ -360,7 +367,9 @@ RowLayout {
                     icon.name: "media-playback-stop"
                     onTriggered: {
                         root.stopConfirmSession = ""
-                        if (row.remoteHost)
+                        if (row.remoteHost && row.canEnd)
+                            root.remoteEnd(row.remoteHost, row.session.sessionId, row.session.profileDir)
+                        else if (row.remoteHost)
                             root.remoteStop(row.remoteHost, row.session.stopCommand)
                         else
                             root.stopSession(row.session.sessionId, row.session.profileDir)

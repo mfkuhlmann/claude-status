@@ -252,7 +252,18 @@ export function openHint(session, remoteHost) {
     return 'Switch to the terminal running this session';
 }
 
+// An idle chat in a terminal can be stopped too: its claude quits and the
+// chat is kept (not VS Code's: the extension would show that as an error)
+export function canEnd(session) {
+    return session.kind === 'interactive' && session.entrypoint !== 'claude-vscode' &&
+        session.state === 'idle' && session.pid !== null;
+}
+
 export function stopQuestion(session) {
+    if (canEnd(session)) {
+        return fmt("Stop “%1”? It's idle, so nothing is interrupted: Claude quits and its terminal stays open. The chat is kept; reopen it from Recent chats.",
+            session.name);
+    }
     if (session.state === 'working') {
         return fmt("Stop “%1”? It's working right now: the current step is interrupted and anything it started in the background stops too. The conversation is kept; claude attach resumes it.",
             session.name);
@@ -522,17 +533,54 @@ export function pickWindow(windows, want) {
     return best;
 }
 
-// The VS Code button of a new chat (port of main.qml's vscodeHint): VS Code's
-// Claude extension runs on one account (status.vscode.on; an SSH host's: its
-// ~/.claude), so the button only works there
-export function vscodeHint(group, host, status) {
+// Chats open in a terminal or in VS Code (port of main.qml's cliHere,
+// openInVscode, terminalHint and vscodeHint): one choice for new and recent
+// chats. A status says whether there's a claude command (result.cli); when
+// unsure (no answer yet, or an error looking), it counts as there.
+export function cliInstalled(result) {
+    return !result || !result.cli || result.cli.installed !== false;
+}
+
+// VS Code when you picked it, or when there's no claude command but VS
+// Code's Claude runs on this account
+export function openInVscode(group, vscodeInstalled, cliHere, preferVscode) {
+    if (!vscodeInstalled || !group.vscodeHere)
+        return false;
+    return preferVscode || !cliHere;
+}
+
+// resuming: for the recent chats' switch (they reopen) instead of new chats'
+export function terminalHint(host, cliHere, resuming = false) {
+    if (!cliHere) {
+        return host ? fmt("Claude Code's claude command isn't installed on %1: it isn't on PATH there, in ~/.local/bin, npm's or nvm's folders, nor on the login shell's PATH.", host)
+            : "Claude Code's claude command isn't installed here: it isn't on PATH, in ~/.local/bin, npm's or nvm's folders, nor on your login shell's PATH.";
+    }
+    if (resuming) {
+        return host ? fmt('Reopens the chat on %1 in a terminal (ssh, claude --resume).', host)
+            : 'Reopens the chat in a terminal (claude --resume).';
+    }
+    return host ? fmt('A terminal opens with Claude on %1 (ssh) in the folder you click.', host)
+        : 'A terminal opens with Claude in the folder you click.';
+}
+
+// VS Code's Claude extension runs on one account (status.vscode.on; an SSH
+// host's: its ~/.claude), so its button only works there
+export function vscodeHint(group, host, status, resuming = false) {
+    if (!(status && status.vscode && status.vscode.installed === true)) {
+        return host ? fmt("VS Code would connect to %1 (Remote-SSH), but it isn't installed on this computer.", host)
+            : "VS Code isn't installed on this computer.";
+    }
+    if (group.vscodeHere && resuming) {
+        return host ? fmt("Opens VS Code connected to %1 (Remote-SSH) in the chat's folder, and the chat in its Claude panel.", host)
+            : "Opens the chat's folder in VS Code, and the chat in its Claude panel.";
+    }
     if (group.vscodeHere) {
         return host ? fmt('Opens VS Code connected to %1 (Remote-SSH) with a new chat in its Claude panel.', host)
             : 'Opens the folder in VS Code with a new chat in its Claude panel.';
     }
     if (host)
         return fmt("VS Code's Claude on %1 runs on another account (the host's ~/.claude).", host);
-    const on = status && status.vscode ? status.vscode.on : null;
-    return on ? fmt("VS Code's Claude runs on %1, not %2: switch its profile to start a chat on this account there.", on, group.title)
+    const on = status.vscode.on;
+    return on ? fmt("VS Code's Claude runs on %1, not %2: switch its profile to use this account there.", on, group.title)
         : "VS Code's Claude doesn't run on this account.";
 }

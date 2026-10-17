@@ -148,10 +148,35 @@ test('new chat in VS Code: only on the account VS Code runs on', () => {
     const status = {vscode: {installed: true, on: 'work'}};
     eq(L.vscodeHint({vscodeHere: true, title: 'work'}, '', status), 'Opens the folder in VS Code with a new chat in its Claude panel.');
     eq(L.vscodeHint({vscodeHere: false, title: 'personal · Pro'}, '', status),
-        "VS Code's Claude runs on work, not personal · Pro: switch its profile to start a chat on this account there.");
+        "VS Code's Claude runs on work, not personal · Pro: switch its profile to use this account there.");
     eq(L.vscodeHint({vscodeHere: false, title: 'x'}, '', {vscode: {installed: true, on: null}}),
         "VS Code's Claude doesn't run on this account.");
     eq(L.vscodeHint({vscodeHere: true}, 'lab', status), 'Opens VS Code connected to lab (Remote-SSH) with a new chat in its Claude panel.');
+    eq(L.vscodeHint({vscodeHere: true}, '', status, true), "Opens the chat's folder in VS Code, and the chat in its Claude panel.");
+    eq(L.vscodeHint({vscodeHere: true}, '', {vscode: {installed: false, on: null}}), "VS Code isn't installed on this computer.");
+});
+
+test('terminal or VS Code: whichever is there', () => {
+    eq([L.cliInstalled(null), L.cliInstalled({}), L.cliInstalled({cli: {installed: false}}), L.cliInstalled({cli: {installed: true}})],
+        [true, true, false, true], 'unsure counts as there');
+    const here = {vscodeHere: true}, elsewhere = {vscodeHere: false};
+    eq(L.openInVscode(here, true, true, false), false, 'your choice: terminal');
+    eq(L.openInVscode(here, true, true, true), true, 'your choice: VS Code');
+    eq(L.openInVscode(here, true, false, false), true, 'no claude command: VS Code');
+    eq(L.openInVscode(elsewhere, true, false, true), false, "VS Code's Claude is on another account");
+    eq(L.openInVscode(here, false, true, true), false, 'no VS Code');
+    eq(L.terminalHint('', true, true), 'Reopens the chat in a terminal (claude --resume).');
+    eq(L.terminalHint('lab', false).startsWith("Claude Code's claude command isn't installed on lab"), true);
+});
+
+test('stopping: background sessions, and idle chats in a terminal', () => {
+    eq(L.canEnd(session('a', 'idle')), true);
+    eq(L.canEnd(session('a', 'working')), false, 'busy');
+    eq(L.canEnd(session('a', 'waiting')), false, 'asks something');
+    eq(L.canEnd(session('a', 'idle', {entrypoint: 'claude-vscode'})), false, "VS Code's");
+    eq(L.canEnd(session('a', 'idle', {kind: 'bg'})), false, 'background: claude stop');
+    eq(L.canEnd(session('a', 'idle', {pid: null})), false, 'no process');
+    eq(L.stopQuestion(session('a', 'idle')).includes('Claude quits and its terminal stays open'), true);
 });
 
 test('pets: stage order and keys', () => {

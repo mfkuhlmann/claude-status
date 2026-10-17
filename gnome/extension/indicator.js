@@ -345,12 +345,34 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         this._newChatDone(await this._helper('jump.py', ['--remote-new-vscode', host, ...cwd]));
     }
 
-    // VS Code is here (its button shows; only the account it runs on can use it)
+    // A recent chat, reopened in VS Code's Claude extension (in its folder)
+    async resumeInVscode(sessionId, profileDir) {
+        const profile = profileDir ? ['--profile', profileDir] : [];
+        this._jumped(await this._helper('jump.py', ['--resume', sessionId, ...profile, '--vscode', ...this._configDirArgs]));
+    }
+
+    // A recent chat of an SSH host, reopened in VS Code connected to it
+    async remoteResumeVscode(host, sessionId, folder) {
+        const cwd = folder ? ['--cwd', folder] : [];
+        this._jumped(await this._helper('jump.py', ['--remote-resume-vscode', host, sessionId, ...cwd]));
+    }
+
+    // VS Code is here (only the account it runs on can use it)
     get vscodeInstalled() {
         return this._status?.vscode?.installed === true;
     }
 
-    // Where new chats start: the switch at the top of the new-chat list
+    // There's a claude command here (host: on that SSH host)
+    cliHere(host) {
+        return L.cliInstalled(host ? this.remote[host]?.result : this._status);
+    }
+
+    // Where this account's chats open (logic.js openInVscode)
+    openInVscode(group, host) {
+        return L.openInVscode(group, this.vscodeInstalled, this.cliHere(host), this.newChatInVscode);
+    }
+
+    // Where chats open, new and recent: the Terminal | VS Code switch
     get newChatInVscode() {
         return this._settings.get_boolean('new-chat-in-vscode');
     }
@@ -511,6 +533,11 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
 
     remoteStop(host, command) {
         this._remoteAction('stop', host, ['--run', host, command]);
+    }
+
+    // An idle chat in a terminal on the host (claude_status.py --end there)
+    remoteEnd(host, sessionId, profileDir) {
+        this._remoteAction('stop', host, ['--end', host, sessionId, ...profileDir ? [profileDir] : []]);
     }
 
     remoteDismiss(host, sessionId) {

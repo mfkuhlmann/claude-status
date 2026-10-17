@@ -13,7 +13,9 @@ export function buildSessionRow(ctx, session, {showProfile = false, remoteHost =
     const s = session;
     const tips = ctx.tips;
     const rowKey = (remoteHost ? `${remoteHost}|` : '') + s.key;
-    const canStop = s.kind === 'bg' && s.pid !== null && (!remoteHost || !!s.stopCommand);
+    // A background session (claude stop), or an idle chat in a terminal (its claude quits)
+    const canEnd = L.canEnd(s);
+    const canStop = canEnd || (s.kind === 'bg' && s.pid !== null && (!remoteHost || !!s.stopCommand));
     const confirmingStop = s.key !== '' && ctx.ui.stopConfirm === rowKey;
     const canShare = ctx.canShareChats && !remoteHost && s.pid === null && s.state === 'done' &&
         !!s.chatId && ctx.shareAccounts.length >= 2;
@@ -88,7 +90,9 @@ export function buildSessionRow(ctx, session, {showProfile = false, remoteHost =
     }
     if (canStop) {
         const stop = iconButton('media-playback-stop-symbolic', () => ctx.setStopConfirm(confirmingStop ? '' : rowKey));
-        tips.add(stop, ['Stop this background session', 'Asks first. The conversation is kept; claude attach resumes it.']);
+        tips.add(stop, canEnd
+            ? ['Stop this chat', 'Asks first. Claude quits and its terminal stays open; the chat is kept and shows under Recent chats.']
+            : ['Stop this background session', 'Asks first. The conversation is kept; claude attach resumes it.']);
         if (!confirmingStop)
             hoverButtons.push(stop);
         line1.add_child(stop);
@@ -134,7 +138,9 @@ export function buildSessionRow(ctx, session, {showProfile = false, remoteHost =
         body.add_child(confirmBox(L.stopQuestion(s), [
             ['Stop', 'media-playback-stop-symbolic', () => {
                 ctx.setStopConfirm('');
-                if (remoteHost)
+                if (remoteHost && canEnd)
+                    ctx.remoteEnd(remoteHost, s.sessionId, s.profileDir);
+                else if (remoteHost)
                     ctx.remoteStop(remoteHost, s.stopCommand);
                 else
                     ctx.stopSession(s.sessionId, s.profileDir);

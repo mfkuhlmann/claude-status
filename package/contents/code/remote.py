@@ -5,6 +5,7 @@
     python3 -I remote.py --status HOST [--done-hours H] [--recent N] [--no-tokens]
     python3 -I remote.py --open HOST COMMAND        a terminal running COMMAND on HOST
     python3 -I remote.py --run HOST COMMAND         run COMMAND on HOST (e.g. claude stop)
+    python3 -I remote.py --end HOST SESSION_ID [PROFILE]   stop an idle chat in a terminal there
     python3 -I remote.py --dismiss HOST SESSION_ID  hide a finished session of HOST
     python3 -I remote.py --undismiss-all HOST
 
@@ -210,11 +211,11 @@ def run(host, command, stdin=None):
     return True, lines[-1] if lines else "Done"
 
 
-def dismiss(host, session_id=None):
-    """Hide a finished session in the host's list (or show all again)."""
+def run_status_script(host, args):
+    """Run claude_status.py on host with args (it goes to python3's stdin, as
+    for --status): (ok, its message)."""
     script = (HERE / "claude_status.py").read_text(encoding="utf-8")
-    args = "--dismiss " + shlex.quote(session_id) if session_id else "--undismiss-all"
-    ok, message = run(host, f"python3 -I - --remote {args}", stdin=script)
+    ok, message = run(host, "python3 -I - --remote " + " ".join(shlex.quote(a) for a in args), stdin=script)
     if ok and cs.REMOTE_MARK in message:
         try:
             answer = json.loads(message.split(cs.REMOTE_MARK, 1)[1])
@@ -222,6 +223,16 @@ def dismiss(host, session_id=None):
         except ValueError:
             pass
     return ok, message
+
+
+def dismiss(host, session_id=None):
+    """Hide a finished session in the host's list (or show all again)."""
+    return run_status_script(host, ["--dismiss", session_id] if session_id else ["--undismiss-all"])
+
+
+def end(host, session_id, profile=None):
+    """Stop an idle chat that runs in a terminal on host (claude_status.end_idle_chat)."""
+    return run_status_script(host, ["--end", session_id] + (["--profile", profile] if profile else []))
 
 
 def open_remote(host, command):
@@ -264,6 +275,9 @@ def main(argv=None):
             out = {"ok": ok, "message": message}
         elif action == "--dismiss" and len(args) == 2:
             ok, message = dismiss(args[0], args[1])
+            out = {"ok": ok, "message": message}
+        elif action == "--end" and len(args) in (2, 3):
+            ok, message = end(*args)
             out = {"ok": ok, "message": message}
         elif action == "--undismiss-all" and len(args) == 1:
             ok, message = dismiss(args[0])

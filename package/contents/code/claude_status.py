@@ -1578,6 +1578,75 @@ def short_folder(folder, home=None):
     return "~" + folder[len(home):] if folder == home or folder.startswith(home + "/") else folder
 
 
+# ---------------------------------------------------------------- stopping idle chats
+#
+# A chat in a terminal whose turn is over (idle: nothing runs, nothing asks)
+# can be stopped from the widget. Claude gets SIGTERM, which it handles like
+# its terminal closing: it shuts down cleanly, and its transcript is saved as
+# it goes, so `claude --resume` reopens the chat. Only if it hasn't quit after
+# END_WAIT seconds is it killed. VS Code's chats are left alone: the extension
+# would show the stop as an error in that tab.
+
+END_WAIT = 10  # seconds Claude gets to shut down before it's killed
+
+
+def process_gone(entry):
+    """Has the session's process exited (an unreaped zombie counts)?"""
+    if not is_alive(entry):
+        return True
+    try:
+        with open(f"/proc/{entry['pid']}/stat", encoding="utf-8", errors="replace") as f:
+            stat = f.read()
+    except OSError:
+        return True
+    return stat[stat.rfind(")") + 2:][:1] in ("Z", "X")
+
+
+def end_idle_chat(entry, wait=END_WAIT):
+    """Stop the process of an idle chat in a terminal: (ok, message). It's
+    looked at again first: one that got back to work isn't stopped."""
+    import signal
+    if entry.get("kind") != "interactive":
+        return False, "Only chats in a terminal can be stopped this way"
+    if entry.get("entrypoint") == "claude-vscode":
+        return False, "It runs in VS Code: close its tab there to end it"
+    state = session_state(entry)
+    if state != "idle":
+        return False, ("It's working again" if state == "working" else "It's waiting for you now") + ", so it wasn't stopped"
+    if process_gone(entry):
+        return True, "It had quit already"
+    try:
+        os.kill(entry["pid"], signal.SIGTERM)
+    except ProcessLookupError:
+        return True, "It had quit already"
+    except OSError as exc:
+        return False, f"Couldn't stop it: {exc}"
+    deadline = time.time() + wait
+    while time.time() < deadline:
+        if process_gone(entry):
+            return True, "Stopped; the chat is kept"
+        time.sleep(0.1)
+    if not process_gone(entry):  # checked again: the pid mustn't be someone else's by now
+        try:
+            os.kill(entry["pid"], signal.SIGKILL)
+        except OSError:
+            pass
+    return True, f"It hadn't quit after {wait} s, so it was killed; the chat is kept"
+
+
+def end_idle_session(home, extra_dirs, session_id, profile_key=None, wait=END_WAIT):
+    """Stop an idle chat in a terminal, found by its session id (and the
+    profile it's listed under: a shared chat can run on two)."""
+    for entry, runs_on, holder in live_entries_all(discover_profiles(home, extra_dirs)):
+        if entry.get("sessionId") != session_id or entry.get("kind") not in SESSION_KINDS \
+                or entry.get("spare") or entry.get("parkedJobId"):
+            continue
+        if profile_key and profile_key not in (runs_on.key, holder.key):
+            continue
+        return end_idle_chat(entry, wait)
+    return False, "That session isn't running any more"
+
+
 
 # ---------------------------------------------------------------- prompt history
 
@@ -2311,6 +2380,32 @@ def find_claude(home, ask_shell=False):
     return found or "claude"
 
 
+CLAUDE_SHELL_CHECK_INTERVAL = 3600  # seconds between asking the login shell (see cached_find_claude)
+
+
+def cached_find_claude(home, cache_root, now):
+    """find_claude for a status check: the claude command's path, or None.
+    When it's on neither PATH nor the usual places, your login shell's PATH
+    is asked at most once an hour (it starts your shell); a find is checked
+    again on every call (it may have been removed)."""
+    found = find_claude(home)
+    if found != "claude":
+        return found
+    path = cache_root / "claude.json"
+    saved = read_json(path)
+    if isinstance(saved, dict) and 0 <= now - (number(saved.get("at")) or 0) < CLAUDE_SHELL_CHECK_INTERVAL:
+        found = saved.get("path")
+        return found if isinstance(found, str) and os.access(found, os.X_OK) else None
+    found = find_claude(home, ask_shell=True)
+    found = None if found == "claude" else found
+    try:
+        private_dir(cache_root)
+        write_json_atomic(path, {"at": now, "path": found})
+    except OSError:
+        pass
+    return found
+
+
 def in_folder(folder, command):
     """command, run in folder when it exists (ssh starts in the home folder)."""
     if isinstance(folder, str) and folder.startswith("/"):
@@ -2318,9 +2413,10 @@ def in_folder(folder, command):
     return command
 
 
-def add_remote_commands(result, home, extra_dirs=()):
-    """Shell commands that open, stop or start chats on this host."""
-    claude = find_claude(home)
+def add_remote_commands(result, home, extra_dirs=(), claude=None):
+    """Shell commands that open, stop or start chats on this host (claude:
+    the claude command's path, if it's been looked for already)."""
+    claude = claude or find_claude(home)
     profiles = {p.key: p for p in discover_profiles(home, extra_dirs)}
     result["claude"] = claude
     for g in result.get("groups", []):
@@ -2354,6 +2450,7 @@ def add_remote_commands(result, home, extra_dirs=()):
 
 USAGE = """usage: claude_status.py [--config-dir DIR]... [--done-hours H] [--recent N] [--no-tokens] [--pretty] [--remote]
        claude_status.py --dismiss SESSION_ID | --undismiss-all
+       claude_status.py --end SESSION_ID [--profile PROFILE] [--config-dir DIR]...
   --config-dir DIR  extra Claude config dir (repeatable)
   --done-hours H    keep finished background jobs listed for H hours (default 24, 0 = never)
   --recent N        list each account's N latest other chats (default 5, 0 = none)
@@ -2361,7 +2458,8 @@ USAGE = """usage: claude_status.py [--config-dir DIR]... [--done-hours H] [--rec
   --pretty          indent the JSON output
   --remote          for the widget on another machine: add the shell commands that open
                     each chat here, and print the JSON after a marker line
-  --dismiss ID      hide a finished session in the widget (--undismiss-all shows them again)"""
+  --dismiss ID      hide a finished session in the widget (--undismiss-all shows them again)
+  --end ID          stop an idle chat in a terminal (it's kept: claude --resume reopens it)"""
 
 
 def main(argv=None):
@@ -2370,10 +2468,15 @@ def main(argv=None):
     args = sys.argv[1:] if argv is None else list(argv)
     config_dirs, with_tokens, pretty, done_hours = [], True, False, KEEP_DONE_HOURS
     recent, remote, dismiss, undismiss = RECENT_CHATS, False, None, False
+    end, profile_key = None, None
     while args:
         arg = args.pop(0)
         if arg == "--config-dir" and args:
             config_dirs.append(args.pop(0))
+        elif arg == "--end" and args:
+            end = args.pop(0)
+        elif arg == "--profile" and args:
+            profile_key = args.pop(0)
         elif arg == "--done-hours" and args:
             try:
                 done_hours = max(0.0, float(args.pop(0)))
@@ -2401,7 +2504,13 @@ def main(argv=None):
     os.umask(0o077)  # cache files are private to the user
     home = Path.home()
     cache_root = cache_dir(home)
-    if dismiss is not None or undismiss:
+    if end is not None:
+        try:
+            ok, message = end_idle_session(home, config_dirs, end, profile_key)
+        except Exception as exc:
+            ok, message = False, f"{type(exc).__name__}: {exc}"
+        result = {"ok": ok, "message": message}
+    elif dismiss is not None or undismiss:
         try:
             private_dir(cache_root)
             sessions = {} if undismiss else load_dismissed(cache_root)
@@ -2419,9 +2528,17 @@ def main(argv=None):
                 add_vscode(result, home, config_dirs, remote, cache_root)
             except Exception as exc:
                 result["errors"].append(f"VS Code: {exc}")
+            # Whether chats can open in a terminal here: the widget greys
+            # that out when there's no claude command (and when unsure, doesn't)
+            claude = None
+            try:
+                claude = cached_find_claude(home, cache_root, time.time())
+                result["cli"] = {"installed": claude is not None}
+            except Exception as exc:
+                result["errors"].append(f"claude command: {exc}")
             if remote:
                 result["host"] = os.uname().nodename
-                add_remote_commands(result, home, config_dirs)
+                add_remote_commands(result, home, config_dirs, claude)
         except Exception as exc:  # the widget must always get parseable output
             result = {"ok": False, "error": f"{type(exc).__name__}: {exc}", "generatedAt": int(time.time() * 1000)}
     if remote:

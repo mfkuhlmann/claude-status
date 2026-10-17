@@ -343,16 +343,76 @@ class StopTests(Fixture):
         self.assertEqual(args, ["/usr/bin/claude", "stop", "job5"])
         self.assertEqual(config_dir, str((self.home / ".claude-work").resolve()))
 
-    def test_refuses_terminal_sessions(self):
-        (ok, msg), calls = self.run_stop("busy")
-        self.assertFalse(ok)
-        self.assertIn("Only background sessions", msg)
-        self.assertEqual(calls, [])
+    def test_leaves_terminal_sessions_that_arent_idle(self):
+        # "busy" and "waiting" run in this test's own process: it mustn't get a signal
+        self.assertEqual(self.run_stop("busy")[0], (False, "It's working again, so it wasn't stopped"))
+        self.assertEqual(self.run_stop("waiting")[0], (False, "It's waiting for you now, so it wasn't stopped"))
+        self.assertEqual(self.run_stop("vscode")[0], (False, "It runs in VS Code: close its tab there to end it"))
+        self.assertEqual(self.run_stop("busy")[1], [])  # and claude stop isn't run for them
 
     def test_reports_claude_errors(self):
         (ok, msg), _ = self.run_stop("bgperm", returncode=1, stderr="No job matching 'job5'.\n")
         self.assertEqual((ok, msg), (False, "No job matching 'job5'."))
         self.assertEqual(self.run_stop("nope")[0], (False, "That session isn't running any more"))
+
+
+class IdleChatStopTests(Fixture):
+    """An idle chat in a terminal can be stopped: its process gets SIGTERM
+    (Claude's clean shutdown), and is killed only if it hangs on."""
+
+    def chat(self, sid, setup="", **kw):
+        """A stand-in for a chat's claude process, listed as an idle terminal session
+        (setup runs before it says it's ready)."""
+        proc = subprocess.Popen([sys.executable, "-c", f"{setup}\nimport time; print('ready', flush=True); time.sleep(60)"],
+                                stdout=subprocess.PIPE, text=True)
+        self.addCleanup(proc.stdout.close)
+        self.addCleanup(lambda: (proc.kill(), proc.wait()) if proc.poll() is None else None)
+        self.assertEqual(proc.stdout.readline().strip(), "ready")
+        write(self.home / f".claude-work/sessions/{proc.pid}.json",
+              session(sid, pid=proc.pid, procStart=cs.proc_start_time(proc.pid), **kw))
+        return proc
+
+    def test_idle_chat_quits_on_sigterm(self):
+        proc = self.chat("idle-chat")
+        self.assertEqual(jump.stop(self.home, [], "idle-chat", ".claude-work"), (True, "Stopped; the chat is kept"))
+        self.assertEqual(proc.wait(timeout=5), -15)   # SIGTERM: Claude shuts down as when its terminal closes
+        self.assertEqual(jump.stop(self.home, [], "idle-chat"), (False, "That session isn't running any more"))
+
+    def test_one_that_hangs_on_is_killed(self):
+        proc = self.chat("stuck", "import signal; signal.signal(signal.SIGTERM, signal.SIG_IGN)")
+        ok, message = cs.end_idle_session(self.home, [], "stuck", wait=0.5)
+        self.assertEqual((ok, message), (True, "It hadn't quit after 0.5 s, so it was killed; the chat is kept"))
+        self.assertEqual(proc.wait(timeout=5), -9)
+
+    def test_only_when_idle_and_not_in_vscode(self):
+        for sid, kw in (("working", {"status": "busy"}), ("shell", {"status": "shell"}),
+                        ("asks", {"status": "waiting", "waitingFor": "permission prompt"}),
+                        ("panel", {"entrypoint": "claude-vscode"})):
+            proc = self.chat(sid, **kw)
+            ok, _ = cs.end_idle_session(self.home, [], sid, wait=0.5)
+            self.assertFalse(ok, sid)
+            self.assertIsNone(proc.poll(), sid)   # still running
+        # its own /model dialog open counts as idle (as in Claude's terminal status)
+        proc = self.chat("dialog-open", status="waiting", waitingFor="dialog open")
+        self.assertTrue(cs.end_idle_session(self.home, [], "dialog-open")[0])
+        self.assertEqual(proc.wait(timeout=5), -15)
+
+    def test_profile_and_pid_reuse(self):
+        proc = self.chat("mine")
+        self.assertEqual(cs.end_idle_session(self.home, [], "mine", ".claude-personal"),
+                         (False, "That session isn't running any more"))
+        # its pid now belongs to another process: the file's start time doesn't match
+        write(self.home / f".claude-work/sessions/{proc.pid}.json", session("mine", pid=proc.pid, procStart="1"))
+        self.assertEqual(cs.end_idle_session(self.home, [], "mine"), (False, "That session isn't running any more"))
+        self.assertIsNone(proc.poll())
+
+    def test_command_line(self):
+        proc = self.chat("cli-chat")
+        env = dict(os.environ, HOME=str(self.home), XDG_CACHE_HOME=str(self.cache))
+        r = subprocess.run([sys.executable, "-I", str(CODE / "claude_status.py"), "--end", "cli-chat",
+                            "--profile", ".claude-work"], capture_output=True, text=True, env=env)
+        self.assertEqual(json.loads(r.stdout), {"ok": True, "message": "Stopped; the chat is kept"}, r.stderr)
+        self.assertEqual(proc.wait(timeout=5), -15)
 
 
 class NewChatTests(Fixture):
@@ -674,6 +734,24 @@ class FindClaudeTests(unittest.TestCase):
                                            f"#!/bin/sh\necho Welcome back\necho PATH={claude.parent}:/usr/bin\n"))
         self.assertEqual(cs.find_claude(self.home), "claude")  # status checks never start a shell
         self.assertEqual(cs.find_claude(self.home, ask_shell=True), str(claude))
+
+    def test_status_checks_ask_the_login_shell_once_an_hour(self):
+        cache = self.home / "cache"
+        claude = self.exe(self.home / "tools/bin/claude")
+        asked = self.home / "asked"
+        os.environ["SHELL"] = str(self.exe(self.home / "login-shell",
+                                           f"#!/bin/sh\necho x >> {asked}\necho PATH={claude.parent}\n"))
+        now = 1000000.0
+        self.assertEqual(cs.cached_find_claude(self.home, cache, now), str(claude))
+        self.assertEqual(cs.cached_find_claude(self.home, cache, now + 60), str(claude))
+        self.assertEqual(asked.read_text().count("x"), 1)   # the second check used the first answer
+        claude.unlink()   # uninstalled: noticed at once
+        self.assertIsNone(cs.cached_find_claude(self.home, cache, now + 120))
+        self.assertIsNone(cs.cached_find_claude(self.home, cache, now + 3700))   # an hour on: asked again
+        self.assertEqual(asked.read_text().count("x"), 2)
+        found = self.exe(self.home / ".local/bin/claude")   # where it's usually installed: no shell needed
+        self.assertEqual(cs.cached_find_claude(self.home, cache, now + 3800), str(found))
+        self.assertEqual(asked.read_text().count("x"), 2)
 
     def test_node_next_to_claude_goes_on_path(self):
         claude = self.exe(self.home / ".nvm/versions/node/v20.3.0/bin/claude")

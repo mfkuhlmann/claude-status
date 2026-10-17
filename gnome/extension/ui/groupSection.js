@@ -80,11 +80,15 @@ export function buildGroupSection(ctx, group, {last = false, remoteHost = ''} = 
         const toggle = textButton(L.fmt('Recent chats (%1)', recent.length), () => ctx.toggleRecent(groupKey, isOpen),
             'claude-text-button claude-small claude-expander', isOpen ? 'pan-down-symbolic' : 'pan-end-symbolic');
         tips.add(toggle, ['Recent chats',
-            "This account's latest chats that aren't listed above. Click one to reopen it in a terminal (claude --resume)."]);
+            "This account's latest chats that aren't listed above. Click one to reopen it, in a terminal or in VS Code (the switch at the top of the list)."]);
         section.add_child(toggle);
         if (isOpen) {
+            // Where they reopen: the same Terminal | VS Code choice as for new chats
+            const openIn = openInSwitch(ctx, group, remoteHost, true);
+            openIn.add_style_class_name('claude-indent');
+            section.add_child(openIn);
             for (const chat of recent)
-                section.add_child(buildRecentLine(ctx, chat, remoteHost));
+                section.add_child(buildRecentLine(ctx, group, chat, remoteHost));
         }
     }
 
@@ -101,10 +105,9 @@ function buildNewChatMenu(ctx, group, host) {
     const menu = column('claude-inline-menu', {x_expand: true});
     menu.add_child(label(L.fmt('New chat on %1 in…', host ? L.fmt('%1 on %2', group.title, host) : group.title),
         'claude-menu-title'));
-    const vscodeHere = ctx.vscodeInstalled && !!group.vscodeHere;
-    const inVscode = vscodeHere && ctx.newChatInVscode;
-    if (ctx.vscodeInstalled)
-        menu.add_child(openInSwitch(ctx, group, host, inVscode, vscodeHere));
+    const inVscode = ctx.openInVscode(group, host);
+    const terminalHere = ctx.cliHere(host);
+    menu.add_child(openInSwitch(ctx, group, host, false));
     for (const f of L.newChatFolders(group, host)) {
         const item = textButton(f.short === '~' ? 'Home folder (~)' : f.short, () => {
             if (host && inVscode)
@@ -115,22 +118,34 @@ function buildNewChatMenu(ctx, group, host) {
                 ctx.newChat(group.chatProfile, f.path, inVscode);
         }, 'claude-menu-item', f.short === '~' ? 'user-home-symbolic' : 'folder-symbolic');
         item.x_expand = true;
-        item.reactive = !host || inVscode || !!f.newChatCommand;
+        item.reactive = inVscode || (terminalHere && (!host || !!f.newChatCommand));
+        if (!item.reactive)
+            item.opacity = 110;
         menu.add_child(item);
     }
     if (!host) {
         const choose = textButton('Choose folder…', () => ctx.newChatChoosingFolder(group.chatProfile, inVscode),
             'claude-menu-item', 'folder-open-symbolic');
         choose.x_expand = true;
+        choose.reactive = inVscode || terminalHere;
+        if (!choose.reactive)
+            choose.opacity = 110;
         menu.add_child(choose);
     }
     return menu;
 }
 
-// Terminal | VS Code. VS Code is greyed out on the accounts its Claude
-// doesn't run on, with a tooltip saying why (on a wrapper, so it shows then too)
-function openInSwitch(ctx, group, host, inVscode, vscodeHere) {
+// Terminal | VS Code, for new chats and (resuming) recent ones: one choice
+// for both. A half is greyed out where it can't work (no claude command, no
+// VS Code, or VS Code's Claude on another account), with a tooltip saying why
+// (on a wrapper, so it shows then too); when neither works, a line says why.
+function openInSwitch(ctx, group, host, resuming) {
+    const inVscode = ctx.openInVscode(group, host);
+    const terminalHere = ctx.cliHere(host);
+    const vscodeHere = ctx.vscodeInstalled && !!group.vscodeHere;
+    const wrap = column('claude-open-in-wrap', {x_expand: true});
     const line = box('claude-menu-row claude-open-in', {x_expand: true});
+    wrap.add_child(line);
     line.add_child(label('Open in:', 'claude-small claude-dim', {y_align: Clutter.ActorAlign.CENTER}));
     const half = (icon, fallback, text, checked, enabled, onClick, tip) => {
         const content = box('claude-button-box');
@@ -143,13 +158,23 @@ function openInSwitch(ctx, group, host, inVscode, vscodeHere) {
         ctx.tips.add(wrap, tip);
         return wrap;
     };
-    line.add_child(half('utilities-terminal-symbolic', 'utilities-terminal', 'Terminal', !inVscode, true,
-        () => ctx.setNewChatInVscode(false),
-        ['New chats in a terminal', 'A terminal opens with Claude in the folder you click.']));
+    line.add_child(half('utilities-terminal-symbolic', 'utilities-terminal', 'Terminal', terminalHere && !inVscode,
+        terminalHere, () => ctx.setNewChatInVscode(false),
+        [!terminalHere ? 'No claude command' : resuming ? 'Reopen chats in a terminal' : 'New chats in a terminal',
+            L.terminalHint(host, terminalHere, resuming)]));
     line.add_child(half('vscode', 'text-editor-symbolic', 'VS Code', inVscode, vscodeHere,
         () => ctx.setNewChatInVscode(true),
-        [vscodeHere ? 'New chats in VS Code' : 'Not on this account', L.vscodeHint(group, host, ctx._status)]));
-    return line;
+        [!ctx.vscodeInstalled ? "VS Code isn't installed" : !vscodeHere ? 'Not on this account'
+            : resuming ? 'Reopen chats in VS Code' : 'New chats in VS Code',
+        L.vscodeHint(group, host, ctx._status, resuming)]));
+    if (!terminalHere && !vscodeHere) {
+        const why = label(`${L.terminalHint(host, terminalHere, resuming)} ${L.vscodeHint(group, host, ctx._status, resuming)}`,
+            'claude-small claude-dim claude-open-in', {x_expand: true});
+        why.clutter_text.line_wrap = true;
+        why.clutter_text.ellipsize = 0;
+        wrap.add_child(why);
+    }
+    return wrap;
 }
 
 function buildSharedLine(ctx, chat, remoteHost) {
@@ -175,15 +200,33 @@ function buildSharedLine(ctx, chat, remoteHost) {
     return line;
 }
 
-function buildRecentLine(ctx, chat, remoteHost) {
+// A recent chat: click to reopen it where the switch above says
+function buildRecentLine(ctx, group, chat, remoteHost) {
     const rowKey = (remoteHost ? `${remoteHost}|` : '') + chat.key;
+    const inVscode = ctx.openInVscode(group, remoteHost);
+    const terminalHere = ctx.cliHere(remoteHost);
+    const canOpen = inVscode || (terminalHere && (!remoteHost || !!chat.openCommand));
     const wrap = column('claude-recent', {x_expand: true});
     const line = box('claude-line', {x_expand: true, reactive: true, track_hover: true});
-    const name = link(chat.name, () => (remoteHost ? ctx.remoteOpen(remoteHost, chat.openCommand)
-        : ctx.jumpTo(chat.sessionId, chat.profileDir)));
+    const name = link(chat.name, () => {
+        if (!canOpen)
+            return;
+        if (remoteHost && inVscode)
+            ctx.remoteResumeVscode(remoteHost, chat.sessionId, chat.cwd);
+        else if (remoteHost)
+            ctx.remoteOpen(remoteHost, chat.openCommand);
+        else if (inVscode)
+            ctx.resumeInVscode(chat.sessionId, chat.profileDir);
+        else
+            ctx.jumpTo(chat.sessionId, chat.profileDir);
+    });
     name.x_expand = true;
-    ctx.tips.add(name, [chat.name, (remoteHost ? L.fmt('Reopens it on %1 in a terminal (ssh, claude --resume).', remoteHost)
-        : 'Reopens it in a terminal (claude --resume).') +
+    if (!canOpen)
+        name.opacity = 150;
+    const where = !canOpen
+        ? `${L.terminalHint(remoteHost, terminalHere, true)}\n${L.vscodeHint(group, remoteHost, ctx._status, true)}`
+        : inVscode ? L.vscodeHint(group, remoteHost, ctx._status, true) : L.terminalHint(remoteHost, terminalHere, true);
+    ctx.tips.add(name, [chat.name, where +
         (chat.shared ? `\n${L.fmt('Shared between accounts; last used on %1.', chat.profile)}` : '')]);
     line.add_child(name);
     if (chat.shared)

@@ -67,17 +67,15 @@ ColumnLayout {
     }
 
     // New chat (the + above): the account's folders. One switch at the top
-    // says where a chat starts (kept between uses): a terminal with Claude in
+    // says where a chat starts (OpenInSwitch.qml): a terminal with Claude in
     // the folder you click, or VS Code's Claude extension, which runs on one
-    // account only (greyed out on the others: root.vscodeHint).
+    // account only (greyed out on the others).
     Rectangle {
         id: newChatBox
         readonly property bool open: root.newChatGroup === section.groupKey
         readonly property var folders: open ? root.newChatFolders(section.group, section.remoteHost) : []
-        readonly property bool vscodeShown: root.vscodeInstalled
-        readonly property bool vscodeHere: !!section.group.vscodeHere
-        readonly property bool inVscode: vscodeShown && vscodeHere && Plasmoid.configuration.newChatInVscode
-        readonly property string vscodeTip: open ? root.vscodeHint(section.group, section.remoteHost) : ""
+        readonly property bool inVscode: root.openInVscode(section.group, section.remoteHost)
+        readonly property bool terminalHere: root.cliHere(section.remoteHost)
 
         visible: open
         Layout.fillWidth: true
@@ -107,38 +105,11 @@ ColumnLayout {
             }
 
             // Where it starts: Terminal | VS Code, for every folder below
-            RowLayout {
-                visible: newChatBox.vscodeShown
+            OpenInSwitch {
                 Layout.fillWidth: true
                 Layout.leftMargin: Kirigami.Units.smallSpacing
-                spacing: Kirigami.Units.smallSpacing
-
-                PlasmaComponents3.Label {
-                    text: i18n("Open in:")
-                    opacity: 0.7
-                }
-                PlasmaComponents3.ToolButton {
-                    icon.name: "utilities-terminal"
-                    text: i18n("Terminal")
-                    display: PlasmaComponents3.AbstractButton.TextBesideIcon
-                    checked: !newChatBox.inVscode
-                    onClicked: Plasmoid.configuration.newChatInVscode = false
-
-                    PlasmaCore.ToolTipArea {
-                        anchors.fill: parent
-                        mainText: i18n("New chats in a terminal")
-                        subText: i18n("A terminal opens with Claude in the folder you click.")
-                    }
-                }
-                VscodeButton {
-                    here: newChatBox.vscodeHere
-                    checked: newChatBox.inVscode
-                    hint: newChatBox.vscodeTip
-                    onClicked: Plasmoid.configuration.newChatInVscode = true
-                }
-                Item {
-                    Layout.fillWidth: true
-                }
+                group: section.group
+                remoteHost: section.remoteHost
             }
 
             Repeater {
@@ -150,7 +121,7 @@ ColumnLayout {
                     Layout.fillWidth: true
                     icon.name: folderRow.folder.short === "~" ? "user-home" : "folder"
                     text: folderRow.folder.short === "~" ? i18n("Home folder (~)") : folderRow.folder.short
-                    enabled: !section.remoteHost || newChatBox.inVscode || !!folderRow.folder.newChatCommand
+                    enabled: newChatBox.inVscode || (newChatBox.terminalHere && (!section.remoteHost || !!folderRow.folder.newChatCommand))
                     onClicked: {
                         if (section.remoteHost && newChatBox.inVscode) {
                             root.remoteNewChatVscode(section.remoteHost, folderRow.folder.path)
@@ -174,6 +145,7 @@ ColumnLayout {
             // Any folder, picked in the folder dialog (not on an SSH host)
             PlasmaComponents3.ItemDelegate {
                 visible: !section.remoteHost
+                enabled: newChatBox.inVscode || newChatBox.terminalHere
                 Layout.fillWidth: true
                 icon.name: "folder-open"
                 text: i18n("Choose folder…")
@@ -379,8 +351,20 @@ ColumnLayout {
         PlasmaCore.ToolTipArea {
             anchors.fill: parent
             mainText: i18n("Recent chats")
-            subText: i18n("This account's latest chats that aren't listed above. Click one to reopen it in a terminal (claude --resume).")
+            subText: i18n("This account's latest chats that aren't listed above. Click one to reopen it, in a terminal or in VS Code (the switch at the top of the list).")
         }
+    }
+
+    // Where they reopen: the same Terminal | VS Code choice as for new chats
+    OpenInSwitch {
+        id: recentOpenIn
+        visible: section.recentOpen && section.recent.length > 0
+        Layout.fillWidth: true
+        Layout.leftMargin: Kirigami.Units.gridUnit
+        Layout.rightMargin: Kirigami.Units.smallSpacing
+        group: section.group
+        remoteHost: section.remoteHost
+        resuming: true
     }
 
     Repeater {
@@ -390,9 +374,22 @@ ColumnLayout {
 
             required property int index
             readonly property var chat: section.recent[index]
-                                        || ({ key: "", sessionId: "", name: "", cwdShort: "", lastActive: 0, profileDir: "",
+                                        || ({ key: "", sessionId: "", name: "", cwd: "", cwdShort: "", lastActive: 0, profileDir: "",
                                               profile: "", shared: false, openCommand: "" })
             readonly property string rowKey: (section.remoteHost ? section.remoteHost + "|" : "") + chat.key
+            readonly property bool canOpen: recentOpenIn.inVscode
+                                            || (recentOpenIn.terminalHere && (!section.remoteHost || !!chat.openCommand))
+
+            function open() {
+                if (section.remoteHost && recentOpenIn.inVscode)
+                    root.remoteResumeVscode(section.remoteHost, chat.sessionId, chat.cwd)
+                else if (section.remoteHost)
+                    root.remoteOpen(section.remoteHost, chat.openCommand)
+                else if (recentOpenIn.inVscode)
+                    root.resumeInVscode(chat.sessionId, chat.profileDir)
+                else
+                    root.jumpTo(chat.sessionId, chat.profileDir)
+            }
 
             Layout.fillWidth: true
             Layout.leftMargin: Kirigami.Units.gridUnit
@@ -411,6 +408,7 @@ ColumnLayout {
                     id: recentName
                     text: recentLine.chat.name
                     font.underline: recentMouse.containsMouse
+                    opacity: recentLine.canOpen ? 1 : 0.6
                     elide: Text.ElideRight
                     Layout.fillWidth: true
 
@@ -418,17 +416,18 @@ ColumnLayout {
                         width: recentName.contentWidth
                         height: parent.height
                         mainText: recentLine.chat.name
-                        subText: (section.remoteHost ? i18n("Reopens it on %1 in a terminal (ssh, claude --resume).", section.remoteHost)
-                                                     : i18n("Reopens it in a terminal (claude --resume)."))
+                        subText: (recentLine.canOpen ? (recentOpenIn.inVscode ? root.vscodeHint(section.group, section.remoteHost, true)
+                                                                              : root.terminalHint(section.remoteHost, true))
+                                                     : root.terminalHint(section.remoteHost, true) + "\n" + root.vscodeHint(section.group, section.remoteHost, true))
                                  + (recentLine.chat.shared ? "\n" + i18n("Shared between accounts; last used on %1.", recentLine.chat.profile) : "")
 
                         MouseArea {
                             id: recentMouse
                             anchors.fill: parent
+                            enabled: recentLine.canOpen
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: section.remoteHost ? root.remoteOpen(section.remoteHost, recentLine.chat.openCommand)
-                                                          : root.jumpTo(recentLine.chat.sessionId, recentLine.chat.profileDir)
+                            onClicked: recentLine.open()
                         }
                     }
                 }

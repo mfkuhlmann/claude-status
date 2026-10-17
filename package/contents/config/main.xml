@@ -98,7 +98,7 @@
       <default>true</default>
     </entry>
     <entry name="newChatInVscode" type="Bool">
-      <label>New chats from the + start in VS Code (the switch at the top of its list)</label>
+      <label>New and recent chats open in VS Code (the Terminal | VS Code switch at the top of their lists)</label>
       <default>false</default>
     </entry>
   </group>

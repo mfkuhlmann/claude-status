@@ -132,17 +132,20 @@ class ProfileTests(Home):
         self.assertEqual(here, {"work": True, "personal": False})
 
 
-class NewChatTests(Home):
+class VscodeHome(Home):
+    """Stand-ins for VS Code, xdg-open and KWin, recording what they're asked."""
+
     def setUp(self):
         super().setUp()
         self.started, self.raised, self.opened = [], [], []
         self.folder = self.home / "repos/app"
         self.folder.mkdir(parents=True)
 
-    def new(self, profile, folder=None, running=False, choose=None):
+    def fakes(self, running=False):
         fake_popen = type("P", (), {"Popen": staticmethod(lambda args, **k: self.opened.append(args)),
                                     "DEVNULL": None, "PIPE": None})
-        changes = [
+        self.waits = []
+        return [
             (cs, "vscode_app", lambda: ("/usr/bin/code", "Code")),
             (cs, "vscode_running_config_dir", lambda: (running, None)),
             (jump, "vscode_main_pids", lambda: [100] if running else []),
@@ -153,9 +156,13 @@ class NewChatTests(Home):
             (jump, "subprocess", fake_popen),
             (jump, "shutil", type("W", (), {"which": staticmethod(lambda n: f"/usr/bin/{n}")})),
         ]
+
+
+class NewChatTests(VscodeHome):
+    def new(self, profile, folder=None, running=False, choose=None):
+        changes = self.fakes(running)
         if choose is not None:
             changes.append((jump, "choose_folder", lambda title, start: (choose, "")))
-        self.waits = []
         with Patch(*changes):
             if choose is not None:
                 return jump.new_chat_choosing_folder(self.home, [], profile, vscode=True)
@@ -216,6 +223,59 @@ class NewChatTests(Home):
             jump.main(["--new-chat", ".claude-work", "--choose-folder", "--vscode"])
         self.assertEqual(calls, [("vscode", ".claude-work", "/p"), ("terminal", ".claude-work", "/p"), ("ssh", "lab", "/srv"),
                                  ("choose", ".claude-work", True)])
+
+
+class ResumeTests(VscodeHome):
+    """A recent chat reopened in VS Code: its folder, then the extension's
+    link with the chat's id (it resumes the chat in a new tab)."""
+
+    CHAT = "5e550000-0000-4000-8000-000000000001"
+
+    def setUp(self):
+        super().setUp()
+        transcript = self.home / ".claude-work/projects/-repos-app" / f"{self.CHAT}.jsonl"
+        transcript.parent.mkdir(parents=True)
+        transcript.write_text(json.dumps({"type": "user", "cwd": str(self.folder), "sessionId": self.CHAT}) + "\n")
+
+    def resume(self, profile, chat=None):
+        with Patch(*self.fakes()):
+            return jump.resume_vscode(self.home, [], chat or self.CHAT, profile)
+
+    def test_opens_the_chats_folder_then_the_chat(self):
+        ok, message = self.resume(".claude-work")
+        self.assertEqual((ok, message), (True, "Reopening the chat in VS Code (~/repos/app)"))
+        self.assertEqual(self.started, [["/usr/bin/code", str(self.folder)]])
+        self.assertEqual(self.raised, [("app", True)])
+        self.assertEqual(self.opened, [["/usr/bin/xdg-open", f"vscode://anthropic.claude-code/open?session={self.CHAT}"]])
+
+    def test_refused_where_it_cant_open(self):
+        self.assertIn("runs on work, not personal", self.resume(".claude-personal")[1])
+        self.assertEqual(self.resume(".claude-work", "0ther000-0000-4000-8000-000000000001"),
+                         (False, "That chat isn't on work"))
+        self.folder.rmdir()
+        self.assertIn("isn't there any more", self.resume(".claude-work")[1])
+        self.assertEqual((self.started, self.opened), ([], []))
+
+    def test_ssh_host(self):
+        with Patch(*self.fakes()):
+            self.assertTrue(jump.resume_remote_vscode("lab", self.CHAT, "/srv/proj")[0])
+        self.assertEqual(self.started, [["/usr/bin/code", "--folder-uri", "vscode-remote://ssh-remote+lab/srv/proj"]])
+        self.assertEqual(self.raised, [("[SSH: lab]", True)])
+        self.assertEqual(self.opened, [["/usr/bin/xdg-open", f"vscode://anthropic.claude-code/open?session={self.CHAT}"]])
+
+    def test_resume_command_line(self):
+        calls = []
+        with Patch((jump, "resume_vscode", lambda home, extra, sid, prof: calls.append(("vscode", sid, prof)) or (True, "")),
+                   (jump, "resume", lambda home, extra, sid, prof: calls.append(("terminal", sid, prof)) or (True, "")),
+                   (jump, "resume_remote_vscode", lambda host, sid, folder: calls.append(("ssh", host, sid, folder)) or (True, ""))), \
+                contextlib.redirect_stdout(io.StringIO()):
+            jump.main(["--resume", "abc", "--profile", ".claude-work", "--vscode"])
+            jump.main(["--resume", "abc", "--profile", ".claude-work"])
+            jump.main(["--remote-resume-vscode", "lab", "abc", "--cwd", "/srv"])
+            with self.assertRaises(SystemExit):
+                jump.main(["--remote-resume-vscode", "lab"])   # which chat?
+        self.assertEqual(calls, [("vscode", "abc", ".claude-work"), ("terminal", "abc", ".claude-work"),
+                                 ("ssh", "lab", "abc", "/srv")])
 
 
 class LaterTests(unittest.TestCase):

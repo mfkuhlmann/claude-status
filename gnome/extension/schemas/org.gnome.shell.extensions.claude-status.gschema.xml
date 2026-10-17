@@ -89,8 +89,8 @@
     </key>
     <key name="new-chat-in-vscode" type="b">
       <default>false</default>
-      <summary>New chats from the + start in VS Code</summary>
-      <description>Instead of a terminal; set with the switch at the top of the new-chat list.</description>
+      <summary>New and recent chats open in VS Code</summary>
+      <description>Instead of a terminal; set with the Terminal | VS Code switch at the top of the new-chat and recent-chat lists.</description>
     </key>
   </schema>
 </schemalist>

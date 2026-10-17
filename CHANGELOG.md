@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **Stop idle chats:** a chat in a terminal whose turn is over gets the ■ stop button too (it asks first). Claude shuts down as when its terminal closes: the terminal stays open, and the chat is kept and moves to **Recent chats**. One that got back to work meanwhile isn't touched, and one that hangs on is killed after 10 s. Also on SSH hosts. Not for chats in VS Code, where it would show as an error.
+- **Recent chats in VS Code:** the **Terminal | VS Code** switch now sits at the top of each account's recent chats too (one choice for new and recent chats). In VS Code, a chat reopens in the folder it last ran in, in a new tab of the Claude panel; on an SSH host, through Remote-SSH.
+- **Terminal or VS Code, whichever is there:** both halves of the switch always show. **Terminal** is greyed out without the `claude` command (here, or on that SSH host), and chats open in VS Code then; **VS Code** is greyed out when it isn't installed. The tooltips say why, and a line under the switch does when neither works.
+
 ## 1.5.0 (2026-10-17)
 
 - The Plasma widget, the GNOME extension and the VS Code extension now share their version numbers: all three are 1.5.0.

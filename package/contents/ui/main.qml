@@ -271,7 +271,8 @@ PlasmoidItem {
         }
     }
 
-    // Runs `jump.py --stop`, which stops a background session (`claude stop`).
+    // Runs `jump.py --stop`, which stops a background session (`claude stop`)
+    // or an idle chat in a terminal (its claude quits).
     P5Support.DataSource {
         id: stopper
         engine: "executable"
@@ -570,19 +571,54 @@ PlasmoidItem {
         return folders
     }
 
+    // Chats open in a terminal or in VS Code (OpenInSwitch.qml): one choice,
+    // newChatInVscode, for new and recent chats.
     // VS Code's Claude extension runs on the account its own environment and
     // settings say (claude_status.py: vscode_profile), so its button is only
     // on that account (an SSH host's: the host's ~/.claude)
     readonly property bool vscodeInstalled: status !== null && !!status.vscode && status.vscode.installed === true
 
-    function vscodeHint(group, host) {
+    // There's a claude command here (host: on that SSH host). When unsure
+    // (no answer yet, or an error looking), it counts as there.
+    function cliHere(host) {
+        const result = host ? (remote[host] || {}).result : status
+        return !result || !result.cli || result.cli.installed !== false
+    }
+
+    // Where this account's chats open: VS Code when you picked it, or when
+    // there's no claude command but VS Code's Claude runs on this account
+    function openInVscode(group, host) {
+        if (!vscodeInstalled || !group.vscodeHere)
+            return false
+        return Plasmoid.configuration.newChatInVscode || !cliHere(host)
+    }
+
+    // resuming: for the recent chats' switch (they reopen) instead of new chats'
+    function terminalHint(host, resuming) {
+        if (!cliHere(host))
+            return host ? i18n("Claude Code's claude command isn't installed on %1: it isn't on PATH there, in ~/.local/bin, npm's or nvm's folders, nor on the login shell's PATH.", host)
+                        : i18n("Claude Code's claude command isn't installed here: it isn't on PATH, in ~/.local/bin, npm's or nvm's folders, nor on your login shell's PATH.")
+        if (resuming)
+            return host ? i18n("Reopens the chat on %1 in a terminal (ssh, claude --resume).", host)
+                        : i18n("Reopens the chat in a terminal (claude --resume).")
+        return host ? i18n("A terminal opens with Claude on %1 (ssh) in the folder you click.", host)
+                    : i18n("A terminal opens with Claude in the folder you click.")
+    }
+
+    function vscodeHint(group, host, resuming) {
+        if (!vscodeInstalled)
+            return host ? i18n("VS Code would connect to %1 (Remote-SSH), but it isn't installed on this computer.", host)
+                        : i18n("VS Code isn't installed on this computer.")
+        if (group.vscodeHere && resuming)
+            return host ? i18n("Opens VS Code connected to %1 (Remote-SSH) in the chat's folder, and the chat in its Claude panel.", host)
+                        : i18n("Opens the chat's folder in VS Code, and the chat in its Claude panel.")
         if (group.vscodeHere)
             return host ? i18n("Opens VS Code connected to %1 (Remote-SSH) with a new chat in its Claude panel.", host)
                         : i18n("Opens the folder in VS Code with a new chat in its Claude panel.")
         if (host)
             return i18n("VS Code's Claude on %1 runs on another account (the host's ~/.claude).", host)
         const on = status && status.vscode ? status.vscode.on : null
-        return on ? i18n("VS Code's Claude runs on %1, not %2: switch its profile to start a chat on this account there.", on, group.title)
+        return on ? i18n("VS Code's Claude runs on %1, not %2: switch its profile to use this account there.", on, group.title)
                   : i18n("VS Code's Claude doesn't run on this account.")
     }
 
@@ -617,6 +653,18 @@ PlasmoidItem {
         root.expanded = false
         launcher.connectSource("python3 -I " + shellQuote(codeDir + "jump.py") + " --new-chat " + shellQuote(profile)
                                + " --choose-folder" + (vscode ? " --vscode" : "") + configDirArgs + " # " + Date.now())
+    }
+
+    // A recent chat, reopened in VS Code's Claude extension (in its folder)
+    function resumeInVscode(sessionId, profileDir) {
+        jumper.connectSource("python3 -I " + shellQuote(codeDir + "jump.py") + " --resume " + shellQuote(sessionId)
+                             + profileArg(profileDir) + " --vscode" + configDirArgs + " # " + Date.now())
+    }
+
+    // A recent chat of an SSH host, reopened in VS Code connected to it
+    function remoteResumeVscode(host, sessionId, folder) {
+        jumper.connectSource("python3 -I " + shellQuote(codeDir + "jump.py") + " --remote-resume-vscode " + shellQuote(host)
+                             + " " + shellQuote(sessionId) + (folder ? " --cwd " + shellQuote(folder) : "") + " # " + Date.now())
     }
 
     // VS Code connected to an SSH host, with a new chat (in folder there, or home)
@@ -834,6 +882,12 @@ PlasmoidItem {
 
     function remoteStop(host, command) {
         remoteAction("stop", host, "--run " + shellQuote(host) + " " + shellQuote(command))
+    }
+
+    // An idle chat in a terminal on the host (claude_status.py --end there)
+    function remoteEnd(host, sessionId, profileDir) {
+        remoteAction("stop", host, "--end " + shellQuote(host) + " " + shellQuote(sessionId)
+                                   + (profileDir ? " " + shellQuote(profileDir) : ""))
     }
 
     function remoteDismiss(host, sessionId) {

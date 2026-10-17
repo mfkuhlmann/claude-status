@@ -206,6 +206,30 @@ class ActionTests(FakeSSH):
         self.assertEqual(remote.dismiss("lab")[0], True)
         self.assertEqual(cs.load_dismissed(self.fake_home / ".cache/claude-widget"), {})
 
+    def test_stop_an_idle_chat_on_the_host(self):
+        proc = subprocess.Popen([sys.executable, "-c", "print('ready', flush=True); import time; time.sleep(60)"],
+                                stdout=subprocess.PIPE, text=True)
+        self.addCleanup(proc.stdout.close)
+        self.addCleanup(lambda: (proc.kill(), proc.wait()) if proc.poll() is None else None)
+        self.assertEqual(proc.stdout.readline().strip(), "ready")
+        (self.fake_home / f".claude/sessions/{proc.pid}.json").write_text(json.dumps(
+            {"pid": proc.pid, "procStart": cs.proc_start_time(proc.pid), "sessionId": "idle-there",
+             "cwd": "/srv/x", "kind": "interactive", "status": "idle"}))
+        self.assertEqual(remote.end("lab", "idle-there", ".claude-work"), (False, "That session isn't running any more"))
+        self.assertIsNone(proc.poll())
+        self.assertEqual(remote.end("lab", "idle-there", ".claude"), (True, "Stopped; the chat is kept"))
+        self.assertEqual(proc.wait(timeout=5), -15)
+        self.assertEqual(self.calls()[-1], ["lab", "python3 -I - --remote --end idle-there --profile .claude"])
+
+    def test_host_says_whether_claude_is_there(self):
+        self.assertEqual(remote.status("lab", tokens=False)["result"]["cli"], {"installed": False})
+        claude = self.fake_home / ".local/bin/claude"
+        claude.parent.mkdir(parents=True)
+        claude.write_text("#!/bin/sh\n")
+        claude.chmod(0o755)
+        result = remote.status("lab", tokens=False)["result"]
+        self.assertEqual((result["cli"], result["claude"]), ({"installed": True}, str(claude)))
+
     def test_open_runs_the_command_unchanged_on_the_host(self):
         # A command with quotes, spaces and $: it must reach the host as is.
         command = "cd '/srv/my dir' 2>/dev/null; printf '%s\\n' \"$HOME\" 'it''s' > /dev/null; echo done"
