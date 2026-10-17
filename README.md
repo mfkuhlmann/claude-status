@@ -234,4 +234,4 @@ projects and work are on my website.
 
 ## License
 
-MIT
+[MIT](LICENSE) © 2026 Wadhah Zai El Amri
