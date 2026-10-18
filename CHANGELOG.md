@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.8.0
 
 - **See what a chat is doing without switching to it:** a line under each
   chat says what it's on right now (*▸ Bash: npm test*), what it needs, or
