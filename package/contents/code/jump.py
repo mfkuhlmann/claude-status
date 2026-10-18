@@ -21,6 +21,8 @@ a new chat (used by the Claude Status widget).
     python3 -I jump.py --unshare SESSION_ID --profile PROFILE   (keep it only there)
     python3 -I jump.py --changes CHAT_ID [--profile PROFILE] [--turn] [--list]
                                                  (compare the files a chat changed in VS Code)
+    python3 -I jump.py --phone MESSAGE [--device ID]   (to your phone, with KDE Connect)
+    python3 -I jump.py --phone-devices           (the phones paired with KDE Connect)
 
 Sharing is done by sharing.py; a chat that's open in a session isn't touched
 (it can be open in one at a time).
@@ -962,6 +964,70 @@ def resume_remote_vscode(host, session_id, folder=""):
     return remote_vscode(host, folder, vscode_chat_link(session_id), "the chat shows")
 
 
+# ---------------------------------------------------------------- your phone
+#
+# While you're away, the widget can send chats that need you to your phone
+# with KDE Connect: `--phone MESSAGE [--device ID]` pings the phone named, or
+# every paired phone that's reachable now (on the same network);
+# `--phone-devices` lists the paired ones for the settings.
+
+
+def kdeconnect_ids(*args):
+    """The lines kdeconnect-cli prints for these options (its "0 devices found" goes to stderr)."""
+    cli = shutil.which("kdeconnect-cli")
+    if not cli:
+        return None
+    try:
+        out = subprocess.run([cli, *args], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, timeout=10).stdout.decode(errors="replace")
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    return [line.strip() for line in out.splitlines() if line.strip()]
+
+
+def phone_devices():
+    """(ok, message, [{"id", "name", "reachable"}]) of the devices paired with KDE Connect."""
+    paired = kdeconnect_ids("-l", "--id-name-only")
+    if paired is None:
+        return False, "KDE Connect isn't installed (kdeconnect-cli)", []
+    reachable = set(kdeconnect_ids("-a", "--id-only") or [])
+    devices = []
+    for line in paired:
+        ident, _, name = line.partition(" ")
+        devices.append({"id": ident, "name": name.strip() or ident, "reachable": ident in reachable})
+    return True, f"{len(devices)} paired device{'s' if len(devices) != 1 else ''}", devices
+
+
+def send_to_phone(message, device=None):
+    """Ping the phone with message (the one named, else every reachable paired one)."""
+    ok, why, devices = phone_devices()
+    if not ok:
+        return False, why
+    if device:
+        targets = [d for d in devices if d["id"] == device]
+        if not targets:
+            return False, "That phone isn't paired with KDE Connect any more"
+        if not targets[0]["reachable"]:
+            return False, f"{targets[0]['name']} isn't reachable (is it on the same network?)"
+    else:
+        targets = [d for d in devices if d["reachable"]]
+        if not targets:
+            return False, "No paired phone is reachable through KDE Connect right now"
+    sent = []
+    for d in targets:
+        try:
+            done = subprocess.run([shutil.which("kdeconnect-cli"), "-d", d["id"], "--ping-msg", message],
+                                  stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                  timeout=15).returncode == 0
+        except (OSError, subprocess.TimeoutExpired):
+            done = False
+        if done:
+            sent.append(d["name"])
+    if not sent:
+        return False, "KDE Connect couldn't send it"
+    return True, "Sent to " + ", ".join(sent)
+
+
 # ---------------------------------------------------------------- what a chat changed
 #
 # `--changes ID` compares the files a chat changed (claude_status.chat_edits)
@@ -1281,7 +1347,9 @@ USAGE = ("usage: jump.py [--stop [--busy] | --interrupt] SESSION_ID [--profile P
          "       jump.py --remote-new-vscode HOST [--cwd FOLDER_ON_HOST]\n"
          "       jump.py --resume SESSION_ID --profile PROFILE --vscode\n"
          "       jump.py --remote-resume-vscode HOST SESSION_ID [--cwd FOLDER_ON_HOST]\n"
-         "       jump.py --changes CHAT_ID [--profile PROFILE] [--turn] [--list]")
+         "       jump.py --changes CHAT_ID [--profile PROFILE] [--turn] [--list]\n"
+         "       jump.py --phone MESSAGE [--device ID]\n"
+         "       jump.py --phone-devices")
 
 
 def main(argv=None):
@@ -1289,7 +1357,7 @@ def main(argv=None):
     extra, session_id, action, folder, profile_dir = [], None, jump, None, None
     remote_host, name_arg, choose, vscode, print_command = None, "", False, False, False
     busy, settings_json, settings_by, unless_default = False, None, "", False
-    turn, listing = False, False
+    turn, listing, device, devices = False, False, None, None
     while args:
         arg = args.pop(0)
         if arg == "--config-dir" and args:
@@ -1306,6 +1374,12 @@ def main(argv=None):
             action = interrupt
         elif arg == "--changes":
             action = show_changes
+        elif arg == "--phone" and args:
+            action, session_id = send_to_phone, args.pop(0)  # the message
+        elif arg == "--device" and args:
+            device = args.pop(0)
+        elif arg == "--phone-devices":
+            action, session_id = phone_devices, "-"
         elif arg == "--turn":
             turn = True
         elif arg == "--list":
@@ -1364,6 +1438,10 @@ def main(argv=None):
             ok, message = resume_vscode(Path.home(), extra, session_id, profile_dir)
         elif action is stop:
             ok, message = stop(Path.home(), extra, session_id, profile_dir, busy)
+        elif action is send_to_phone:
+            ok, message = send_to_phone(session_id, device)
+        elif action is phone_devices:
+            ok, message, devices = phone_devices()
         elif action is show_changes and listing:
             ok, message, comparison = list_changes(Path.home(), extra, session_id, profile_dir, turn)
         elif action is show_changes:
@@ -1382,7 +1460,8 @@ def main(argv=None):
     except Exception as exc:  # report, don't crash: the widget shows the message
         ok, message = False, f"{type(exc).__name__}: {exc}"
     print(json.dumps({"ok": ok, "message": message, **({"command": command} if command else {}),
-                      **({"comparison": comparison} if comparison else {})}))
+                      **({"comparison": comparison} if comparison else {}),
+                      **({"devices": devices} if devices is not None else {})}))
 
 
 if __name__ == "__main__":

@@ -111,6 +111,18 @@
       <min>1</min>
       <max>240</max>
     </entry>
+    <entry name="phoneWhileAway" type="Bool">
+      <label>While the screen is locked, send chats that need you to your phone with KDE Connect</label>
+      <default>false</default>
+    </entry>
+    <entry name="phoneFinished" type="Bool">
+      <label>…and chats that finish a turn</label>
+      <default>false</default>
+    </entry>
+    <entry name="phoneDevice" type="String">
+      <label>KDE Connect device id of the phone (empty: every paired phone that's reachable)</label>
+      <default></default>
+    </entry>
     <entry name="shortcutGoesToChat" type="Bool">
       <label>The widget's keyboard shortcut goes to the chat that needs you (else it opens the popup)</label>
       <default>true</default>

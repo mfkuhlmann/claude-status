@@ -17,6 +17,9 @@ KCM.SimpleKCM {
     property alias cfg_awayDigest: awayDigest.checked
     property alias cfg_awayMinutes: awayMinutes.value
     property alias cfg_shortcutGoesToChat: shortcutGoesToChat.checked
+    property alias cfg_phoneWhileAway: phoneWhileAway.checked
+    property alias cfg_phoneFinished: phoneFinished.checked
+    property string cfg_phoneDevice
     property alias cfg_keepDoneHours: keepDoneHours.value
     property alias cfg_showUsageInPanel: showUsage.checked
     property alias cfg_iconBlink: iconBlink.checked
@@ -44,6 +47,9 @@ KCM.SimpleKCM {
     property bool cfg_awayDigestDefault
     property int cfg_awayMinutesDefault
     property bool cfg_shortcutGoesToChatDefault
+    property bool cfg_phoneWhileAwayDefault
+    property bool cfg_phoneFinishedDefault
+    property string cfg_phoneDeviceDefault
     property int cfg_keepDoneHoursDefault
     property bool cfg_showUsageInPanelDefault
     property bool cfg_iconBlinkDefault
@@ -69,6 +75,42 @@ KCM.SimpleKCM {
         connectedSources: []
         onNewData: source => disconnectSource(source)
     }
+
+    // KDE Connect: the paired phones (jump.py --phone-devices), and a test message
+    property var phones: []
+    property string phoneStatus: ""
+    property bool kdeConnect: true
+
+    P5Support.DataSource {
+        id: phoneHelper
+        engine: "executable"
+        connectedSources: []
+        onNewData: (source, data) => {
+            disconnectSource(source)
+            let result = null
+            try {
+                result = JSON.parse(data["stdout"])
+            } catch (e) {
+                page.phoneStatus = i18n("Couldn't ask KDE Connect")
+                return
+            }
+            if (result.devices !== undefined) {
+                page.kdeConnect = result.ok
+                page.phones = result.devices
+                if (!result.ok)
+                    page.phoneStatus = result.message
+            } else {
+                page.phoneStatus = result.message
+            }
+        }
+    }
+
+    function jumpCommand(args) {
+        const q = s => "'" + String(s).replace(/'/g, "'\\''") + "'"
+        return "python3 -I " + q(codeDir + "jump.py") + " " + args.map(q).join(" ") + " # " + Date.now()
+    }
+
+    Component.onCompleted: phoneHelper.connectSource(jumpCommand(["--phone-devices"]))
 
     function play(sound) {
         const q = s => "'" + String(s).replace(/'/g, "'\\''") + "'"
@@ -135,6 +177,57 @@ KCM.SimpleKCM {
             to: 240
             QQC2.ToolTip.visible: hovered
             QQC2.ToolTip.text: i18n("After this long, chats that finish or need you don't notify one by one: when you unlock the screen, one notification says what happened meanwhile.")
+        }
+
+        QQC2.CheckBox {
+            id: phoneWhileAway
+            Kirigami.FormData.label: i18n("Phone:")
+            enabled: page.kdeConnect
+            text: i18n("Meanwhile, send chats that need you to my phone")
+        }
+
+        QQC2.CheckBox {
+            id: phoneFinished
+            enabled: page.kdeConnect && phoneWhileAway.checked
+            text: i18n("…and chats that finish a turn")
+        }
+
+        RowLayout {
+            Kirigami.FormData.label: i18n("…to:")
+            enabled: page.kdeConnect
+
+            QQC2.ComboBox {
+                id: phoneDevice
+                textRole: "text"
+                valueRole: "value"
+                model: [{ text: i18n("Every paired phone that's reachable"), value: "" }].concat(
+                    page.phones.map(d => ({ text: d.name + (d.reachable ? "" : " " + i18n("(not reachable now)")), value: d.id })),
+                    page.cfg_phoneDevice && !page.phones.some(d => d.id === page.cfg_phoneDevice)
+                        ? [{ text: i18n("A phone no longer paired"), value: page.cfg_phoneDevice }] : [])
+                currentIndex: Math.max(0, indexOfValue(page.cfg_phoneDevice))
+                onActivated: page.cfg_phoneDevice = currentValue
+                Layout.preferredWidth: Kirigami.Units.gridUnit * 14
+            }
+            QQC2.Button {
+                text: i18n("Send a test")
+                icon.name: "smartphone"
+                onClicked: {
+                    page.phoneStatus = i18n("Sending…")
+                    phoneHelper.connectSource(page.jumpCommand(["--phone", i18n("Claude Status: this is how chats that need you will show up here."),
+                                                                ...(page.cfg_phoneDevice ? ["--device", page.cfg_phoneDevice] : [])]))
+                }
+            }
+        }
+
+        QQC2.Label {
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 20
+            wrapMode: Text.Wrap
+            font: Kirigami.Theme.smallFont
+            opacity: 0.7
+            text: (page.phoneStatus ? page.phoneStatus + "\n" : "")
+                  + (page.kdeConnect
+                     ? i18n("Through KDE Connect, once the screen was locked as long as set above: the phone gets them while it's on the same network as this computer (pair it in System Settings → KDE Connect).")
+                     : i18n("Needs KDE Connect (kdeconnect-cli), paired with your phone."))
         }
 
         QQC2.CheckBox {

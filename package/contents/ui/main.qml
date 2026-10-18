@@ -237,7 +237,7 @@ PlasmoidItem {
     readonly property var sharedKeys: ["pollInterval", "idlePollInterval", "extraConfigDirs", "notifyWaiting", "notifyDone",
         "notifyDoneMinSeconds", "notifySound", "soundVolume", "soundWaiting", "soundDone", "soundFailed", "recentChats",
         "sshHosts", "remotePollSeconds", "keepDoneHours", "showUsageInPanel", "showPet", "chatPets", "showTokens",
-        "newChatInVscode", "iconBlink", "awayDigest", "awayMinutes"]
+        "newChatInVscode", "iconBlink", "awayDigest", "awayMinutes", "phoneWhileAway", "phoneFinished", "phoneDevice"]
     property real settingsSeenAt: 0     // the newest shared settings this copy has seen
     property string settingsSeen: ""    // its own settings as of the last check (to see changes)
 
@@ -371,9 +371,29 @@ PlasmoidItem {
     property var awayEvents: []         // [{kind: done|failed|stopped|reset, name}]
     property var awayDigest: null       // the last summary, at the top of the popup until you've seen it
 
+    function awayLongEnough() {
+        return away && Date.now() - awaySince >= Plasmoid.configuration.awayMinutes * 60000
+    }
+
     function holdingBack() {
-        return away && Plasmoid.configuration.awayDigest
-               && Date.now() - awaySince >= Plasmoid.configuration.awayMinutes * 60000
+        return awayLongEnough() && Plasmoid.configuration.awayDigest
+    }
+
+    // ...and meanwhile, chats that need you (or finish) go to your phone with
+    // KDE Connect (phoneWhileAway; jump.py --phone)
+    function toPhone(text) {
+        if (!root.notifier || !Plasmoid.configuration.phoneWhileAway || !awayLongEnough())
+            return
+        const device = Plasmoid.configuration.phoneDevice
+        phoneSender.connectSource("python3 -I " + shellQuote(codeDir + "jump.py") + " --phone " + shellQuote(text)
+                                  + (device ? " --device " + shellQuote(device) : "") + " # " + Date.now())
+    }
+
+    P5Support.DataSource {
+        id: phoneSender
+        engine: "executable"
+        connectedSources: []
+        onNewData: (source, data) => disconnectSource(source)   // a phone out of reach just misses it
     }
 
     function noteAway(kind, name) {
@@ -457,7 +477,7 @@ PlasmoidItem {
     Timer {
         interval: 10000
         repeat: true
-        running: root.notifier && Plasmoid.configuration.awayDigest
+        running: root.notifier && (Plasmoid.configuration.awayDigest || Plasmoid.configuration.phoneWhileAway)
         triggeredOnStart: true
         onTriggered: lockWatch.connectSource("dbus-send --session --print-reply=literal --dest=org.freedesktop.ScreenSaver"
                                              + " /ScreenSaver org.freedesktop.ScreenSaver.GetActive # " + Date.now())
@@ -775,6 +795,8 @@ PlasmoidItem {
                     if (!quiet) {
                         lastWaitingAlert[sid] = nowMs
                         petEvent("waiting", i18n("%1 needs you!", s.name), petKeyOf(s, host))
+                        toPhone(i18n("Claude: %1 needs you", s.name + where) + (s.detail ? " (" + s.detail + ")" : "")
+                                + " · " + s.cwdShort)
                         if (Plasmoid.configuration.notifyWaiting && root.notifier && !holdingBack()) {
                             notify(sid, s, "waiting", i18n("%1 needs your input", s.name),
                                    (s.detail || reasonText(s.reason)) + "\n" + s.cwdShort + where, "dialog-warning", host)
@@ -793,6 +815,11 @@ PlasmoidItem {
                     if (took >= Plasmoid.configuration.notifyDoneMinSeconds * 1000)
                         markUnseen(sid, "done")
                     noteAway(s.reason === "failed" || s.reason === "stopped" ? s.reason : "done", s.name + where)
+                    if (Plasmoid.configuration.phoneFinished && took >= Plasmoid.configuration.notifyDoneMinSeconds * 1000)
+                        toPhone((s.reason === "failed" ? i18n("Claude: %1 failed", s.name + where)
+                                 : s.reason === "stopped" ? i18n("Claude: %1 was stopped", s.name + where)
+                                 : i18n("Claude: %1 finished", s.name + where))
+                                + (s.detail ? " (" + s.detail + ")" : "") + " · " + i18n("took %1", duration(took)))
                     if (Plasmoid.configuration.notifyDone && root.notifier && !holdingBack()
                             && took >= Plasmoid.configuration.notifyDoneMinSeconds * 1000) {
                         notify(sid, s, "done", s.reason === "failed" ? i18n("%1 failed", s.name)

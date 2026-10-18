@@ -1268,3 +1268,57 @@ def mock_vscode():
             yield
     finally:
         cs.vscode_app = real
+
+
+class PhoneTests(unittest.TestCase):
+    """jump.py --phone: a message to your phone through KDE Connect (a stand-in kdeconnect-cli)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.bin = Path(self.tmp.name)
+        self.log = self.bin / "pings"
+        cli = self.bin / "kdeconnect-cli"
+        cli.write_text(f"""#!/bin/sh
+case "$*" in
+  "-l --id-name-only") printf 'aaa Pixel 9\\nbbb Old tablet\\n' ;;
+  "-a --id-only") cat "{self.bin}/reachable" 2>/dev/null; echo "$(cat "{self.bin}/reachable" 2>/dev/null | wc -l) devices found" >&2 ;;
+  -d*) echo "$2|$4" >> "{self.log}" ;;
+esac
+""")
+        cli.chmod(0o755)
+        self.which = staticmethod(lambda name: str(cli) if name == "kdeconnect-cli" else None)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def reachable(self, *ids):
+        (self.bin / "reachable").write_text("".join(i + "\n" for i in ids))
+
+    def pings(self):
+        return self.log.read_text().splitlines() if self.log.exists() else []
+
+    def call(self, fn, *args):
+        with Patch(shutil=type("W", (), {"which": self.which})):
+            return fn(*args)
+
+    def test_lists_paired_phones(self):
+        self.reachable("aaa")
+        ok, _, devices = self.call(jump.phone_devices)
+        self.assertTrue(ok)
+        self.assertEqual(devices, [{"id": "aaa", "name": "Pixel 9", "reachable": True},
+                                   {"id": "bbb", "name": "Old tablet", "reachable": False}])
+
+    def test_every_reachable_phone_or_the_one_picked(self):
+        self.reachable("aaa")
+        self.assertEqual(self.call(jump.send_to_phone, "fix-parser needs you"), (True, "Sent to Pixel 9"))
+        self.assertEqual(self.pings(), ["aaa|fix-parser needs you"])
+        ok, msg = self.call(jump.send_to_phone, "hi", "bbb")
+        self.assertEqual((ok, msg), (False, "Old tablet isn't reachable (is it on the same network?)"))
+        self.assertEqual(len(self.pings()), 1)
+
+    def test_nothing_reachable_or_no_kde_connect(self):
+        self.reachable()
+        self.assertEqual(self.call(jump.send_to_phone, "hi"), (False, "No paired phone is reachable through KDE Connect right now"))
+        with Patch(shutil=type("W", (), {"which": staticmethod(lambda name: None)})):
+            self.assertFalse(jump.send_to_phone("hi")[0])
+            self.assertEqual(jump.phone_devices()[1], "KDE Connect isn't installed (kdeconnect-cli)")
