@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.9.0
 
 - **Your last days:** an account's token line unfolds its last 14 days:
   tokens per day as bars (today's in the accent color; hover one for its
