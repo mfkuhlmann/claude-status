@@ -14,7 +14,7 @@
     "Id": "org.wzaielamri.claudestatus",
     "License": "MIT",
     "Name": "Claude Status",
-    "Version": "1.8.0",
+    "Version": "1.9.0",
     "Website": "https://github.com/wzaielamri/claude-status",
     "BugReportUrl": "https://github.com/wzaielamri/claude-status/issues"
   },

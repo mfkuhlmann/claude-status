@@ -1,10 +1,10 @@
 # Changelog
 
-## Unreleased
+## 1.9.0 (2026-10-18)
 
 - **Your last days in numbers:** click an account's token line for its last 14 days: tokens per day as bars (today's in your accent color), chats, prompts and active days, your busiest folders and the models you used. The token scan keeps 30 days of per-day sums for it, and reads back 30 days once.
 - **A chat's recap:** the box under a chat ends with its numbers: your prompts, how long Claude worked, its tool calls by name, its tokens (subagents included) and, when the status line has it, what the session would cost through the API.
-- The GNOME and VS Code extensions have them too.
+- The GNOME extension has them too, and the VS Code extension is 1.9.0 with the same.
 
 ## 1.8.0 (2026-10-18)
 
