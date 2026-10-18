@@ -2,7 +2,7 @@
 // Claude Code) and for the webview's dev harness. Nothing here is real: the
 // accounts, folders, hosts and chats are invented, times are relative to now.
 
-import type { Agent, Group, HostState, Session, Status, ViewState } from "./types";
+import type { Agent, ChatStats, Group, HostState, Session, Status, UsageStats, ViewState } from "./types";
 
 const MIN = 60000;
 const HOUR = 60 * MIN;
@@ -57,6 +57,48 @@ function totals(scale: number) {
   };
 }
 
+// The last 14 days of an account: a busy week, a quiet weekend, today
+function usageStats(now: number, scale: number, folders: [string, string][]): UsageStats {
+  const shape = [0, 0.2, 0.9, 1.6, 2.4, 1.1, 0, 0, 0.7, 1.9, 3.1, 2.2, 1.4, 1];
+  const days = shape.map((f, i) => {
+    const d = new Date(now - (shape.length - 1 - i) * 24 * HOUR);
+    const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const total = Math.round(f * 21_000_000 * scale);
+    return { day, total, output: Math.round(total / 31), messages: Math.round(f * 160 * scale), chats: f ? Math.max(1, Math.round(f * 2.4)) : 0, prompts: Math.round(f * 18 * scale) };
+  });
+  const total = days.reduce((n, d) => n + d.total, 0);
+  const prompts = days.reduce((n, d) => n + d.prompts, 0);
+  const shares = [0.58, 0.27, 0.1, 0.05];
+  return {
+    days,
+    projects: folders.map(([name, path], i) => ({
+      name,
+      path,
+      total: Math.round(total * shares[i]),
+      output: Math.round((total * shares[i]) / 31),
+      prompts: Math.round(prompts * shares[i]),
+    })),
+    models: [
+      { model: "Opus 5.5", total: Math.round(total * 0.86) },
+      { model: "Sonnet 5.5", total: Math.round(total * 0.13) },
+      { model: "Haiku 5.5", total: Math.round(total * 0.01) },
+    ],
+    sum: { total, output: Math.round(total / 31), chats: 23, prompts, activeDays: days.filter((d) => d.total).length },
+  };
+}
+
+function chatStats(now: number, prompts: number, minutes: number, tools: [string, number][], total: number): ChatStats {
+  return {
+    prompts,
+    toolCalls: tools.reduce((n, [, c]) => n + c, 0),
+    tools,
+    tokens: { input: Math.round(total * 0.004), output: Math.round(total / 30), cacheRead: Math.round(total * 0.9), cacheWrite: Math.round(total * 0.06), total },
+    workedMs: minutes * MIN,
+    startedAt: now - 3 * HOUR,
+    lastAt: now - 20000,
+  };
+}
+
 function personal(now: number, phase: number): Group {
   const parserState = phase % 3 === 2 ? "idle" : "working";
   return {
@@ -79,6 +121,7 @@ function personal(now: number, phase: number): Group {
             ? { activity: "Bash: npm test -- parser", prompt: "The date parser breaks on ISO weeks; fix it and add tests.", reply: "Found it: week 53 wraps to the next year. Fixing the year rollover now.", replyLine: "Found it: week 53 wraps to the next year. Fixing the year rollover now.", at: now - 20000 }
             : { activity: "", prompt: "The date parser breaks on ISO weeks; fix it and add tests.", reply: "Fixed: ISO week 53 no longer rolls over into the next year.\n\n• parseIsoWeek() takes the year from the week's Thursday\n• 12 new tests in date.test.ts, all passing\n\nWant me to open a pull request?", replyLine: "Fixed: ISO week 53 no longer rolls over into the next year.", at: now - 60000 },
         changes: { count: 3, files: ["src/date/parse.ts", "src/date/week.ts", "test/date.test.ts"] },
+        stats: chatStats(now, 4, 38, [["Bash", 41], ["Read", 18], ["Edit", 9], ["Grep", 6], ["Agent", 3]], 18_400_000),
         tasks: {
           done: parserState === "working" ? 2 : 4,
           total: 4,
@@ -105,6 +148,7 @@ function personal(now: number, phase: number): Group {
         model: "Sonnet",
         peek: { activity: "Bash: git tag v2.0.0", prompt: "Write the release notes for 2.0 and tag it.", reply: "The notes are in CHANGELOG.md. Tagging v2.0.0 next.", replyLine: "The notes are in CHANGELOG.md. Tagging v2.0.0 next.", at: now - 2 * MIN },
         changes: { count: 1, files: ["CHANGELOG.md"] },
+        stats: chatStats(now, 2, 6, [["Bash", 7], ["Read", 4], ["Write", 1]], 2_100_000),
       }),
       session(now, {
         key: "demo-3",
@@ -142,6 +186,12 @@ function personal(now: number, phase: number): Group {
       ],
     },
     tokens: { today: totals(1), week: totals(5.3), models: [{ model: "Opus", total: 8100000 }, { model: "Sonnet", total: 2570000 }] },
+    stats: usageStats(now, 1, [
+      ["webapp", "~/projects/webapp"],
+      ["api-server", "~/projects/api-server"],
+      ["notes", "~/notes"],
+      ["~", "~"],
+    ]),
     chatProfile: ".claude",
     shareProfile: null,
     projects: [
@@ -195,6 +245,7 @@ function buildServer(now: number, phase: number): Status {
               at: now - MIN,
             },
             changes: { count: 2, files: ["configs/ranking.yaml", "train.py"] },
+            stats: chatStats(now, 3, 24, [["Bash", 22], ["Read", 9], ["Edit", 4]], 9_700_000),
           }),
         ],
         limits: {
@@ -212,6 +263,7 @@ function buildServer(now: number, phase: number): Status {
           ],
         },
         tokens: { today: totals(0.6), week: totals(2.2), models: [{ model: "Opus", total: 6400000 }] },
+        stats: usageStats(now, 0.6, [["ranking", "~/experiments/ranking"]]),
         chatProfile: ".claude",
         shareProfile: null,
         projects: [{ path: "/home/alice/experiments/ranking", short: "~/experiments/ranking", newChatCommand: "echo 'Demo mode'" }],

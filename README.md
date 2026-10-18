@@ -36,6 +36,14 @@ As an editor tab (**Claude Status: Open in Editor Tab**):
   reset, today's and this week's tokens. Each bar also shows where your pace
   leads by the reset (the lighter part) and where an even pace would be by now
   (the tick); when the 5-hour limit would run out first, a line says when.
+- **Your last days**: click an account's token line for its last 14 days:
+  tokens per day as bars (hover one for its chats and prompts), the totals,
+  the busiest folders and the models used. The prompts come from Claude
+  Code's prompt history, the tokens from the transcripts.
+- **A chat's recap**: the unfolded peek ends with the chat's numbers: your
+  prompts, how long Claude worked (each turn from your prompt to its last
+  step), its tool calls by tool, its tokens with its subagents', and what it
+  would cost at API prices when the status line says so.
 - **The chat that needs you, one key away**: **Ctrl+Alt+Shift+C** (**Claude
   Status: Go to the Chat That Needs You**) opens the chat that has waited
   longest; press it again for the next one, then the chats that finished

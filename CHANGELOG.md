@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **Your last days:** an account's token line unfolds its last 14 days:
+  tokens per day as bars (today's in the accent color; hover one for its
+  chats and prompts), the totals, the busiest folders and the models used.
+- **A chat's recap:** the unfolded peek ends with the chat's numbers: your
+  prompts, how long Claude worked, its tool calls by tool, its tokens
+  (subagents included) and, when the status line says so, its cost at API
+  prices.
+
 ## 1.8.0
 
 - **See what a chat is doing without switching to it:** a line under each

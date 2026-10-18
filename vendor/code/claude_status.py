@@ -35,7 +35,11 @@ from pathlib import Path
 SNAPSHOT_MAX_AGE = 8 * 86400  # seconds a status-line snapshot is kept
 TOKEN_SCAN_INTERVAL = 60  # seconds between transcript scans
 TOKEN_DAYS = 8  # days of per-message token records kept in the cache
+STATS_DAYS = 30  # days of per-day sums kept for the stats (token_stats)
+STATS_SHOWN_DAYS = 14  # days the stats show
 CACHE_VERSION = 3  # token cache; 3 = keyed by the real profile folder, linked folders followed
+# (the stats' history, prompts and chatFolders were added without a new version: older
+# copies of this script, e.g. a VS Code extension not updated yet, keep them as they are)
 
 PLAN_NAMES = {
     "claude_free": "Free",
@@ -402,6 +406,7 @@ def make_session(profile, home, *, sid, pid, name, cwd, kind, entrypoint, state,
         "peek": None,  # what it's doing, your last prompt, Claude's last reply (chat_peek)
         "changes": None,  # the files it changed: {"count", "files"} (ChatCache.changes)
         "tasks": None,  # its task list: {"done", "total", "current", "items"} (task_progress)
+        "stats": None,  # its recap: prompts, tool calls, tokens, time worked (stats_summary)
     }
 
 
@@ -563,6 +568,7 @@ def finish_row(row, job, job_id, profile, ctx, alive):
         row["peek"] = chats.peek(path)
         row["changes"] = chats.changes(path, row["cwd"], ctx.home, ctx.own_folders)
         row["tasks"] = task_progress(ctx.profiles, [row["sessionId"], row["chatId"], row.get("jobSessionId")])
+        row["stats"] = chats.stats(path)
     return row
 
 
@@ -845,7 +851,9 @@ EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 EDIT_LINE = re.compile(rb'"name":\s*"(?:Edit|Write|MultiEdit|NotebookEdit)"')
 SESSION_ID_FIELD = re.compile(rb'"sessionId":\s*"([0-9A-Za-z_-]{1,80})"')
 CHANGES_LISTED = 12  # file names a row carries (its tooltip lists them)
-CHAT_CACHE_VERSION = 1
+CHAT_CACHE_VERSION = 1  # its records got "stats" without a new version (older copies keep them); one without is read again
+USER_LINE = re.compile(rb'"type":\s*"user"')
+ASSISTANT_LINE = re.compile(rb'"type":\s*"assistant"')
 
 
 def message_text(msg):
@@ -1005,8 +1013,82 @@ def new_edits():
     snap: id of your newest prompt's snapshot; snapFiles: {path: backup name}
         as of that prompt; turn: {path: backup name} of files first backed up
         since then;
-    sessions: session ids whose file-history folders hold its backups."""
-    return {"files": {}, "snap": None, "snapFiles": {}, "turn": {}, "sessions": []}
+    sessions: session ids whose file-history folders hold its backups;
+    stats: what the chat did (fold_stats)."""
+    return {"files": {}, "snap": None, "snapFiles": {}, "turn": {}, "sessions": [], "stats": new_stats()}
+
+
+def new_stats():
+    """A chat's numbers so far: your prompts, its tool calls by name, tokens
+    [input, output, cacheRead, cacheWrite] (cur: the reply being read, whose
+    blocks repeat its usage), first and last entry (ms), and how long Claude
+    worked: each turn from your prompt to its last step (busyMs, plus the turn
+    open now: turnStart … turnLast)."""
+    return {"prompts": 0, "tools": {}, "tokens": [0, 0, 0, 0], "cur": None, "first": None, "last": None,
+            "busyMs": 0, "turnStart": None, "turnLast": None}
+
+
+def fold_stats(st, e):
+    """Fold one transcript entry into a chat's numbers (new_stats)."""
+    ts = to_ms(e.get("timestamp"))
+    if ts is not None:
+        st["first"] = ts if st["first"] is None else min(st["first"], ts)
+        st["last"] = ts if st["last"] is None else max(st["last"], ts)
+    if human_prompt(e) is not None:
+        st["prompts"] += 1
+        if st["turnStart"] is not None and st["turnLast"] is not None and st["turnLast"] > st["turnStart"]:
+            st["busyMs"] += st["turnLast"] - st["turnStart"]
+        st["turnStart"], st["turnLast"] = ts, None
+        return
+    if e.get("type") != "assistant":
+        return
+    msg, blocks = blocks_of(e)
+    if ts is not None and st["turnStart"] is not None:
+        st["turnLast"] = ts
+    for c in blocks:
+        if c.get("type") == "tool_use" and isinstance(c.get("name"), str):
+            name = c["name"].split("__")[-1] if c["name"].startswith("mcp__") else c["name"]
+            st["tools"][name] = st["tools"].get(name, 0) + 1
+    u = msg.get("usage")
+    if not isinstance(u, dict):
+        return
+    vals = [int(number(u.get(k)) or 0) for k in (
+        "input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")]
+    mid = msg.get("id") or e.get("requestId") or e.get("uuid")
+    if st["cur"] and st["cur"][0] == mid:
+        st["cur"] = [mid] + [max(a, b) for a, b in zip(st["cur"][1:], vals)]
+    else:
+        if st["cur"]:
+            st["tokens"] = [a + b for a, b in zip(st["tokens"], st["cur"][1:])]
+        st["cur"] = [mid] + vals
+
+
+def stats_summary(main, others=()):
+    """A chat's recap, for its row: {"prompts", "toolCalls", "tools": [[name,
+    count]] most used first, "tokens": {"input", "output", "cacheRead",
+    "cacheWrite", "total"}, "workedMs", "startedAt", "lastAt"}; its subagents'
+    (others) tool calls and tokens included."""
+    tokens, tools = [0, 0, 0, 0], {}
+    for st in (main,) + tuple(others):
+        cur = st["cur"][1:] if st.get("cur") else [0, 0, 0, 0]
+        tokens = [a + b + c for a, b, c in zip(tokens, st["tokens"], cur)]
+        for name, n in st["tools"].items():
+            tools[name] = tools.get(name, 0) + n
+    worked = main["busyMs"]
+    if main["turnStart"] is not None and main["turnLast"] is not None and main["turnLast"] > main["turnStart"]:
+        worked += main["turnLast"] - main["turnStart"]
+    if not (main["prompts"] or sum(tokens) or tools):
+        return None
+    keys = ("input", "output", "cacheRead", "cacheWrite")
+    return {
+        "prompts": main["prompts"],
+        "toolCalls": sum(tools.values()),
+        "tools": sorted(([n, c] for n, c in tools.items()), key=lambda nc: (-nc[1], nc[0]))[:5],
+        "tokens": dict(zip(keys, tokens), total=sum(tokens)),
+        "workedMs": worked,
+        "startedAt": main["first"],
+        "lastAt": main["last"],
+    }
 
 
 def backup_target(key, backup):
@@ -1080,13 +1162,17 @@ def scan_edits(path, rec, start=0, sessions=None):
                     m = SESSION_ID_FIELD.search(line)
                     if m:
                         sessions.add(m.group(1).decode())
-                if b'"file-history-' in line or EDIT_LINE.search(line):
+                edits = b'"file-history-' in line or EDIT_LINE.search(line)
+                talk = ASSISTANT_LINE.search(line) or (USER_LINE.search(line) and b'"tool_result"' not in line)
+                if edits or talk:
                     try:
                         e = json.loads(line)
                     except ValueError:
                         e = None
                     if isinstance(e, dict):
-                        fold_edits(rec, e)
+                        if edits:
+                            fold_edits(rec, e)
+                        fold_stats(rec["stats"], e)
                 offset += len(line)
     except OSError:
         pass
@@ -1231,7 +1317,7 @@ class ChatCache:
         key = file_key(st)
         old = self._old("edits", key)
         if isinstance(old, dict) and isinstance(old.get("size"), int) and old["size"] <= st.st_size \
-                and isinstance(old.get("rec"), dict):
+                and isinstance(old.get("rec"), dict) and isinstance(old["rec"].get("stats"), dict):
             size, rec = old["size"], old["rec"]
         else:
             size, rec = 0, new_edits()
@@ -1241,6 +1327,13 @@ class ChatCache:
             self.changed = True
         self.data["edits"][key] = {"size": size, "rec": rec}
         return rec
+
+    def stats(self, path):
+        """The chat's recap (stats_summary), subagents included, or None."""
+        if path is None:
+            return None
+        main = self.edits(path).get("stats") or new_stats()
+        return stats_summary(main, [self.edits(sub).get("stats") or new_stats() for sub in subagent_transcripts(path)])
 
     def changes(self, path, cwd, home, skip):
         """{"count", "files"} of the files a chat changed, or None."""
@@ -2624,19 +2717,27 @@ def prune_token_caches(cache_root, profiles):
 def scan_transcripts(profile, cache, now):
     """Incrementally read new transcript lines into cache["messages"].
 
-    messages: {message id: [day, model, input, output, cacheRead, cacheWrite, shared]},
-    shared = 1 when the transcript is hard-linked elsewhere or sits in a linked
-    folder (a chat shared with another profile: it counts on both accounts).
-    Claude writes one line per content block, each repeating the message's
-    usage (the last one sometimes with the final output count), so lines are
-    merged by message id with an element-wise max.
+    messages: {message id: [day, model, input, output, cacheRead, cacheWrite,
+    shared, project folder, chat id]}, shared = 1 when the transcript is
+    hard-linked elsewhere or sits in a linked folder (a chat shared with
+    another profile: it counts on both accounts). Claude writes one line per
+    content block, each repeating the message's usage (the last one sometimes
+    with the final output count), so lines are merged by message id with an
+    element-wise max. Messages are kept TOKEN_DAYS; their per-day sums
+    (history, for the stats) STATS_DAYS, read back that far on a cache's first scan.
     """
-    cutoff_day = (date.fromtimestamp(now) - timedelta(days=TOKEN_DAYS - 1)).isoformat()
-    cutoff_mtime = now - TOKEN_DAYS * 86400
-    messages = {k: v for k, v in cache["messages"].items() if v[0] >= cutoff_day}
-    old_files, files = cache["files"], {}
+    days_back = TOKEN_DAYS if "history" in cache else STATS_DAYS
+    cutoff_day = (date.fromtimestamp(now) - timedelta(days=days_back - 1)).isoformat()
+    cutoff_mtime = now - days_back * 86400
+    if "history" in cache:
+        messages, old_files = {k: v for k, v in cache["messages"].items() if v[0] >= cutoff_day}, cache["files"]
+    else:  # a cache from before the stats: read everything again, STATS_DAYS back
+        messages, old_files = {}, {}
+    files = {}
+    # each chat's tokens count for the folder it started in (Claude may cd elsewhere)
+    started_in = cache.get("chatFolders") if isinstance(cache.get("chatFolders"), dict) else {}
 
-    def add(line, shared):
+    def add(line, shared, chat):
         if b'"usage"' not in line:
             return
         try:
@@ -2660,11 +2761,15 @@ def scan_transcripts(profile, cache, now):
         if not key:
             return
         prev = messages.get(key)
+        cwd = e.get("cwd") if isinstance(e.get("cwd"), str) else ""
+        if cwd:
+            cwd = started_in.setdefault(chat, cwd)
         if prev:
             vals = [max(a, b) for a, b in zip(prev[2:6], vals)]
             day = prev[0]
             shared = shared or bool(prev[6])
-        messages[key] = [day, m.get("model") or "unknown", *vals, int(shared)]
+            cwd = cwd or (prev[7] if len(prev) > 7 else "")
+        messages[key] = [day, m.get("model") or "unknown", *vals, int(shared), cwd, chat]
 
     for path, linked in transcript_files(profile):
         try:
@@ -2686,14 +2791,134 @@ def scan_transcripts(profile, cache, now):
                 chunk = b""
             end = chunk.rfind(b"\n")  # never consume a half-written last line
             if end >= 0:
+                chat = path.stem if path.parent.name != "subagents" else path.parent.parent.name
                 for line in chunk[:end].splitlines():
-                    add(line, st.st_nlink > 1 or linked)
+                    add(line, st.st_nlink > 1 or linked, chat)
                 offset += end + 1
         files[str(path)] = {"offset": offset, "ino": st.st_ino}
 
-    cache["files"], cache["messages"], cache["scannedAt"] = files, messages, now
+    stats_from = (date.fromtimestamp(now) - timedelta(days=STATS_DAYS - 1)).isoformat()
+    history = {d: v for d, v in (cache.get("history") or {}).items() if d >= stats_from}
+    history.update(day_history(messages))  # days still in messages: summed again
+    keep_from = (date.fromtimestamp(now) - timedelta(days=TOKEN_DAYS - 1)).isoformat()
+    messages = {k: v for k, v in messages.items() if v[0] >= keep_from}
+    cache["files"], cache["messages"], cache["scannedAt"], cache["history"] = files, messages, now, history
+    listed = {v[8] for v in messages.values() if len(v) > 8} | {c for h in history.values() for c in h.get("chats", [])}
+    cache["chatFolders"] = {c: f for c, f in started_in.items() if c in listed}
     cache["days"], cache["daysAt"] = day_totals(messages), now
+    cache["prompts"] = scan_prompts(profile, cache.get("prompts"), stats_from)
     return cache
+
+
+def day_history(messages):
+    """Messages summed per day for the stats: {day: {"models": {model:
+    [input, output, cacheRead, cacheWrite, messages]}, "projects": {folder:
+    [tokens, output]}, "chats": [chat ids]}}."""
+    out = {}
+    for day, model, *rest in messages.values():
+        vals = rest[:4]
+        project = rest[5] if len(rest) > 5 else ""
+        chat = rest[6] if len(rest) > 6 else ""
+        h = out.setdefault(day, {"models": {}, "projects": {}, "chats": []})
+        row = h["models"].setdefault(model, [0, 0, 0, 0, 0])
+        for i, v in enumerate(vals):
+            row[i] += v
+        row[4] += 1
+        if project:
+            pr = h["projects"].setdefault(project, [0, 0])
+            pr[0] += sum(vals)
+            pr[1] += vals[1]
+        if chat and chat not in h["chats"]:
+            h["chats"].append(chat)
+    return out
+
+
+def scan_prompts(profile, rec, stats_from):
+    """Your prompts per day and folder, from the profile's history.jsonl
+    (read where it grew): {"offset", "ino", "days": {day: {folder: count}}}."""
+    path = profile.real / "history.jsonl"
+    rec = rec if isinstance(rec, dict) and isinstance(rec.get("days"), dict) else {"offset": 0, "ino": None, "days": {}}
+    try:
+        st = path.stat()
+    except OSError:
+        return {"offset": 0, "ino": None, "days": {}}
+    offset = rec.get("offset", 0) if rec.get("ino") == st.st_ino and rec.get("offset", 0) <= st.st_size else 0
+    days = {d: v for d, v in rec["days"].items() if d >= stats_from} if offset else {}
+    if offset < st.st_size:
+        try:
+            with open(path, "rb") as f:
+                f.seek(offset)
+                chunk = f.read()
+        except OSError:
+            chunk = b""
+        end = chunk.rfind(b"\n")
+        if end >= 0:
+            for line in chunk[:end].splitlines():
+                try:
+                    e = json.loads(line)
+                except ValueError:
+                    continue
+                day = local_day(e.get("timestamp")) if isinstance(e, dict) else None
+                if day is None or day < stats_from:
+                    continue
+                folder = e.get("project") if isinstance(e.get("project"), str) else ""
+                by_folder = days.setdefault(day, {})
+                by_folder[folder] = by_folder.get(folder, 0) + 1
+            offset += end + 1
+    return {"offset": offset, "ino": st.st_ino, "days": days}
+
+
+def token_stats(caches, now, home, shown=STATS_SHOWN_DAYS):
+    """The last days of an account, for its stats: {"days": [{"day", "total",
+    "output", "messages", "chats", "prompts"}] oldest first, "projects":
+    [{"name", "path", "total", "output", "prompts"}] busiest first, "models":
+    [{"model", "total"}], "sum": {"total", "output", "chats", "prompts",
+    "activeDays"}}, or None before any history is kept."""
+    if not any(isinstance(c.get("history"), dict) for c in caches):
+        return None
+    today = date.fromtimestamp(now)
+    names = [(today - timedelta(days=i)).isoformat() for i in range(shown - 1, -1, -1)]
+    first = names[0]
+    days = {d: {"day": d, "total": 0, "output": 0, "messages": 0, "chats": set(), "prompts": 0} for d in names}
+    projects, models = {}, {}
+    for cache in caches:
+        for day, h in (cache.get("history") or {}).items():
+            if day < first or day not in days or not isinstance(h, dict):
+                continue
+            d = days[day]
+            for model, row in (h.get("models") or {}).items():
+                if isinstance(row, list) and len(row) == 5:
+                    d["total"] += sum(row[:4])
+                    d["output"] += row[1]
+                    d["messages"] += row[4]
+                    models[model] = models.get(model, 0) + sum(row[:4])
+            for folder, sums in (h.get("projects") or {}).items():
+                if isinstance(sums, list) and len(sums) == 2:
+                    p = projects.setdefault(folder, {"total": 0, "output": 0, "prompts": 0})
+                    p["total"] += sums[0]
+                    p["output"] += sums[1]
+            d["chats"].update(h.get("chats") or [])
+        for day, by_folder in ((cache.get("prompts") or {}).get("days") or {}).items():
+            if day in days and isinstance(by_folder, dict):
+                for folder, n in by_folder.items():
+                    days[day]["prompts"] += n
+                    projects.setdefault(folder, {"total": 0, "output": 0, "prompts": 0})["prompts"] += n
+    chats = set()
+    for d in days.values():
+        chats |= d["chats"]
+        d["chats"] = len(d["chats"])
+    rows = [days[n] for n in names]
+    top = sorted(((f, p) for f, p in projects.items() if f and p["total"]), key=lambda fp: (-fp[1]["total"], -fp[1]["prompts"]))
+    return {
+        "days": rows,
+        "projects": [{"name": "~" if short_path(f, home) == "~" else os.path.basename(f.rstrip("/")) or f,
+                      "path": short_path(f, home), **p} for f, p in top[:6]],
+        "models": [{"model": model_label(m) or m, "total": t}
+                   for m, t in sorted(models.items(), key=lambda mt: -mt[1]) if t],
+        "sum": {"total": sum(d["total"] for d in rows), "output": sum(d["output"] for d in rows),
+                "chats": len(chats), "prompts": sum(d["prompts"] for d in rows),
+                "activeDays": sum(1 for d in rows if d["messages"] or d["prompts"])},
+    }
 
 
 def day_totals(messages):
@@ -2882,6 +3107,7 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
                 "sessions": [row for p in members for row in rows[p.real]],
                 "limits": None,
                 "tokens": None,
+                "stats": None,  # the last days: per-day tokens, chats and prompts, busiest folders (token_stats)
                 # for "new chat": the profile folder name jump.py --new-chat takes
                 "chatProfile": named.key,
                 # for sharing a chat with this account: the profile it goes to (jump.py --profile)
@@ -2901,6 +3127,7 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
                 try:
                     caches = [load_token_cache(cache_root, p, now, lock.held) for p in members]
                     group["tokens"] = token_totals(caches, now)
+                    group["stats"] = token_stats(caches, now, home)
                 except Exception as exc:
                     errors.append(f"{group['title']}: tokens: {exc}")
             groups.append(group)

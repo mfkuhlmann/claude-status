@@ -1,7 +1,7 @@
 // The dashboard's derived values, shared by the extension (status bar,
 // notifications) and the webview. Ported from the widget's main.qml.
 
-import type { ChangeSummary, ClaudeCodeInfo, Counts, Group, HostState, LimitWindow, Overall, ReopenIn, Session, Status, TaskProgress, ViewState } from "./types";
+import type { ChangeSummary, ChatStats, ClaudeCodeInfo, Counts, Group, HostState, LimitWindow, Overall, ReopenIn, Session, StatsDay, Status, TaskProgress, UsageStats, ViewState } from "./types";
 
 // This computer's accounts, then the hosts' (each marked with its host).
 export function allGroups(status: Status | null, hosts: HostState[]): Group[] {
@@ -273,8 +273,8 @@ export function peekLine(
 }
 
 // Something to unfold under the row: the last exchange, tasks or changed files
-export function hasPeek(s: Pick<Session, "peek" | "tasks" | "changes">): boolean {
-  return !!(s.peek && (s.peek.prompt || s.peek.reply)) || !!s.tasks?.items.length || !!s.changes;
+export function hasPeek(s: Pick<Session, "peek" | "tasks" | "changes"> & { stats?: Session["stats"] }): boolean {
+  return !!(s.peek && (s.peek.prompt || s.peek.reply)) || !!s.tasks?.items.length || !!s.changes || !!s.stats;
 }
 
 export function taskMark(status: string): string {
@@ -356,4 +356,97 @@ export function nextChatIndex(list: ChatSpot[], last: { id: string; at: number }
   if (!last || now - last.at > againMs) return 0;
   const i = list.findIndex((c) => c.id === last.id);
   return i < 0 ? 0 : (i + 1) % list.length;
+}
+
+// ---------------------------------------------------------------- stats
+
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// A local YYYY-MM-DD as a Date at local midnight
+function localDate(day: string): Date {
+  const [y, m, d] = day.split("-").map(Number);
+  return new Date(y, (m || 1) - 1, d || 1);
+}
+
+export function weekdayShort(day: string): string {
+  return WEEKDAYS[localDate(day).getDay()];
+}
+
+// "Tue 15 Oct"
+export function dayLabel(day: string): string {
+  const d = localDate(day);
+  return `${WEEKDAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}`;
+}
+
+// A part of a whole as a percentage: "99%", "<1%"
+export function sharePercent(part: number, whole: number): string {
+  if (whole <= 0 || part <= 0) return "0%";
+  const pct = (100 * part) / whole;
+  return pct < 1 ? "<1%" : `${Math.round(pct)}%`;
+}
+
+// A bar's tooltip: "Tue 15 Oct: 446.8M tokens (1.7M out) · 6 chats · 73 prompts"
+export function dayTitle(d: StatsDay): string {
+  if (!d.total && !d.prompts) return `${dayLabel(d.day)}: nothing`;
+  return (
+    `${dayLabel(d.day)}: ${formatTokens(d.total)} tokens (${formatTokens(d.output)} out)` +
+    ` · ${plural(d.chats, "%1 chat", "%1 chats")} · ${plural(d.prompts, "%1 prompt", "%1 prompts")}`
+  );
+}
+
+// "14 days: 997.4M tokens (3.2M out) · 15 chats · 253 prompts · 5 active days"
+export function statsSummary(s: UsageStats): string {
+  const sum = s.sum;
+  return (
+    `${s.days.length} days: ${formatTokens(sum.total)} tokens (${formatTokens(sum.output)} out)` +
+    ` · ${plural(sum.chats, "%1 chat", "%1 chats")} · ${plural(sum.prompts, "%1 prompt", "%1 prompts")}` +
+    ` · ${plural(sum.activeDays, "%1 active day", "%1 active days")}`
+  );
+}
+
+// "Opus 5.5 99% · Sonnet 5.5 <1%"
+export function modelShares(models: UsageStats["models"]): string {
+  const whole = models.reduce((n, m) => n + m.total, 0);
+  return models.map((m) => `${m.model} ${sharePercent(m.total, whole)}`).join(" · ");
+}
+
+// Bars that get a weekday under them: every other one, counted back from
+// today (the last), so today always has its label
+export function labeledBar(index: number, count: number): boolean {
+  return (count - 1 - index) % 2 === 0;
+}
+
+// The recap under a chat's peek: "3 prompts · worked 51m · 278 tool calls
+// (Bash 236, Read 23, Write 5) · 85.3M tokens (249.0k out) · $12.40 at API prices"
+export function recapText(st: ChatStats, costUsd?: number | null): string {
+  const parts = [plural(st.prompts, "%1 prompt", "%1 prompts")];
+  if (st.workedMs > 0) parts.push(`worked ${duration(st.workedMs)}`);
+  if (st.toolCalls) {
+    const top = st.tools.slice(0, 3).map(([name, n]) => `${name} ${n}`).join(", ");
+    parts.push(plural(st.toolCalls, "%1 tool call", "%1 tool calls") + (top ? ` (${top})` : ""));
+  }
+  if (st.tokens.total) parts.push(`${formatTokens(st.tokens.total)} tokens (${formatTokens(st.tokens.output)} out)`);
+  if (costUsd) parts.push(`$${costUsd.toFixed(2)} at API prices`);
+  return parts.join(" · ");
+}
+
+function clock(ms: number, now: number): string {
+  const d = new Date(ms);
+  const time = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return now - ms < 20 * 3600000 ? time : `${WEEKDAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]} ${time}`;
+}
+
+export function recapTitle(st: ChatStats, now: number): string {
+  const t = st.tokens;
+  const lines = [];
+  if (st.startedAt) lines.push(`Started ${clock(st.startedAt, now)}`);
+  if (st.lastAt) lines.push(`Last activity ${clock(st.lastAt, now)} (${ago(now - st.lastAt)})`);
+  if (st.workedMs) lines.push(`Claude worked ${duration(st.workedMs)}: each turn from your prompt to its last step`);
+  if (st.tools.length) lines.push(`Tools: ${st.tools.map(([name, n]) => `${name} ${n}`).join(", ")}`);
+  lines.push(
+    `Tokens (subagents included): input ${formatTokens(t.input)} · output ${formatTokens(t.output)} · ` +
+      `cache read ${formatTokens(t.cacheRead)} · cache write ${formatTokens(t.cacheWrite)}`,
+  );
+  return lines.join("\n");
 }

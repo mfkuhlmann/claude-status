@@ -3,7 +3,7 @@
   The webview in a browser, with demo data: build with `npm run build` and
   `node esbuild.mjs --harness`, serve the repository folder over http and open
   dev/harness.html. ?theme=dark|light|hc  ?width=360  ?tab=1  ?phase=0
-  ?open=1 (subagents, a peek and recent chats unfolded)  ?digest=1 (the "while
+  ?open=1 (subagents, a peek, recent chats and the stats unfolded)  ?digest=1 (the "while
   you were away" card)  ?hover=1 (the rows' hover
   buttons shown)  ?scroll=N (scrolled down N px). Errors show in a red box.
 -->
@@ -97,7 +97,7 @@
         document.documentElement.dataset.theme = theme;
         // ?open=1: the webview's saved state with the folded parts open
         let state = params.get("open") === "1"
-          ? { ui: { agents: { "demo-1": true }, peek: { "demo-1": true }, recent: { "demo-personal": true } } }
+          ? { ui: { agents: { "demo-1": true }, peek: { "demo-1": true }, recent: { "demo-personal": true }, stats: { "demo-personal": true } } }
           : undefined;
         function showError(text) {
           const box = document.createElement("pre");

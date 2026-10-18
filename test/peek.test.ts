@@ -20,7 +20,7 @@ const MIN = 60000;
 const HOUR = 60 * MIN;
 
 function chat(partial: Partial<Session>): Session {
-  return { ...demoState(NOW).status!.groups[0].sessions[0], peek: null, tasks: null, changes: null, detail: "", ...partial };
+  return { ...demoState(NOW).status!.groups[0].sessions[0], peek: null, tasks: null, changes: null, stats: null, detail: "", ...partial };
 }
 
 const peek = { activity: "Bash: npm test", prompt: "fix it", reply: "Fixed.\n\nMore.", replyLine: "Fixed.", at: NOW };

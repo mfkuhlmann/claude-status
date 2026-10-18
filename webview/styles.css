@@ -586,6 +586,146 @@ button:focus-visible {
   white-space: nowrap;
 }
 
+/* The token line unfolds the account's last days */
+.stats-toggle {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.stats-toggle:hover .token-line {
+  text-decoration: underline;
+}
+
+.stats-toggle .icon {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--cs-muted);
+  transition: transform 120ms;
+}
+
+.stats-toggle .icon.open {
+  transform: rotate(90deg);
+}
+
+.token-line {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stats {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 2px 0 6px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--cs-fg) 5%, transparent);
+}
+
+/* Tokens per day: today's bar in the accent color */
+.stats-chart {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  height: 64px;
+}
+
+.stats-day {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.stats-bar-area {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: flex-end;
+  border-bottom: 1px solid var(--cs-track);
+}
+
+.stats-bar {
+  width: 100%;
+  border-radius: 2px 2px 0 0;
+  background: color-mix(in srgb, var(--cs-fg) 35%, transparent);
+}
+
+.stats-bar.empty {
+  height: 0;
+}
+
+.stats-day.today .stats-bar {
+  background: var(--cs-working);
+}
+
+.stats-day:hover .stats-bar {
+  background: color-mix(in srgb, var(--cs-working) 70%, transparent);
+}
+
+.stats-weekday {
+  overflow: visible;
+  font-size: 0.85em;
+  line-height: 1.4;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.stats-sum {
+  overflow-wrap: anywhere;
+}
+
+.stats-projects {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stats-project {
+  display: grid;
+  grid-template-columns: minmax(0, 7em) minmax(2em, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.stats-project-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stats-project-meter {
+  height: 5px;
+  border-radius: 3px;
+  background: var(--cs-track);
+}
+
+.stats-project-meter span {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--cs-working);
+}
+
+.stats-project-numbers {
+  white-space: nowrap;
+}
+
 .no-sessions {
   padding: 2px 0;
 }
@@ -825,6 +965,10 @@ button:focus-visible {
 
 .peek-actions .link {
   color: var(--cs-link);
+}
+
+.peek-recap {
+  overflow-wrap: anywhere;
 }
 
 .peek-actions .link:disabled {

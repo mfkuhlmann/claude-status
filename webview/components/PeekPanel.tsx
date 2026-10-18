@@ -1,13 +1,17 @@
-import { plural, taskMark } from "../../src/shared/model";
+import { plural, recapText, recapTitle, taskMark } from "../../src/shared/model";
 import type { ChatRef, Session } from "../../src/shared/types";
 import { post } from "../env";
+import { useView } from "./context";
 
 // Unfolded under a chat (click its peek line): your last prompt, Claude's
-// last reply, its task list, and its changed files to compare side by side
+// last reply, its task list, its changed files to compare side by side, and
+// its numbers (prompts, time worked, tool calls, tokens)
 export function PeekPanel({ session: s, host, chat }: { session: Session; host?: string; chat: ChatRef }) {
   const peek = s.peek;
   const tasks = s.tasks;
   const changes = s.changes;
+  const stats = s.stats;
+  const now = useView().now;
   const elsewhere = host ? `Its files are on ${host}: compare them there.` : "";
   return (
     <div class="peek small">
@@ -58,6 +62,11 @@ export function PeekPanel({ session: s, host, chat }: { session: Session; host?:
           >
             Last turn
           </button>
+        </div>
+      ) : null}
+      {stats ? (
+        <div class="peek-recap muted" title={recapTitle(stats, now)}>
+          {recapText(stats, s.costUsd)}
         </div>
       ) : null}
     </div>

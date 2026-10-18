@@ -1,5 +1,5 @@
 // UI state kept across reloads of the webview (VS Code drops a hidden view's
-// page): which subagent trees, peeks and recent-chat lists are open. Kept by
+// page): which subagent trees, peeks, recent-chat lists and stats are open. Kept by
 // row and account key, since every poll brings new objects.
 
 import { savedState, saveState } from "../env";
@@ -9,6 +9,7 @@ interface UiState {
   agents: Record<string, true>;
   peek: Record<string, true>;
   recent: Record<string, true>;
+  stats: Record<string, true>;
 }
 
 // Our part of the webview's saved state; other parts (the pets) keep theirs
@@ -18,7 +19,12 @@ const MAX_KEYS = 100;
 
 function load(): UiState {
   const saved = savedState<Record<string, unknown>>()[KEY] as Partial<UiState> | undefined;
-  return { agents: { ...(saved?.agents ?? {}) }, peek: { ...(saved?.peek ?? {}) }, recent: { ...(saved?.recent ?? {}) } };
+  return {
+    agents: { ...(saved?.agents ?? {}) },
+    peek: { ...(saved?.peek ?? {}) },
+    recent: { ...(saved?.recent ?? {}) },
+    stats: { ...(saved?.stats ?? {}) },
+  };
 }
 
 export const uiState = createStore<UiState>(load());
@@ -50,4 +56,9 @@ export function togglePeek(rowKey: string): void {
 export function toggleRecent(groupKey: string): void {
   const s = uiState.get();
   persist({ ...s, recent: toggled(s.recent, groupKey) });
+}
+
+export function toggleStats(groupKey: string): void {
+  const s = uiState.get();
+  persist({ ...s, stats: toggled(s.stats, groupKey) });
 }

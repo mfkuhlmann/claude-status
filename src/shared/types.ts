@@ -80,9 +80,39 @@ export interface Session {
   peek?: Peek | null;
   changes?: ChangeSummary | null;
   tasks?: TaskProgress | null;
+  stats?: ChatStats | null;
   // --remote: shell commands, run on the machine the session is on
   openCommand?: string | null;
   stopCommand?: string | null;
+}
+
+// A chat's numbers (claude_status.py: stats_summary): your prompts, its tool
+// calls by name, tokens (subagents included), how long Claude worked
+export interface ChatStats {
+  prompts: number;
+  toolCalls: number;
+  tools: [string, number][]; // most used first, at most 5
+  tokens: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number };
+  workedMs: number; // each turn from your prompt to its last step
+  startedAt: number | null;
+  lastAt: number | null;
+}
+
+// An account's last days (claude_status.py: token_stats)
+export interface StatsDay {
+  day: string; // YYYY-MM-DD, local
+  total: number;
+  output: number;
+  messages: number;
+  chats: number;
+  prompts: number;
+}
+
+export interface UsageStats {
+  days: StatsDay[]; // oldest first, today last
+  projects: { name: string; path: string; total: number; output: number; prompts: number }[]; // busiest first
+  models: { model: string; total: number }[];
+  sum: { total: number; output: number; chats: number; prompts: number; activeDays: number };
 }
 
 // Where a plan window is heading at your pace
@@ -168,6 +198,7 @@ export interface Group {
   sessions: Session[];
   limits: Limits | null;
   tokens: Tokens | null;
+  stats?: UsageStats | null;
   chatProfile: string;
   shareProfile: string | null;
   projects: Project[];

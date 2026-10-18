@@ -2,11 +2,15 @@ import { duration, formatTokens, stateText } from "../../src/shared/model";
 import type { Group, TokenTotals, Tokens } from "../../src/shared/types";
 import { post } from "../env";
 import { fiveHourOf, groupKeyOf, sharedRef, stageChats } from "../util/chat";
+import { Icon } from "../util/icons";
+import { useStore } from "../util/store";
+import { toggleStats, uiState } from "../util/ui";
 import { AccountStage } from "./AccountStage";
 import { useView } from "./context";
 import { IconButton } from "./IconButton";
 import { RecentChats } from "./RecentChats";
 import { SessionRow, stateClass } from "./SessionRow";
+import { StatsPanel } from "./StatsPanel";
 import { UsageBar } from "./UsageBar";
 
 function modelName(model: string): string {
@@ -27,6 +31,23 @@ function tokenTitle(t: Tokens): string {
   );
 }
 
+function TokenLine({ tokens, topModels }: { tokens: Tokens; topModels: Tokens["models"] }) {
+  return (
+    <span class="token-line">
+      <span class="muted">Tokens today </span>
+      {formatTokens(tokens.today.total)}
+      <span class="muted"> · 7 days </span>
+      {formatTokens(tokens.week.total)}
+      {topModels.map((m) => (
+        <span key={m.model} class="muted">
+          {" · "}
+          {modelName(m.model)} {formatTokens(m.total)}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 // One Claude account: its pets, plan limits, token totals, chats (from every
 // config folder logged into it) and recent chats. With group.host set, the
 // account is on that SSH host and its actions run there.
@@ -41,6 +62,9 @@ export function GroupSection({ group: g }: { group: Group }) {
   const usageAge = !limits ? "" : now - limits.updatedAt < 60000 ? "just now" : `${duration(now - limits.updatedAt)} ago`;
   const tokens = settings.showTokens ? g.tokens : null;
   const topModels = tokens ? tokens.models.slice(0, 2) : [];
+  const ui = useStore(uiState);
+  const stats = tokens && g.stats ? g.stats : null;
+  const statsOpen = !!stats && !!ui.stats[key];
 
   return (
     <section class="group" aria-label={(host ? host + ": " : "") + g.title}>
@@ -101,19 +125,24 @@ export function GroupSection({ group: g }: { group: Group }) {
 
       {/* Token totals (from local transcripts) */}
       {tokens ? (
-        <div class="tokens small" title={tokenTitle(tokens)}>
-          <span class="muted">Tokens today </span>
-          {formatTokens(tokens.today.total)}
-          <span class="muted"> · 7 days </span>
-          {formatTokens(tokens.week.total)}
-          {topModels.map((m) => (
-            <span key={m.model} class="muted">
-              {" · "}
-              {modelName(m.model)} {formatTokens(m.total)}
-            </span>
-          ))}
-        </div>
+        stats ? (
+          <button
+            type="button"
+            class="tokens small stats-toggle"
+            aria-expanded={statsOpen}
+            title={`${tokenTitle(tokens)}\n\nClick to ${statsOpen ? "hide" : "show"} the last ${stats.days.length} days.`}
+            onClick={() => toggleStats(key)}
+          >
+            <Icon name="chevron" class={statsOpen ? "open" : ""} />
+            <TokenLine tokens={tokens} topModels={topModels} />
+          </button>
+        ) : (
+          <div class="tokens small" title={tokenTitle(tokens)}>
+            <TokenLine tokens={tokens} topModels={topModels} />
+          </div>
+        )
       ) : null}
+      {statsOpen && stats ? <StatsPanel stats={stats} /> : null}
 
       <div class="sessions">
         {g.sessions.map((s) => (
