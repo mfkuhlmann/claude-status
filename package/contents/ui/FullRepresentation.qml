@@ -21,13 +21,16 @@ PlasmaExtras.Representation {
             anchors.fill: parent
             spacing: Kirigami.Units.smallSpacing
 
+            // In the system tray, the tray's own heading names the widget
             SparkIcon {
+                visible: !root.inTray
                 Layout.preferredWidth: Kirigami.Units.iconSizes.small
                 Layout.preferredHeight: Kirigami.Units.iconSizes.small
                 color: root.stateColor(root.overall)
                 spinning: root.overall === "working" && root.expanded
             }
             Kirigami.Heading {
+                visible: !root.inTray
                 level: 3
                 text: i18n("Claude Code")
             }

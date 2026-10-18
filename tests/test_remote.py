@@ -221,6 +221,25 @@ class ActionTests(FakeSSH):
         self.assertEqual(proc.wait(timeout=5), -15)
         self.assertEqual(self.calls()[-1], ["lab", "python3 -I - --remote --end idle-there --profile .claude"])
 
+    def test_stop_a_working_chat_or_interrupt_it_on_the_host(self):
+        proc = subprocess.Popen([sys.executable, "-c", "print('ready', flush=True); import time; time.sleep(60)"],
+                                stdout=subprocess.PIPE, text=True)
+        self.addCleanup(proc.stdout.close)
+        self.addCleanup(lambda: (proc.kill(), proc.wait()) if proc.poll() is None else None)
+        self.assertEqual(proc.stdout.readline().strip(), "ready")
+        (self.fake_home / f".claude/sessions/{proc.pid}.json").write_text(json.dumps(
+            {"pid": proc.pid, "procStart": cs.proc_start_time(proc.pid), "sessionId": "busy-there",
+             "cwd": "/srv/x", "kind": "interactive", "status": "busy"}))
+        self.assertIn("doesn't run in tmux", remote.interrupt("lab", "busy-there")[1])
+        self.assertEqual(self.calls()[-1], ["lab", "python3 -I - --remote --interrupt busy-there"])
+        self.assertFalse(remote.end("lab", "busy-there")[0])   # working: only when you were told
+        self.assertIsNone(proc.poll())
+        out = subprocess.run([sys.executable, "-I", str(CODE / "remote.py"), "--end", "lab", "busy-there", ".claude", "--busy"],
+                             capture_output=True, text=True, env=os.environ).stdout
+        self.assertEqual(json.loads(out), {"ok": True, "message": "Stopped; the chat is kept"})
+        self.assertEqual(proc.wait(timeout=5), -15)
+        self.assertEqual(self.calls()[-1], ["lab", "python3 -I - --remote --end busy-there --profile .claude --busy"])
+
     def test_host_says_whether_claude_is_there(self):
         self.assertEqual(remote.status("lab", tokens=False)["result"]["cli"], {"installed": False})
         claude = self.fake_home / ".local/bin/claude"

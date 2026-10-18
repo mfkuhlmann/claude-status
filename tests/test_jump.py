@@ -4,6 +4,7 @@ import io
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -343,11 +344,11 @@ class StopTests(Fixture):
         self.assertEqual(args, ["/usr/bin/claude", "stop", "job5"])
         self.assertEqual(config_dir, str((self.home / ".claude-work").resolve()))
 
-    def test_leaves_terminal_sessions_that_arent_idle(self):
-        # "busy" and "waiting" run in this test's own process: it mustn't get a signal
+    def test_leaves_chats_that_arent_idle_unless_told(self):
+        # "busy", "waiting" and "vscode" run in this test's own process: it mustn't get a signal
         self.assertEqual(self.run_stop("busy")[0], (False, "It's working again, so it wasn't stopped"))
         self.assertEqual(self.run_stop("waiting")[0], (False, "It's waiting for you now, so it wasn't stopped"))
-        self.assertEqual(self.run_stop("vscode")[0], (False, "It runs in VS Code: close its tab there to end it"))
+        self.assertEqual(self.run_stop("vscode")[0], (False, "It's working again, so it wasn't stopped"))
         self.assertEqual(self.run_stop("busy")[1], [])  # and claude stop isn't run for them
 
     def test_reports_claude_errors(self):
@@ -356,9 +357,11 @@ class StopTests(Fixture):
         self.assertEqual(self.run_stop("nope")[0], (False, "That session isn't running any more"))
 
 
-class IdleChatStopTests(Fixture):
-    """An idle chat in a terminal can be stopped: its process gets SIGTERM
-    (Claude's clean shutdown), and is killed only if it hangs on."""
+class ChatStopTests(Fixture):
+    """A chat with a process (terminal or VS Code) can be stopped: SIGTERM in a
+    terminal, SIGINT for VS Code's panel (Claude's clean exit there), a kill
+    only if it hangs on, and commands it leaves behind are ended. In tmux a
+    working chat can be interrupted instead (Ctrl+C in its pane)."""
 
     def chat(self, sid, setup="", **kw):
         """A stand-in for a chat's claude process, listed as an idle terminal session
@@ -378,41 +381,108 @@ class IdleChatStopTests(Fixture):
         self.assertEqual(proc.wait(timeout=5), -15)   # SIGTERM: Claude shuts down as when its terminal closes
         self.assertEqual(jump.stop(self.home, [], "idle-chat"), (False, "That session isn't running any more"))
 
+    def test_vscode_chat_gets_sigint(self):
+        # VS Code's panel takes Claude's exit after SIGINT (code 0) like its own stop button
+        proc = self.chat("panel", "import os, signal; signal.signal(signal.SIGINT, lambda *a: os._exit(0))",
+                         entrypoint="claude-vscode", status="busy")
+        self.assertEqual(jump.stop(self.home, [], "panel", busy=True), (True, "Stopped; the chat is kept"))
+        self.assertEqual(proc.wait(timeout=5), 0)
+
+    def test_busy_only_when_you_were_told(self):
+        for sid, kw in (("working", {"status": "busy"}), ("shell", {"status": "shell"}),
+                        ("asks", {"status": "waiting", "waitingFor": "permission prompt"})):
+            proc = self.chat(sid, **kw)
+            ok, message = cs.stop_chat_by_id(self.home, [], sid, wait=0.5)
+            self.assertFalse(ok, sid)
+            self.assertIn("so it wasn't stopped", message)
+            self.assertIsNone(proc.poll(), sid)   # still running
+            self.assertTrue(cs.stop_chat_by_id(self.home, [], sid, busy_ok=True)[0])
+            self.assertEqual(proc.wait(timeout=5), -15, sid)
+        # its own /model dialog open counts as idle (as in Claude's terminal status)
+        proc = self.chat("dialog-open", status="waiting", waitingFor="dialog open")
+        self.assertTrue(cs.stop_chat_by_id(self.home, [], "dialog-open")[0])
+        self.assertEqual(proc.wait(timeout=5), -15)
+
     def test_one_that_hangs_on_is_killed(self):
         proc = self.chat("stuck", "import signal; signal.signal(signal.SIGTERM, signal.SIG_IGN)")
-        ok, message = cs.end_idle_session(self.home, [], "stuck", wait=0.5)
+        ok, message = cs.stop_chat_by_id(self.home, [], "stuck", wait=0.5)
         self.assertEqual((ok, message), (True, "It hadn't quit after 0.5 s, so it was killed; the chat is kept"))
         self.assertEqual(proc.wait(timeout=5), -9)
 
-    def test_only_when_idle_and_not_in_vscode(self):
-        for sid, kw in (("working", {"status": "busy"}), ("shell", {"status": "shell"}),
-                        ("asks", {"status": "waiting", "waitingFor": "permission prompt"}),
-                        ("panel", {"entrypoint": "claude-vscode"})):
-            proc = self.chat(sid, **kw)
-            ok, _ = cs.end_idle_session(self.home, [], sid, wait=0.5)
-            self.assertFalse(ok, sid)
-            self.assertIsNone(proc.poll(), sid)   # still running
-        # its own /model dialog open counts as idle (as in Claude's terminal status)
-        proc = self.chat("dialog-open", status="waiting", waitingFor="dialog open")
-        self.assertTrue(cs.end_idle_session(self.home, [], "dialog-open")[0])
-        self.assertEqual(proc.wait(timeout=5), -15)
+    def test_commands_it_leaves_behind_are_ended(self):
+        # VS Code's claude exits on SIGINT but leaves its running command behind
+        pids = Path(self.tmp.name) / "child"
+        proc = self.chat("panel", "import os, signal, subprocess; c = subprocess.Popen(['sleep', '60']);"
+                                  f"open({str(pids)!r}, 'w').write(str(c.pid));"
+                                  "signal.signal(signal.SIGINT, lambda *a: os._exit(0))",
+                         entrypoint="claude-vscode", status="busy")
+        child = int(pids.read_text())
+        start = cs.proc_start_time(child)
+        ok, message = cs.stop_chat_by_id(self.home, [], "panel", busy_ok=True)
+        self.assertEqual((ok, message), (True, "Stopped; the chat is kept (and 1 command it was running ended)"))
+        self.assertEqual(proc.wait(timeout=5), 0)
+        self.assertTrue(cs.process_gone({"pid": child, "procStart": start}))
 
     def test_profile_and_pid_reuse(self):
         proc = self.chat("mine")
-        self.assertEqual(cs.end_idle_session(self.home, [], "mine", ".claude-personal"),
+        self.assertEqual(cs.stop_chat_by_id(self.home, [], "mine", ".claude-personal"),
                          (False, "That session isn't running any more"))
         # its pid now belongs to another process: the file's start time doesn't match
         write(self.home / f".claude-work/sessions/{proc.pid}.json", session("mine", pid=proc.pid, procStart="1"))
-        self.assertEqual(cs.end_idle_session(self.home, [], "mine"), (False, "That session isn't running any more"))
+        self.assertEqual(cs.stop_chat_by_id(self.home, [], "mine"), (False, "That session isn't running any more"))
         self.assertIsNone(proc.poll())
 
+    @unittest.skipUnless(shutil.which("tmux"), "needs tmux")
+    def test_interrupt_presses_ctrl_c_in_its_tmux_pane(self):
+        tmp = Path(self.tmp.name)
+        sock, keys, ready = tmp / "tmux.sock", tmp / "keys", tmp / "ready"
+        # a stand-in claude that reads its terminal raw, as Claude's own UI does
+        script = (f"import os, sys, tty; tty.setraw(0); open({str(ready)!r}, 'w').write(str(os.getpid()));"
+                  f"open({str(keys)!r}, 'wb').write(os.read(0, 16)); import time; time.sleep(30)")
+        subprocess.run(["tmux", "-S", str(sock), "-f", "/dev/null", "new-session", "-d", "-s", "t", "-x", "80", "-y", "24",
+                        f"{sys.executable} -c {shlex.quote(script)}"], check=True)
+        self.addCleanup(lambda: subprocess.run(["tmux", "-S", str(sock), "kill-server"], capture_output=True))
+        for _ in range(100):
+            if ready.exists() and ready.read_text():
+                break
+            time.sleep(0.05)
+        pid = int(ready.read_text())
+        pane = subprocess.run(["tmux", "-S", str(sock), "display-message", "-p", "-t", "t",
+                               "#{session_name}:#{window_id}.#{pane_id}"], capture_output=True, text=True).stdout.strip()
+        write(self.home / f".claude-work/sessions/{pid}.json",
+              session("in-tmux", pid=pid, procStart=cs.proc_start_time(pid), status="busy", tmux=pane))
+        self.assertEqual(cs.interrupt_chat_by_id(self.home, [], "in-tmux"),
+                         (True, "Interrupted (Ctrl+C in its tmux pane); the chat stays open there"))
+        for _ in range(100):
+            if keys.exists() and keys.read_bytes():
+                break
+            time.sleep(0.05)
+        self.assertEqual(keys.read_bytes(), b"\x03")   # Ctrl+C, as if pressed there (a key: its terminal is raw)
+        self.assertTrue(cs.is_alive({"pid": pid, "procStart": cs.proc_start_time(pid)}))   # the chat stays
+
+    def test_interrupt_only_in_tmux_and_while_working(self):
+        self.chat("plain", status="busy")
+        self.assertIn("doesn't run in tmux", cs.interrupt_chat_by_id(self.home, [], "plain")[1])
+        self.chat("done-now", tmux="t:@1.%1")
+        self.assertIn("nothing to interrupt", cs.interrupt_chat_by_id(self.home, [], "done-now")[1])
+
     def test_command_line(self):
-        proc = self.chat("cli-chat")
+        proc = self.chat("cli-chat", status="busy")
         env = dict(os.environ, HOME=str(self.home), XDG_CACHE_HOME=str(self.cache))
-        r = subprocess.run([sys.executable, "-I", str(CODE / "claude_status.py"), "--end", "cli-chat",
-                            "--profile", ".claude-work"], capture_output=True, text=True, env=env)
-        self.assertEqual(json.loads(r.stdout), {"ok": True, "message": "Stopped; the chat is kept"}, r.stderr)
+        run = lambda *args: json.loads(subprocess.run([sys.executable, "-I", str(CODE / "claude_status.py"), *args],
+                                                      capture_output=True, text=True, env=env).stdout)
+        self.assertFalse(run("--end", "cli-chat", "--profile", ".claude-work")["ok"])   # it's working: not without --busy
+        self.assertEqual(run("--end", "cli-chat", "--profile", ".claude-work", "--busy"),
+                         {"ok": True, "message": "Stopped; the chat is kept"})
         self.assertEqual(proc.wait(timeout=5), -15)
+        calls = []
+        with Patch(stop=lambda home, extra, sid, prof=None, busy=False: calls.append(("stop", sid, busy)) or (True, ""),
+                   interrupt=lambda home, extra, sid, prof=None: calls.append(("interrupt", sid, prof)) or (True, "")), \
+                contextlib.redirect_stdout(io.StringIO()):
+            jump.main(["--stop", "a", "--busy"])
+            jump.main(["--stop", "b"])
+            jump.main(["--interrupt", "c", "--profile", ".claude-work"])
+        self.assertEqual(calls, [("stop", "a", True), ("stop", "b", False), ("interrupt", "c", ".claude-work")])
 
 
 class NewChatTests(Fixture):

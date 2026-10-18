@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Stop or interrupt any running chat:** the ■ stop button works on every chat with a process, whatever it's doing, and asks first with what will happen. In a terminal, Claude quits as when the terminal closes: the current step is cut off, the terminal stays open and the chat moves to **Recent chats**. In VS Code's Claude tab it's like the tab's own stop button: the tab says *Interrupted*, keeps the chat and goes on with your next message (Claude gets SIGINT there, its clean exit; SIGTERM showed an error). A working chat in tmux can be **interrupted** instead: Ctrl+C in its pane, which stops the turn and its subagents, background ones too, and keeps the chat open. Commands a stopped chat leaves behind are ended too. Also on SSH hosts.
+- **Model and effort:** a chat's row shows its reasoning effort next to the model (*Opus 5.5 · max*, from the status line), and each subagent in the tree the model it runs on (*Explore · Haiku 4.5*).
+- **System tray (Plasma):** Claude Status can sit in the system tray: System Tray Settings → Entries → Claude Status (off until you switch it on; *Shown when relevant* shows it while a chat runs). With a panel widget and a tray one, only one of them notifies, and they share their settings.
+- **An icon that catches your eye:** it blinks while a chat needs you that you haven't seen, and pulses a few times when one finishes. Its one number is the most urgent: red for chats that need you, else green for chats that finished since you last opened the popup (turns as long as the "finished" notifications ask for). Opening the popup counts as seen. A new setting turns the blinking off.
+- The VS Code extension is 1.7.0 too, with the same changes; in its own terminals a working chat can be interrupted (Ctrl+C) too, not only in tmux.
+
 ## 1.6.0 (2026-10-17)
 
 - **Stop idle chats:** a chat in a terminal whose turn is over gets the ■ stop button too (it asks first). Claude shuts down as when its terminal closes: the terminal stays open, and the chat is kept and moves to **Recent chats**. One that got back to work meanwhile isn't touched, and one that hangs on is killed after 10 s. Also on SSH hosts. Not for chats in VS Code, where it would show as an error.

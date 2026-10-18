@@ -5,7 +5,8 @@
     python3 -I remote.py --status HOST [--done-hours H] [--recent N] [--no-tokens]
     python3 -I remote.py --open HOST COMMAND        a terminal running COMMAND on HOST
     python3 -I remote.py --run HOST COMMAND         run COMMAND on HOST (e.g. claude stop)
-    python3 -I remote.py --end HOST SESSION_ID [PROFILE]   stop an idle chat in a terminal there
+    python3 -I remote.py --end HOST SESSION_ID [PROFILE] [--busy]   stop a chat in a terminal or VS Code there
+    python3 -I remote.py --interrupt HOST SESSION_ID [PROFILE]      interrupt a working chat in tmux there
     python3 -I remote.py --dismiss HOST SESSION_ID  hide a finished session of HOST
     python3 -I remote.py --undismiss-all HOST
 
@@ -230,9 +231,15 @@ def dismiss(host, session_id=None):
     return run_status_script(host, ["--dismiss", session_id] if session_id else ["--undismiss-all"])
 
 
-def end(host, session_id, profile=None):
-    """Stop an idle chat that runs in a terminal on host (claude_status.end_idle_chat)."""
-    return run_status_script(host, ["--end", session_id] + (["--profile", profile] if profile else []))
+def end(host, session_id, profile=None, busy=False):
+    """Stop a chat that runs on host (claude_status.stop_chat); only an idle one unless busy."""
+    return run_status_script(host, ["--end", session_id] + (["--profile", profile] if profile else [])
+                             + (["--busy"] if busy else []))
+
+
+def interrupt(host, session_id, profile=None):
+    """Interrupt a working chat in tmux on host (claude_status.interrupt_chat)."""
+    return run_status_script(host, ["--interrupt", session_id] + (["--profile", profile] if profile else []))
 
 
 def open_remote(host, command):
@@ -276,8 +283,11 @@ def main(argv=None):
         elif action == "--dismiss" and len(args) == 2:
             ok, message = dismiss(args[0], args[1])
             out = {"ok": ok, "message": message}
-        elif action == "--end" and len(args) in (2, 3):
-            ok, message = end(*args)
+        elif action == "--end" and len([a for a in args if a != "--busy"]) in (2, 3):
+            ok, message = end(*[a for a in args if a != "--busy"], busy="--busy" in args)
+            out = {"ok": ok, "message": message}
+        elif action == "--interrupt" and len(args) in (2, 3):
+            ok, message = interrupt(*args)
             out = {"ok": ok, "message": message}
         elif action == "--undismiss-all" and len(args) == 1:
             ok, message = dismiss(args[0])

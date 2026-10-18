@@ -16,6 +16,7 @@ KCM.SimpleKCM {
     property alias cfg_notifyDoneMinSeconds: notifyDoneMinSeconds.value
     property alias cfg_keepDoneHours: keepDoneHours.value
     property alias cfg_showUsageInPanel: showUsage.checked
+    property alias cfg_iconBlink: iconBlink.checked
     property alias cfg_showTokens: showTokens.checked
     property alias cfg_showPet: showPet.checked
     property alias cfg_chatPets: chatPets.value
@@ -38,6 +39,7 @@ KCM.SimpleKCM {
     property int cfg_notifyDoneMinSecondsDefault
     property int cfg_keepDoneHoursDefault
     property bool cfg_showUsageInPanelDefault
+    property bool cfg_iconBlinkDefault
     property bool cfg_showTokensDefault
     property bool cfg_showPetDefault
     property int cfg_chatPetsDefault
@@ -195,6 +197,29 @@ KCM.SimpleKCM {
             id: showUsage
             Kirigami.FormData.label: i18n("Panel:")
             text: i18n("Show 5-hour usage next to the icon")
+        }
+
+        QQC2.CheckBox {
+            id: iconBlink
+            Kirigami.FormData.label: i18n("Icon:")
+            text: i18n("Blink while a chat needs you, pulse when one finishes")
+        }
+
+        QQC2.Label {
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 20
+            wrapMode: Text.Wrap
+            font: Kirigami.Theme.smallFont
+            opacity: 0.7
+            text: i18n("Its number: red, chats that need you; green, chats that finished since you last opened the popup (turns at least as long as the \"finished\" notifications ask for). Opening the popup counts as seen.")
+        }
+
+        QQC2.Label {
+            Kirigami.FormData.label: i18n("System tray:")
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 20
+            wrapMode: Text.Wrap
+            font: Kirigami.Theme.smallFont
+            opacity: 0.7
+            text: i18n("Claude Status can sit in the system tray too: right-click the tray's arrow → Configure System Tray… → Entries → Claude Status. \"Shown when relevant\" shows it while a chat runs. Several Claude Status widgets share these settings, and only one of them notifies.")
         }
 
         QQC2.CheckBox {

@@ -9,7 +9,39 @@ MouseArea {
     id: compact
 
     readonly property bool vertical: Plasmoid.formFactor === PlasmaCore.Types.Vertical
-    readonly property bool showUsage: Plasmoid.configuration.showUsageInPanel && !vertical && root.panelWindow !== null
+    // Not in the system tray: its icons are square
+    readonly property bool showUsage: Plasmoid.configuration.showUsageInPanel && !vertical && !root.inTray && root.panelWindow !== null
+    // One count at a time, the most urgent: chats that need you (red), else
+    // chats that finished since you last opened the popup (green). Working
+    // chats show as the spinning spark; the tooltip has every count.
+    readonly property int badgeCount: root.counts.waiting > 0 ? root.counts.waiting : root.unseenDone
+    // To catch your eye: it blinks while a chat that needs you hasn't been
+    // seen, and pulses a few times when one finishes (opening the popup stops it)
+    property int pulses: 0
+    property int doneBefore: 0
+    readonly property bool blinking: Plasmoid.configuration.iconBlink && !root.expanded
+                                     && (root.unseenWaiting > 0 || pulses > 0)
+
+    Connections {
+        target: root
+        function onUnseenDoneChanged() {
+            if (root.unseenDone > compact.doneBefore)
+                compact.pulses = 6   // three blinks
+            compact.doneBefore = root.unseenDone
+        }
+    }
+
+    Timer {
+        interval: 450
+        repeat: true
+        running: compact.blinking
+        onTriggered: {
+            spark.dimmed = !spark.dimmed
+            if (compact.pulses > 0)
+                compact.pulses -= 1
+        }
+        onRunningChanged: if (!running) spark.dimmed = false
+    }
     property bool wasExpanded: false
 
     Layout.minimumWidth: vertical ? 0 : row.implicitWidth
@@ -38,29 +70,35 @@ MouseArea {
             Layout.preferredWidth: compact.vertical ? compact.width : compact.height
 
             SparkIcon {
+                id: spark
+                property bool dimmed: false
                 anchors.centerIn: parent
                 width: Math.min(parent.width, parent.height) * 0.78
                 height: width
                 color: root.stateColor(root.overall)
                 spinning: root.overall === "working"
+                opacity: dimmed ? 0.2 : 1
+
+                Behavior on opacity {
+                    NumberAnimation { duration: 400; easing.type: Easing.InOutQuad }
+                }
             }
 
-            // Count of sessions waiting for input
             Rectangle {
-                visible: root.counts.waiting > 0
+                visible: compact.badgeCount > 0
                 anchors.right: parent.right
                 anchors.top: parent.top
                 width: Math.max(height, badgeLabel.implicitWidth + Kirigami.Units.smallSpacing)
                 height: Math.round(parent.height * 0.45)
                 radius: height / 2
-                color: Kirigami.Theme.negativeTextColor
+                color: root.counts.waiting > 0 ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.positiveTextColor
                 border.color: Kirigami.Theme.backgroundColor
                 border.width: 1
 
                 PlasmaComponents3.Label {
                     id: badgeLabel
                     anchors.centerIn: parent
-                    text: root.counts.waiting
+                    text: compact.badgeCount
                     color: "white"
                     font.bold: true
                     font.pixelSize: Math.max(7, parent.height * 0.75)

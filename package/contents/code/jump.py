@@ -3,7 +3,9 @@
 a new chat (used by the Claude Status widget).
 
     python3 -I jump.py SESSION_ID [--config-dir DIR]...
-    python3 -I jump.py --stop SESSION_ID [--config-dir DIR]...
+    python3 -I jump.py --stop SESSION_ID [--profile PROFILE] [--busy] [--config-dir DIR]...
+    python3 -I jump.py --interrupt SESSION_ID [--profile PROFILE]   (Ctrl+C in its tmux pane)
+    python3 -I jump.py --save-settings JSON --by WIDGET [--unless-default]   (settings the widgets share)
     python3 -I jump.py --new-chat PROFILE_DIRNAME [--cwd FOLDER] [--config-dir DIR]...
     python3 -I jump.py --new-chat PROFILE_DIRNAME --choose-folder   (ask for the folder first)
     python3 -I jump.py --new-chat PROFILE_DIRNAME [--cwd FOLDER | --choose-folder] --vscode
@@ -22,9 +24,11 @@ Sharing is done by sharing.py; a chat that's open in a session isn't touched
 (it can be open in one at a time).
 
 `--stop` runs `claude stop <id>` for a background session: it's interrupted,
-its conversation is kept, and `claude attach <id>` resumes it. An idle chat in
-a terminal is stopped too (claude_status.end_idle_chat): Claude quits, its
-terminal stays open, and `claude --resume <id>` reopens it.
+its conversation is kept, and `claude attach <id>` resumes it. A chat in a
+terminal or in VS Code is stopped too (claude_status.stop_chat): Claude quits,
+its terminal stays open (VS Code's tab goes on with the next message), and
+`claude --resume <id>` reopens it; only an idle one unless --busy (you were
+told it's working or waiting). `--interrupt` presses Ctrl+C for a chat in tmux.
 
 - terminal session: switch Konsole to the tab running it (or select its tmux
   pane) and raise that window;
@@ -725,16 +729,17 @@ def jump(home, extra_dirs, session_id, profile_dir=None):
     return False, "Don't know how to open this session"
 
 
-def stop(home, extra_dirs, session_id, profile_dir=None):
-    """Stop a background session with `claude stop`, or an idle chat in a
-    terminal (its process quits). Either way the conversation is kept."""
+def stop(home, extra_dirs, session_id, profile_dir=None, busy=False):
+    """Stop a background session with `claude stop`, or a chat in a terminal
+    or VS Code (its process quits; only an idle one unless busy). Either way
+    the conversation is kept."""
     profile, entry, job, job_id = find_session(home, extra_dirs, session_id, profile_dir)
     if profile is None:
         return False, "That session isn't running any more"
     if not job_id:
         if entry is not None and entry.get("kind") == "interactive":
-            return cs.end_idle_chat(entry)
-        return False, "Only background sessions and idle chats can be stopped here"
+            return cs.stop_chat(entry, busy_ok=busy)
+        return False, "Only background sessions and chats with a process can be stopped here"
     claude = claude_path(home)
     if not claude:
         return False, NO_CLAUDE
@@ -756,6 +761,27 @@ def stop(home, extra_dirs, session_id, profile_dir=None):
     if r.returncode != 0:
         return False, lines[-1] if lines else f"claude stop failed (exit {r.returncode})"
     return True, lines[-1] if lines else "Stopped"
+
+
+def interrupt(home, extra_dirs, session_id, profile_dir=None):
+    """Interrupt a working chat in tmux (Ctrl+C in its pane); it stays open."""
+    profile, entry, _job, job_id = find_session(home, extra_dirs, session_id, profile_dir)
+    if profile is None or entry is None:
+        return False, "That session isn't running any more"
+    if job_id:
+        return False, "A background session can only be stopped"
+    return cs.interrupt_chat(entry)
+
+
+def save_settings(home, values_json, by, unless_default=False):
+    """Save a widget's settings for its other copies (claude_status: several widgets at once)."""
+    try:
+        values = json.loads(values_json)
+    except ValueError:
+        return False, "The settings aren't JSON"
+    if not isinstance(values, dict):
+        return False, "The settings aren't a JSON object"
+    return cs.save_shared_settings(cs.cache_dir(home), by, values, int(time.time() * 1000), unless_default)
 
 
 def new_chat(home, extra_dirs, dirname, folder=None):
@@ -1047,7 +1073,8 @@ def undismiss_all(home, extra_dirs, _session_id=None):
     return True, f"{count} session(s) shown again"
 
 
-USAGE = ("usage: jump.py [--stop] SESSION_ID [--profile PROFILE] [--config-dir DIR]...\n"
+USAGE = ("usage: jump.py [--stop [--busy] | --interrupt] SESSION_ID [--profile PROFILE] [--config-dir DIR]...\n"
+         "       jump.py --save-settings JSON --by WIDGET [--unless-default]\n"
          "       jump.py --new-chat PROFILE_DIRNAME [--cwd FOLDER | --choose-folder] [--vscode] [--config-dir DIR]...\n"
          "       jump.py --resume|--continue|--unshare SESSION_ID --profile PROFILE\n"
          "       jump.py --continue SESSION_ID --profile PROFILE --print-command   (share it; print the command, no terminal)\n"
@@ -1063,6 +1090,7 @@ def main(argv=None):
     args = sys.argv[1:] if argv is None else list(argv)
     extra, session_id, action, folder, profile_dir = [], None, jump, None, None
     remote_host, name_arg, choose, vscode, print_command = None, "", False, False, False
+    busy, settings_json, settings_by, unless_default = False, None, "", False
     while args:
         arg = args.pop(0)
         if arg == "--config-dir" and args:
@@ -1073,6 +1101,16 @@ def main(argv=None):
             profile_dir = args.pop(0)
         elif arg == "--stop":
             action = stop
+        elif arg == "--busy":
+            busy = True
+        elif arg == "--interrupt":
+            action = interrupt
+        elif arg == "--save-settings" and args:
+            action, settings_json, session_id = save_settings, args.pop(0), session_id or "-"
+        elif arg == "--by" and args:
+            settings_by = args.pop(0)
+        elif arg == "--unless-default":
+            unless_default = True
         elif arg == "--new-chat":
             action = new_chat
         elif arg == "--choose-folder":
@@ -1117,12 +1155,16 @@ def main(argv=None):
             ok, message = resume_remote_vscode(remote_host, session_id, folder or "")
         elif action is resume and vscode:
             ok, message = resume_vscode(Path.home(), extra, session_id, profile_dir)
+        elif action is stop:
+            ok, message = stop(Path.home(), extra, session_id, profile_dir, busy)
+        elif action is save_settings:
+            ok, message = save_settings(Path.home(), settings_json, settings_by, unless_default)
         elif action is new_chat and choose:
             ok, message = (new_chat_choosing_folder(Path.home(), extra, session_id, vscode=True) if vscode
                            else new_chat_choosing_folder(Path.home(), extra, session_id))
         elif action is new_chat:
             ok, message = (new_chat_vscode if vscode else new_chat)(Path.home(), extra, session_id, folder)
-        elif action in (jump, stop, resume, continue_on, share, unshare):
+        elif action in (jump, interrupt, resume, continue_on, share, unshare):
             ok, message = action(Path.home(), extra, session_id, profile_dir)
         else:
             ok, message = action(Path.home(), extra, session_id)

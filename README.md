@@ -27,7 +27,7 @@ On GNOME (Ubuntu 26.04 and newer) it lives in the top bar: see [On GNOME](#on-gn
 
 - **Panel icon:** a ✳ spark in the state color: orange with a red badge counting the sessions that need you, blue and spinning while Claude works, green when it's your turn, grey when nothing runs. The 5-hour usage of the account you're using sits next to it.
 - **The big Clawd** at the top of the popup sums it all up. His stage glows orange (gently pulsing) when a chat needs you, blue while chats work, green when it's your turn, and turns into a starry night once everything is done. His headline says what matters most, e.g. *2 chats need you*: click it to go there.
-- **One section per Claude account** (profiles logged into the same account are merged): plan usage with reset countdowns, tokens for today and the last 7 days, and every session (terminal, background job or VS Code) with its state, how long it's been in it, project folder, model and context fill, plus what a waiting session asks for (e.g. *approve Bash: rm -rf build/*).
+- **One section per Claude account** (profiles logged into the same account are merged): plan usage with reset countdowns, tokens for today and the last 7 days, and every session (terminal, background job or VS Code) with its state, how long it's been in it, project folder, model and reasoning effort (e.g. *Opus 5.5 · max*) and context fill, plus what a waiting session asks for (e.g. *approve Bash: rm -rf build/*).
 - **A pet for every chat:** each account's chats walk on a little stage under its name, wearing the chat's name and color. The chat's row in the list gets a bar in the same color. A pet acts its chat out: it works (types, tests, reviews, juggles subagents), holds up a warning sign when the chat needs you, relaxes when it's your turn, sleeps once the chat is done and looks sad if it failed. Click a pet to open its chat.
 
 <p align="center"><img src="docs/screenshots/pets.gif" alt="Pets reacting: a chat finishes and its pet celebrates, a new chat's pet walks in, and the big Clawd charges up when a usage limit resets" width="500"></p>
@@ -36,7 +36,7 @@ On GNOME (Ubuntu 26.04 and newer) it lives in the top bar: see [On GNOME](#on-gn
 
 - **Jump to a session** by clicking its name: Konsole switches to the right tab (or tmux to its pane), VS Code opens the conversation, and a background job is attached in a terminal. Finished chats reopen with `claude --resume`.
 - **Start a new chat** with the **+** next to an account: pick one of its recent project folders, or **Choose folder…** to pick any folder in the folder dialog, and a terminal opens with Claude in it. Or switch the **Terminal | VS Code** switch at the top of the list to VS Code, and the chat starts in VS Code's Claude panel instead (the switch is kept for next time). Without the `claude` command, **Terminal** is greyed out; without VS Code, **VS Code** is (the tooltip says why).
-- **Stop** a background session, or an idle chat in a terminal (■; it asks first and keeps the conversation), or **hide** a finished one (－; nothing is deleted).
+- **Stop or interrupt** any chat that's running, from the list (■; it asks first and keeps the conversation), or **hide** a finished one (－; nothing is deleted).
 - **Recent chats** per account, to reopen older conversations: in a terminal or in VS Code, with the same switch at the top of the list.
 - **Notifications** when a session needs you or finishes a long turn, with sounds from your sound theme (quiet during Do Not Disturb). Click one to jump to the session.
 
@@ -57,7 +57,7 @@ On GNOME (Ubuntu 26.04 and newer) it lives in the top bar: see [On GNOME](#on-gn
   - **+** starts a new chat there; ■ and － stop its background sessions and idle chats, or hide finished ones
   - checked every 30 seconds (configurable) while it's ticked; the ✕ next to the host's name hides it again
   - needs key-based login (the widget can't type a password: load your key with `ssh-add`, or log in once in a terminal to accept a new host key) and `python3` on the host. Nothing is installed there: the status script is sent over the connection each time. It keeps its caches in the host's `~/.cache/claude-widget`, like here. One connection per host stays open for a few minutes, so checks through a jump host are quick.
-- **Subagents:** a session that started subagents shows an **agents 2/3** tag (finished/total), outlined while any are running. Click it for a tree of its agents, nested agents included: each one's type, task, running/done/stopped, and what it is doing right now (e.g. `Bash: pytest -x`, `Edit: parser.py`, or the first line of its final answer).
+- **Subagents:** a session that started subagents shows an **agents 2/3** tag (finished/total), outlined while any are running. Click it for a tree of its agents, nested agents included: each one's type and the model it runs on (e.g. *Explore · Haiku 4.5*), its task, running/done/stopped, and what it is doing right now (e.g. `Bash: pytest -x`, `Edit: parser.py`, or the first line of its final answer).
 - **Shared chats:** a chat shared across profiles (one transcript hard-linked into each profile) gets a **⇄ shared** tag. Its tooltip lists the profiles and, when known, which one has it open. It's listed once, under the account it runs on, or, once it's finished, the account it was used on last. Every other account it's shared with shows a short line pointing there (e.g. *⇄ my chat · on personal · Working*), and clicking it jumps to the chat.
   - When Claude forks a shared chat into a chat of its own (e.g. when a background session takes it over), that copy gets a **⇄ shared copy** tag: its new messages are only on that account. If the shared chat continued in the copy, the copy is listed instead of the chat, and the other accounts point to it (*copy on personal*).
   - A shared chat's tokens appear in every profile it's shared with, since a transcript doesn't record which account paid; the token tooltip shows how much that is.
@@ -73,8 +73,10 @@ On GNOME (Ubuntu 26.04 and newer) it lives in the top bar: see [On GNOME](#on-gn
 - **Terminal or VS Code, whichever is there:** **Terminal** is greyed out where the `claude` command isn't found (on PATH, in `~/.local/bin`, npm's or nvm's folders, or on your login shell's PATH, which is asked at most once an hour), and chats open in VS Code there. **VS Code** is greyed out where VS Code isn't installed. On an SSH host, Terminal depends on the host's `claude`.
 - **Hiding finished sessions** only hides them in the widget; nothing is deleted, and you can still resume the conversation. A hidden session comes back by itself if it runs again, and right-click → *Show removed sessions again* brings all of them back. The widget deliberately has no real "delete": that can't be undone, and Claude's `claude rm` also removes a background session's worktree.
 - **Stopping** a background session runs `claude stop <id>`: the conversation is kept and `claude attach <id>` resumes it. A session that is *working* is interrupted mid-step, and anything it started in the background stops too.
-  - An **idle chat in a terminal** (its turn is over and nothing runs) can be stopped too: Claude gets the signal it gets when its terminal closes and shuts down cleanly. Its terminal stays open, and the chat moves to **Recent chats**, from where it reopens. The widget looks again before it stops one: a chat that got back to work in the meantime isn't touched. If Claude hasn't quit after 10 seconds, it's killed.
-  - Chats that are working or waiting for you have no stop button (answer them, or press Esc in their terminal), and neither do chats in VS Code (close their tab there: stopping one from outside shows an error in VS Code).
+  - A **chat in a terminal** can be stopped whatever it's doing: Claude gets the signal it gets when its terminal closes and shuts down cleanly. A working one's current step is cut off, and a waiting one quits without your answer. Its terminal stays open, and the chat moves to **Recent chats**, from where it reopens.
+  - A **chat in VS Code's Claude tab** is stopped the way the tab's own stop button does it: the tab says *Interrupted*, keeps the chat and goes on with your next message (which starts Claude again, a second or two). Claude gets SIGINT there, its clean exit; SIGTERM would put an error in the tab.
+  - A **working chat in tmux** can be **interrupted** instead: Ctrl+C in its pane, as if you pressed it. Like the stop button in VS Code, that stops the turn and its subagents, background ones too, and keeps the chat open (a draft you typed stays). Esc would leave background subagents running. Other terminals take no keys from outside, so their chats can only be stopped.
+  - The confirmation says which of these happens. The widget looks again before stopping: an idle chat that got back to work since you asked isn't touched. Stopping ends every subagent of the chat, since they run inside its Claude; commands it leaves behind are ended too, and a Claude that hasn't quit after 10 seconds is killed.
 - **Notifications:** when a session needs you (a permission prompt, a question, or a background job that stopped to ask you something; closed again once you answer), and when a session finishes a turn that took at least 30 seconds (configurable, or off). Sounds: one each for "needs input", "finished" and "failed", from your sound theme, a sound file of your own, or none. They go through PipeWire's notification stream, so the system's notification volume applies. When several sessions change at once, only the most urgent sound plays.
 
 </details>
@@ -181,7 +183,7 @@ The same dashboard as a GNOME Shell extension: the ✳ in the top bar, the popup
 | Panel icon | Left-click opens the popup, middle-click refreshes. Right-click: *Refresh*, *Show removed sessions again*, *Open Usage Page on claude.ai*, and the settings. |
 | The big Clawd | Click his headline (*… needs you*) to go to that chat. Click him to pet him, double-click to make him dance, drag him around. |
 | A session's name | Jumps to the session: its terminal tab, its VS Code window, or a terminal attached to the background job. |
-| Hovering a session | ■ stops a background session or an idle chat in a terminal, － hides a finished one, and the share button shares a chat with your other accounts. |
+| Hovering a session | ■ stops or interrupts a chat (it asks first), － hides a finished one, and the share button shares a chat with your other accounts. |
 | A chat's pet | Opens its chat. |
 | **+** next to an account | Lists the account's recent folders and **Choose folder…** (an SSH host's: its home folder instead). Click one for a new chat there: in a terminal, or in VS Code (the switch at the top of the list). |
 | *Recent chats* | Unfolds the account's older conversations; click one to reopen it, in a terminal or in VS Code (the switch at the top of the list). |
@@ -222,9 +224,14 @@ Right-click the widget → **Configure Claude Status…**
 | Recent chats per account | 5 | 0 hides the list |
 | Check SSH hosts every | 30 s | |
 | Panel | on | The 5-hour usage next to the icon |
+| Icon | on | Blink while a chat needs you (until you open the popup), pulse when one finishes |
 | Pet | on | Clawd in the popup and in notifications |
 | Chat pets per account | 5 | 0 keeps only the big Clawd |
 | Popup | on | Token totals |
+
+**The icon** shows one number, the most urgent: red for chats that need you, else green for chats that finished since you last opened the popup (turns as long as the "finished" notifications ask for). A working chat makes the spark spin, and hovering the icon lists every count.
+
+**In the system tray (Plasma):** Claude Status can sit in the system tray as well as (or instead of) on a panel: right-click the tray's arrow → **Configure System Tray…** → **Entries** → **Claude Status**. It's off until you switch it on. *Shown when relevant* shows it while a chat runs; clicking it opens the same popup. With two Claude Status widgets, only one of them (the one running longest) sends notifications and sounds, and they share their settings: a change in one shows in the other within a few seconds, and a new one starts with what the others use.
 
 ## Updating
 

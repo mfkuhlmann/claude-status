@@ -14,11 +14,26 @@ RowLayout {
     readonly property string tag: session.entrypoint === "claude-vscode" ? i18n("VS Code")
                                   : session.kind === "bg" ? i18n("background") : ""
     // A background session with a running process can be stopped (`claude stop`),
-    // and so can an idle chat in a terminal: its claude quits, the chat is kept
-    // (not VS Code's: the extension would show that as an error)
-    readonly property bool canEnd: session.kind === "interactive" && session.entrypoint !== "claude-vscode"
-                                   && session.state === "idle" && session.pid !== null
+    // and so can a chat with a process of its own, whatever it's doing: in a
+    // terminal its claude quits (the chat is kept), in VS Code its tab shows it
+    // as interrupted and goes on with the next message (claude_status.py:
+    // stopping and interrupting chats). One in tmux that's working can be
+    // interrupted instead: Ctrl+C in its pane, like VS Code's stop button.
+    readonly property bool canEnd: session.kind === "interactive" && session.pid !== null
+    readonly property bool inVscode: session.entrypoint === "claude-vscode"
+    readonly property bool canInterrupt: canEnd && !!session.tmux && (session.state === "working" || session.state === "waiting")
     readonly property bool canStop: canEnd || (session.kind === "bg" && session.pid !== null && (!remoteHost || !!session.stopCommand))
+    readonly property string stopTitle: row.canInterrupt ? i18n("Interrupt or stop this chat")
+                                        : row.canEnd ? i18n("Stop this chat") : i18n("Stop this background session")
+    readonly property string stopTip: row.canInterrupt
+        ? i18n("Asks first. Interrupting is like Ctrl+C in its tmux pane, or the stop button in VS Code: the current step and its subagents stop, and the chat stays open there.")
+        : row.canEnd && row.inVscode
+        ? i18n("Asks first. Its tab in VS Code shows it as interrupted, keeps the chat and goes on with your next message.")
+        : row.canEnd && row.session.state === "idle"
+        ? i18n("Asks first. Claude quits and its terminal stays open; the chat is kept and shows under Recent chats.")
+        : row.canEnd
+        ? i18n("Asks first. The current step is cut off, Claude quits and its terminal stays open; the chat is kept and shows under Recent chats.")
+        : i18n("Asks first. The conversation is kept; claude attach resumes it.")
     // Kept in root by row key: rows are refreshed with new data every poll.
     readonly property string rowKey: (remoteHost ? remoteHost + "|" : "") + session.key
     readonly property bool confirmingStop: session.key !== "" && root.stopConfirmSession === rowKey
@@ -198,16 +213,18 @@ RowLayout {
                 opacity: rowHover.hovered || row.confirmingStop ? 1 : 0
                 icon.name: "media-playback-stop"
                 display: PlasmaComponents3.AbstractButton.IconOnly
-                text: i18n("Stop…")
+                text: row.canInterrupt ? i18n("Interrupt or stop…") : i18n("Stop…")
                 Layout.preferredHeight: nameLabel.implicitHeight
                 Layout.preferredWidth: Layout.preferredHeight
-                onClicked: root.stopConfirmSession = row.confirmingStop ? "" : row.rowKey
+                onClicked: {
+                    root.stopConfirmBusy = row.session.state !== "idle"
+                    root.stopConfirmSession = row.confirmingStop ? "" : row.rowKey
+                }
 
                 PlasmaCore.ToolTipArea {
                     anchors.fill: parent
-                    mainText: row.canEnd ? i18n("Stop this chat") : i18n("Stop this background session")
-                    subText: row.canEnd ? i18n("Asks first. Claude quits and its terminal stays open; the chat is kept and shows under Recent chats.")
-                                        : i18n("Asks first. The conversation is kept; claude attach resumes it.")
+                    mainText: row.stopTitle
+                    subText: row.stopTip
                 }
             }
         }
@@ -225,9 +242,17 @@ RowLayout {
             }
             PlasmaComponents3.Label {
                 visible: !!row.session.model
-                text: row.session.model || ""
+                // the model, and how hard it thinks (Claude's /effort)
+                text: (row.session.model || "") + (row.session.effort ? " · " + row.session.effort : "")
                 opacity: 0.7
                 font: Kirigami.Theme.smallFont
+
+                PlasmaCore.ToolTipArea {
+                    anchors.fill: parent
+                    active: !!row.session.effort
+                    mainText: row.session.model || ""
+                    subText: i18n("Effort: %1 (how hard it thinks; /effort changes it)", row.session.effort || "")
+                }
             }
             // Context window fill
             Rectangle {
@@ -312,7 +337,8 @@ RowLayout {
                                 font: Kirigami.Theme.smallFont
                             }
                             PlasmaComponents3.Label {
-                                text: agentRow.modelData.type
+                                // its kind, and the model it runs on
+                                text: agentRow.modelData.type + (agentRow.modelData.model ? " · " + agentRow.modelData.model : "")
                                 opacity: 0.6
                                 font: Kirigami.Theme.smallFont
                             }
@@ -354,7 +380,19 @@ RowLayout {
             Layout.fillWidth: true
             visible: row.confirmingStop && row.canStop
             type: Kirigami.MessageType.Warning
-            text: row.canEnd
+            text: row.canInterrupt
+                  ? i18n("Interrupt “%1”? Like Ctrl+C in its tmux pane, or the stop button in VS Code: the current step and its subagents stop, and the chat stays open there. Or stop it: Claude quits and its terminal stays open.", row.session.name)
+                  : row.canEnd && row.inVscode && row.session.state === "working"
+                  ? i18n("Stop “%1”? It's working right now: the current step is interrupted, as with VS Code's stop button, and anything it was running stops. Its tab keeps the chat and goes on with your next message.", row.session.name)
+                  : row.canEnd && row.inVscode && row.session.state === "waiting"
+                  ? i18n("Stop “%1”? It's waiting for you: what it asks is refused, as with VS Code's stop button. Its tab keeps the chat and goes on with your next message.", row.session.name)
+                  : row.canEnd && row.inVscode
+                  ? i18n("Stop “%1”? It's idle, so nothing is interrupted: its Claude process in VS Code quits. Its tab keeps the chat and goes on with your next message.", row.session.name)
+                  : row.canEnd && row.session.state === "working"
+                  ? i18n("Stop “%1”? It's working right now: the current step is cut off and anything it was running stops. Claude quits and its terminal stays open; the chat is kept (Recent chats reopens it).", row.session.name)
+                  : row.canEnd && row.session.state === "waiting"
+                  ? i18n("Stop “%1”? It's waiting for you: Claude quits without your answer and its terminal stays open. The chat is kept (Recent chats reopens it).", row.session.name)
+                  : row.canEnd
                   ? i18n("Stop “%1”? It's idle, so nothing is interrupted: Claude quits and its terminal stays open. The chat is kept; reopen it from Recent chats.", row.session.name)
                   : row.session.state === "working"
                   ? i18n("Stop “%1”? It's working right now: the current step is interrupted and anything it started in the background stops too. The conversation is kept; claude attach resumes it.", row.session.name)
@@ -363,16 +401,30 @@ RowLayout {
                   : i18n("Stop “%1”? It's finished, so this only shuts down its idle process. The conversation is kept.", row.session.name)
             actions: [
                 Kirigami.Action {
+                    text: i18n("Interrupt")
+                    icon.name: "media-playback-pause"
+                    visible: row.canInterrupt
+                    onTriggered: {
+                        root.stopConfirmSession = ""
+                        if (row.remoteHost)
+                            root.remoteInterrupt(row.remoteHost, row.session.sessionId, row.session.profileDir)
+                        else
+                            root.interruptSession(row.session.sessionId, row.session.profileDir)
+                    }
+                },
+                Kirigami.Action {
                     text: i18n("Stop")
                     icon.name: "media-playback-stop"
                     onTriggered: {
                         root.stopConfirmSession = ""
+                        // only stopped if it's as you were told (an idle one that got busy isn't)
+                        const busy = root.stopConfirmBusy
                         if (row.remoteHost && row.canEnd)
-                            root.remoteEnd(row.remoteHost, row.session.sessionId, row.session.profileDir)
+                            root.remoteEnd(row.remoteHost, row.session.sessionId, row.session.profileDir, busy)
                         else if (row.remoteHost)
                             root.remoteStop(row.remoteHost, row.session.stopCommand)
                         else
-                            root.stopSession(row.session.sessionId, row.session.profileDir)
+                            root.stopSession(row.session.sessionId, row.session.profileDir, busy)
                     }
                 },
                 Kirigami.Action {

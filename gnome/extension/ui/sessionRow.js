@@ -13,8 +13,10 @@ export function buildSessionRow(ctx, session, {showProfile = false, remoteHost =
     const s = session;
     const tips = ctx.tips;
     const rowKey = (remoteHost ? `${remoteHost}|` : '') + s.key;
-    // A background session (claude stop), or an idle chat in a terminal (its claude quits)
+    // A background session (claude stop), or a chat with a process of its own
+    // (its claude quits; one in tmux can be interrupted instead: logic.js canEnd)
     const canEnd = L.canEnd(s);
+    const canInterrupt = L.canInterrupt(s);
     const canStop = canEnd || (s.kind === 'bg' && s.pid !== null && (!remoteHost || !!s.stopCommand));
     const confirmingStop = s.key !== '' && ctx.ui.stopConfirm === rowKey;
     const canShare = ctx.canShareChats && !remoteHost && s.pid === null && s.state === 'done' &&
@@ -89,10 +91,9 @@ export function buildSessionRow(ctx, session, {showProfile = false, remoteHost =
         line1.add_child(remove);
     }
     if (canStop) {
-        const stop = iconButton('media-playback-stop-symbolic', () => ctx.setStopConfirm(confirmingStop ? '' : rowKey));
-        tips.add(stop, canEnd
-            ? ['Stop this chat', 'Asks first. Claude quits and its terminal stays open; the chat is kept and shows under Recent chats.']
-            : ['Stop this background session', 'Asks first. The conversation is kept; claude attach resumes it.']);
+        const stop = iconButton('media-playback-stop-symbolic',
+            () => ctx.setStopConfirm(confirmingStop ? '' : rowKey, s.state !== 'idle'));
+        tips.add(stop, L.stopTip(s));
         if (!confirmingStop)
             hoverButtons.push(stop);
         line1.add_child(stop);
@@ -110,8 +111,13 @@ export function buildSessionRow(ctx, session, {showProfile = false, remoteHost =
     const cwd = label(s.cwdShort, 'claude-dim', {x_expand: true});
     cwd.clutter_text.ellipsize = 2;   // Pango.EllipsizeMode.MIDDLE
     line2.add_child(cwd);
-    if (s.model)
-        line2.add_child(label(s.model, 'claude-dim'));
+    if (s.model) {
+        // the model, and how hard it thinks (Claude's /effort)
+        const model = label(s.effort ? `${s.model} · ${s.effort}` : s.model, 'claude-dim');
+        if (s.effort)
+            tips.add(model, [s.model, L.fmt('Effort: %1 (how hard it thinks; /effort changes it)', s.effort)]);
+        line2.add_child(model);
+    }
     if (s.context !== null && s.context !== undefined) {
         const m = meter(s.context, L.usageClass(s.context), 'claude-meter claude-context-meter');
         m.x_expand = false;
@@ -135,18 +141,30 @@ export function buildSessionRow(ctx, session, {showProfile = false, remoteHost =
         body.add_child(buildKeepOnly(ctx));
 
     if (confirmingStop && canStop) {
-        body.add_child(confirmBox(L.stopQuestion(s), [
+        // stopped only if it's as you were told: an idle one that got busy isn't
+        const busy = ctx.ui.stopConfirmBusy;
+        const buttons = [
             ['Stop', 'media-playback-stop-symbolic', () => {
                 ctx.setStopConfirm('');
                 if (remoteHost && canEnd)
-                    ctx.remoteEnd(remoteHost, s.sessionId, s.profileDir);
+                    ctx.remoteEnd(remoteHost, s.sessionId, s.profileDir, busy);
                 else if (remoteHost)
                     ctx.remoteStop(remoteHost, s.stopCommand);
                 else
-                    ctx.stopSession(s.sessionId, s.profileDir);
+                    ctx.stopSession(s.sessionId, s.profileDir, busy);
             }],
             ['Cancel', '', () => ctx.setStopConfirm('')],
-        ]));
+        ];
+        if (canInterrupt) {
+            buttons.unshift(['Interrupt', 'media-playback-pause-symbolic', () => {
+                ctx.setStopConfirm('');
+                if (remoteHost)
+                    ctx.remoteInterrupt(remoteHost, s.sessionId, s.profileDir);
+                else
+                    ctx.interruptSession(s.sessionId, s.profileDir);
+            }]);
+        }
+        body.add_child(confirmBox(L.stopQuestion(s), buttons));
     }
     return row;
 }
@@ -185,7 +203,7 @@ function buildAgentsTree(ctx, agents) {
         const col = column('', {x_expand: true});
         const top = box('claude-line', {x_expand: true});
         top.add_child(label(a.description || a.type, 'claude-small', {x_expand: true}));
-        top.add_child(label(a.type, 'claude-small claude-dim'));
+        top.add_child(label(a.model ? `${a.type} · ${a.model}` : a.type, 'claude-small claude-dim'));
         top.add_child(label(a.status === 'running'
             ? L.fmt('running · %1', L.duration(ctx.now - (a.started || ctx.now)))
             : a.status === 'done' ? 'done' : 'stopped', 'claude-small claude-dim'));

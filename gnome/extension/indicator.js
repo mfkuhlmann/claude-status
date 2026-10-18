@@ -46,7 +46,7 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         this._polling = false;
         this._timers = {};
         // Popup state kept by row key (rows are rebuilt with new data)
-        this.ui = {expandedAgents: {}, expandedRecent: {}, stopConfirm: '', shareConfirm: null, openMenu: null};
+        this.ui = {expandedAgents: {}, expandedRecent: {}, stopConfirm: '', stopConfirmBusy: false, shareConfirm: null, openMenu: null};
 
         this._buildPanel();
         this._buildMenu();
@@ -302,11 +302,22 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         this._jumped(await this._helper('jump.py', [sessionId, ...profile, ...this._configDirArgs]));
     }
 
-    async stopSession(sessionId, profileDir) {
+    // busy: you were told it's working or waiting (else only an idle one is stopped)
+    async stopSession(sessionId, profileDir, busy = false) {
         const profile = profileDir ? ['--profile', profileDir] : [];
-        const result = await this._helper('jump.py', ['--stop', sessionId, ...profile, ...this._configDirArgs]);
+        const result = await this._helper('jump.py',
+            ['--stop', sessionId, ...profile, ...busy ? ['--busy'] : [], ...this._configDirArgs]);
         if (!result.ok)
             this._showError(L.fmt("Couldn't stop the session: %1", result.message));
+        this.refresh();
+    }
+
+    // Esc in the tmux pane of a working chat
+    async interruptSession(sessionId, profileDir) {
+        const profile = profileDir ? ['--profile', profileDir] : [];
+        const result = await this._helper('jump.py', ['--interrupt', sessionId, ...profile, ...this._configDirArgs]);
+        if (!result.ok)
+            this._showError(L.fmt("Couldn't interrupt the session: %1", result.message));
         this.refresh();
     }
 
@@ -409,8 +420,10 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         this.rerender();
     }
 
-    setStopConfirm(rowKey) {
+    // busy: the chat wasn't idle when you were asked (stop it anyway)
+    setStopConfirm(rowKey, busy = false) {
         this.ui.stopConfirm = rowKey;
+        this.ui.stopConfirmBusy = busy;
         this.rerender();
     }
 
@@ -535,9 +548,14 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         this._remoteAction('stop', host, ['--run', host, command]);
     }
 
-    // An idle chat in a terminal on the host (claude_status.py --end there)
-    remoteEnd(host, sessionId, profileDir) {
-        this._remoteAction('stop', host, ['--end', host, sessionId, ...profileDir ? [profileDir] : []]);
+    // A chat with a process on the host (claude_status.py --end there; busy:
+    // you were told it's working or waiting), or one in tmux interrupted
+    remoteEnd(host, sessionId, profileDir, busy = false) {
+        this._remoteAction('stop', host, ['--end', host, sessionId, ...profileDir ? [profileDir] : [], ...busy ? ['--busy'] : []]);
+    }
+
+    remoteInterrupt(host, sessionId, profileDir) {
+        this._remoteAction('stop', host, ['--interrupt', host, sessionId, ...profileDir ? [profileDir] : []]);
     }
 
     remoteDismiss(host, sessionId) {

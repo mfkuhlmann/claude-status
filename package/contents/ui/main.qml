@@ -28,15 +28,16 @@ PlasmoidItem {
     property var expandedAgents: ({})
     property var expandedRecent: ({})
     property string stopConfirmSession: ""
+    property bool stopConfirmBusy: false   // the chat wasn't idle when you were asked (stop it anyway)
     readonly property var emptyGroup: ({ id: "", name: "", title: "", plan: "", profiles: [], sessions: [],
                                          limits: null, tokens: null, projects: [], chatProfile: "", sharedHere: [],
                                          recent: [] })
     readonly property var emptySession: ({ key: "", profileDir: "", sessionId: "", chatId: "", pid: null, name: "", cwd: "", cwdShort: "", profile: "",
                                            kind: "", entrypoint: "", state: "idle", reason: "", waitingFor: "",
                                            detail: "", since: null, startedAt: null, context: null, model: null,
-                                           costUsd: null, agents: null, shared: null })
+                                           costUsd: null, agents: null, shared: null, effort: null, tmux: false })
     readonly property var emptyAgent: ({ id: "", parent: null, depth: 0, type: "", description: "",
-                                         status: "done", activity: "", started: null, updated: null })
+                                         status: "done", activity: "", started: null, updated: null, model: null })
     readonly property string waitingName: {
         for (const g of allGroups)
             for (const s of g.sessions)
@@ -73,6 +74,12 @@ PlasmoidItem {
                 c[s.state] += 1
         return c
     }
+    // What happened since you last opened the popup, for the icon: chats that
+    // started needing you, and chats that finished a turn (as long as the
+    // "finished" notifications ask for), keyed like lastStates.
+    property var unseen: ({})
+    readonly property int unseenDone: Object.keys(unseen).filter(k => unseen[k] === "done").length
+    readonly property int unseenWaiting: Object.keys(unseen).filter(k => unseen[k] === "waiting").length
     readonly property string overall: {
         if (counts.waiting)
             return "waiting"
@@ -206,11 +213,72 @@ PlasmoidItem {
         cmd += " --recent " + Math.max(0, Plasmoid.configuration.recentChats)
         if (!Plasmoid.configuration.showTokens)
             cmd += " --no-tokens"
+        cmd += " --instance " + shellQuote(instanceId) + " --interval-ms " + checkInterval
         return cmd
     }
 
+    // ---------------------------------------------------------------- several widgets
+    // This widget can run twice, e.g. on a panel and in the system tray
+    // (claude_status.py: several widgets at once). Each copy names itself on
+    // every check; the one running longest sends the notifications and sounds.
+    // Settings are shared: a change is saved for the others at the next check,
+    // and the others take it over at theirs (a new copy takes over what the
+    // others use).
+    readonly property string instanceId: (Plasmoid.containment ? Plasmoid.containment.id + "/" : "") + Plasmoid.id
+    readonly property bool notifier: status === null || status.notifier !== false
+    // In the system tray, which draws the popup's heading itself (settable for render tests)
+    property bool inTray: (Plasmoid.containmentDisplayHints & PlasmaCore.Types.ContainmentDrawsPlasmoidHeading) !== 0
+    readonly property var sharedKeys: ["pollInterval", "idlePollInterval", "extraConfigDirs", "notifyWaiting", "notifyDone",
+        "notifyDoneMinSeconds", "notifySound", "soundVolume", "soundWaiting", "soundDone", "soundFailed", "recentChats",
+        "sshHosts", "remotePollSeconds", "keepDoneHours", "showUsageInPanel", "showPet", "chatPets", "showTokens",
+        "newChatInVscode", "iconBlink"]
+    property real settingsSeenAt: 0     // the newest shared settings this copy has seen
+    property string settingsSeen: ""    // its own settings as of the last check (to see changes)
+
+    function currentSettings() {
+        const values = {}
+        for (const key of sharedKeys)
+            values[key] = Plasmoid.configuration[key]
+        return values
+    }
+
+    function syncSettings(shared) {
+        const first = settingsSeen === ""
+        if (shared && shared.at > settingsSeenAt) {
+            settingsSeenAt = shared.at
+            if (shared.by !== instanceId) {
+                for (const key in shared.values)
+                    if (sharedKeys.indexOf(key) >= 0 && Plasmoid.configuration[key] !== shared.values[key])
+                        Plasmoid.configuration[key] = shared.values[key]
+                settingsSeen = JSON.stringify(currentSettings())
+                return
+            }
+        }
+        const now = JSON.stringify(currentSettings())
+        if (now === settingsSeen)
+            return
+        settingsSeen = now
+        // Changed here: save it for the others. The first check of a copy
+        // saves only what's been set up, so a new copy can't replace the
+        // others' settings with defaults.
+        if (!first || !shared)
+            settingsSaver.connectSource("python3 -I " + shellQuote(codeDir + "jump.py") + " --save-settings " + shellQuote(now)
+                                        + " --by " + shellQuote(instanceId) + (first ? " --unless-default" : "") + " # " + Date.now())
+    }
+
+    P5Support.DataSource {
+        id: settingsSaver
+        engine: "executable"
+        connectedSources: []
+        onNewData: (source, data) => disconnectSource(source)
+    }
+
     Plasmoid.icon: "dialog-messages"
-    Plasmoid.status: overall === "waiting" ? PlasmaCore.Types.NeedsAttentionStatus : PlasmaCore.Types.ActiveStatus
+    // In the system tray, "shown when relevant" means: while a chat runs, and
+    // until you've seen what needs you or finished
+    Plasmoid.status: overall === "waiting" || unseenDone > 0 ? PlasmaCore.Types.NeedsAttentionStatus
+                   : inTray && overall === "none" ? PlasmaCore.Types.PassiveStatus
+                   : PlasmaCore.Types.ActiveStatus
 
     toolTipMainText: i18n("Claude Code")
     toolTipSubText: tooltipText()
@@ -272,7 +340,8 @@ PlasmoidItem {
     }
 
     // Runs `jump.py --stop`, which stops a background session (`claude stop`)
-    // or an idle chat in a terminal (its claude quits).
+    // or a chat in a terminal or VS Code (its claude quits), or `--interrupt`
+    // (Esc for a chat in tmux).
     P5Support.DataSource {
         id: stopper
         engine: "executable"
@@ -280,11 +349,15 @@ PlasmoidItem {
         onNewData: (source, data) => {
             disconnectSource(source)
             const result = root.helperResult(data)
-            if (result.ok) {
-                root.actionError = ""
-            } else {
+            if (!result.ok) {
                 root.actionError = i18n("Couldn't stop the session: %1", result.message)
                 actionErrorTimer.restart()
+            } else {
+                root.actionError = ""
+                if (result.message.indexOf("killed") >= 0 || result.message.indexOf("ended") >= 0) {
+                    root.actionInfo = result.message   // more happened than you asked for: say so
+                    actionInfoTimer.restart()
+                }
             }
             root.refresh()
         }
@@ -336,9 +409,10 @@ PlasmoidItem {
     // does the same (logic.js).
     readonly property bool quiet: status !== null && overall === "none" && !root.expanded
     readonly property int pollMs: Math.max(1000, Plasmoid.configuration.pollInterval)
+    readonly property int checkInterval: quiet ? Math.max(pollMs, Plasmoid.configuration.idlePollInterval) : pollMs
 
     Timer {
-        interval: root.quiet ? Math.max(root.pollMs, Plasmoid.configuration.idlePollInterval) : root.pollMs
+        interval: root.checkInterval
         running: true
         repeat: true
         triggeredOnStart: true
@@ -365,9 +439,10 @@ PlasmoidItem {
             return
         }
         errorText = parsed.errors.length ? parsed.errors.join("\n") : ""
+        status = parsed   // first: whether this copy notifies
         trackTransitions("", parsed.groups, parsed.generatedAt, "")
         celebrateResets("", parsed.groups)
-        status = parsed
+        syncSettings(parsed.sharedSettings || null)
     }
 
     function celebrateResets(source, groupList) {
@@ -400,7 +475,7 @@ PlasmoidItem {
     property string pendingSoundKind: ""
 
     function queueSound(kind) {
-        if (!Plasmoid.configuration.notifySound || soundRank[kind] <= soundRank[pendingSoundKind])
+        if (!root.notifier || !Plasmoid.configuration.notifySound || soundRank[kind] <= soundRank[pendingSoundKind])
             return
         const sound = kind === "waiting" ? Plasmoid.configuration.soundWaiting
                     : kind === "failed" ? Plasmoid.configuration.soundFailed
@@ -444,17 +519,22 @@ PlasmoidItem {
                 // A turn runs from leaving idle/done until returning to it.
                 if (active)
                     starts[sid] = sid in startedAt ? startedAt[sid] : (s.since || nowMs)
-                if (prev === "waiting" && s.state !== "waiting")
+                if (prev === "waiting" && s.state !== "waiting") {
                     closeNotification(sid, "waiting")  // answered: drop the stale prompt
+                    forgetUnseen(sid, "waiting")
+                }
+                if (s.state === "working")
+                    forgetUnseen(sid, "done")  // it's at it again
                 if (!primed || prev === s.state)
                     continue
                 if (s.state === "waiting") {
+                    markUnseen(sid, "waiting")
                     // At most one "needs input" alert per session per minute
                     const quiet = nowMs - (lastWaitingAlert[sid] || 0) < 60000
                     if (!quiet) {
                         lastWaitingAlert[sid] = nowMs
                         petEvent("waiting", i18n("%1 needs you!", s.name), petKeyOf(s, host))
-                        if (Plasmoid.configuration.notifyWaiting) {
+                        if (Plasmoid.configuration.notifyWaiting && root.notifier) {
                             notify(sid, s, "waiting", i18n("%1 needs your input", s.name),
                                    (s.detail || reasonText(s.reason)) + "\n" + s.cwdShort + where, "dialog-warning", host)
                             queueSound("waiting")
@@ -469,7 +549,9 @@ PlasmoidItem {
                     else
                         petEvent("done", i18n("%1 is done!", s.name), pk)
                     const took = (s.since || nowMs) - (sid in startedAt ? startedAt[sid] : nowMs)
-                    if (Plasmoid.configuration.notifyDone && took >= Plasmoid.configuration.notifyDoneMinSeconds * 1000) {
+                    if (took >= Plasmoid.configuration.notifyDoneMinSeconds * 1000)
+                        markUnseen(sid, "done")
+                    if (Plasmoid.configuration.notifyDone && root.notifier && took >= Plasmoid.configuration.notifyDoneMinSeconds * 1000) {
                         notify(sid, s, "done", s.reason === "failed" ? i18n("%1 failed", s.name)
                                             : s.reason === "stopped" ? i18n("%1 was stopped", s.name)
                                             : i18n("%1 finished", s.name),
@@ -486,6 +568,11 @@ PlasmoidItem {
             const mine = source ? sid.startsWith(prefix) : sid.indexOf("|") < 0
             if (mine && !(sid in next))
                 closeNotification(sid, "waiting")
+        }
+        for (const sid in unseen) {
+            const mine = source ? sid.startsWith(prefix) : sid.indexOf("|") < 0
+            if (mine && !(sid in next))
+                forgetUnseen(sid, "")
         }
         lastStates = Object.assign({}, lastStates, { [source]: next })
         turnStarts = Object.assign({}, turnStarts, { [source]: starts })
@@ -551,10 +638,25 @@ PlasmoidItem {
     // VS Code button starts the chat in VS Code's Claude extension instead.
     property string newChatGroup: ""   // group key of the account whose folders are open
     onExpandedChanged: {
-        if (!root.expanded)
+        if (!root.expanded) {
             newChatGroup = ""
-        else
+        } else {
+            unseen = ({})  // seen now: the icon stops blinking
             refresh()  // it may have been checked a while ago (see quiet)
+        }
+    }
+
+    function markUnseen(sid, kind) {
+        if (!root.expanded)
+            unseen = Object.assign({}, unseen, { [sid]: kind })
+    }
+
+    function forgetUnseen(sid, kind) {
+        if (sid in unseen && (!kind || unseen[sid] === kind)) {
+            const next = Object.assign({}, unseen)
+            delete next[sid]
+            unseen = next
+        }
     }
 
     function toggleNewChat(groupKey) {
@@ -884,9 +986,15 @@ PlasmoidItem {
         remoteAction("stop", host, "--run " + shellQuote(host) + " " + shellQuote(command))
     }
 
-    // An idle chat in a terminal on the host (claude_status.py --end there)
-    function remoteEnd(host, sessionId, profileDir) {
+    // A chat with a process on the host (claude_status.py --end there; busy:
+    // you were told it's working or waiting), or one in tmux interrupted
+    function remoteEnd(host, sessionId, profileDir, busy) {
         remoteAction("stop", host, "--end " + shellQuote(host) + " " + shellQuote(sessionId)
+                                   + (profileDir ? " " + shellQuote(profileDir) : "") + (busy ? " --busy" : ""))
+    }
+
+    function remoteInterrupt(host, sessionId, profileDir) {
+        remoteAction("stop", host, "--interrupt " + shellQuote(host) + " " + shellQuote(sessionId)
                                    + (profileDir ? " " + shellQuote(profileDir) : ""))
     }
 
@@ -1031,8 +1139,15 @@ PlasmoidItem {
         return profileDir ? " --profile " + shellQuote(profileDir) : ""
     }
 
-    function stopSession(sessionId, profileDir) {
+    // busy: you were told it's working or waiting (else only an idle one is stopped)
+    function stopSession(sessionId, profileDir, busy) {
         stopper.connectSource("python3 -I " + shellQuote(codeDir + "jump.py") + " --stop " + shellQuote(sessionId)
+                              + profileArg(profileDir) + (busy ? " --busy" : "") + configDirArgs + " # " + Date.now())
+    }
+
+    // Esc in the tmux pane of a working chat
+    function interruptSession(sessionId, profileDir) {
+        stopper.connectSource("python3 -I " + shellQuote(codeDir + "jump.py") + " --interrupt " + shellQuote(sessionId)
                               + profileArg(profileDir) + configDirArgs + " # " + Date.now())
     }
 

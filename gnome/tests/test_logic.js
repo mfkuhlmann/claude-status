@@ -169,14 +169,20 @@ test('terminal or VS Code: whichever is there', () => {
     eq(L.terminalHint('lab', false).startsWith("Claude Code's claude command isn't installed on lab"), true);
 });
 
-test('stopping: background sessions, and idle chats in a terminal', () => {
+test('stopping: background sessions, and chats with a process; interrupting in tmux', () => {
     eq(L.canEnd(session('a', 'idle')), true);
-    eq(L.canEnd(session('a', 'working')), false, 'busy');
-    eq(L.canEnd(session('a', 'waiting')), false, 'asks something');
-    eq(L.canEnd(session('a', 'idle', {entrypoint: 'claude-vscode'})), false, "VS Code's");
+    eq(L.canEnd(session('a', 'working')), true, 'busy: it asks first');
+    eq(L.canEnd(session('a', 'idle', {entrypoint: 'claude-vscode'})), true, "VS Code's: its tab goes on");
     eq(L.canEnd(session('a', 'idle', {kind: 'bg'})), false, 'background: claude stop');
     eq(L.canEnd(session('a', 'idle', {pid: null})), false, 'no process');
+    eq(L.canInterrupt(session('a', 'working', {tmux: true})), true);
+    eq(L.canInterrupt(session('a', 'idle', {tmux: true})), false, 'nothing to interrupt');
+    eq(L.canInterrupt(session('a', 'working')), false, 'not in tmux');
     eq(L.stopQuestion(session('a', 'idle')).includes('Claude quits and its terminal stays open'), true);
+    eq(L.stopQuestion(session('a', 'working')).includes('the current step is cut off'), true);
+    eq(L.stopQuestion(session('a', 'working', {entrypoint: 'claude-vscode'})).includes("as with VS Code's stop button"), true);
+    eq(L.stopQuestion(session('a', 'working', {tmux: true})).startsWith('Interrupt “chat a”?'), true);
+    eq(L.stopTip(session('a', 'idle', {entrypoint: 'claude-vscode'}))[0], 'Stop this chat');
 });
 
 test('pets: stage order and keys', () => {

@@ -298,6 +298,7 @@ class LimitTests(Fixture):
         self.snapshot(".claude-work", "busy", {
             "session_id": "busy",
             "model": {"display_name": "Opus 5.5"},
+            "effort": {"level": "max"},
             "context_window": {"used_percentage": 34.4},
             "cost": {"total_cost_usd": 1.25},
             "rate_limits": {
@@ -309,6 +310,8 @@ class LimitTests(Fixture):
         work = self.group(r, "work")
         busy = next(s for s in work["sessions"] if s["sessionId"] == "busy")
         self.assertEqual((busy["context"], busy["model"], busy["costUsd"]), (34.4, "Opus 5.5", 1.25))
+        self.assertEqual(busy["effort"], "max")
+        self.assertIsNone(next(s for s in work["sessions"] if s["sessionId"] == "waiting")["effort"])
         five, seven = work["limits"]["windows"]
         self.assertEqual((five["label"], five["pct"], five["reset"]), ("5h", 42.5, False))
         self.assertEqual(five["resetsAt"], int((self.now + 3600) * 1000))
@@ -525,6 +528,27 @@ class AgentTests(Fixture):
         self.assertEqual([p.name for p in calls], ["agent-a2.jsonl"])
         a = next(s for s in work["sessions"] if s["sessionId"] == "busy")["agents"]
         self.assertEqual((a["done"], a["running"]), (2, 1))
+
+    def test_each_agents_model(self):
+        tool = {"type": "tool_use", "id": "toolu_g", "name": "Grep", "input": {"pattern": "def parse"}}
+        reply = self.line("assistant", [tool], "tool_use")
+        reply["message"]["model"] = "claude-haiku-4-5-20251001"
+        self.agent("busy", "a5", [self.line("user", "search"), reply], description="Search")
+        a = next(s for s in self.group(self.collect(with_tokens=False), "work")["sessions"] if s["sessionId"] == "busy")["agents"]
+        self.assertEqual(next(t for t in a["tree"] if t["id"] == "a5")["model"], "Haiku 4.5")
+        self.assertIsNone(next(t for t in a["tree"] if t["id"] == "a1")["model"])   # no model recorded
+        # tool results come in after its reply: the model it had stays
+        with open(self.home / ".claude-work/projects/-w-proj/busy/subagents/agent-a5.jsonl", "a") as f:
+            for _ in range(8):
+                f.write(json.dumps(self.line("user", [{"type": "tool_result", "tool_use_id": "toolu_g", "content": "x"}])) + "\n")
+        a = next(s for s in self.group(self.collect(with_tokens=False), "work")["sessions"] if s["sessionId"] == "busy")["agents"]
+        self.assertEqual(next(t for t in a["tree"] if t["id"] == "a5")["model"], "Haiku 4.5")
+
+    def test_model_label(self):
+        for model, label in (("claude-opus-5-5", "Opus 5.5"), ("claude-opus-5-5[1m]", "Opus 5.5"),
+                             ("claude-haiku-4-5-20251001", "Haiku 4.5"), ("claude-3-5-sonnet-20241022", "Sonnet 3.5"),
+                             ("claude-fable-5-1", "Fable 5.1"), ("<synthetic>", None), (None, None)):
+            self.assertEqual(cs.model_label(model), label, model)
 
     def test_describe_tool(self):
         self.assertEqual(cs.describe_tool({"name": "Edit", "input": {"file_path": "/a/b/parser.py"}}), "Edit: parser.py")
@@ -779,3 +803,65 @@ class StatusCheckCostTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TmuxFlagTests(Fixture):
+    def test_rows_say_whether_a_chat_runs_in_tmux(self):
+        write(self.home / ".claude-work/sessions/30.json", session("in-tmux", status="busy", tmux="main:@1.%4"))
+        work = self.group(self.collect(with_tokens=False), "work")
+        flag = {s["sessionId"]: s["tmux"] for s in work["sessions"]}
+        self.assertEqual((flag["in-tmux"], flag["busy"]), (True, False))
+
+
+class SeveralWidgetsTests(unittest.TestCase):
+    """A panel widget and one in the system tray: one of them notifies, and they share their settings."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name) / "cache"
+
+    def test_the_widget_running_longest_notifies(self):
+        self.assertTrue(cs.elect_notifier(self.root, "panel", 2000, 1000))
+        self.assertFalse(cs.elect_notifier(self.root, "tray", 2000, 1500))
+        self.assertTrue(cs.elect_notifier(self.root, "panel", 2000, 3000))
+        # the panel's widget is gone: after 3 of its check intervals and some grace, the tray's takes over
+        self.assertFalse(cs.elect_notifier(self.root, "tray", 2000, 3000 + 3 * 2000 + cs.INSTANCE_GRACE_MS))
+        self.assertTrue(cs.elect_notifier(self.root, "tray", 2000, 3001 + 3 * 2000 + cs.INSTANCE_GRACE_MS))
+        # one that checks rarely (nothing runs) isn't counted out early
+        self.assertFalse(cs.elect_notifier(self.root, "old", 60000, 0) and False)
+        root = Path(self.tmp.name) / "other"
+        cs.elect_notifier(root, "slow", 60000, 0)
+        self.assertFalse(cs.elect_notifier(root, "fast", 2000, 150000))   # 2.5 min later: slow still counts
+
+    def test_settings_are_shared(self):
+        defaults = cs.config_defaults()
+        self.assertEqual((defaults["pollInterval"], defaults["showPet"], defaults["sshHosts"]), (2000, True, ""))
+        self.assertIsNone(cs.shared_settings(self.root))
+        # a widget nobody set up yet mustn't replace what the others use
+        self.assertEqual(cs.save_shared_settings(self.root, "tray", dict(defaults), 1000, unless_default=True),
+                         (False, "Nothing set up yet"))
+        self.assertIsNone(cs.shared_settings(self.root))
+        values = dict(defaults, sshHosts="lab", bogus=1)
+        self.assertTrue(cs.save_shared_settings(self.root, "panel", values, 2000, unless_default=True)[0])
+        shared = cs.shared_settings(self.root)
+        self.assertEqual((shared["at"], shared["by"], shared["values"]["sshHosts"]), (2000, "panel", "lab"))
+        self.assertNotIn("bogus", shared["values"])
+        self.assertEqual(oct((self.root / "settings.json").stat().st_mode & 0o777), "0o600")
+
+    def test_through_the_status_check(self):
+        home = Path(self.tmp.name) / "home"
+        (home / ".claude/sessions").mkdir(parents=True)
+        env = dict(os.environ, HOME=str(home), XDG_CACHE_HOME=str(Path(self.tmp.name)))
+        run = lambda *a: json.loads(subprocess.run([sys.executable, "-I", str(ROOT / "package/contents/code/claude_status.py"),
+                                                    "--no-tokens", *a], capture_output=True, text=True, env=env).stdout)
+        self.assertNotIn("notifier", run())   # GNOME and VS Code: one copy, no question
+        first = run("--instance", "12/3", "--interval-ms", "2000")
+        self.assertEqual((first["notifier"], first["sharedSettings"]), (True, None))
+        self.assertFalse(run("--instance", "40/1", "--interval-ms", "2000")["notifier"])
+        jump = [sys.executable, "-I", str(ROOT / "package/contents/code/jump.py")]
+        out = subprocess.run(jump + ["--save-settings", json.dumps({"sshHosts": "lab"}), "--by", "12/3"],
+                             capture_output=True, text=True, env=env).stdout
+        self.assertTrue(json.loads(out)["ok"], out)
+        shared = run("--instance", "40/1")["sharedSettings"]
+        self.assertEqual((shared["by"], shared["values"]), ("12/3", {"sshHosts": "lab"}))

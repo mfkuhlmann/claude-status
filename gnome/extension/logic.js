@@ -252,18 +252,53 @@ export function openHint(session, remoteHost) {
     return 'Switch to the terminal running this session';
 }
 
-// An idle chat in a terminal can be stopped too: its claude quits and the
-// chat is kept (not VS Code's: the extension would show that as an error)
+// A chat with a process of its own can be stopped, whatever it's doing: in a
+// terminal its claude quits (the chat is kept), in VS Code its tab shows it as
+// interrupted and goes on with the next message (claude_status.py: stopping
+// and interrupting chats). One in tmux that's working can be interrupted
+// instead: Ctrl+C in its pane, like VS Code's stop button.
 export function canEnd(session) {
-    return session.kind === 'interactive' && session.entrypoint !== 'claude-vscode' &&
-        session.state === 'idle' && session.pid !== null;
+    return session.kind === 'interactive' && session.pid !== null;
+}
+
+export function canInterrupt(session) {
+    return canEnd(session) && !!session.tmux && (session.state === 'working' || session.state === 'waiting');
+}
+
+// The stop button's tooltip
+export function stopTip(session) {
+    if (canInterrupt(session)) {
+        return ['Interrupt or stop this chat',
+            'Asks first. Interrupting is like Ctrl+C in its tmux pane, or the stop button in VS Code: the current step and its subagents stop, and the chat stays open there.'];
+    }
+    if (canEnd(session) && session.entrypoint === 'claude-vscode')
+        return ['Stop this chat', 'Asks first. Its tab in VS Code shows it as interrupted, keeps the chat and goes on with your next message.'];
+    if (canEnd(session) && session.state === 'idle')
+        return ['Stop this chat', 'Asks first. Claude quits and its terminal stays open; the chat is kept and shows under Recent chats.'];
+    if (canEnd(session)) {
+        return ['Stop this chat',
+            'Asks first. The current step is cut off, Claude quits and its terminal stays open; the chat is kept and shows under Recent chats.'];
+    }
+    return ['Stop this background session', 'Asks first. The conversation is kept; claude attach resumes it.'];
 }
 
 export function stopQuestion(session) {
-    if (canEnd(session)) {
-        return fmt("Stop “%1”? It's idle, so nothing is interrupted: Claude quits and its terminal stays open. The chat is kept; reopen it from Recent chats.",
-            session.name);
+    const n = session.name;
+    if (canInterrupt(session))
+        return fmt("Interrupt “%1”? Like Ctrl+C in its tmux pane, or the stop button in VS Code: the current step and its subagents stop, and the chat stays open there. Or stop it: Claude quits and its terminal stays open.", n);
+    if (canEnd(session) && session.entrypoint === 'claude-vscode') {
+        if (session.state === 'working')
+            return fmt("Stop “%1”? It's working right now: the current step is interrupted, as with VS Code's stop button, and anything it was running stops. Its tab keeps the chat and goes on with your next message.", n);
+        if (session.state === 'waiting')
+            return fmt("Stop “%1”? It's waiting for you: what it asks is refused, as with VS Code's stop button. Its tab keeps the chat and goes on with your next message.", n);
+        return fmt("Stop “%1”? It's idle, so nothing is interrupted: its Claude process in VS Code quits. Its tab keeps the chat and goes on with your next message.", n);
     }
+    if (canEnd(session) && session.state === 'working')
+        return fmt("Stop “%1”? It's working right now: the current step is cut off and anything it was running stops. Claude quits and its terminal stays open; the chat is kept (Recent chats reopens it).", n);
+    if (canEnd(session) && session.state === 'waiting')
+        return fmt("Stop “%1”? It's waiting for you: Claude quits without your answer and its terminal stays open. The chat is kept (Recent chats reopens it).", n);
+    if (canEnd(session))
+        return fmt("Stop “%1”? It's idle, so nothing is interrupted: Claude quits and its terminal stays open. The chat is kept; reopen it from Recent chats.", n);
     if (session.state === 'working') {
         return fmt("Stop “%1”? It's working right now: the current step is interrupted and anything it started in the background stops too. The conversation is kept; claude attach resumes it.",
             session.name);

@@ -83,6 +83,10 @@
       <label>Show 5-hour usage next to the panel icon</label>
       <default>true</default>
     </entry>
+    <entry name="iconBlink" type="Bool">
+      <label>Blink the icon while a chat needs you (until you open the popup), pulse it when one finishes</label>
+      <default>true</default>
+    </entry>
     <entry name="showPet" type="Bool">
       <label>Show Clawd the pet in the popup and in notifications</label>
       <default>true</default>
