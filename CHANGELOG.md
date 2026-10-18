@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.7.0
 
 - The same version as the widget and the GNOME extension: all three are 1.7.0.
 - **Stop or interrupt any running chat:** the ■ button works on every chat
