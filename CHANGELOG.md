@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.9.1 (2026-10-18)
+
+- **Chats that need you, on your phone (Plasma):** while you're away (the screen locked for the minutes set under *While you're away*), a chat that needs you is sent to your phone with KDE Connect, and if you like a chat that finishes a turn too. Settings → *Phone*: pick the phone (or every reachable one) and *Send a test*. Off until you turn it on. Back at your desk, the summary comes as before.
+- The GNOME and VS Code extensions are unchanged (the GNOME one is numbered 1.9.1 along with the widget).
+
 ## 1.9.0 (2026-10-18)
 
 - **Your last days in numbers:** click an account's token line for its last 14 days: tokens per day as bars (today's in your accent color), chats, prompts and active days, your busiest folders and the models you used. The token scan keeps 30 days of per-day sums for it, and reads back 30 days once.
