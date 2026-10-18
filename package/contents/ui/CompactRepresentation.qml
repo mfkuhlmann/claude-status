@@ -44,7 +44,9 @@ MouseArea {
     }
     property bool wasExpanded: false
 
-    Layout.minimumWidth: vertical ? 0 : row.implicitWidth
+    // In the system tray the slot is given (one icon wide, but as tall as a
+    // thick panel's row): the icon fits in it, as tray icons do
+    Layout.minimumWidth: vertical || root.inTray ? 0 : row.implicitWidth
     Layout.preferredWidth: Layout.minimumWidth
     Layout.minimumHeight: vertical ? width : 0
 
@@ -66,14 +68,22 @@ MouseArea {
         Item {
             id: iconBox
             Layout.fillHeight: true
-            Layout.fillWidth: compact.vertical
-            Layout.preferredWidth: compact.vertical ? compact.width : compact.height
+            Layout.fillWidth: compact.vertical || root.inTray
+            Layout.preferredWidth: compact.vertical || root.inTray ? -1 : compact.height
+
+            // The icon's square, centered (the box can be taller than wide)
+            Item {
+                id: square
+                anchors.centerIn: parent
+                width: Math.min(parent.width, parent.height)
+                height: width
+            }
 
             SparkIcon {
                 id: spark
                 property bool dimmed: false
-                anchors.centerIn: parent
-                width: Math.min(parent.width, parent.height) * 0.78
+                anchors.centerIn: square
+                width: square.width * (root.inTray ? 0.86 : 0.78)
                 height: width
                 color: root.stateColor(root.overall)
                 spinning: root.overall === "working"
@@ -86,10 +96,10 @@ MouseArea {
 
             Rectangle {
                 visible: compact.badgeCount > 0
-                anchors.right: parent.right
-                anchors.top: parent.top
+                anchors.right: square.right
+                anchors.top: square.top
                 width: Math.max(height, badgeLabel.implicitWidth + Kirigami.Units.smallSpacing)
-                height: Math.round(parent.height * 0.45)
+                height: Math.round(square.height * 0.45)
                 radius: height / 2
                 color: root.counts.waiting > 0 ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.positiveTextColor
                 border.color: Kirigami.Theme.backgroundColor

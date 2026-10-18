@@ -17,6 +17,7 @@ KCM.SimpleKCM {
     property alias cfg_keepDoneHours: keepDoneHours.value
     property alias cfg_showUsageInPanel: showUsage.checked
     property alias cfg_iconBlink: iconBlink.checked
+    property bool cfg_newChatInVscode   // set with the Terminal | VS Code switch in the popup
     property alias cfg_showTokens: showTokens.checked
     property alias cfg_showPet: showPet.checked
     property alias cfg_chatPets: chatPets.value
@@ -40,6 +41,7 @@ KCM.SimpleKCM {
     property int cfg_keepDoneHoursDefault
     property bool cfg_showUsageInPanelDefault
     property bool cfg_iconBlinkDefault
+    property bool cfg_newChatInVscodeDefault
     property bool cfg_showTokensDefault
     property bool cfg_showPetDefault
     property int cfg_chatPetsDefault
