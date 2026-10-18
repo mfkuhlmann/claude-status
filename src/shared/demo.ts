@@ -74,6 +74,22 @@ function personal(now: number, phase: number): Group {
         since: now - (parserState === "working" ? 7 : 1) * MIN,
         agents: parserState === "working" ? agents(now) : null,
         context: 62,
+        peek:
+          parserState === "working"
+            ? { activity: "Bash: npm test -- parser", prompt: "The date parser breaks on ISO weeks; fix it and add tests.", reply: "Found it: week 53 wraps to the next year. Fixing the year rollover now.", replyLine: "Found it: week 53 wraps to the next year. Fixing the year rollover now.", at: now - 20000 }
+            : { activity: "", prompt: "The date parser breaks on ISO weeks; fix it and add tests.", reply: "Fixed: ISO week 53 no longer rolls over into the next year.\n\n• parseIsoWeek() takes the year from the week's Thursday\n• 12 new tests in date.test.ts, all passing\n\nWant me to open a pull request?", replyLine: "Fixed: ISO week 53 no longer rolls over into the next year.", at: now - 60000 },
+        changes: { count: 3, files: ["src/date/parse.ts", "src/date/week.ts", "test/date.test.ts"] },
+        tasks: {
+          done: parserState === "working" ? 2 : 4,
+          total: 4,
+          current: parserState === "working" ? "Writing tests for week 53" : "",
+          items: [
+            { subject: "Reproduce the week-53 bug", status: "completed" },
+            { subject: "Fix the year rollover", status: "completed" },
+            { subject: "Write tests for week 53", status: parserState === "working" ? "in_progress" : "completed" },
+            { subject: "Run the whole test suite", status: parserState === "working" ? "pending" : "completed" },
+          ],
+        },
       }),
       session(now, {
         key: "demo-2",
@@ -87,6 +103,8 @@ function personal(now: number, phase: number): Group {
         since: now - 2 * MIN,
         context: 18,
         model: "Sonnet",
+        peek: { activity: "Bash: git tag v2.0.0", prompt: "Write the release notes for 2.0 and tag it.", reply: "The notes are in CHANGELOG.md. Tagging v2.0.0 next.", replyLine: "The notes are in CHANGELOG.md. Tagging v2.0.0 next.", at: now - 2 * MIN },
+        changes: { count: 1, files: ["CHANGELOG.md"] },
       }),
       session(now, {
         key: "demo-3",
@@ -105,8 +123,22 @@ function personal(now: number, phase: number): Group {
     limits: {
       updatedAt: now - 3 * MIN,
       windows: [
-        { key: "five_hour", label: "5h", pct: 63, resetsAt: now + 2 * HOUR + 14 * MIN, reset: false },
-        { key: "seven_day", label: "7d", pct: 41, resetsAt: now + 3 * 24 * HOUR, reset: false },
+        {
+          key: "five_hour",
+          label: "5h",
+          pct: 63,
+          resetsAt: now + 2 * HOUR + 14 * MIN,
+          reset: false,
+          forecast: { evenPct: 55, rate: 24, atReset: 116, fullAt: now + HOUR + 32 * MIN, basis: "hour" },
+        },
+        {
+          key: "seven_day",
+          label: "7d",
+          pct: 41,
+          resetsAt: now + 3 * 24 * HOUR,
+          reset: false,
+          forecast: { evenPct: 57, rate: 0.4, atReset: 70, fullAt: null, basis: "window" },
+        },
       ],
     },
     tokens: { today: totals(1), week: totals(5.3), models: [{ model: "Opus", total: 8100000 }, { model: "Sonnet", total: 2570000 }] },
@@ -155,12 +187,27 @@ function buildServer(now: number, phase: number): Status {
             since: now - (state === "working" ? 24 : 2) * MIN,
             context: 87,
             model: "Opus",
+            peek: {
+              activity: state === "working" ? "Bash: python train.py --epochs 20" : "",
+              prompt: "Train the ranking model on the new click data.",
+              reply: state === "working" ? "Epoch 7/20: validation NDCG 0.412." : "Done: NDCG 0.431 on validation, up from 0.398.",
+              replyLine: state === "working" ? "Epoch 7/20: validation NDCG 0.412." : "Done: NDCG 0.431 on validation, up from 0.398.",
+              at: now - MIN,
+            },
+            changes: { count: 2, files: ["configs/ranking.yaml", "train.py"] },
           }),
         ],
         limits: {
           updatedAt: now - 9 * MIN,
           windows: [
-            { key: "five_hour", label: "5h", pct: 92, resetsAt: now + 41 * MIN, reset: false },
+            {
+              key: "five_hour",
+              label: "5h",
+              pct: 92,
+              resetsAt: now + 41 * MIN,
+              reset: false,
+              forecast: { evenPct: 86, rate: 11, atReset: 99.5, fullAt: null, basis: "hour" },
+            },
             { key: "seven_day", label: "7d", pct: 55, resetsAt: now + 5 * 24 * HOUR, reset: false },
           ],
         },

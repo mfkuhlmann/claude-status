@@ -1,14 +1,15 @@
-import { canEndChat, hasTurn, petKeyOf, reasonText, stateText, usageLevel } from "../../src/shared/model";
+import { canEndChat, changesTitle, hasPeek, hasTurn, peekLine, petKeyOf, plural, stateText, tasksTitle, usageLevel } from "../../src/shared/model";
 import type { Session } from "../../src/shared/types";
 import { post } from "../env";
 import { pets } from "../pets";
 import { canRemove, canShare, canStop, chatRefOf, isBackground, openHint, rowKeyOf, sharedTagTitle } from "../util/chat";
 import { useStore } from "../util/store";
-import { toggleAgents, uiState } from "../util/ui";
+import { toggleAgents, togglePeek, uiState } from "../util/ui";
 import { AgentTree } from "./AgentTree";
 import { useView } from "./context";
 import { Elided } from "./Elided";
 import { IconButton } from "./IconButton";
+import { PeekPanel } from "./PeekPanel";
 import { Tag } from "./Tag";
 
 // The color class of a chat's state; a failed chat stands out from done ones
@@ -16,8 +17,13 @@ export function stateClass(state: string, reason: string): string {
   return reason === "failed" ? "st-failed" : `st-${state}`;
 }
 
+function lineTitle(kind: string): string {
+  return kind === "needs" ? "What it needs: " : kind === "result" ? "Result: " : kind === "activity" ? "Doing: " : "";
+}
+
 // One chat: state, name (click to open), tags, folder, model, context fill,
-// what it needs, and its subagents. With `host`, the chat is on that SSH host.
+// what it's doing or needs or said last (click it for more), and its
+// subagents. With `host`, the chat is on that SSH host.
 export function SessionRow({ session: s, host, showProfile }: { session: Session; host?: string; showProfile: boolean }) {
   const view = useView();
   const ui = useStore(uiState);
@@ -28,7 +34,11 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
   const agents = s.agents;
   const showAgents = !!agents && !!ui.agents[rowKey];
   const tag = s.entrypoint === "claude-vscode" ? "VS Code" : isBackground(s) ? "background" : "";
-  const detail = s.state === "waiting" ? s.detail || reasonText(s.reason) : s.state === "done" ? s.detail : "";
+  const line = peekLine(s);
+  const canPeek = hasPeek(s);
+  const showPeek = canPeek && !!ui.peek[rowKey];
+  const tasks = s.tasks;
+  const changes = s.changes;
 
   const share = canShare(s, host, view.status);
   const remove = canRemove(s);
@@ -65,6 +75,23 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
               onClick={() => toggleAgents(rowKey)}
             />
           ) : null}
+          {tasks ? (
+            <Tag
+              text={`${tasks.done}/${tasks.total}`}
+              fill={tasks.total ? tasks.done / tasks.total : 0}
+              active={!!tasks.current}
+              pressed={showPeek}
+              title={`${tasksTitle(tasks)}\n\nClick to ${showPeek ? "hide" : "show"} the chat's tasks and last exchange.`}
+              onClick={() => togglePeek(rowKey)}
+            />
+          ) : null}
+          {changes ? (
+            <Tag
+              text={`± ${plural(changes.count, "%1 file", "%1 files")}`}
+              title={changesTitle(changes, host)}
+              onClick={host ? undefined : () => post({ type: "compareChanges", chat, turn: false })}
+            />
+          ) : null}
           <span class="state-text" title={stateText(s, now)}>
             {stateText(s, now)}
           </span>
@@ -97,11 +124,25 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
           ) : null}
         </div>
 
-        {detail ? (
-          <div class="session-detail small" title={(s.state === "waiting" ? "What it needs: " : "Result: ") + detail}>
-            {detail}
-          </div>
+        {line ? (
+          canPeek ? (
+            <button
+              type="button"
+              class={`session-detail small peek-line pk-${line.kind}`}
+              aria-expanded={showPeek}
+              title={`${lineTitle(line.kind)}${line.text}\n\nClick to ${showPeek ? "hide" : "show"} your last prompt and Claude's reply${tasks ? ", the tasks" : ""}${changes ? " and the changed files" : ""}.`}
+              onClick={() => togglePeek(rowKey)}
+            >
+              {line.text}
+            </button>
+          ) : (
+            <div class={`session-detail small pk-${line.kind}`} title={lineTitle(line.kind) + line.text}>
+              {line.text}
+            </div>
+          )
         ) : null}
+
+        {showPeek ? <PeekPanel session={s} host={host} chat={chat} /> : null}
 
         {showAgents && agents ? <AgentTree tree={agents.tree} now={now} /> : null}
       </div>

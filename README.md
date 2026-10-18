@@ -22,8 +22,28 @@ As an editor tab (**Claude Status: Open in Editor Tab**):
 - **Every chat**, grouped by account: waiting for you (permission prompt,
   question…), working, your turn, finished. Background jobs too, and the
   subagents a chat runs.
+- **What a chat is doing, without switching to it**: a line under each chat
+  says what it's on right now (*▸ Bash: npm test*), what it needs, or the
+  first line of Claude's last reply. Click it for your last prompt, Claude's
+  whole reply, the chat's task list and its changed files. A chat with a task
+  list gets a **2/4** tag that fills up as tasks get done.
+- **What a chat changed**: its **± 3 files** tag opens VS Code's changes view
+  with each file as it was before the chat and as it is now (or only the last
+  turn: **Last turn** in the unfolded peek). The files come from the backups
+  Claude Code makes before it edits a file; a file with no backup is compared
+  with git's last commit. Changes made through shell commands aren't tracked.
 - **Plan usage**: the 5-hour and weekly limits of each account with when they
-  reset, today's and this week's tokens.
+  reset, today's and this week's tokens. Each bar also shows where your pace
+  leads by the reset (the lighter part) and where an even pace would be by now
+  (the tick); when the 5-hour limit would run out first, a line says when.
+- **The chat that needs you, one key away**: **Ctrl+Alt+Shift+C** (**Claude
+  Status: Go to the Chat That Needs You**) opens the chat that has waited
+  longest; press it again for the next one, then the chats that finished
+  while you weren't looking. With none, it shows the view.
+- **While you were away**: back at VS Code after 5 minutes or more, one
+  notification (and a card at the top of the view) sums up what happened:
+  chats that need you, finished or failed, limits that reset. Meanwhile,
+  notifications of finished chats wait for it.
 - **SSH hosts**: the chats on the hosts you pick, side by side with this
   computer's.
 - **Notifications** (and a sound) when a chat needs you or finishes a long turn.
@@ -162,6 +182,7 @@ code --install-extension claude-status-*.vsix
 | `claudeStatus.reopenIn` | `terminal` | `claudeCode`: reopen recent chats in a Claude Code tab (the switch above them) |
 | `claudeStatus.notifyWaiting` / `notifyDone` | `true` | Notifications; turn them off here if the Plasma or GNOME widget notifies too |
 | `claudeStatus.notifyDoneMinSeconds` | `30` | Shortest turn that gets a "finished" notification |
+| `claudeStatus.awayDigest` / `awayMinutes` | `true` / `5` | The "while you were away" summary, after this many minutes without using VS Code (with notifications off, only its card in the view) |
 | `claudeStatus.notifySound`, `soundVolume`, `soundWaiting`, `soundDone`, `soundFailed` | | Sounds (sound-theme names or files) |
 | `claudeStatus.showPet` / `chatPets` | `true` / `5` | Clawd, and pets per account |
 | `claudeStatus.showTokens`, `showUsageInStatusBar`, `recentChats`, `keepDoneHours` | | What the view shows |
@@ -174,17 +195,25 @@ pick. There is no telemetry, and the view loads nothing from the internet.
 
 What it reads, all of it written by Claude Code itself: the session registry
 (`<config>/sessions`), background jobs (`<config>/jobs`), transcripts (for
-token totals, chat titles and subagents), `history.jsonl` (recent folders),
+token totals, chat titles, subagents, what a chat is doing and which files it
+changed), task lists (`<config>/tasks`), the backups Claude makes before it
+edits a file (`<config>/file-history`, to compare a chat's changes),
+`history.jsonl` (recent folders),
 the account name and plan from `.claude.json`, and the status-line copies in
 `~/.cache/claude-widget/statusline`. It writes only to
-`~/.cache/claude-widget` (caches, the list of chats you removed) and, if you
+`~/.cache/claude-widget` (caches, the list of chats you removed, copies of
+the files a comparison shows, kept for a day) and, if you
 ask for it, the status-line change above and the links of the chats you share
 (see below).
 
 ## Good to know
 
 - Every VS Code window runs its own copy; only the window you used last
-  shows notifications and plays sounds.
+  shows notifications and plays sounds. "Away" means no VS Code window was in
+  use, so switching between windows isn't an absence.
+- The Plasma widget and the GNOME extension open a chat's changes in this
+  extension's changes view (through its `vscode://wzaielamri.claude-status/changes`
+  link); without it they open one diff per file.
 - With the Plasma widget or the GNOME extension running too, both notify:
   turn notifications off in one of them.
 - On KDE Plasma, a chat running in a terminal outside VS Code is brought to

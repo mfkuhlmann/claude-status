@@ -4,6 +4,7 @@
 
 import { spawn } from "node:child_process";
 import * as path from "node:path";
+import { isComparison, type Comparison } from "./changes";
 import type { Status } from "./shared/types";
 
 export const REMOTE_MARK = "@@claude-status@@";
@@ -143,6 +144,16 @@ export class Backend {
     const r = await this.json([scriptName, ...args], timeoutMs);
     if (!r) return { ok: false, message: "the helper gave no answer" };
     return { ok: !!r.ok, message: String(r.message ?? r.error ?? ""), ...(typeof r.command === "string" ? { command: r.command } : {}) };
+  }
+
+  // What a chat changed (jump.py --changes --list): the files, with copies of
+  // what they were before it (or before its last turn)
+  async changes(chatId: string, profileDir: string, turn: boolean, extra: string[] = []): Promise<{ message: string; comparison?: Comparison }> {
+    const args = ["jump.py", "--changes", chatId, ...(profileDir ? ["--profile", profileDir] : []), ...(turn ? ["--turn"] : []), "--list", ...extra];
+    const r = await this.json(args, 60000);
+    if (!r) return { message: "the helper gave no answer" };
+    const message = String(r.message ?? r.error ?? "");
+    return r.ok && isComparison(r.comparison) ? { message, comparison: r.comparison } : { message: message || "no answer" };
   }
 
   // theme: the sound theme when the desktop keeps it elsewhere (GNOME)

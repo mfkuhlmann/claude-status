@@ -36,7 +36,8 @@
     "ui"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "onStartupFinished",
+    "onUri"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -84,6 +85,12 @@
         "icon": "$(add)"
       },
       {
+        "command": "claudeStatus.nextChat",
+        "title": "Go to the Chat That Needs You",
+        "category": "Claude Status",
+        "icon": "$(bell-dot)"
+      },
+      {
         "command": "claudeStatus.showRemoved",
         "title": "Show Removed Chats Again",
         "category": "Claude Status"
@@ -118,6 +125,13 @@
         "title": "Use Account for VS Code's Claude…",
         "category": "Claude Status",
         "icon": "$(account)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "claudeStatus.nextChat",
+        "key": "ctrl+alt+shift+c",
+        "mac": "cmd+alt+shift+c"
       }
     ],
     "menus": {
@@ -286,6 +300,20 @@
           "default": "dialog-error",
           "markdownDescription": "Sound when a chat fails.",
           "order": 17
+        },
+        "claudeStatus.awayDigest": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "When you come back to VS Code after `#claudeStatus.awayMinutes#` minutes or more, one notification sums up what happened meanwhile (chats that finished, failed or need you, limits that reset). While you're away, notifications of finished chats wait for it.",
+          "order": 18
+        },
+        "claudeStatus.awayMinutes": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "maximum": 240,
+          "markdownDescription": "How long, in minutes, no VS Code window has to be in use to count as away (`#claudeStatus.awayDigest#`).",
+          "order": 19
         },
         "claudeStatus.showPet": {
           "type": "boolean",

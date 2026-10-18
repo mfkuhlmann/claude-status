@@ -38,6 +38,8 @@ export const settings = {
   recentChats: () => num("recentChats", 5, 0, 20),
   keepDoneHours: () => num("keepDoneHours", 24, 0, 168),
   showTokens: () => cfg().get<boolean>("showTokens", true),
+  awayDigest: () => cfg().get<boolean>("awayDigest", true),
+  awayMinutes: () => num("awayMinutes", 5, 1, 240),
   python: () => expandHome(cfg().get<string>("pythonPath", "python3")?.trim() || "python3"),
 };
 

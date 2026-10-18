@@ -255,6 +255,32 @@ code {
   background: color-mix(in srgb, var(--cs-link) 10%, transparent);
 }
 
+/* While you were away: what happened meanwhile */
+.msg.digest {
+  border-left-color: var(--cs-working);
+  background: color-mix(in srgb, var(--cs-working) 8%, transparent);
+}
+
+.digest-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.digest-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.digest-line {
+  font-size: 0.9em;
+}
+
+.msg.digest .link {
+  margin-top: 2px;
+  color: var(--cs-link);
+}
+
 /* ---------------------------------------------------------------------------
    Buttons */
 
@@ -345,6 +371,20 @@ button:focus-visible {
   background: var(--cs-hover);
 }
 
+/* A task list's progress: the tag fills up as tasks get done */
+.tag.progress,
+.tag.progress.clickable:hover,
+.tag.progress[aria-pressed="true"] {
+  background:
+    linear-gradient(to right, color-mix(in srgb, var(--cs-working) 30%, transparent) var(--fill), transparent var(--fill)),
+    var(--tag-under, transparent);
+}
+
+.tag.progress.clickable:hover,
+.tag.progress[aria-pressed="true"] {
+  --tag-under: var(--cs-hover);
+}
+
 .badge {
   flex: none;
   padding: 0 6px;
@@ -360,6 +400,7 @@ button:focus-visible {
    Bars: plan usage and context fill, colored by how full they are */
 
 .meter {
+  position: relative;
   display: block;
   height: 6px;
   border-radius: 3px;
@@ -372,6 +413,23 @@ button:focus-visible {
   height: 100%;
   border-radius: inherit;
   background: var(--lvl);
+}
+
+/* Where your pace leads by the reset, and where an even pace would be by now */
+.meter > .meter-ahead {
+  position: absolute;
+  top: 0;
+  border-radius: 0 3px 3px 0;
+  opacity: 0.35;
+}
+
+.meter > .meter-even {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 0;
+  background: color-mix(in srgb, var(--cs-fg) 60%, transparent);
 }
 
 .lvl-high {
@@ -499,6 +557,18 @@ button:focus-visible {
   white-space: nowrap;
   font-size: 0.85em;
   color: var(--cs-muted);
+}
+
+/* "At this pace: full in 1h 20m (resets in 2h)" under its bar */
+.usage-warning {
+  grid-column: 2 / -1;
+  min-width: 0;
+  margin-bottom: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.85em;
+  color: var(--cs-waiting);
 }
 
 .no-usage {
@@ -635,6 +705,132 @@ button:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
   opacity: 0.85;
+}
+
+/* The peek line: what it's doing, needs or said last; click it for more */
+.peek-line {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 0.85em;
+  text-align: left;
+  cursor: pointer;
+}
+
+.peek-line:hover {
+  text-decoration: underline;
+}
+
+.pk-activity {
+  color: var(--cs-working);
+  opacity: 1;
+}
+
+.pk-reply {
+  color: var(--cs-muted);
+  opacity: 1;
+}
+
+/* Unfolded: your last prompt, Claude's reply, the tasks, the changed files */
+.peek {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 3px 0 4px;
+  padding: 5px 7px;
+  border-left: 2px solid var(--cs-tag-border);
+  border-radius: 0 4px 4px 0;
+  background: color-mix(in srgb, var(--cs-fg) 5%, transparent);
+}
+
+.peek-msg {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.peek-who {
+  flex: none;
+  min-width: 3.4em;
+  font-weight: 600;
+  color: var(--cs-muted);
+}
+
+.peek-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.peek-reply {
+  max-height: calc(1.4em * 12);
+  overflow-y: auto;
+}
+
+.peek-tasks {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.task {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.task-mark {
+  flex: none;
+  width: 1em;
+  text-align: center;
+  color: var(--cs-muted);
+}
+
+.task-in_progress .task-mark,
+.task-in_progress .task-subject {
+  color: var(--cs-working);
+}
+
+.task-completed .task-mark {
+  color: var(--cs-idle);
+}
+
+.task-completed .task-subject {
+  color: var(--cs-muted);
+  text-decoration: line-through;
+}
+
+.task-subject {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.peek-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.peek-actions .link {
+  color: var(--cs-link);
+}
+
+.peek-actions .link:disabled {
+  color: var(--cs-disabled);
+  cursor: default;
+  text-decoration: none;
 }
 
 /* Cut in the middle (Elided.tsx): the full text keeps the width, the cut one

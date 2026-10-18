@@ -8,10 +8,12 @@ import * as os from "node:os";
 import * as vscode from "vscode";
 import type { Answer, Backend } from "./backend";
 import { configDirArgs, setSshHosts, settings } from "./config";
+import { openComparison } from "./changes";
 import { claudePanelAvailable, localPanelProfileKey, openPanelChat } from "./claudePanel";
 import type { Dashboard } from "./dashboard";
 import { canRaiseWindows, isGnome } from "./desktop";
-import { allGroups, canEndChat, cliInstalled, groupLabel, hasTurn, shellQuote } from "./shared/model";
+import { chatRef } from "./notify";
+import { allGroups, canEndChat, cliInstalled, groupLabel, hasTurn, nextChatIndex, shellQuote } from "./shared/model";
 import type { ChatRef, Group } from "./shared/types";
 import { localAncestors, type Place, type Terminals } from "./terminals";
 
@@ -37,7 +39,12 @@ export function folderOf(command: string): string | null {
   return word.startsWith("'") ? word.slice(1, -1).replace(/'"'"'/g, "'") : word;
 }
 
+const AGAIN_MS = 30000; // pressing the shortcut again this soon goes on to the next chat
+
 export class Actions {
+  private lastNext: { id: string; at: number } | null = null;
+  private visited = new Set<string>(); // chats the shortcut went to in this round
+
   constructor(
     private backend: Backend,
     private dash: Dashboard,
@@ -474,6 +481,52 @@ export class Actions {
     });
     if (!chosen) return;
     await setSshHosts(chosen.map((c) => c.host));
+  }
+
+  // ---------------------------------------------------------------- the chat that needs you
+
+  // The shortcut (claudeStatus.nextChat): the chat waiting longest, then the
+  // other waiting ones and the ones that finished while you weren't looking,
+  // one per press; with none, the view. Chats it went to count as seen once
+  // a round of presses is over.
+  async nextChat(): Promise<void> {
+    const now = Date.now();
+    if (!this.lastNext || now - this.lastNext.at > AGAIN_MS) {
+      for (const id of this.visited) this.dash.seen(id);
+      this.visited.clear();
+    }
+    const list = this.dash.needingYou();
+    const i = nextChatIndex(list, this.lastNext, now, AGAIN_MS);
+    if (i < 0) {
+      this.lastNext = null;
+      await vscode.commands.executeCommand("claudeStatus.view.focus");
+      return;
+    }
+    const spot = list[i];
+    this.lastNext = { id: spot.id, at: now };
+    this.visited.add(spot.id);
+    await this.open(chatRef(spot.session, spot.host));
+  }
+
+  // ---------------------------------------------------------------- what a chat changed
+
+  // Side by side in VS Code's changes view: each file as it was before the
+  // chat (or before its last turn) and now (src/changes.ts)
+  async compareChanges(chat: ChatRef, turn: boolean): Promise<void> {
+    if (this.demoOnly()) return;
+    if (chat.host) {
+      this.fail(`${chat.name} runs on ${chat.host}: its files are there.`);
+      return;
+    }
+    const answer = await this.backend.changes(chat.chatId || chat.sessionId, chat.profileDir, turn, configDirArgs());
+    if (!answer.comparison) {
+      // "No changed files in its last turn" is news, not a failure
+      if (/^No changed files/.test(answer.message)) this.dash.setActionInfo(`${chat.name}: ${answer.message}.`);
+      else this.fail(`Couldn't compare ${chat.name}'s changes: ${answer.message}`);
+      return;
+    }
+    const error = await openComparison(answer.comparison);
+    if (error) this.fail(`Couldn't show ${chat.name}'s changes: ${error}`);
   }
 
   async hideHost(host: string): Promise<void> {

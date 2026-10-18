@@ -7,6 +7,7 @@ const disposable = () => ({ dispose() {} });
 export const recorded = {
   commands: new Map<string, (...args: unknown[]) => unknown>(),
   viewProviders: new Map<string, unknown>(),
+  uriHandlers: [] as unknown[],
   statusBarItems: [] as { text: string; tooltip: unknown; backgroundColor: unknown; show(): void; dispose(): void }[],
   messages: [] as string[],
 };
@@ -45,6 +46,10 @@ export const window = {
   },
   registerWebviewViewProvider: (id: string, provider: unknown) => {
     recorded.viewProviders.set(id, provider);
+    return disposable();
+  },
+  registerUriHandler: (handler: unknown) => {
+    recorded.uriHandlers.push(handler);
     return disposable();
   },
   showInformationMessage: async (m: string) => void recorded.messages.push(m),

@@ -4,16 +4,21 @@
 // status bar and notifications still need it), hosts every remotePollSeconds.
 
 import * as vscode from "vscode";
+import { AwayWatch } from "./away";
 import type { Backend } from "./backend";
 import { claudePanelAvailable, localPanelProfileKey } from "./claudePanel";
 import { settings, statusArgs, configDirArgs, viewSettings } from "./config";
 import type { Notifier } from "./notify";
 import { currentRemoteHost } from "./remoteHost";
 import { demoState } from "./shared/demo";
-import type { ClaudeCodeInfo, HostState, PetEventKind, Status, ViewState } from "./shared/types";
+import { allGroups, chatsNeedingYou, trackKey, type ChatSpot } from "./shared/model";
+import { chatRef } from "./notify";
+import type { ClaudeCodeInfo, DigestCard, HostState, PetEventKind, Status, ViewState } from "./shared/types";
 import { TransitionTracker, type Changes, type PetEvent } from "./transitions";
 
 const HIDDEN_POLL_MS = 10000;
+const VIEW_ID = "claudeStatus.view";
+const DIGEST_SHOWN_MS = 60 * 60000; // the away card stays this long, unless closed
 const DEMO_STEP_MS = 8000;
 const MESSAGE_MS = { error: 10000, info: 12000 };
 
@@ -36,6 +41,10 @@ export class Dashboard implements vscode.Disposable {
   private disposed = false;
   private windowHost: string | undefined;
   private claudeCodeAvailable = false;
+  // Chats that finished a turn while you weren't looking (trackKey -> when)
+  private unseen = new Map<string, number>();
+  private away: AwayWatch;
+  private digest: DigestCard | null = null;
   private readonly onStateEmitter = new vscode.EventEmitter<ViewState>();
   private readonly onPetEventEmitter = new vscode.EventEmitter<PetEvent>();
   readonly onState = this.onStateEmitter.event;
@@ -47,7 +56,13 @@ export class Dashboard implements vscode.Disposable {
     private log: vscode.LogOutputChannel,
   ) {
     this.windowHost = currentRemoteHost(vscode);
+    this.away = new AwayWatch((now, lastUse) => this.cameBack(now, lastUse));
     this.disposables.push(
+      this.away,
+      // looking at the view: what finished is seen
+      vscode.window.onDidChangeWindowState((s) => {
+        if (s.focused && this.visible) this.unseen.clear();
+      }),
       this.onStateEmitter,
       this.onPetEventEmitter,
       vscode.workspace.onDidChangeConfiguration((e) => {
@@ -124,6 +139,7 @@ export class Dashboard implements vscode.Disposable {
     this.visible = visible;
     // Just opened: show fresh numbers now, then poll at the faster pace
     if (visible) this.scheduleLocal(0);
+    if (visible && vscode.window.state.focused) this.unseen.clear();
   }
 
   isVisible(): boolean {
@@ -242,10 +258,58 @@ export class Dashboard implements vscode.Disposable {
   private react(changes: Changes, resets: PetEvent[]): void {
     try {
       this.petEvents([...changes.petEvents, ...resets]);
-      if (!this.demo) this.notifier.handle(changes);
+      const now = Date.now();
+      this.away.tracker.note(changes, resets, now);
+      this.noteUnseen(changes);
+      const holdDone = settings.awayDigest() && this.away.holding(now, settings.awayMinutes() * 60000);
+      if (!this.demo) this.notifier.handle(changes, { holdDone });
     } catch (e) {
       this.log.error(`A reaction to the new status failed: ${e instanceof Error ? e.message : String(e)}`);
     }
+  }
+
+  // A turn that finished while you weren't looking at the view (and that was
+  // long enough to notify about) waits for you: the shortcut to the chat that
+  // needs you goes there too
+  private noteUnseen(changes: Changes): void {
+    if (this.visible && vscode.window.state.focused) return;
+    const min = settings.notifyDoneMinSeconds() * 1000;
+    for (const f of changes.finished) if (f.took >= min) this.unseen.set(f.id, f.at);
+  }
+
+  // The chats that need you, most urgent first (model.chatsNeedingYou)
+  needingYou(): ChatSpot[] {
+    const st = this.state();
+    const groups = allGroups(st.status, st.hosts);
+    // a finished chat that works again, or is gone, no longer waits for you
+    const states = new Map<string, string>();
+    for (const g of groups) for (const s of g.sessions) states.set(trackKey(s, g.host), s.state);
+    for (const id of [...this.unseen.keys()]) {
+      const state = states.get(id);
+      if (state !== "idle" && state !== "done") this.unseen.delete(id);
+    }
+    return chatsNeedingYou(groups, this.unseen);
+  }
+
+  seen(id: string): void {
+    this.unseen.delete(id);
+  }
+
+  // Back at VS Code after a while: what happened, in one notification
+  private cameBack(now: number, lastUse: number): void {
+    const st = this.state();
+    const digest = this.away.tracker.back(now, lastUse, allGroups(st.status, st.hosts), settings.awayMinutes() * 60000);
+    if (!digest || this.demo || !settings.awayDigest()) return;
+    // a card in the view; a notification too, unless notifications are off
+    this.digest = { title: digest.title, lines: digest.lines, at: now, first: digest.first ? chatRef(digest.first.session, digest.first.host) : null };
+    if (settings.notifyWaiting() || settings.notifyDone())
+      this.notifier.digest(digest, () => void vscode.commands.executeCommand(`${VIEW_ID}.focus`));
+    this.emit();
+  }
+
+  dismissDigest(): void {
+    this.digest = null;
+    this.emit();
   }
 
   private petEvents(events: PetEvent[]): void {
@@ -323,6 +387,7 @@ export class Dashboard implements vscode.Disposable {
       claudeCode: this.claudeCodeInfo(),
       actionError: this.actionError,
       actionInfo: this.actionInfo,
+      digest: this.digest && now - this.digest.at < DIGEST_SHOWN_MS ? this.digest : null,
       now,
     };
   }

@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+- **See what a chat is doing without switching to it:** a line under each
+  chat says what it's on right now (*▸ Bash: npm test*), what it needs, or
+  the first line of Claude's last reply. Click it for your last prompt,
+  Claude's whole reply, the chat's tasks and its changed files.
+- **Task progress:** a chat with a task list gets a **2/4** tag that fills up
+  as tasks get done; its tooltip lists them with the one it's on now.
+- **Compare what a chat changed:** the **± 3 files** tag opens VS Code's
+  changes view with every file the chat changed, as it was before the chat
+  and now (or only its last turn, from the unfolded peek). The Plasma and
+  GNOME widgets open the same view through this extension
+  (`vscode://wzaielamri.claude-status/changes`).
+- **Usage forecast:** each plan bar shows where your pace leads by the reset
+  (lighter) and where an even pace would be by now (a tick). When the
+  5-hour limit would run out first, a line under it says when.
+- **Go to the chat that needs you:** Ctrl+Alt+Shift+C (**Claude Status: Go
+  to the Chat That Needs You**) opens the chat waiting longest; press it again
+  for the next one, then the chats that finished while you weren't looking.
+  With none, it shows the view.
+- **While you were away:** back at VS Code after 5 minutes or more
+  (`claudeStatus.awayMinutes`), one notification and a card in the view sum
+  up what happened: chats that need you, finished or failed, limits that
+  reset. Meanwhile, notifications of finished chats wait for it
+  (`claudeStatus.awayDigest`). With notifications off, only the card shows.
+
 ## 1.7.0
 
 - The same version as the widget and the GNOME extension: all three are 1.7.0.

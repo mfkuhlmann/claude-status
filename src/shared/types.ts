@@ -25,6 +25,31 @@ export interface SharedInfo {
   movedHere?: boolean;
 }
 
+// What a chat is doing, from the end of its transcript
+export interface Peek {
+  activity: string; // its newest step, e.g. "Bash: npm test"; "" once its reply is finished
+  prompt: string; // your last prompt
+  reply: string; // Claude's last reply (up to 1500 characters, several lines)
+  replyLine: string; // its first line
+  at: number | null;
+}
+
+// The files a chat changed (labels relative to its folder)
+export interface ChangeSummary {
+  count: number;
+  files: string[];
+}
+
+export type TaskStatus = "pending" | "in_progress" | "completed";
+
+// A chat's task list (Claude's TaskCreate/TaskUpdate)
+export interface TaskProgress {
+  done: number;
+  total: number;
+  current: string; // what it's on now, e.g. "Running the tests"
+  items: { subject: string; status: TaskStatus | string }[];
+}
+
 export interface Session {
   key: string;
   profileDir: string;
@@ -52,9 +77,21 @@ export interface Session {
   jobId: string | null;
   jobSessionId: string | null;
   tmux?: boolean; // runs in a tmux pane: a working one can be interrupted (Ctrl+C)
+  peek?: Peek | null;
+  changes?: ChangeSummary | null;
+  tasks?: TaskProgress | null;
   // --remote: shell commands, run on the machine the session is on
   openCommand?: string | null;
   stopCommand?: string | null;
+}
+
+// Where a plan window is heading at your pace
+export interface Forecast {
+  evenPct: number; // where an even pace through the window would be by now
+  rate: number; // percent per hour
+  atReset: number; // where it would be when the window resets
+  fullAt: number | null; // when it would run out, if that's before it resets
+  basis: "hour" | "window"; // the last hour's pace, or the window's so far
 }
 
 export interface LimitWindow {
@@ -63,6 +100,7 @@ export interface LimitWindow {
   pct: number;
   resetsAt: number | null;
   reset: boolean;
+  forecast?: Forecast | null;
 }
 
 export interface Limits {
@@ -195,6 +233,14 @@ export interface ClaudeCodeInfo {
   profileKey: string | null;
 }
 
+// What happened while you were away (away.ts), as a card at the top of the view
+export interface DigestCard {
+  title: string; // "While you were away (1h 12m)"
+  lines: string[]; // "Needs you: Deploy (waiting 22m)", "Finished: a, b", …
+  at: number;
+  first: ChatRef | null; // the chat waiting longest, to open
+}
+
 // Everything the webview draws
 export interface ViewState {
   status: Status | null;
@@ -206,6 +252,7 @@ export interface ViewState {
   claudeCode: ClaudeCodeInfo;
   actionError: string;
   actionInfo: string;
+  digest?: DigestCard | null;
   now: number;
 }
 
@@ -239,6 +286,8 @@ export type WebviewMessage =
   | { type: "stop"; chat: ChatRef }
   | { type: "dismiss"; chat: ChatRef }
   | { type: "share"; chat: ChatRef }
+  | { type: "compareChanges"; chat: ChatRef; turn: boolean }
+  | { type: "dismissDigest" }
   | { type: "newChat"; groupId: string; host?: string }
   | { type: "refresh"; host?: string }
   | { type: "showRemoved"; host?: string }

@@ -63,3 +63,11 @@ test("a plan limit that drops a lot is celebrated as a reset", () => {
   const reset = groups.map((g) => ({ ...g, limits: { ...g.limits!, windows: g.limits!.windows.map((w) => ({ ...w, pct: 2 })) } }));
   assert.deepEqual(t.resets("", reset).map((e) => e.text), ["5h limit reset!", "7d limit reset!"]);
 });
+
+test("finished turns are reported with how long they took", () => {
+  const t = new TransitionTracker();
+  t.track("ssh:lab", oneChat("working", NOW - 60000), NOW, "lab", OPTS);
+  const r = t.track("ssh:lab", oneChat("done", NOW + 60000, "failed"), NOW + 60000, "lab", OPTS);
+  assert.equal(r.finished.length, 1);
+  assert.deepEqual([r.finished[0].id, r.finished[0].host, r.finished[0].took], ["ssh:lab|chat-1", "lab", 120000]);
+});

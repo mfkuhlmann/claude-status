@@ -13,7 +13,16 @@ function send(message: HostMessage): void {
 }
 
 function sendState(): void {
-  send({ type: "state", state: demoState(Date.now(), phase) });
+  const state = demoState(Date.now(), phase);
+  // ?digest=1: the card that sums up what happened while you were away
+  if (params.get("digest") === "1")
+    state.digest = {
+      title: "While you were away (1h 12m)",
+      lines: ["Needs you: Release notes for 2.0 (waiting 22m)", "Finished: Fix the date parser, Nightly dependency check", "5h limit reset"],
+      at: Date.now(),
+      first: { key: "demo-2", sessionId: "demo-2", profileDir: ".claude", name: "Release notes for 2.0" },
+    };
+  send({ type: "state", state });
 }
 
 setTimeout(() => {

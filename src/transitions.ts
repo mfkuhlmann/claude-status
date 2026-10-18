@@ -23,10 +23,21 @@ export interface PetEvent {
 
 export type SoundKind = "" | "done" | "failed" | "waiting";
 
+// A chat that finished a turn this poll (for the away digest and the
+// shortcut to the chat that needs you)
+export interface Finished {
+  id: string; // the row as tracked: "<source>|<key>"
+  session: Session;
+  host?: string;
+  took: number; // how long the turn ran, ms
+  at: number;
+}
+
 export interface Changes {
   notices: Notice[];
   petEvents: PetEvent[];
   sound: SoundKind; // the most urgent of this poll's notifications
+  finished: Finished[];
 }
 
 export interface NotifyOptions {
@@ -45,7 +56,7 @@ export class TransitionTracker {
   private lastWindows = new Map<string, number>();
 
   track(source: string, groups: Group[], nowMs: number, host: string | undefined, opts: NotifyOptions): Changes {
-    const changes: Changes = { notices: [], petEvents: [], sound: "" };
+    const changes: Changes = { notices: [], petEvents: [], sound: "", finished: [] };
     const next = new Map<string, SessionState>();
     const starts = new Map<string, number>();
     const before = this.lastStates.get(source);
@@ -87,6 +98,7 @@ export class TransitionTracker {
           else if (s.reason === "stopped") changes.petEvents.push({ kind: "stopped", text: `${s.name} was stopped.`, key: pk });
           else changes.petEvents.push({ kind: "done", text: `${s.name} is done!`, key: pk });
           const took = (s.since ?? nowMs) - (startedAt.get(sid) ?? nowMs);
+          changes.finished.push({ id: sid, session: s, host, took, at: nowMs });
           if (opts.notifyDone && took >= opts.notifyDoneMinSeconds * 1000) {
             const title =
               s.reason === "failed" ? `${s.name} failed` : s.reason === "stopped" ? `${s.name} was stopped` : `${s.name} finished`;

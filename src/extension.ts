@@ -7,6 +7,7 @@ import * as vscode from "vscode";
 import { AccountSwitch } from "./accountSwitch";
 import { Actions } from "./actions";
 import { Backend } from "./backend";
+import { openChangesLink } from "./changes";
 import { settings } from "./config";
 import { Dashboard } from "./dashboard";
 import { Notifier } from "./notify";
@@ -46,6 +47,9 @@ export function activate(context: vscode.ExtensionContext): void {
       view.setBadge(countStates(allGroups(state.status, state.hosts)).waiting);
     }),
     vscode.commands.registerCommand("claudeStatus.switchAccount", () => account.switch()),
+    vscode.commands.registerCommand("claudeStatus.nextChat", () => a.nextChat()),
+    // the Plasma and GNOME widgets hand over what a chat changed (changes.ts)
+    vscode.window.registerUriHandler({ handleUri: (uri) => void openChangesLink(uri, log) }),
     vscode.commands.registerCommand("claudeStatus.refresh", () => dash.refreshAll()),
     vscode.commands.registerCommand("claudeStatus.pickHosts", () => a.pickHosts()),
     vscode.commands.registerCommand("claudeStatus.openInEditor", () => view.openInEditor()),

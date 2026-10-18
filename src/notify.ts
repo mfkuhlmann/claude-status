@@ -8,6 +8,7 @@ import * as vscode from "vscode";
 import type { Backend } from "./backend";
 import { cacheDir, settings } from "./config";
 import { gnomeSoundTheme } from "./desktop";
+import type { Digest } from "./away";
 import type { ChatRef, Session } from "./shared/types";
 import type { Changes } from "./transitions";
 
@@ -67,7 +68,7 @@ export class Notifier implements vscode.Disposable {
   }
 
   // This window speaks for all: it was focused last, or the one that was is gone
-  private isLeader(): boolean {
+  isLeader(): boolean {
     try {
       const { pid } = JSON.parse(fs.readFileSync(this.leaderFile, "utf8"));
       if (pid === process.pid) return true;
@@ -79,19 +80,33 @@ export class Notifier implements vscode.Disposable {
     return true;
   }
 
-  handle(changes: Changes): void {
-    if (!changes.notices.length || !this.isLeader()) return;
-    for (const n of changes.notices) {
+  // holdDone: you're away; finished chats wait for the digest (away.ts)
+  handle(changes: Changes, opts: { holdDone?: boolean } = {}): void {
+    const notices = opts.holdDone ? changes.notices.filter((n) => n.kind !== "done") : changes.notices;
+    if (!notices.length || !this.isLeader()) return;
+    for (const n of notices) {
       const text = `${n.title} — ${n.body}`;
       const show = n.kind === "waiting" ? vscode.window.showWarningMessage : vscode.window.showInformationMessage;
       void show(text, "Open").then((choice) => {
         if (choice === "Open") this.open(chatRef(n.session, n.host));
       });
     }
-    if (changes.sound && settings.notifySound()) {
-      const sound =
-        changes.sound === "waiting" ? settings.soundWaiting() : changes.sound === "failed" ? settings.soundFailed() : settings.soundDone();
-      if (sound) void gnomeSoundTheme().then((theme) => this.backend.sound(sound, settings.soundVolume(), theme));
+    const sound = opts.holdDone && changes.sound !== "waiting" ? "" : changes.sound;
+    if (sound && settings.notifySound()) {
+      const file =
+        sound === "waiting" ? settings.soundWaiting() : sound === "failed" ? settings.soundFailed() : settings.soundDone();
+      if (file) void gnomeSoundTheme().then((theme) => this.backend.sound(file, settings.soundVolume(), theme));
     }
+  }
+
+  // What happened while you were away, in one notification
+  digest(d: Digest, showView: () => void): void {
+    if (!this.isLeader()) return;
+    const action = d.first ? `Open ${d.first.session.name}` : "Show Chats";
+    void vscode.window.showInformationMessage(d.message, action).then((choice) => {
+      if (choice !== action) return;
+      if (d.first) this.open(chatRef(d.first.session, d.first.host));
+      else showView();
+    });
   }
 }

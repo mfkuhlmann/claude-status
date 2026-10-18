@@ -1,7 +1,7 @@
 // The dashboard's derived values, shared by the extension (status bar,
 // notifications) and the webview. Ported from the widget's main.qml.
 
-import type { ClaudeCodeInfo, Counts, Group, HostState, LimitWindow, Overall, ReopenIn, Session, Status, ViewState } from "./types";
+import type { ChangeSummary, ClaudeCodeInfo, Counts, Group, HostState, LimitWindow, Overall, ReopenIn, Session, Status, TaskProgress, ViewState } from "./types";
 
 // This computer's accounts, then the hosts' (each marked with its host).
 export function allGroups(status: Status | null, hosts: HostState[]): Group[] {
@@ -252,4 +252,108 @@ export function tooltipLines(groups: Group[], counts: Counts, hosts: HostState[]
   }
   for (const h of hosts) if (h.error) lines.push(`${h.name}: not reachable`);
   return lines;
+}
+
+// ---------------------------------------------------------------- a peek at a chat
+
+// The line under a chat's folder: what it's doing (working), what it needs
+// (waiting), its result (a finished background session) or what Claude said
+// last (your turn, done)
+export function peekLine(
+  s: Pick<Session, "state" | "detail" | "reason" | "peek" | "tasks">,
+): { kind: "activity" | "needs" | "result" | "reply"; text: string } | null {
+  const peek = s.peek;
+  if (s.state === "working") {
+    const what = peek?.activity || s.tasks?.current || "";
+    return what ? { kind: "activity", text: `▸ ${what}` } : null;
+  }
+  if (s.state === "waiting") return { kind: "needs", text: s.detail || peek?.activity || reasonText(s.reason) };
+  if (s.state === "done" && s.detail) return { kind: "result", text: s.detail };
+  return peek?.replyLine ? { kind: "reply", text: `Claude: ${peek.replyLine}` } : null;
+}
+
+// Something to unfold under the row: the last exchange, tasks or changed files
+export function hasPeek(s: Pick<Session, "peek" | "tasks" | "changes">): boolean {
+  return !!(s.peek && (s.peek.prompt || s.peek.reply)) || !!s.tasks?.items.length || !!s.changes;
+}
+
+export function taskMark(status: string): string {
+  return status === "completed" ? "✓" : status === "in_progress" ? "▸" : "○";
+}
+
+export function tasksTitle(t: TaskProgress): string {
+  const head = `Tasks: ${t.done} of ${t.total} done` + (t.current ? ` · now: ${t.current}` : "");
+  return [head, ...t.items.map((i) => `${taskMark(i.status)} ${i.subject}`)].join("\n");
+}
+
+export function changesTitle(c: ChangeSummary, host?: string): string {
+  const more = c.count > c.files.length ? `\n…and ${c.count - c.files.length} more` : "";
+  const what = host
+    ? `\nThey're on ${host}: compare them there.`
+    : "\nClick to compare them with what they were before the chat, side by side (VS Code's changes view).";
+  return `Files this chat changed (${c.count}):\n${c.files.join("\n")}${more}${what}`;
+}
+
+// ---------------------------------------------------------------- usage forecast
+
+function percent(n: number): string {
+  return `${Math.round(n * 10) / 10}%`;
+}
+
+// "At this pace: full in 1h 20m (resets in 2h 5m)", when a plan window would
+// run out before it resets
+export function forecastWarning(w: LimitWindow, now: number): string {
+  const f = w.forecast;
+  if (!f || f.fullAt === null || !w.resetsAt || w.reset) return "";
+  return `At this pace: full in ${duration(f.fullAt - now)} (resets in ${duration(w.resetsAt - now)})`;
+}
+
+export function forecastTitle(w: LimitWindow, now: number): string {
+  const f = w.forecast;
+  if (!f || w.reset) return "";
+  const pace = f.basis === "hour" ? `${percent(f.rate)} an hour over the last hour` : `${percent(f.rate)} an hour so far in this window`;
+  const where =
+    f.fullAt !== null && w.resetsAt
+      ? `full in ${duration(f.fullAt - now)}, ${duration(w.resetsAt - f.fullAt)} before it resets`
+      : `about ${Math.round(f.atReset)}% when it resets${w.resetsAt ? ` in ${duration(w.resetsAt - now)}` : ""}`;
+  return `At this pace (${pace}): ${where}.\nAn even pace through the window would be at ${Math.round(f.evenPct)}% by now.`;
+}
+
+// ---------------------------------------------------------------- the chat that needs you
+
+// A row's key as the transition tracker keeps it ("ssh:<host>|<key>" for a host's)
+export function trackKey(s: Pick<Session, "key" | "sessionId">, host?: string): string {
+  return (host ? `ssh:${host}|` : "") + (s.key || s.sessionId);
+}
+
+export interface ChatSpot {
+  id: string; // trackKey
+  session: Session;
+  host?: string;
+}
+
+// The chats that need you, most urgent first: the waiting ones (the one
+// waiting longest first), then the ones that finished a turn you haven't
+// looked at yet (unseen: trackKey -> when; newest first)
+export function chatsNeedingYou(groups: Group[], unseen: ReadonlyMap<string, number>): ChatSpot[] {
+  const waiting: ChatSpot[] = [];
+  const finished: { spot: ChatSpot; at: number }[] = [];
+  for (const g of groups)
+    for (const s of g.sessions) {
+      const spot = { id: trackKey(s, g.host), session: s, host: g.host };
+      if (s.state === "waiting") waiting.push(spot);
+      else if (unseen.has(spot.id) && (s.state === "idle" || s.state === "done")) finished.push({ spot, at: unseen.get(spot.id)! });
+    }
+  waiting.sort((a, b) => (a.session.since ?? 0) - (b.session.since ?? 0));
+  finished.sort((a, b) => b.at - a.at);
+  return [...waiting, ...finished.map((f) => f.spot)];
+}
+
+// Which one a press of the shortcut goes to: the first, or (pressed again
+// soon) the one after the last it went to
+export function nextChatIndex(list: ChatSpot[], last: { id: string; at: number } | null, now: number, againMs = 30000): number {
+  if (!list.length) return -1;
+  if (!last || now - last.at > againMs) return 0;
+  const i = list.findIndex((c) => c.id === last.id);
+  return i < 0 ? 0 : (i + 1) % list.length;
 }
