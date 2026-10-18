@@ -299,6 +299,40 @@ test('while you were away', () => {
         'Needs you: chat w2 (waiting 9m)', 'Needs you: chat w3 (waiting 8m)', '+2 more need you']);
 });
 
+test('account stats', () => {
+    const day = (d, total, output, chats, prompts) => ({day: d, total, output, messages: total ? 1 : 0, chats, prompts});
+    const stats = {
+        days: [day('2026-10-13', 0, 0, 0, 0), day('2026-10-14', 11212072, 124703, 6, 73),
+            day('2026-10-15', 446759436, 1711830, 6, 73), day('2026-10-16', 0, 0, 0, 2)],
+        projects: [{name: 'claude_widget', path: '~/repos/claude_widget', total: 669761283, output: 2067056, prompts: 146},
+            {name: '~', path: '~', total: 0, output: 0, prompts: 1}],
+        models: [{model: 'Opus 5.5', total: 997186118}, {model: 'Sonnet 5.5', total: 149621}],
+        sum: {total: 997417549, output: 3218060, chats: 15, prompts: 253, activeDays: 1},
+    };
+    eq(L.statsSummaryText(stats), '4 days: 997.4M tokens (3.2M out) · 15 chats · 253 prompts · 1 active day');
+    eq(L.statsDayText(stats.days[2]), 'Thu 15 Oct: 446.8M tokens (1.7M out) · 6 chats · 73 prompts');
+    eq(L.statsDayLetter('2026-10-18'), 'S');
+    eq(L.statsBarHeights(stats, 48), [0, 2, 48, 0], 'zero days have no bar, small ones a sliver');
+    eq(stats.projects.map(L.statsProjectText), ['669.8M · 146 prompts', '1 prompt']);
+    eq(L.statsModelsText(stats), 'Opus 5.5 100% · Sonnet 5.5 <1%');
+    eq(L.statsModelsText({...stats, models: []}), '');
+    // what's drawn, not the exact numbers: a few more tokens in a day don't rebuild the popup
+    const more = {...stats, days: stats.days.map((d, i) => (i === 2 ? {...d, total: d.total + 1000} : d))};
+    eq(L.statsSignature(more), L.statsSignature(stats));
+});
+
+test('chat recap', () => {
+    const stats = {prompts: 3, toolCalls: 278, tools: [['Bash', 236], ['Read', 23], ['Write', 5], ['Agent', 4]],
+        tokens: {input: 536, output: 248717, cacheRead: 84294022, cacheWrite: 711117, total: 85254392},
+        workedMs: 3045969, startedAt: T, lastAt: T + 3600000};
+    eq(L.chatRecapText(stats), '3 prompts · worked 51m · 278 tool calls (Bash 236, Read 23, Write 5) · 85.3M tokens (248.7k out)');
+    eq(L.chatRecapText(stats, 12.4), '3 prompts · worked 51m · 278 tool calls (Bash 236, Read 23, Write 5) · 85.3M tokens (248.7k out) · $12.40 at API prices');
+    eq(L.chatRecapText({prompts: 1, toolCalls: 1, tools: [['Bash', 1]], tokens: {total: 0, output: 0}, workedMs: 20000}),
+        '1 prompt · worked <1m · 1 tool call (Bash 1)');
+    eq(L.canPeek(session('x', 'idle', {stats}), ''), true, 'a recap is worth unfolding');
+    eq(L.canPeek(session('x', 'idle', {stats: {prompts: 0, toolCalls: 0, tools: [], tokens: {total: 0}, workedMs: 0}}), ''), false);
+});
+
 print(`${count - failures}/${count} passed`);
 if (failures)
     System.exit(1);

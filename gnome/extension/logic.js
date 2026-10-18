@@ -648,7 +648,8 @@ export function peekLine(s) {
 // Is there more to show when the peek line is clicked?
 export function canPeek(s, remoteHost) {
     const peek = s.peek || null;
-    return !!((peek && (peek.prompt || peek.reply)) || (s.tasks && s.tasks.total) || (s.changes && !remoteHost));
+    return !!((peek && (peek.prompt || peek.reply)) || (s.tasks && s.tasks.total) || (s.changes && !remoteHost)
+        || (s.stats && chatRecapText(s.stats)));
 }
 
 // At most maxLines lines and maxChars characters, with … when cut
@@ -829,4 +830,107 @@ export function awayDigest(away, groups, now, minMinutes) {
         lines.push(fmt('Failed: %1', nameList(failed)));
     lines.push(...resets);
     return {title: fmt('While you were away (%1)', duration(awayMs)), body: lines.join('\n'), first: waiting[0] || null};
+}
+
+// ---------------------------------------------------------------- stats
+
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// "2026-10-15" -> a local Date (no time zone shift)
+function dayDate(day) {
+    const [y, m, d] = String(day).split('-').map(Number);
+    return new Date(y, (m || 1) - 1, d || 1);
+}
+
+// The letter under a day's bar: M, T, W, …
+export function statsDayLetter(day) {
+    return WEEKDAYS[dayDate(day).getDay()][0];
+}
+
+// A day's bar, on hover: "Tue 15 Oct: 446.8M tokens (1.7M out) · 6 chats · 73 prompts"
+export function statsDayText(d) {
+    const date = dayDate(d.day);
+    const parts = [fmt('%1 tokens (%2 out)', formatTokens(d.total), formatTokens(d.output)),
+        plural(d.chats, '%1 chat', '%1 chats'), plural(d.prompts, '%1 prompt', '%1 prompts')];
+    return `${WEEKDAYS[date.getDay()]} ${date.getDate()} ${MONTHS[date.getMonth()]}: ${parts.join(' · ')}`;
+}
+
+// "14 days: 997.4M tokens (3.2M out) · 15 chats · 253 prompts · 5 active days"
+export function statsSummaryText(stats) {
+    const s = stats.sum;
+    return [fmt('%1 days: %2 tokens (%3 out)', stats.days.length, formatTokens(s.total), formatTokens(s.output)),
+        plural(s.chats, '%1 chat', '%1 chats'), plural(s.prompts, '%1 prompt', '%1 prompts'),
+        plural(s.activeDays, '%1 active day', '%1 active days')].join(' · ');
+}
+
+// The bars' heights in px, out of maxPx for the busiest day; 0 for a day without tokens
+export function statsBarHeights(stats, maxPx) {
+    const top = Math.max(0, ...stats.days.map(d => d.total));
+    return stats.days.map(d => (d.total > 0 && top > 0 ? Math.max(2, Math.round(maxPx * d.total / top)) : 0));
+}
+
+// A busy folder's numbers: "669.8M · 146 prompts"
+export function statsProjectText(p) {
+    const parts = [];
+    if (p.total > 0)
+        parts.push(formatTokens(p.total));
+    if (p.prompts > 0)
+        parts.push(plural(p.prompts, '%1 prompt', '%1 prompts'));
+    return parts.join(' · ');
+}
+
+// "Opus 5.5 99% · Sonnet 5.5 <1%"
+export function statsModelsText(stats) {
+    const all = stats.models.reduce((n, m) => n + m.total, 0);
+    if (!all)
+        return '';
+    return stats.models.map(m => {
+        const pct = 100 * m.total / all;
+        return `${m.model} ${pct > 0 && pct < 0.5 ? '<1' : Math.round(pct)}%`;
+    }).join(' · ');
+}
+
+// A chat's recap, at the bottom of its peek box: "3 prompts · worked 51m ·
+// 278 tool calls (Bash 236, Read 23, Write 5) · 85.3M tokens (249.7k out)",
+// with what it would cost at API prices when the status line says
+export function chatRecapText(stats, costUsd = null) {
+    const parts = [];
+    if (stats.prompts)
+        parts.push(plural(stats.prompts, '%1 prompt', '%1 prompts'));
+    if (stats.workedMs > 0)
+        parts.push(fmt('worked %1', stats.workedMs < 60000 ? '<1m' : duration(stats.workedMs)));
+    if (stats.toolCalls) {
+        const top = stats.tools.slice(0, 3).map(([name, n]) => `${name} ${n}`).join(', ');
+        parts.push(plural(stats.toolCalls, '%1 tool call', '%1 tool calls') + (top ? ` (${top})` : ''));
+    }
+    if (stats.tokens && stats.tokens.total)
+        parts.push(fmt('%1 tokens (%2 out)', formatTokens(stats.tokens.total), formatTokens(stats.tokens.output)));
+    if (typeof costUsd === 'number' && costUsd > 0)
+        parts.push(fmt('$%1 at API prices', costUsd.toFixed(2)));
+    return parts.join(' · ');
+}
+
+// What of an account's stats the popup draws (for its render signature):
+// moving numbers only rebuild it where the text or a bar changes
+export function statsSignature(stats) {
+    return [statsSummaryText(stats), statsBarHeights(stats, 48), stats.days.map(statsDayText),
+        stats.projects.map(p => [p.name, statsProjectText(p)]), statsModelsText(stats)];
+}
+
+// The recap's tooltip: its tokens in full, when it started and was last busy,
+// and every tool it used
+export function chatRecapTooltip(stats, costUsd, now) {
+    const t = stats.tokens || {};
+    const lines = [fmt('Tokens: %1 in · %2 out · %3 cache read · %4 cache write (subagents included)',
+        formatTokens(t.input || 0), formatTokens(t.output || 0), formatTokens(t.cacheRead || 0), formatTokens(t.cacheWrite || 0))];
+    if (stats.tools.length)
+        lines.push(fmt('Tools: %1', stats.tools.map(([name, n]) => `${name} ${n}`).join(', ')));
+    if (stats.workedMs > 0)
+        lines.push(fmt('Claude worked %1: from each of your prompts to its last step.', duration(stats.workedMs)));
+    if (stats.startedAt)
+        lines.push(fmt('Started %1 ago, last busy %2 ago.', duration(now - stats.startedAt), duration(now - (stats.lastAt || now))));
+    if (typeof costUsd === 'number' && costUsd > 0)
+        lines.push(fmt('At API prices this session would cost $%1 (from the status line; a plan pays differently).', costUsd.toFixed(2)));
+    return lines.join('\n');
 }

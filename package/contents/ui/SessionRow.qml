@@ -52,7 +52,8 @@ RowLayout {
     readonly property var tasks: session.tasks || null
     readonly property var changes: session.changes || null
     readonly property bool showPeek: root.expandedPeek[rowKey] === true
-    readonly property bool hasPeek: (!!peek && (peek.prompt !== "" || peek.reply !== "")) || tasks !== null
+    readonly property var recap: session.stats || null
+    readonly property bool hasPeek: (!!peek && (peek.prompt !== "" || peek.reply !== "")) || tasks !== null || recap !== null
     // Its changes open side by side in VS Code (jump.py --changes); an SSH host's files are there
     readonly property bool canCompare: changes !== null && !remoteHost && root.vscodeInstalled && !!session.chatId
     // The line under the folder: what it's doing, what it needs, or what Claude said last
@@ -436,6 +437,30 @@ RowLayout {
                             font.pointSize: Kirigami.Theme.smallFont.pointSize
                             font.bold: task.status === "in_progress"
                         }
+                    }
+                }
+
+                // The chat in numbers
+                PlasmaComponents3.Label {
+                    Layout.fillWidth: true
+                    visible: row.recap !== null
+                    text: root.recapText(row.recap, row.session.costUsd)
+                    wrapMode: Text.Wrap
+                    opacity: 0.7
+                    font: Kirigami.Theme.smallFont
+
+                    PlasmaCore.ToolTipArea {
+                        anchors.fill: parent
+                        active: row.recap !== null
+                        mainText: i18n("This chat in numbers")
+                        subText: !row.recap ? ""
+                                 : (row.recap.startedAt ? i18n("Started %1 ago, last active %2 ago.", root.duration(root.now - row.recap.startedAt),
+                                                               root.duration(root.now - (row.recap.lastAt || root.now))) + "\n" : "")
+                                   + i18n("Tokens: input %1 · output %2 · cache read %3 · cache write %4 (subagents included).",
+                                          root.formatTokens(row.recap.tokens.input), root.formatTokens(row.recap.tokens.output),
+                                          root.formatTokens(row.recap.tokens.cacheRead), root.formatTokens(row.recap.tokens.cacheWrite))
+                                   + "\n" + i18n("Worked: how long Claude was at it, from each prompt of yours to its last step.")
+                                   + (row.session.costUsd ? "\n" + i18n("The price is what this session would cost through the API, from the status line.") : "")
                     }
                 }
 

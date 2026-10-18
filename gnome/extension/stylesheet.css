@@ -166,3 +166,22 @@
     background-color: rgba(36, 36, 36, 0.88);
 }
 .claude-particle { font-weight: bold; font-size: 1.1em; }
+
+/* An account's last days (stats), unfolded from its tokens line */
+.claude-stats {
+    margin: 2px 4px 4px 14px;
+    padding: 6px 8px;
+    spacing: 4px;
+    border-radius: 8px;
+    background-color: rgba(127, 127, 127, 0.08);
+}
+.claude-stats-chart { spacing: 3px; padding-top: 2px; }
+.claude-stats-day { spacing: 2px; }
+.claude-stats-bar { border-radius: 2px 2px 0 0; }
+.claude-stats-baseline { background-color: rgba(127, 127, 127, 0.35); }
+.claude-stats-letter { font-size: 0.75em; }
+.claude-stats-project { spacing: 6px; }
+.claude-stats-name { width: 8em; }
+.claude-stats-meter { height: 5px; }
+.claude-stats-numbers { width: 9em; text-align: right; }
+.claude-recap { padding-top: 2px; }

@@ -8,7 +8,7 @@ import sys
 import tempfile
 import time
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 sys.dont_write_bytecode = True  # keep __pycache__ out of the plasmoid package
@@ -1173,3 +1173,133 @@ class TaskProgressTests(Fixture):
     def test_no_tasks(self):
         (self.home / ".claude-work/tasks/busy").mkdir(parents=True)
         self.assertIsNone(self.tasks())
+
+
+def usage_line(msg_id, ts, output, cwd, model="claude-opus-5-5", tool=None):
+    """One block of a reply, with its usage (repeated on every block of the reply)."""
+    content = [{"type": "tool_use", "id": "t-" + msg_id, "name": tool, "input": {}}] if tool else [{"type": "text", "text": "ok"}]
+    return {"type": "assistant", "timestamp": iso(ts), "cwd": cwd, "message": {
+        "id": msg_id, "model": model, "content": content,
+        "usage": {"input_tokens": 1, "output_tokens": output, "cache_read_input_tokens": 100, "cache_creation_input_tokens": 9}}}
+
+
+class StatsTests(Fixture):
+    """An account's last days: tokens per day, chats, your prompts, busiest folders."""
+
+    DAY = 86400
+
+    def setUp(self):
+        super().setUp()
+        self.now = datetime(2026, 10, 18, 15, 0).timestamp()
+        w = self.home / ".claude-work/projects/-w"
+        write(w / "chat-a.jsonl", "\n".join(json.dumps(l) for l in [
+            usage_line("a1", self.now - 2 * self.DAY, 10, "/w/app"),
+            usage_line("a2", self.now - 600, 20, "/w/app/tests"),  # cd'd into a subfolder: still /w/app
+            usage_line("a2", self.now - 600, 25, "/w/app/tests"),  # same reply, final count
+        ]) + "\n")
+        write(w / "chat-b.jsonl", json.dumps(usage_line("b1", self.now - 300, 5, "/w/site", model="claude-haiku-5-5")) + "\n")
+        write(w / "chat-a/subagents/agent-x.jsonl", json.dumps(usage_line("x1", self.now - 500, 3, "/w/app")) + "\n")
+        write(w / "old.jsonl", json.dumps(usage_line("o1", self.now - 20 * self.DAY, 7, "/w/old")) + "\n")
+        os.utime(w / "old.jsonl", (self.now - 20 * self.DAY, self.now - 20 * self.DAY))
+        prompts = [{"display": "go", "timestamp": int((self.now - t) * 1000), "project": f, "sessionId": "chat-a"}
+                   for t, f in ((700, "/w/app"), (650, "/w/app"), (2 * self.DAY, "/w/app"), (400, "/w/site"))]
+        write(self.home / ".claude-work/history.jsonl", "".join(json.dumps(p) + "\n" for p in prompts))
+
+    def stats(self, **kw):
+        return self.group(self.collect(**kw), "work")["stats"]
+
+    def test_days_folders_models(self):
+        st = self.stats()
+        days = st["days"]
+        self.assertEqual(len(days), cs.STATS_SHOWN_DAYS)
+        self.assertEqual(days[-1]["day"], "2026-10-18")
+        today, two_ago = days[-1], days[-3]
+        self.assertEqual((today["output"], today["messages"], today["chats"], today["prompts"]), (25 + 3 + 5, 3, 2, 3))
+        self.assertEqual(today["total"], 3 * 110 + 25 + 3 + 5)
+        self.assertEqual((two_ago["output"], two_ago["chats"], two_ago["prompts"]), (10, 1, 1))
+        self.assertEqual([(p["name"], p["output"], p["prompts"]) for p in st["projects"]],
+                         [("app", 38, 3), ("site", 5, 1)])  # old is beyond the days shown
+        self.assertEqual([m["model"] for m in st["models"]], ["Opus 5.5", "Haiku 5.5"])
+        self.assertEqual((st["sum"]["chats"], st["sum"]["prompts"], st["sum"]["activeDays"]), (2, 4, 2))
+
+    def test_history_outlives_the_messages(self):
+        self.stats()
+        work = next(p for p in cs.discover_profiles(self.home) if p.label == "work")
+        cache = json.loads(cs.token_cache_path(self.cache, work).read_text())
+        self.assertIn((date.fromtimestamp(self.now) - timedelta(days=20)).isoformat(), cache["history"])  # read back 30 days once
+        self.assertNotIn("o1", cache["messages"])  # messages: only TOKEN_DAYS
+        later = self.now + 9 * self.DAY  # a2 and b1 are no longer in the messages kept
+        st = self.stats(now=later)
+        self.assertEqual(st["days"][-10]["output"], 33)  # nine days ago: from the history
+        self.assertEqual(st["days"][-1]["output"], 0)
+
+    def test_no_history_without_tokens(self):
+        self.assertIsNone(self.group(self.collect(with_tokens=False), "work")["stats"])
+
+
+class ChatRecapTests(Fixture):
+    """A chat's numbers: prompts, tool calls, tokens, how long Claude worked."""
+
+    def test_recap(self):
+        t = time.time() - 3600
+        main = self.home / ".claude-work/projects/-w/busy.jsonl"
+        lines = [
+            chat_line("user", "first", ts=t),
+            usage_line("m1", t + 10, 5, "/w", tool="Bash"),
+            usage_line("m1", t + 11, 8, "/w", tool="Read"),  # the same reply's next block
+            chat_line("user", [{"type": "tool_result", "tool_use_id": "t", "content": "x"}], ts=t + 30),
+            usage_line("m2", t + 60, 4, "/w"),
+            chat_line("user", "second", ts=t + 600),
+            usage_line("m3", t + 620, 2, "/w", tool="Bash"),
+        ]
+        write(main, "\n".join(json.dumps(l) for l in lines) + "\n")
+        write(main.parent / "busy/subagents/agent-a.jsonl", json.dumps(usage_line("s1", t + 15, 6, "/w", tool="Grep")) + "\n")
+        work = self.group(self.collect(with_tokens=False), "work")
+        st = next(s for s in work["sessions"] if s["sessionId"] == "busy")["stats"]
+        self.assertEqual((st["prompts"], st["toolCalls"]), (2, 4))
+        self.assertEqual(st["tools"], [["Bash", 2], ["Grep", 1], ["Read", 1]])
+        self.assertEqual(st["tokens"]["output"], 8 + 4 + 2 + 6)
+        self.assertEqual(st["tokens"]["total"], 4 * 110 + 20)
+        self.assertEqual(st["workedMs"], 60_000 + 20_000)
+        self.assertEqual((st["startedAt"], st["lastAt"]), (int(t * 1000), int((t + 620) * 1000)))
+
+    def test_no_recap_without_a_transcript(self):
+        work = self.group(self.collect(with_tokens=False), "work")
+        self.assertIsNone(next(s for s in work["sessions"] if s["sessionId"] == "busy")["stats"])
+
+
+class OlderCopiesTests(Fixture):
+    """An older copy of this script (a VS Code extension not updated yet) reads
+    and writes the same caches: neither may make the other read everything again."""
+
+    def test_token_cache_from_before_the_stats(self):
+        path = self.home / ".claude-work/projects/-w/c.jsonl"
+        write(path, json.dumps(usage_line("a1", self.now - 60, 5, "/w/app")) + "\n")
+        work = next(p for p in cs.discover_profiles(self.home) if p.label == "work")
+        cache_file = cs.token_cache_path(self.cache, work)
+        old = {"version": cs.CACHE_VERSION, "scannedAt": 0, "messages": {"a1": [cs.local_day(iso(self.now - 60)), "m", 1, 5, 100, 9, 0]},
+               "files": {str(path): {"offset": path.stat().st_size, "ino": path.stat().st_ino}}}
+        write(cache_file, old)  # as 1.8 left it: the file read to its end
+        st = self.group(self.collect(), "work")["stats"]
+        self.assertEqual(st["projects"][0]["name"], "app")  # read again for the stats
+        cache = json.loads(cache_file.read_text())
+        self.assertEqual(cache["version"], cs.CACHE_VERSION)
+        cache.pop("scannedAt")
+        cache["scannedAt"] = 0  # an older copy rescans: it keeps the keys it doesn't know
+        write(cache_file, cache)
+        self.collect()
+        self.assertIn("history", json.loads(cache_file.read_text()))
+
+    def test_message_records_of_an_older_copy(self):
+        msgs = {"x": ["2026-10-18", "claude-opus-5-5", 1, 2, 3, 4, 0]}  # 7 fields: no folder or chat
+        self.assertEqual(cs.day_history(msgs)["2026-10-18"]["projects"], {})
+        self.assertEqual(cs.day_totals(msgs)["2026-10-18"]["claude-opus-5-5"][:2], [1, 2])
+
+    def test_chat_records_without_stats_are_read_again(self):
+        path = self.home / ".claude-work/projects/-w/busy.jsonl"
+        write(path, json.dumps(chat_line("user", "go")) + "\n")
+        old = {"version": cs.CHAT_CACHE_VERSION, "peeks": {}, "edits": {
+            cs.file_key(path.stat()): {"size": path.stat().st_size, "rec": {"files": {}, "snap": None, "snapFiles": {}, "turn": {}, "sessions": []}}}}
+        write(self.cache / "chats.json", old)
+        work = self.group(self.collect(with_tokens=False), "work")
+        self.assertEqual(next(s for s in work["sessions"] if s["sessionId"] == "busy")["stats"]["prompts"], 1)

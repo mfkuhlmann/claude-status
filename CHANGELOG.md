@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **Your last days in numbers:** click an account's token line for its last 14 days: tokens per day as bars (today's in your accent color), chats, prompts and active days, your busiest folders and the models you used. The token scan keeps 30 days of per-day sums for it, and reads back 30 days once.
+- **A chat's recap:** the box under a chat ends with its numbers: your prompts, how long Claude worked, its tool calls by name, its tokens (subagents included) and, when the status line has it, what the session would cost through the API.
+- The GNOME and VS Code extensions have them too.
+
 ## 1.8.0 (2026-10-18)
 
 - **What a chat is doing, without switching to it:** a line under each session says what it's doing right now (*▸ Bash: npm test*), what it needs, or what Claude said last. Click it for your last prompt, Claude's reply and the chat's tasks.

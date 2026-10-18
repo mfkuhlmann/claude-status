@@ -21,6 +21,8 @@ ColumnLayout {
 
     readonly property var tokens: group.tokens
     readonly property bool hasTokens: tokens !== null && tokens !== undefined
+    readonly property bool hasStats: !!group.stats
+    readonly property bool statsOpen: hasStats && root.expandedStats[groupKey] === true
     readonly property bool multiProfile: group.profiles.length > 1
 
     spacing: Kirigami.Units.smallSpacing
@@ -222,40 +224,74 @@ ColumnLayout {
         }
     }
 
-    // Token totals (from local transcripts)
-    PlasmaComponents3.Label {
-        id: tokenLabel
+    // Token totals (from local transcripts); click for the last days
+    RowLayout {
         visible: section.hasTokens
         Layout.fillWidth: true
         Layout.leftMargin: Kirigami.Units.smallSpacing
         Layout.rightMargin: Kirigami.Units.smallSpacing
-        elide: Text.ElideRight
-        text: section.hasTokens
-              ? i18n("Tokens today %1 (%2 out) · 7 days %3 (%4 out)",
-                     root.formatTokens(section.tokens.today.total), root.formatTokens(section.tokens.today.output),
-                     root.formatTokens(section.tokens.week.total), root.formatTokens(section.tokens.week.output))
-              : ""
+        spacing: Kirigami.Units.smallSpacing
 
-        PlasmaCore.ToolTipArea {
-            anchors.fill: parent
-            active: section.hasTokens
-            mainText: i18n("Tokens (this machine's transcripts only)")
-            subText: {
-                if (!section.hasTokens)
-                    return ""
-                const t = section.tokens
-                const fmt = b => i18n("input %1 · output %2 · cache read %3 · cache write %4 · %5 replies",
-                                      root.formatTokens(b.input), root.formatTokens(b.output),
-                                      root.formatTokens(b.cacheRead), root.formatTokens(b.cacheWrite), b.messages)
-                const models = t.models.map(m => m.model.replace(/^claude-/, "") + ": " + root.formatTokens(m.total))
-                return i18n("Today: %1", fmt(t.today)) + "\n" + i18n("Last 7 days: %1", fmt(t.week))
-                       + (models.length ? "\n" + i18n("By model (7 days): %1", models.join(", ")) : "")
-                       + (t.week.shared > 0
-                          ? "\n" + i18n("Includes %1 today (%2 in 7 days) from chats shared with another profile. A transcript doesn't say which account paid, so shared chats count on both.",
-                                         root.formatTokens(t.today.shared), root.formatTokens(t.week.shared))
-                          : "")
+        PlasmaComponents3.Label {
+            id: tokenLabel
+            Layout.fillWidth: true
+            elide: Text.ElideRight
+            text: section.hasTokens
+                  ? i18n("Tokens today %1 (%2 out) · 7 days %3 (%4 out)",
+                         root.formatTokens(section.tokens.today.total), root.formatTokens(section.tokens.today.output),
+                         root.formatTokens(section.tokens.week.total), root.formatTokens(section.tokens.week.output))
+                  : ""
+
+            PlasmaCore.ToolTipArea {
+                anchors.fill: parent
+                active: section.hasTokens
+                mainText: i18n("Tokens (this machine's transcripts only)")
+                subText: {
+                    if (!section.hasTokens)
+                        return ""
+                    const t = section.tokens
+                    const fmt = b => i18n("input %1 · output %2 · cache read %3 · cache write %4 · %5 replies",
+                                          root.formatTokens(b.input), root.formatTokens(b.output),
+                                          root.formatTokens(b.cacheRead), root.formatTokens(b.cacheWrite), b.messages)
+                    const models = t.models.map(m => m.model.replace(/^claude-/, "") + ": " + root.formatTokens(m.total))
+                    return i18n("Today: %1", fmt(t.today)) + "\n" + i18n("Last 7 days: %1", fmt(t.week))
+                           + (models.length ? "\n" + i18n("By model (7 days): %1", models.join(", ")) : "")
+                           + (t.week.shared > 0
+                              ? "\n" + i18n("Includes %1 today (%2 in 7 days) from chats shared with another profile. A transcript doesn't say which account paid, so shared chats count on both.",
+                                             root.formatTokens(t.today.shared), root.formatTokens(t.week.shared))
+                              : "")
+                           + (section.hasStats ? "\n\n" + (section.statsOpen ? i18n("Click to fold the last days up again.")
+                                                                             : i18n("Click for the last days: tokens per day, your busiest folders and models.")) : "")
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    enabled: section.hasStats
+                    cursorShape: section.hasStats ? Qt.PointingHandCursor : Qt.ArrowCursor
+                    onClicked: root.toggleStats(section.groupKey)
+                }
             }
         }
+        Kirigami.Icon {
+            visible: section.hasStats
+            source: section.statsOpen ? "arrow-up" : "arrow-down"
+            Layout.preferredWidth: Kirigami.Units.iconSizes.small
+            Layout.preferredHeight: Layout.preferredWidth
+            opacity: 0.5
+
+            TapHandler {
+                onTapped: root.toggleStats(section.groupKey)
+            }
+        }
+    }
+
+    // The last days, unfolded from the token line
+    StatsPanel {
+        visible: section.statsOpen
+        Layout.fillWidth: true
+        Layout.leftMargin: Kirigami.Units.smallSpacing
+        Layout.rightMargin: Kirigami.Units.smallSpacing
+        stats: section.hasStats ? section.group.stats : null
     }
 
     // Sessions

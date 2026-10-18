@@ -8,7 +8,7 @@ import St from 'gi://St';
 
 import * as L from '../logic.js';
 import {buildSessionRow, buildKeepOnly, buildShareMenu} from './sessionRow.js';
-import {box, column, iconButton, label, link, separator, textButton, usageMeter} from './widgets.js';
+import {box, column, iconButton, label, link, meter, paragraph, separator, textButton, usageMeter} from './widgets.js';
 
 export function buildGroupSection(ctx, group, {last = false, remoteHost = ''} = {}) {
     const tips = ctx.tips;
@@ -69,11 +69,18 @@ export function buildGroupSection(ctx, group, {last = false, remoteHost = ''} = 
     limits.add_child(asOf);
     section.add_child(limits);
 
-    // Token totals (from local transcripts)
+    // Token totals (from local transcripts); with stats, a toggle for the last days
     if (group.tokens) {
-        const tokens = label(L.tokensText(group.tokens), 'claude-tokens', {x_expand: true});
-        tips.add(tokens, () => ["Tokens (this machine's transcripts only)", L.tokensTooltip(group.tokens)]);
+        const statsOpen = !!group.stats && ctx.ui.expandedStats[groupKey] === true;
+        const tokens = group.stats
+            ? textButton(L.tokensText(group.tokens), () => ctx.toggleStats(groupKey),
+                'claude-text-button claude-tokens claude-expander', statsOpen ? 'pan-down-symbolic' : 'pan-end-symbolic')
+            : label(L.tokensText(group.tokens), 'claude-tokens', {x_expand: true});
+        tips.add(tokens, () => ["Tokens (this machine's transcripts only)", L.tokensTooltip(group.tokens)
+            + (group.stats ? `\n\n${L.fmt('Click to %1 the last %2 days.', statsOpen ? 'hide' : 'show', group.stats.days.length)}` : '')]);
         section.add_child(tokens);
+        if (statsOpen)
+            section.add_child(buildStats(ctx, group.stats));
     }
 
     // Sessions
@@ -109,6 +116,54 @@ export function buildGroupSection(ctx, group, {last = false, remoteHost = ''} = 
     if (!last)
         section.add_child(separator());
     return section;
+}
+
+// The account's last days: tokens per day as bars (today's in the working
+// color), the totals, its busiest folders and its models
+const STATS_BAR_PX = 48;
+
+function buildStats(ctx, stats) {
+    const wrap = column('claude-stats claude-indent', {x_expand: true});
+    wrap.add_child(label(L.fmt('Last %1 days', stats.days.length), 'claude-small claude-strong'));
+    const chart = box('claude-stats-chart', {x_expand: true});
+    const heights = L.statsBarHeights(stats, STATS_BAR_PX);
+    stats.days.forEach((d, i) => {
+        const today = i === stats.days.length - 1;
+        const col = column('claude-stats-day', {x_expand: true});
+        const area = new St.Widget({layout_manager: new Clutter.BinLayout(), x_expand: true, height: STATS_BAR_PX});
+        const bar = new St.Widget({
+            style_class: `claude-stats-bar ${heights[i] ? 'claude-bg-working' : 'claude-stats-baseline'}`,
+            x_expand: true, y_expand: true, y_align: Clutter.ActorAlign.END,
+            height: heights[i] || 2, opacity: today || !heights[i] ? 255 : 140,
+        });
+        area.add_child(bar);
+        col.add_child(area);
+        col.add_child(label(L.statsDayLetter(d.day), `claude-stats-letter claude-small${today ? ' claude-strong' : ' claude-dim'}`,
+            {x_align: Clutter.ActorAlign.CENTER}));
+        ctx.tips.add(col, L.statsDayText(d));
+        chart.add_child(col);
+    });
+    wrap.add_child(chart);
+    wrap.add_child(paragraph(L.statsSummaryText(stats), 'claude-small'));
+
+    const projects = stats.projects.slice(0, 5);
+    if (projects.length) {
+        wrap.add_child(label('Busiest folders', 'claude-small claude-strong'));
+        const top = Math.max(1, ...projects.map(p => p.total));
+        for (const p of projects) {
+            const line = box('claude-stats-project', {x_expand: true});
+            line.add_child(label(p.name, 'claude-small claude-stats-name'));
+            line.add_child(meter(100 * p.total / top, 'working', 'claude-meter claude-stats-meter'));
+            line.add_child(label(L.statsProjectText(p), 'claude-small claude-dim claude-stats-numbers'));
+            ctx.tips.add(line, [p.path, L.fmt('%1 tokens (%2 out) in %3 days', L.formatTokens(p.total),
+                L.formatTokens(p.output), stats.days.length)]);
+            wrap.add_child(line);
+        }
+    }
+    const models = L.statsModelsText(stats);
+    if (models)
+        wrap.add_child(label(models, 'claude-small claude-dim', {x_expand: true}));
+    return wrap;
 }
 
 // New chat on this account: its recent folders, then any folder you pick.

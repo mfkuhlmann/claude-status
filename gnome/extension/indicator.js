@@ -49,7 +49,7 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         this._polling = false;
         this._timers = {};
         // Popup state kept by row key (rows are rebuilt with new data)
-        this.ui = {expandedAgents: {}, expandedRecent: {}, expandedPeek: {}, stopConfirm: '', stopConfirmBusy: false,
+        this.ui = {expandedAgents: {}, expandedRecent: {}, expandedPeek: {}, expandedStats: {}, stopConfirm: '', stopConfirmBusy: false,
             shareConfirm: null, openMenu: null};
         // Turns that ended while the menu was closed (row key -> "done"), for
         // the hotkey; forgotten when the menu opens
@@ -554,6 +554,11 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         this.rerender();
     }
 
+    toggleStats(groupKey) {
+        this.ui.expandedStats[groupKey] = !this.ui.expandedStats[groupKey];
+        this.rerender();
+    }
+
     toggleRecent(groupKey, wasOpen) {
         this.ui.expandedRecent[groupKey] = !wasOpen;
         this.rerender();
@@ -885,10 +890,13 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         // A forecast moves a little with every check (fullAt in ms): only
         // what the bar shows (its warning, whole percents) rebuilds the popup
         const now = this.now;
+        // and so do the stats: an account's (what its box draws) and a chat's (its recap line)
         const coarse = function (key, value) {
-            return key === 'forecast' && value
-                ? [L.forecastWarning(this, now), Math.round(value.evenPct), Math.round(Math.min(100, value.atReset))]
-                : value;
+            if (key === 'forecast' && value)
+                return [L.forecastWarning(this, now), Math.round(value.evenPct), Math.round(Math.min(100, value.atReset))];
+            if (key === 'stats' && value)
+                return Array.isArray(value.days) ? L.statsSignature(value) : L.chatRecapText(value);
+            return value;
         };
         const signature = JSON.stringify([this._status ? {...this._status, generatedAt: 0} : null, this._errorText,
             remote, this._sshHosts, this.ui, this._actionError, this._actionInfo, Math.floor(this.now / 60000),

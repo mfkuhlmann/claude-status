@@ -97,7 +97,11 @@ parser_work = [prompt("The parser crashes on an empty file. Fix it and add a tes
                 "backup": {"backupFileName": "pp@v1", "version": 1, "realParentDir": str(home / "repos/parser")}},
                {"type": "file-history-delta", "snapshotMessageId": "p1", "trackingPath": "tests/test_empty.py",
                 "backup": {"backupFileName": None, "version": 1, "realParentDir": str(home / "repos/parser/tests")}},
-               said("m2", [use("Bash", {"command": "pytest -x tests/"})])]
+               {"type": "assistant", "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(now - 240)) + ".000Z",
+                "message": {"id": "m2", "role": "assistant", "model": "claude-opus-5-5",
+                            "content": [use("Bash", {"command": "pytest -x tests/"})],
+                            "usage": {"input_tokens": 300, "output_tokens": 2400, "cache_read_input_tokens": 180000,
+                                      "cache_creation_input_tokens": 4000}}}]
 release_wait = [prompt("Write the release notes for 2.4 from the merged PRs."),
                 said("m1", [text("Here's a draft. I'll put it in CHANGELOG.md.")]),
                 said("m1", [use("Write", {"file_path": str(home / "repos/site/CHANGELOG.md")})])]
@@ -155,6 +159,37 @@ write(home / ".claude-work/jobs/job-lint/state.json", {
 
 history(".claude-work", ["repos/parser", "repos/site", "repos/api"])
 history(".claude-personal", ["notes/blog", "notes/garden"])
+
+
+# The last days, for the stats: earlier chats' replies (with their usage) and
+# your prompts, spread over two weeks
+def past_work(profile, folder, sid, days):
+    """A finished chat in folder with a reply on each of days (days ago: output tokens)."""
+    cwd = str(home / folder)
+    os.makedirs(cwd, exist_ok=True)
+    lines = []
+    for n, (ago, output) in enumerate(days):
+        t = now - ago * 86400 - 3600
+        lines.append({"type": "assistant", "cwd": cwd, "timestamp": iso(t), "message": {
+            "id": f"msg-{sid}-{n}", "model": "claude-haiku-5-5" if n % 5 == 4 else "claude-opus-5-5",
+            "usage": {"input_tokens": 900, "output_tokens": output, "cache_read_input_tokens": output * 40,
+                      "cache_creation_input_tokens": 700}}})
+    path = home / profile / "projects" / cwd.replace("/", "-") / f"{sid}.jsonl"
+    write(path, "\n".join(json.dumps(line) for line in lines) + "\n")
+
+
+past_work(".claude-work", "repos/parser", "9a1c7e2b-0000-4000-8000-000000000011",
+          [(13, 9000), (12, 30000), (9, 21000), (8, 52000), (6, 18000), (2, 41000), (1, 26000)])
+past_work(".claude-work", "repos/site", "9a1c7e2b-0000-4000-8000-000000000012",
+          [(12, 8000), (7, 15000), (5, 12000), (2, 9000)])
+past_work(".claude-work", "repos/api", "9a1c7e2b-0000-4000-8000-000000000013", [(9, 6000), (3, 22000), (1, 14000)])
+past_work(".claude-personal", "notes/garden", "9a1c7e2b-0000-4000-8000-000000000014", [(10, 5000), (4, 3000)])
+with open(home / ".claude-work/history.jsonl", "a") as f:
+    for ago, folder, n in ((13, "repos/parser", 3), (12, "repos/parser", 8), (12, "repos/site", 2), (9, "repos/api", 2),
+                           (8, "repos/parser", 11), (7, "repos/site", 4), (6, "repos/parser", 5), (5, "repos/site", 3),
+                           (3, "repos/api", 6), (2, "repos/parser", 9), (1, "repos/api", 4), (1, "repos/parser", 7)):
+        for i in range(n):
+            f.write(json.dumps({"project": str(home / folder), "timestamp": int((now - ago * 86400 - i * 300) * 1000)}) + "\n")
 limits(".claude-work", fix, 64, 31, 42)
 limits(".claude-work", rel, 64, 31, 88)
 limits(".claude-personal", blog, 12, 7, 23, "Sonnet 5.5")

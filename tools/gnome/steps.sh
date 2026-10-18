@@ -10,7 +10,7 @@ ev "$work ext.toggleAgents(s('deploy docs').key); ext.setStopConfirm(s('deploy d
 sleep 1
 popup popup-unfolded
 # a tooltip: the tokens line
-ev "$work const row = ext._list.get_child_at_index(1).get_children().find(c => c.text && c.text.startsWith('Tokens')); ext.tips._show(row, ['Tokens', 'tooltip test'])"
+ev "$work const row = ext._list.get_child_at_index(1).get_children().find(c => c.has_style_class_name && c.has_style_class_name('claude-tokens')); ext.tips._show(row, ['Tokens', 'tooltip test'])"
 sleep 1
 shot tooltip
 ev 'ext.tips.hide(); ext._toggleMenu("hosts", ""); ext.toggleHost("lab")'

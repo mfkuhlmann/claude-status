@@ -27,6 +27,7 @@ PlasmoidItem {
     // Popup state kept by row key (rows get new data every poll)
     property var expandedAgents: ({})
     property var expandedPeek: ({})     // rows showing your last prompt, Claude's reply and the tasks
+    property var expandedStats: ({})    // accounts showing their last days
     property var expandedRecent: ({})
     property string stopConfirmSession: ""
     property bool stopConfirmBusy: false   // the chat wasn't idle when you were asked (stop it anyway)
@@ -37,8 +38,10 @@ PlasmoidItem {
                                            kind: "", entrypoint: "", state: "idle", reason: "", waitingFor: "",
                                            detail: "", since: null, startedAt: null, context: null, model: null,
                                            costUsd: null, agents: null, shared: null, effort: null, tmux: false,
-                                           peek: null, changes: null, tasks: null })
+                                           peek: null, changes: null, tasks: null, stats: null })
     readonly property var emptyTask: ({ subject: "", status: "pending" })
+    readonly property var emptyDay: ({ day: "", total: 0, output: 0, messages: 0, chats: 0, prompts: 0 })
+    readonly property var emptyProject: ({ name: "", path: "", total: 0, output: 0, prompts: 0 })
     readonly property var emptyAgent: ({ id: "", parent: null, depth: 0, type: "", description: "",
                                          status: "done", activity: "", started: null, updated: null, model: null })
     readonly property string waitingName: {
@@ -481,6 +484,36 @@ PlasmoidItem {
     function showChanges(chatId, profileDir, turn) {
         differ.connectSource("python3 -I " + shellQuote(codeDir + "jump.py") + " --changes " + shellQuote(chatId)
                              + profileArg(profileDir) + (turn ? " --turn" : "") + configDirArgs + " # " + Date.now())
+    }
+
+    function toggleStats(groupKey) {
+        expandedStats = Object.assign({}, expandedStats, { [groupKey]: !expandedStats[groupKey] })
+    }
+
+    // "Tue" (long: "Tuesday 15 October") for a day of the stats ("2026-10-15")
+    function dayName(day, long) {
+        const p = String(day).split("-").map(Number)
+        if (p.length !== 3)
+            return ""
+        const d = new Date(p[0], p[1] - 1, p[2])
+        return long ? d.toLocaleDateString(Qt.locale(), "dddd d MMMM") : Qt.locale().dayName(d.getDay(), Locale.NarrowFormat)
+    }
+
+    // A chat's recap (claude_status.py: stats_summary), e.g. "3 prompts ·
+    // worked 51m · 278 tool calls (Bash 236, Read 23) · 85.3M tokens (249k out)"
+    function recapText(st, costUsd) {
+        if (!st)
+            return ""
+        const parts = [i18np("%1 prompt", "%1 prompts", st.prompts)]
+        if (st.workedMs > 0)
+            parts.push(i18n("worked %1", st.workedMs < 60000 ? i18nc("less than a minute", "<1m") : duration(st.workedMs)))
+        if (st.toolCalls)
+            parts.push(i18np("%1 tool call", "%1 tool calls", st.toolCalls)
+                       + " (" + st.tools.slice(0, 3).map(t => t[0] + " " + t[1]).join(", ") + ")")
+        parts.push(i18n("%1 tokens (%2 out)", formatTokens(st.tokens.total), formatTokens(st.tokens.output)))
+        if (costUsd !== null && costUsd !== undefined && costUsd > 0)
+            parts.push(i18n("$%1 at API prices", costUsd.toFixed(2)))
+        return parts.join(" · ")
     }
 
     function togglePeek(rowKey) {

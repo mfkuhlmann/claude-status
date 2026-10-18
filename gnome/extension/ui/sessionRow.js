@@ -268,6 +268,13 @@ function buildPeek(ctx, s, remoteHost) {
         buttons.add_child(turn);
         box_.add_child(buttons);
     }
+    // The chat's numbers so far (subagents included)
+    const recap = s.stats ? L.chatRecapText(s.stats, s.costUsd) : '';
+    if (recap) {
+        const line = paragraph(recap, 'claude-small claude-dim claude-recap');
+        ctx.tips.add(line, () => ['This chat so far', L.chatRecapTooltip(s.stats, s.costUsd, ctx.now)]);
+        box_.add_child(line);
+    }
     return box_;
 }
 
