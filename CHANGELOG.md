@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.8.0 (2026-10-18)
 
 - **What a chat is doing, without switching to it:** a line under each session says what it's doing right now (*▸ Bash: npm test*), what it needs, or what Claude said last. Click it for your last prompt, Claude's reply and the chat's tasks.
 - **Task progress:** a chat's task list (Claude's own) shows as a bar with *2/5* and, unfolded, as a checklist.
@@ -8,7 +8,7 @@
 - **Usage forecast:** usage bars show where you'll be when the window resets at your pace, a mark for an even pace, and a warning when you'd run out before it resets.
 - **A shortcut to the chat that needs you:** the widget's keyboard shortcut (Plasma: set it in its settings; GNOME: Super+Shift+C; VS Code: Ctrl+Alt+Shift+C) goes to the chat that has waited longest, then to ones that finished while you weren't looking; again for the next one.
 - **While you were away:** after the screen has been locked for 5 minutes (a setting), notifications wait; when you're back, one notification and a card at the top of the popup sum up what finished, failed or needs you.
-- The GNOME and VS Code extensions have all of this too.
+- The GNOME extension has all of this too, and the VS Code extension is 1.8.0 with the same changes.
 
 ## 1.7.0 (2026-10-18)
 
