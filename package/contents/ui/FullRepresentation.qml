@@ -123,6 +123,24 @@ PlasmaExtras.Representation {
                     wrapMode: Text.Wrap
                 }
 
+                // What happened while you were away (main.qml: sendDigest), until you've seen it
+                Kirigami.InlineMessage {
+                    Layout.fillWidth: true
+                    Layout.margins: Kirigami.Units.smallSpacing
+                    visible: root.awayDigest !== null
+                    type: Kirigami.MessageType.Information
+                    icon.name: "user-away"
+                    text: root.awayDigest ? "<b>" + root.escapeHtml(root.awayDigest.title) + "</b><br>"
+                                            + root.awayDigest.lines.map(root.escapeHtml).join("<br>") : ""
+                    actions: [
+                        Kirigami.Action {
+                            text: i18n("Dismiss")
+                            icon.name: "dialog-close"
+                            onTriggered: root.awayDigest = null
+                        }
+                    ]
+                }
+
                 PlasmaComponents3.Label {
                     Layout.fillWidth: true
                     Layout.margins: Kirigami.Units.smallSpacing

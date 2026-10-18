@@ -1,21 +1,47 @@
-// Claude Status for GNOME Shell: the panel button (indicator.js) and the
-// window raiser that code/jump.py calls (raiser.js). Nothing runs until
-// enable(), and disable() takes everything down again.
+// Claude Status for GNOME Shell: the panel button (indicator.js), the
+// window raiser that code/jump.py calls (raiser.js) and the hotkey to the
+// chat that needs you. Nothing runs until enable(), and disable() takes
+// everything down again.
+//
+// GNOME Shell turns extensions off while the screen is locked: disable()
+// then notes the time and what the dashboard showed, and the next enable()
+// (unlocked) hands that to the indicator for its "while you were away"
+// summary.
 
+import Meta from 'gi://Meta';
+import Shell from 'gi://Shell';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
 import {Indicator} from './indicator.js';
+import {awaySnapshot} from './logic.js';
 import {Raiser} from './raiser.js';
 
 export default class ClaudeStatusExtension extends Extension {
     enable() {
         this._raiser = new Raiser();
-        this._indicator = new Indicator(this);
+        const away = this._lockedAt ? {lockedAt: this._lockedAt, snapshot: this._lockedSnapshot} : null;
+        this._lockedAt = null;
+        this._lockedSnapshot = null;
+        this._indicator = new Indicator(this, away);
         Main.panel.addToStatusArea(this.uuid, this._indicator);
+        this._settings = this.getSettings();
+        Main.wm.addKeybinding('next-chat-shortcut', this._settings, Meta.KeyBindingFlags.NONE,
+            Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW | Shell.ActionMode.POPUP,
+            () => this._indicator?.goToNextChat());
     }
 
     disable() {
+        Main.wm.removeKeybinding('next-chat-shortcut');
+        this._settings = null;
+        if (Main.sessionMode.isLocked && this._indicator?._status) {
+            try {
+                this._lockedSnapshot = awaySnapshot(this._indicator.allGroups);
+                this._lockedAt = Date.now();
+            } catch (e) {
+                console.error(`Claude Status: couldn't note the dashboard at locking: ${e.message}`);
+            }
+        }
         this._indicator?.destroy();
         this._indicator = null;
         this._raiser?.destroy();

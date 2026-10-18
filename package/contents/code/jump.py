@@ -19,6 +19,8 @@ a new chat (used by the Claude Status widget).
     python3 -I jump.py --continue SESSION_ID --profile PROFILE  (share it if needed, reopen it there)
     python3 -I jump.py --share SESSION_ID                       (share it with every account)
     python3 -I jump.py --unshare SESSION_ID --profile PROFILE   (keep it only there)
+    python3 -I jump.py --changes CHAT_ID [--profile PROFILE] [--turn] [--list]
+                                                 (compare the files a chat changed in VS Code)
 
 Sharing is done by sharing.py; a chat that's open in a session isn't touched
 (it can be open in one at a time).
@@ -960,6 +962,201 @@ def resume_remote_vscode(host, session_id, folder=""):
     return remote_vscode(host, folder, vscode_chat_link(session_id), "the chat shows")
 
 
+# ---------------------------------------------------------------- what a chat changed
+#
+# `--changes ID` compares the files a chat changed (claude_status.chat_edits)
+# with what they were before it: copies of the originals go to a folder of
+# their own in the cache (named like the files, so VS Code highlights them),
+# then VS Code shows them side by side. With the Claude Status extension for
+# VS Code (1.8 or newer) all of them open in one multi-file diff, through its
+# vscode:// link; else each file opens with `code --diff`. `--turn` compares
+# with what they were when you sent your last prompt; `--list` only prints
+# the comparison (the VS Code extension opens it itself).
+
+CHANGES_KEEP_S = 86400  # comparison folders are removed after a day
+CHANGES_ONE_BY_ONE = 25  # files `code --diff` opens, at most
+STATUS_EXTENSION = "wzaielamri.claude-status"
+STATUS_EXTENSION_CHANGES = (1, 8)  # its first version that opens CHANGES_LINK
+CHANGES_LINK = "vscode://wzaielamri.claude-status/changes"
+EXTENSION_FOLDERS = {"code": ".vscode", "code-insiders": ".vscode-insiders", "codium": ".vscode-oss",
+                     "code-oss": ".vscode-oss"}
+
+
+def git_original(path):
+    """A file's content as of git's HEAD: b"" for a file git doesn't have
+    there (new since), None outside a git repository."""
+    folder = os.path.dirname(path)
+    if not shutil.which("git") or not os.path.isdir(folder):
+        return None
+    try:
+        top = subprocess.run(["git", "-C", folder, "rev-parse", "--show-toplevel"],
+                             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=5)
+        if top.returncode != 0:
+            return None
+        root = top.stdout.decode(errors="replace").strip()
+        rel = os.path.relpath(os.path.realpath(path), os.path.realpath(root))
+        shown = subprocess.run(["git", "-C", root, "show", f"HEAD:{rel}"],
+                               stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=10)
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return None
+    return shown.stdout if shown.returncode == 0 else b""
+
+
+def read_bytes(path):
+    try:
+        with open(path, "rb") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def backup_content(profiles, sessions, name):
+    """A file-history backup's content, from the folder of a session that wrote the chat."""
+    for p in profiles:
+        for sid in sessions:
+            data = read_bytes(p.path / "file-history" / sid / name)
+            if data is not None:
+                return data
+    return None
+
+
+def changes_folder(home):
+    """A new, empty folder for one comparison's copies; older ones are removed."""
+    root = cs.cache_dir(home) / "changes"
+    cs.private_dir(root)
+    now = time.time()
+    for old in root.iterdir():
+        try:
+            if now - old.stat().st_mtime > CHANGES_KEEP_S:
+                shutil.rmtree(old, ignore_errors=True)
+        except OSError:
+            pass
+    return Path(tempfile.mkdtemp(prefix=time.strftime("%Y%m%d-%H%M%S-"), dir=root))
+
+
+def chat_comparison(home, extra_dirs, session_id, profile_dir=None, turn=False):
+    """(ok, message, comparison) of what a chat changed: {"title", "folder",
+    "items": [{"label", "path", "original", "created", "deleted"}]}, where
+    original is a copy of the file before the chat (before its last turn),
+    created means it didn't exist then and deleted that it's gone now."""
+    profiles = cs.discover_profiles(home, extra_dirs)
+    ordered = sorted(profiles, key=lambda p: not (profile_dir and matches(p, profile_dir)))
+    path = next((t for t in (cs.transcript_path(p, session_id) for p in ordered) if t is not None), None)
+    if path is None:
+        return False, "Can't find that chat's transcript", None
+    rec = cs.chat_edits(path)
+    try:
+        name, _, _ = cs.read_chat_info(path, path.stat().st_size)
+    except OSError:
+        name = ""
+    cwd = chat_folder(path) or ""
+    skip = cs.own_folders(profiles)
+    if turn:
+        if rec["snap"] is None:
+            return False, "Claude kept no record of where the last turn started", None
+        names = dict(rec["snapFiles"], **rec["turn"])  # each file's backup as of your last prompt
+    else:
+        names = {key: first[0] for key, first in rec["files"].items()}  # from before the chat first changed it
+    wanted = {}
+    for key, backup in names.items():
+        full = cs.absolute_path(key, cwd)
+        if cs.project_file(full, skip):
+            wanted[full] = backup
+    folder, items, unknown = None, [], 0
+    for full in sorted(wanted):
+        backup = wanted[full]
+        if backup is None:
+            original = b""  # it didn't exist yet
+        elif backup is False:
+            original = git_original(full)  # no backup on record: git's last commit
+        else:
+            original = backup_content(profiles, rec["sessions"], backup)
+            if original is None:
+                original = git_original(full)  # Claude has removed the backup since
+        if original is None:
+            unknown += 1
+            continue
+        current = read_bytes(full)
+        if current == original or (current is None and original == b""):
+            continue  # unchanged (or made and removed again)
+        if folder is None:
+            folder = changes_folder(home)
+        copy = folder / str(len(items)) / os.path.basename(full)
+        copy.parent.mkdir()
+        copy.write_bytes(original)
+        items.append({"label": cs.file_label(full, cwd, home), "path": full, "original": str(copy),
+                      "created": backup is None or (original == b"" and backup is False),
+                      "deleted": current is None})
+    what = "in its last turn" if turn else "since it started"
+    if not items:
+        more = f" ({unknown} with no earlier version to compare with)" if unknown else ""
+        return False, f"No changed files {what}{more}", None
+    title = f"{name or 'Chat'}: {'last turn' if turn else 'all changes'}"
+    message = f"{len(items)} changed file{'s' if len(items) != 1 else ''} {what}"
+    if unknown:
+        message += f"; {unknown} more with no earlier version to compare with"
+    return True, message, {"title": title, "folder": cwd, "items": items}
+
+
+def status_extension_opens_changes(code):
+    """Has VS Code the Claude Status extension, new enough for CHANGES_LINK?"""
+    folder = EXTENSION_FOLDERS.get(os.path.basename(code or ""), ".vscode")
+    installed = cs.read_json(Path.home() / folder / "extensions" / "extensions.json")
+    for ext in installed if isinstance(installed, list) else []:
+        ident = ext.get("identifier") if isinstance(ext, dict) else None
+        if isinstance(ident, dict) and str(ident.get("id", "")).lower() == STATUS_EXTENSION:
+            try:
+                version = tuple(int(x) for x in str(ext.get("version", "")).split(".")[:2])
+            except ValueError:
+                continue
+            if version >= STATUS_EXTENSION_CHANGES:
+                return True
+    return False
+
+
+def open_diffs(code, items):
+    """One `code --diff ORIGINAL FILE` per file (in the window used last)."""
+    for item in items[:CHANGES_ONE_BY_ONE]:
+        current = item["path"]
+        if item["deleted"]:
+            current = os.path.join(os.path.dirname(item["original"]), "(deleted) " + os.path.basename(item["path"]))
+            Path(current).write_bytes(b"")
+        subprocess.run([code, "--reuse-window", "--diff", item["original"], current], stdin=subprocess.DEVNULL,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
+
+
+def show_changes(home, extra_dirs, session_id, profile_dir=None, turn=False):
+    """Open what a chat changed in VS Code (see chat_comparison)."""
+    code, _ = cs.vscode_app()
+    if code is None:
+        return False, "VS Code isn't installed: it shows the changes side by side"
+    ok, message, comparison = chat_comparison(home, extra_dirs, session_id, profile_dir, turn)
+    if not ok:
+        return False, message
+    folder = comparison["folder"]
+    if status_extension_opens_changes(code) and shutil.which("xdg-open"):
+        manifest = Path(comparison["items"][0]["original"]).parent.parent / "changes.json"
+        cs.write_json_atomic(manifest, comparison)
+        link = CHANGES_LINK + "?" + urlencode({"file": str(manifest)})
+        if folder and os.path.isdir(folder):
+            start_vscode_chat(code, folder, link)  # the folder's window, then the link there
+        else:
+            subprocess.Popen([shutil.which("xdg-open"), link], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, start_new_session=True)
+        return True, f"Comparing {message} in VS Code"
+    items = comparison["items"]
+    later(lambda: open_diffs(code, items))
+    if len(items) > CHANGES_ONE_BY_ONE:
+        return True, f"Comparing {message} in VS Code (the first {CHANGES_ONE_BY_ONE}; " \
+                     f"the Claude Status extension for VS Code shows all of them in one view)"
+    return True, f"Comparing {message} in VS Code"
+
+
+def list_changes(home, extra_dirs, session_id, profile_dir=None, turn=False):
+    """(ok, message, comparison) for the VS Code extension, which opens it itself."""
+    return chat_comparison(home, extra_dirs, session_id, profile_dir, turn)
+
+
 # ---------------------------------------------------------------- shared chats
 
 
@@ -1083,7 +1280,8 @@ USAGE = ("usage: jump.py [--stop [--busy] | --interrupt] SESSION_ID [--profile P
          "       jump.py --remote-terminal HOST [--name SESSION_NAME]\n"
          "       jump.py --remote-new-vscode HOST [--cwd FOLDER_ON_HOST]\n"
          "       jump.py --resume SESSION_ID --profile PROFILE --vscode\n"
-         "       jump.py --remote-resume-vscode HOST SESSION_ID [--cwd FOLDER_ON_HOST]")
+         "       jump.py --remote-resume-vscode HOST SESSION_ID [--cwd FOLDER_ON_HOST]\n"
+         "       jump.py --changes CHAT_ID [--profile PROFILE] [--turn] [--list]")
 
 
 def main(argv=None):
@@ -1091,6 +1289,7 @@ def main(argv=None):
     extra, session_id, action, folder, profile_dir = [], None, jump, None, None
     remote_host, name_arg, choose, vscode, print_command = None, "", False, False, False
     busy, settings_json, settings_by, unless_default = False, None, "", False
+    turn, listing = False, False
     while args:
         arg = args.pop(0)
         if arg == "--config-dir" and args:
@@ -1105,6 +1304,12 @@ def main(argv=None):
             busy = True
         elif arg == "--interrupt":
             action = interrupt
+        elif arg == "--changes":
+            action = show_changes
+        elif arg == "--turn":
+            turn = True
+        elif arg == "--list":
+            listing = True
         elif arg == "--save-settings" and args:
             action, settings_json, session_id = save_settings, args.pop(0), session_id or "-"
         elif arg == "--by" and args:
@@ -1141,7 +1346,9 @@ def main(argv=None):
         sys.exit(USAGE)
     if vscode and action is resume and not profile_dir:
         sys.exit(USAGE)
-    command = None
+    if (turn or listing) and action is not show_changes:
+        sys.exit(USAGE)
+    command, comparison = None, None
     try:
         if print_command:
             ok, message, command = continue_command(Path.home(), extra, session_id, profile_dir)
@@ -1157,6 +1364,10 @@ def main(argv=None):
             ok, message = resume_vscode(Path.home(), extra, session_id, profile_dir)
         elif action is stop:
             ok, message = stop(Path.home(), extra, session_id, profile_dir, busy)
+        elif action is show_changes and listing:
+            ok, message, comparison = list_changes(Path.home(), extra, session_id, profile_dir, turn)
+        elif action is show_changes:
+            ok, message = show_changes(Path.home(), extra, session_id, profile_dir, turn)
         elif action is save_settings:
             ok, message = save_settings(Path.home(), settings_json, settings_by, unless_default)
         elif action is new_chat and choose:
@@ -1170,7 +1381,8 @@ def main(argv=None):
             ok, message = action(Path.home(), extra, session_id)
     except Exception as exc:  # report, don't crash: the widget shows the message
         ok, message = False, f"{type(exc).__name__}: {exc}"
-    print(json.dumps({"ok": ok, "message": message, **({"command": command} if command else {})}))
+    print(json.dumps({"ok": ok, "message": message, **({"command": command} if command else {}),
+                      **({"comparison": comparison} if comparison else {})}))
 
 
 if __name__ == "__main__":

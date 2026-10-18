@@ -101,6 +101,20 @@
       <label>Show token totals from local transcripts</label>
       <default>true</default>
     </entry>
+    <entry name="awayDigest" type="Bool">
+      <label>While the screen is locked, sum up what happened in one notification when you're back instead of one per chat</label>
+      <default>true</default>
+    </entry>
+    <entry name="awayMinutes" type="Int">
+      <label>Minutes the screen has to be locked before notifications wait for the summary</label>
+      <default>5</default>
+      <min>1</min>
+      <max>240</max>
+    </entry>
+    <entry name="shortcutGoesToChat" type="Bool">
+      <label>The widget's keyboard shortcut goes to the chat that needs you (else it opens the popup)</label>
+      <default>true</default>
+    </entry>
     <entry name="newChatInVscode" type="Bool">
       <label>New and recent chats open in VS Code (the Terminal | VS Code switch at the top of their lists)</label>
       <default>false</default>

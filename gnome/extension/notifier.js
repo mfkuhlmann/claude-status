@@ -30,8 +30,8 @@ export class Notifier {
         return this._source;
     }
 
-    // n: {key, kind, title, body, icon, session}; pose: show Clawd (the pet
-    // setting) in the matching pose instead of a plain icon
+    // n: {key, kind, title, body, icon, session, action (the button's label)};
+    // pose: show Clawd (the pet setting) in the matching pose instead of a plain icon
     notify(n, pose, onOpen) {
         const old = this._shown.get(n.key);
         if (old)
@@ -46,7 +46,7 @@ export class Notifier {
             gicon: pose && poseFile ? this._icon(poseFile) : new Gio.ThemedIcon({name: n.icon}),
         });
         if (onOpen) {
-            notification.addAction('Open session', onOpen);
+            notification.addAction(n.action || 'Open session', onOpen);
             notification.connect('activated', onOpen);
         }
         notification.connect('destroy', () => {
@@ -55,6 +55,10 @@ export class Notifier {
         });
         this._shown.set(n.key, {notification, kind: n.kind});
         source.addNotification(notification);
+    }
+
+    kindOf(key) {
+        return this._shown.get(key)?.kind || '';
     }
 
     close(key, kind) {

@@ -92,5 +92,20 @@
       <summary>New and recent chats open in VS Code</summary>
       <description>Instead of a terminal; set with the Terminal | VS Code switch at the top of the new-chat and recent-chat lists.</description>
     </key>
+    <key name="next-chat-shortcut" type="as">
+      <default><![CDATA[['<Super><Shift>c']]]></default>
+      <summary>Keyboard shortcut to the chat that needs you</summary>
+      <description>Waiting chats first (the one waiting longest), then finished turns you haven't seen; pressed again soon after, the next one. With none, the menu opens or closes. Empty: no shortcut.</description>
+    </key>
+    <key name="away-digest" type="b">
+      <default>true</default>
+      <summary>A summary when you come back</summary>
+      <description>After the screen was locked: the chats that finished, failed or need you, at the top of the menu until you've seen it, and as one notification while notify-waiting or notify-done is on.</description>
+    </key>
+    <key name="away-minutes" type="i">
+      <default>5</default>
+      <range min="1" max="240"/>
+      <summary>Only after being away at least this many minutes</summary>
+    </key>
   </schema>
 </schemalist>

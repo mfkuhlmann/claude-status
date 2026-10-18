@@ -24,7 +24,10 @@ const USAGE_PAGE = 'https://claude.ai/settings/usage';
 
 export const Indicator = GObject.registerClass(
 class ClaudeStatusIndicator extends PanelMenu.Button {
-    _init(extension) {
+    // away: {lockedAt, snapshot} when the screen was locked before this
+    // (GNOME Shell turns extensions off while it's locked): the summary of
+    // what happened meanwhile goes out once the first checks are back
+    _init(extension, away = null) {
         super._init(0.5, 'Claude Status', false);
         this._extension = extension;
         this._settings = extension.getSettings();
@@ -46,7 +49,15 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         this._polling = false;
         this._timers = {};
         // Popup state kept by row key (rows are rebuilt with new data)
-        this.ui = {expandedAgents: {}, expandedRecent: {}, stopConfirm: '', stopConfirmBusy: false, shareConfirm: null, openMenu: null};
+        this.ui = {expandedAgents: {}, expandedRecent: {}, expandedPeek: {}, stopConfirm: '', stopConfirmBusy: false,
+            shareConfirm: null, openMenu: null};
+        // Turns that ended while the menu was closed (row key -> "done"), for
+        // the hotkey; forgotten when the menu opens
+        this._unseen = {};
+        this._lastHotkey = null;   // {key, at}: where the hotkey went last
+        this._digest = null;       // the "while you were away" card, until the popup has shown it
+        this._digestSeen = false;
+        this._away = away && this._settings.get_boolean('away-digest') ? {...away, heard: new Set()} : null;
 
         this._buildPanel();
         this._buildMenu();
@@ -65,6 +76,12 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         this._restartPollTimer();
         this._restartRemoteTimer();
         this._loadHosts();
+        if (this._away) {
+            for (const host of this.shownHosts)
+                this.pollHost(host);
+            // hosts that don't answer soon are left out
+            this._later('awayDigest', 20000, () => this._sendAwayDigest());
+        }
     }
 
     // ---------------------------------------------------------------- data
@@ -212,6 +229,12 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         });
         const resets = this._tracker.celebrateResets(source, groups);
         const pose = this._settings.get_boolean('show-pet');
+        this._noteUnseen(source, out);
+        if (this._away) {
+            this._away.heard.add(source);
+            if (['', ...this.shownHosts.map(h => `ssh:${h}`)].every(s => this._away.heard.has(s)))
+                this._sendAwayDigest();
+        }
         const guard = (what, fn) => {
             try {
                 fn();
@@ -228,6 +251,101 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
             guard(`the pets' "${event.kind}"`, () => this._pets.event(event));
         if (out.sound)
             guard('a sound', () => this._playSound(out.sound));
+    }
+
+    // Turns that ended while you weren't looking (as long as the "finished"
+    // notifications ask for), for the hotkey
+    _noteUnseen(source, out) {
+        const min = this._settings.get_int('notify-done-min-seconds') * 1000;
+        for (const f of out.finished) {
+            if (!this.menu.isOpen && f.took >= min)
+                this._unseen[f.key] = 'done';
+        }
+        for (const key of Object.keys(this._unseen)) {
+            if (L.keyOfSource(key, source) && (!out.present.has(key) || out.states[key] === 'working'))
+                delete this._unseen[key];
+        }
+    }
+
+    // ---------------------------------------------------------------- the hotkey and coming back
+
+    // The hotkey (next-chat-shortcut): the chat that needs you (waiting the
+    // longest, then a finished turn you haven't seen); pressed again soon
+    // after, the next one; with none, the menu opens or closes
+    goToNextChat() {
+        const list = L.chatsNeedingYou(this.allGroups, this._unseen);
+        const now = Date.now();
+        const i = L.nextChatIndex(list, this._lastHotkey, now);
+        if (i < 0) {
+            this._lastHotkey = null;
+            this.menu.toggle();
+            return;
+        }
+        const c = list[i];
+        this._lastHotkey = {key: c.key, at: now};
+        if (this._unseen[c.key])
+            delete this._unseen[c.key];
+        this._openChat(c);
+    }
+
+    dismissDigest() {
+        this._digest = null;
+        this._notifier.close('away-digest', this._notifier.kindOf('away-digest'));
+        this.rerender();
+    }
+
+    _buildDigestCard() {
+        const d = this._digest;
+        const card = column('claude-digest', {x_expand: true});
+        const head = box('claude-line', {x_expand: true});
+        head.add_child(label(d.title, 'claude-strong', {x_expand: true}));
+        head.add_child(this.tips.add(iconButton('window-close-symbolic', () => this.dismissDigest()), 'Dismiss'));
+        card.add_child(head);
+        card.add_child(paragraph(d.body, 'claude-small'));
+        if (d.first) {
+            card.add_child(textButton('Open the chat that needs you', () => {
+                this.dismissDigest();
+                this._openChat(d.first);
+            }, 'claude-text-button claude-confirm-button'));
+        }
+        return card;
+    }
+
+    _openChat(c) {
+        if (c.host)
+            this.remoteShow(c.host, c.session);
+        else
+            this.jumpTo(c.session.sessionId, c.session.profileDir);
+    }
+
+    // What happened while the screen was locked: a card at the top of the
+    // popup until you've seen it, and (with notifications on) one
+    // notification, instead of the ones that would have piled up (none were
+    // sent meanwhile)
+    _sendAwayDigest() {
+        const away = this._away;
+        this._away = null;
+        this._clearTimer('awayDigest');
+        if (!away || !this._status || this._destroyed)
+            return;
+        let digest = null;
+        try {
+            digest = L.awayDigest(away, this.allGroups, Date.now(), this._settings.get_int('away-minutes'));
+        } catch (e) {
+            console.error(`Claude Status: the away summary failed: ${e.message}\n${e.stack}`);
+        }
+        if (!digest)
+            return;
+        this._digest = digest;
+        this._digestSeen = false;
+        this.rerender();
+        if (!this._settings.get_boolean('notify-waiting') && !this._settings.get_boolean('notify-done'))
+            return;
+        const first = digest.first;
+        this._notifier.notify({key: 'away-digest', kind: first ? 'waiting' : 'done', title: digest.title,
+            body: digest.body, icon: first ? 'dialog-warning-symbolic' : 'emblem-ok-symbolic', session: null,
+            action: first ? 'Open the chat that needs you' : 'Show chats'},
+        this._settings.get_boolean('show-pet'), () => (first ? this._openChat(first) : this.menu.open()));
     }
 
     _openFromNotification(n) {
@@ -408,6 +526,27 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
 
     rerender() {
         this._render(true);
+    }
+
+    togglePeek(rowKey) {
+        this.ui.expandedPeek[rowKey] = !this.ui.expandedPeek[rowKey];
+        this.rerender();
+    }
+
+    // The files a chat changed, before ↔ now (turn: since your last prompt),
+    // side by side in VS Code (jump.py --changes)
+    async showChanges(chatId, profileDir, turn = false) {
+        const profile = profileDir ? ['--profile', profileDir] : [];
+        const result = await this._helper('jump.py',
+            ['--changes', chatId, ...profile, ...turn ? ['--turn'] : [], ...this._configDirArgs]);
+        if (this._destroyed)
+            return;
+        if (result.ok) {
+            this._actionError = '';
+            this.menu.close();
+        } else {
+            this._showError(L.fmt("Couldn't compare the changes: %1", result.message));
+        }
     }
 
     toggleAgents(rowKey) {
@@ -714,6 +853,7 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
 
         this.menu.connect('open-state-changed', (menu, open) => {
             if (open) {
+                this._unseen = {};   // seen now
                 const area = Main.layoutManager.getWorkAreaForMonitor(Main.layoutManager.primaryIndex);
                 this._scroll.style = `max-height: ${Math.round(area.height * 0.62)}px;`;
                 this._loadHosts();
@@ -721,6 +861,8 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
                 this.refresh();  // it may have been checked a while ago (see _pollInterval)
             } else {
                 this.tips.hide();
+                if (this._digestSeen)
+                    this._digest = null;   // you've seen it
                 this.ui.openMenu = null;
                 this.ui.stopConfirm = '';
             }
@@ -740,9 +882,18 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
             return;
         const remote = Object.fromEntries(Object.entries(this.remote).map(([host, r]) =>
             [host, {...r, result: r.result ? {...r.result, generatedAt: 0} : null, updatedAt: Math.floor(r.updatedAt / 60000)}]));
+        // A forecast moves a little with every check (fullAt in ms): only
+        // what the bar shows (its warning, whole percents) rebuilds the popup
+        const now = this.now;
+        const coarse = function (key, value) {
+            return key === 'forecast' && value
+                ? [L.forecastWarning(this, now), Math.round(value.evenPct), Math.round(Math.min(100, value.atReset))]
+                : value;
+        };
         const signature = JSON.stringify([this._status ? {...this._status, generatedAt: 0} : null, this._errorText,
             remote, this._sshHosts, this.ui, this._actionError, this._actionInfo, Math.floor(this.now / 60000),
-            this.petColors, this._settings.get_boolean('show-pet')]);
+            this._digest ? this._digest.body : null,
+            this.petColors, this._settings.get_boolean('show-pet')], coarse);
         if (!force && signature === this._signature)
             return;
         this._signature = signature;
@@ -764,6 +915,10 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
             this._messages.add_child(paragraph(this._actionInfo, 'claude-fg-ok claude-message'));
         if (this._errorText)
             this._messages.add_child(paragraph(this._errorText, 'claude-fg-bad claude-message'));
+        if (this._digest) {
+            this._messages.add_child(this._buildDigestCard());
+            this._digestSeen = true;
+        }
 
         this._hostsPicker.child?.destroy();
         this._hostsPicker.child = this.ui.openMenu?.type === 'hosts' ? this._buildHostsPicker() : null;

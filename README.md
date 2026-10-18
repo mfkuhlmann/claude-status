@@ -28,6 +28,8 @@ On GNOME (Ubuntu 26.04 and newer) it lives in the top bar: see [On GNOME](#on-gn
 - **Panel icon:** a ✳ spark in the state color: orange with a red badge counting the sessions that need you, blue and spinning while Claude works, green when it's your turn, grey when nothing runs. The 5-hour usage of the account you're using sits next to it.
 - **The big Clawd** at the top of the popup sums it all up. His stage glows orange (gently pulsing) when a chat needs you, blue while chats work, green when it's your turn, and turns into a starry night once everything is done. His headline says what matters most, e.g. *2 chats need you*: click it to go there.
 - **One section per Claude account** (profiles logged into the same account are merged): plan usage with reset countdowns, tokens for today and the last 7 days, and every session (terminal, background job or VS Code) with its state, how long it's been in it, project folder, model and reasoning effort (e.g. *Opus 5.5 · max*) and context fill, plus what a waiting session asks for (e.g. *approve Bash: rm -rf build/*).
+- **What each chat is doing, without switching to it:** under each session, a line says what it's doing right now (`▸ Bash: npm test`), what it needs, or what Claude said last, with a bar for its task list (*2/5*). Click the line to read your last prompt, Claude's reply and the chat's tasks.
+- **Where your usage is heading:** each usage bar shows where you'd be when the window resets at your pace (the faded part), a mark where an even pace would be by now, and a warning when you'd run out first (*At this pace: full in 1h 20m, 40m before it resets*).
 - **A pet for every chat:** each account's chats walk on a little stage under its name, wearing the chat's name and color. The chat's row in the list gets a bar in the same color. A pet acts its chat out: it works (types, tests, reviews, juggles subagents), holds up a warning sign when the chat needs you, relaxes when it's your turn, sleeps once the chat is done and looks sad if it failed. Click a pet to open its chat.
 
 <p align="center"><img src="docs/screenshots/pets.gif" alt="Pets reacting: a chat finishes and its pet celebrates, a new chat's pet walks in, and the big Clawd charges up when a usage limit resets" width="500"></p>
@@ -37,8 +39,10 @@ On GNOME (Ubuntu 26.04 and newer) it lives in the top bar: see [On GNOME](#on-gn
 - **Jump to a session** by clicking its name: Konsole switches to the right tab (or tmux to its pane), VS Code opens the conversation, and a background job is attached in a terminal. Finished chats reopen with `claude --resume`.
 - **Start a new chat** with the **+** next to an account: pick one of its recent project folders, or **Choose folder…** to pick any folder in the folder dialog, and a terminal opens with Claude in it. Or switch the **Terminal | VS Code** switch at the top of the list to VS Code, and the chat starts in VS Code's Claude panel instead (the switch is kept for next time). Without the `claude` command, **Terminal** is greyed out; without VS Code, **VS Code** is (the tooltip says why).
 - **Stop or interrupt** any chat that's running, from the list (■; it asks first and keeps the conversation), or **hide** a finished one (－; nothing is deleted).
+- **See what a chat changed:** **±3** next to a chat counts the files it changed. Click it to compare them in VS Code, side by side: each file as it was before the chat first changed it, and as it is now. The box under a chat also compares only its last turn.
+- **A shortcut to the chat that needs you:** give the widget a key (its settings → Keyboard Shortcuts). It brings up the chat that has waited longest for you, then one that finished while you weren't looking; press it again for the next one. With none, it opens the popup.
 - **Recent chats** per account, to reopen older conversations: in a terminal or in VS Code, with the same switch at the top of the list.
-- **Notifications** when a session needs you or finishes a long turn, with sounds from your sound theme (quiet during Do Not Disturb). Click one to jump to the session.
+- **Notifications** when a session needs you or finishes a long turn, with sounds from your sound theme (quiet during Do Not Disturb). Click one to jump to the session. **While you're away** (the screen locked for 5 minutes or more) they wait: when you're back, one notification sums up what finished, failed or needs you.
 
 **Beyond this computer**
 
@@ -77,6 +81,9 @@ On GNOME (Ubuntu 26.04 and newer) it lives in the top bar: see [On GNOME](#on-gn
   - A **chat in VS Code's Claude tab** is stopped the way the tab's own stop button does it: the tab says *Interrupted*, keeps the chat and goes on with your next message (which starts Claude again, a second or two). Claude gets SIGINT there, its clean exit; SIGTERM would put an error in the tab.
   - A **working chat in tmux** can be **interrupted** instead: Ctrl+C in its pane, as if you pressed it. Like the stop button in VS Code, that stops the turn and its subagents, background ones too, and keeps the chat open (a draft you typed stays). Esc would leave background subagents running. Other terminals take no keys from outside, so their chats can only be stopped.
   - The confirmation says which of these happens. The widget looks again before stopping: an idle chat that got back to work since you asked isn't touched. Stopping ends every subagent of the chat, since they run inside its Claude; commands it leaves behind are ended too, and a Claude that hasn't quit after 10 seconds is killed.
+- **What a chat changed:** Claude backs up a file before a chat first changes it (in `file-history/`, the backups its undo uses). The comparison puts each file as it was then next to the file now; with the [Claude Status extension for VS Code](https://github.com/wzaielamri/claude-status-vscode) 1.8 or newer, all of them open in one view, else each in a tab of its own (at most 25). *Last turn* compares with the files as they were when you sent your last prompt. A file the chat edited with no backup on record (e.g. in a subagent) is compared with git's last commit. Changes made through shell commands (`sed`, scripts) aren't counted, since Claude doesn't back those up.
+- **Usage forecast:** your pace is the last hour's in the 5-hour window, and the window's so far in the weekly ones (or while there's no hour on record yet). The widget notes each window's usage as it changes, in `~/.cache/claude-widget/usage.json`.
+- **While you're away:** the widget asks every 10 s whether the screen is locked. Once it has been for 5 minutes (a setting), chats that finish or need you don't notify one by one; when you unlock, one notification (if notifications are on) and a card at the top of the popup say what happened since you left. Clicking the notification goes to the chat that needs you.
 - **Notifications:** when a session needs you (a permission prompt, a question, or a background job that stopped to ask you something; closed again once you answer), and when a session finishes a turn that took at least 30 seconds (configurable, or off). Sounds: one each for "needs input", "finished" and "failed", from your sound theme, a sound file of your own, or none. They go through PipeWire's notification stream, so the system's notification volume applies. When several sessions change at once, only the most urgent sound plays.
 
 </details>
@@ -171,6 +178,8 @@ The same dashboard as a GNOME Shell extension: the ✳ in the top bar, the popup
 - The menu at the bottom of the popup replaces the right-click menu; a middle click on the ✳ refreshes.
 - Working sessions are blue rather than your accent color (Ubuntu's orange would look like "needs you").
 - Sounds come from your GNOME sound theme and stay quiet with Do Not Disturb.
+- The shortcut to the chat that needs you is **Super+Shift+C** (change it in the settings).
+- GNOME turns extensions off while the screen is locked, so nothing notifies then; when you're back after 5 minutes or more, the summary comes as soon as the chats have been checked.
 
 **Tested** in a headless GNOME Shell 50.1 on Ubuntu 26.04 (`tools/gnome/shell.sh`: the popup, jumping, notifications, settings, pets, install and uninstall), not yet on a physical Ubuntu desktop.
 
@@ -183,6 +192,9 @@ The same dashboard as a GNOME Shell extension: the ✳ in the top bar, the popup
 | Panel icon | Left-click opens the popup, middle-click refreshes. Right-click: *Refresh*, *Show removed sessions again*, *Open Usage Page on claude.ai*, and the settings. |
 | The big Clawd | Click his headline (*… needs you*) to go to that chat. Click him to pet him, double-click to make him dance, drag him around. |
 | A session's name | Jumps to the session: its terminal tab, its VS Code window, or a terminal attached to the background job. |
+| The line under a session | Unfolds your last prompt, Claude's reply, the chat's tasks, and buttons that compare what it changed (all of it, or its last turn). |
+| **±3** next to a session | Compares the files the chat changed in VS Code. |
+| The widget's keyboard shortcut | Goes to the chat that needs you, else opens the popup (set the key in the settings, on the Keyboard Shortcuts page). |
 | Hovering a session | ■ stops or interrupts a chat (it asks first), － hides a finished one, and the share button shares a chat with your other accounts. |
 | A chat's pet | Opens its chat. |
 | **+** next to an account | Lists the account's recent folders and **Choose folder…** (an SSH host's: its home folder instead). Click one for a new chat there: in a terminal, or in VS Code (the switch at the top of the list). |
@@ -219,11 +231,13 @@ Right-click the widget → **Configure Claude Status…**
 | Extra config dirs | – | Claude config folders besides `~/.claude` and `~/.claude-*` |
 | Notify | both on | When a session needs input, and when it finishes a turn… |
 | …if the turn took at least | 30 s | …that ran at least this long |
+| While you're away | on, 5 min | Once the screen has been locked this long, one notification sums it all up when you're back |
 | Sound | on, 70% | Sounds for needs input / finished / failed: from your sound theme, a file, or none |
 | Keep finished background jobs | 24 h | 0 hides them right away |
 | Recent chats per account | 5 | 0 hides the list |
 | Check SSH hosts every | 30 s | |
 | Panel | on | The 5-hour usage next to the icon |
+| Keyboard shortcut | goes to the chat | Goes to the chat that needs you (else opens the popup); the key itself is set on the Keyboard Shortcuts page |
 | Icon | on | Blink while a chat needs you (until you open the popup), pulse when one finishes |
 | Pet | on | Clawd in the popup and in notifications |
 | Chat pets per account | 5 | 0 keeps only the big Clawd |
@@ -288,6 +302,7 @@ Issues and ideas are welcome on the [issue tracker](https://github.com/wzaielamr
   - Interactive sessions follow Claude Code's terminal status. A dialog you opened yourself (`/model`, `/effort`, …) doesn't count as "needs input", and a background shell still running after the turn counts as working.
 - **Plan limits and context** come from the JSON that Claude Code passes to the status line (`rate_limits`, `context_window`). `statusline-snippet.sh` saves a copy of it per session, under the profile's real folder name. Older copies filed under a link's name only count if they're newer than the link: before it was last switched, that name meant another profile.
 - **Token totals** are read incrementally from transcripts (at most once a minute, cached per profile in `~/.cache/claude-widget/tokens-*.json`). Lines are de-duplicated per message, and summed per day, so a status check adds up a few numbers instead of every message of the week. Linked folders are followed, so a shared chat's subagents count too.
+- **What a chat is doing** comes from the end of its transcript: its newest step (a tool call, thinking, writing), your last prompt and Claude's reply since (markdown read as plain text). Its **tasks** are Claude's own task list, `tasks/<session>/<n>.json`. The **files it changed** come from the transcript's `file-history-delta` and `file-history-snapshot` records (each prompt's snapshot is where that turn started), plus its edit tool calls; only what was appended since the last check is read (`~/.cache/claude-widget/chats.json`).
 - **Subagents** are read from `projects/<project>/<session>/subagents/agent-*.jsonl` and their `.meta.json`. An agent is done when its transcript ends with its final answer, running otherwise, and stopped if its session ended first.
 - **Shared chats** are transcripts with the same file (inode) in several profiles. Each row knows which conversation it shows: a background session that took a chat over counts as that chat while its own transcript holds no messages; a transcript that starts with a shared chat's history is a copy of it. Claude's own rule decides whether a chat moved on (its last `continued-in` record comes after its last finished reply). Where a finished shared chat was used last comes from the status-line snapshots, the prompt history (`history.jsonl`) and, if you use hooks that hold a shared chat to one session, their lock file (`~/.local/state/claude-shared-chats/lock-<id>`).
 - **Sharing** (`package/contents/code/sharing.py`): hard links the transcript into each profile and the store, moves the chat's `projects/<project>/<id>/` and `file-history/<id>/` folders into the store and symlinks them back. A chat shared the same way by another tool, into a store of its own, is found through its links and handled where it is.
@@ -302,6 +317,7 @@ Issues and ideas are welcome on the [issue tracker](https://github.com/wzaielamr
 - It doesn't call any Anthropic API and sends no data anywhere. *Open Usage Page on claude.ai* just opens that page in your browser.
 - Everything it stores lives in `~/.cache/claude-widget`, plus shared chats' folders in `~/.local/share/claude-status/shared-chats`; only your user can read either (mode 0700). SSH connection sockets go to `$XDG_RUNTIME_DIR/claude-status-ssh`, which is cleared when you log out. Its JSON output replaces account ids with a one-way hash.
 - It changes Claude Code's files only when you share a chat: it links the chat into your other profiles, or out of them again.
+- To show what a chat changed, it reads Claude's backups of the chat's files (`file-history/`) and the files themselves, runs `git show HEAD:<file>` for a file with no backup, and puts copies of the earlier versions in `~/.cache/claude-widget/changes` for VS Code to show; they're removed after a day. It also reads Claude's task lists (`tasks/`), and asks the screen saver over D-Bus whether the screen is locked.
 
 ## Limitations
 

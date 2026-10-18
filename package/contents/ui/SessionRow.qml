@@ -46,6 +46,23 @@ RowLayout {
     readonly property string petColor: root.petColors[root.petKeyOf(session, remoteHost)] || ""
     readonly property bool showAgents: root.expandedAgents[rowKey] === true
     readonly property var agents: session.agents || null
+    // A peek at the chat (claude_status.py: chat_peek), its task list and the
+    // files it changed
+    readonly property var peek: session.peek || null
+    readonly property var tasks: session.tasks || null
+    readonly property var changes: session.changes || null
+    readonly property bool showPeek: root.expandedPeek[rowKey] === true
+    readonly property bool hasPeek: (!!peek && (peek.prompt !== "" || peek.reply !== "")) || tasks !== null
+    // Its changes open side by side in VS Code (jump.py --changes); an SSH host's files are there
+    readonly property bool canCompare: changes !== null && !remoteHost && root.vscodeInstalled && !!session.chatId
+    // The line under the folder: what it's doing, what it needs, or what Claude said last
+    readonly property bool showsReply: (session.state === "idle" || (session.state === "done" && !session.detail))
+                                       && !!peek && peek.replyLine !== ""
+    readonly property string stepText: session.state === "working"
+                                       ? (peek && peek.activity ? peek.activity : tasks && tasks.current ? tasks.current : "")
+                                       : session.state === "waiting" ? (session.detail || (peek ? peek.activity : ""))
+                                       : session.state === "done" && session.detail ? session.detail
+                                       : showsReply ? peek.replyLine : ""
     readonly property string openHint: remoteHost
                                        ? (session.entrypoint === "claude-vscode" && !session.openCommand
                                           ? i18n("Show this conversation in VS Code (connected to %1)", remoteHost)
@@ -163,6 +180,19 @@ RowLayout {
                                 row.agents.done, row.agents.running, row.agents.stopped,
                                 row.showAgents ? i18n("hide") : i18n("show"))
             }
+            Tag {
+                visible: row.changes !== null
+                text: row.changes ? i18nc("number of files a chat changed", "±%1", row.changes.count) : ""
+                clickable: row.canCompare
+                onClicked: root.showChanges(row.session.chatId, row.session.profileDir, false)
+                tooltipTitle: row.changes ? i18np("Changed %1 file", "Changed %1 files", row.changes.count) : ""
+                tooltip: !row.changes ? ""
+                         : row.changes.files.join("\n")
+                           + (row.changes.count > row.changes.files.length ? "\n" + i18n("…and %1 more", row.changes.count - row.changes.files.length) : "")
+                           + "\n\n" + (row.remoteHost ? i18n("The files are on %1.", row.remoteHost)
+                                      : !root.vscodeInstalled ? i18n("Install VS Code to compare them side by side.")
+                                      : i18n("Click to compare them in VS Code: what they were before the chat, and now."))
+            }
             PlasmaComponents3.Label {
                 text: root.stateText(row.session)
                 color: row.session.state === "waiting" ? Kirigami.Theme.neutralTextColor : Kirigami.Theme.textColor
@@ -277,19 +307,168 @@ RowLayout {
             }
         }
 
-        PlasmaComponents3.Label {
-            visible: !!row.session.detail && (row.session.state === "waiting" || row.session.state === "done")
-            text: row.session.detail
+        // What it's doing now, what it needs, or what Claude said last, with
+        // its task progress; click to read your last prompt and Claude's reply
+        Item {
             Layout.fillWidth: true
-            elide: Text.ElideRight
-            opacity: 0.8
-            font: Kirigami.Theme.smallFont
+            visible: row.stepText !== "" || row.tasks !== null
+            implicitHeight: stepRow.implicitHeight
+
+            RowLayout {
+                id: stepRow
+                anchors.fill: parent
+                spacing: Kirigami.Units.smallSpacing
+
+                Rectangle {
+                    visible: row.tasks !== null
+                    Layout.preferredWidth: Kirigami.Units.gridUnit * 2.5
+                    Layout.preferredHeight: Math.round(Kirigami.Units.gridUnit * 0.3)
+                    radius: height / 2
+                    color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.15)
+
+                    Rectangle {
+                        width: parent.width * (row.tasks ? row.tasks.done / Math.max(1, row.tasks.total) : 0)
+                        height: parent.height
+                        radius: parent.radius
+                        color: Kirigami.Theme.positiveTextColor
+                    }
+                }
+                PlasmaComponents3.Label {
+                    visible: row.tasks !== null
+                    text: row.tasks ? i18nc("tasks done/total", "%1/%2", row.tasks.done, row.tasks.total) : ""
+                    opacity: 0.7
+                    font: Kirigami.Theme.smallFont
+                }
+                PlasmaComponents3.Label {
+                    id: stepLabel
+                    Layout.fillWidth: true
+                    text: (row.session.state === "working" && row.stepText ? "▸ "
+                           : row.showsReply ? i18nc("what Claude said last", "Claude: ") : "") + row.stepText
+                    textFormat: Text.PlainText
+                    color: row.session.state === "waiting" ? Kirigami.Theme.neutralTextColor : Kirigami.Theme.textColor
+                    elide: Text.ElideRight
+                    opacity: 0.8
+                    font: Kirigami.Theme.smallFont
+                }
+                Kirigami.Icon {
+                    visible: row.hasPeek
+                    source: row.showPeek ? "arrow-up" : "arrow-down"
+                    Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                    Layout.preferredHeight: Layout.preferredWidth
+                    opacity: stepMouse.containsMouse ? 0.9 : 0.4
+                }
+            }
 
             PlasmaCore.ToolTipArea {
                 anchors.fill: parent
-                active: parent.truncated
-                mainText: row.session.state === "waiting" ? i18n("What it needs") : i18n("Result")
-                subText: row.session.detail
+                active: stepLabel.truncated || row.hasPeek
+                mainText: row.session.state === "waiting" ? i18n("What it needs")
+                          : row.session.state === "working" ? i18n("What it's doing")
+                          : row.showsReply ? i18n("What Claude said last") : i18n("Result")
+                subText: (stepLabel.truncated ? row.stepText + (row.hasPeek ? "\n\n" : "") : "")
+                         + (!row.hasPeek ? "" : row.showPeek ? i18n("Click to fold it up again.")
+                                                             : i18n("Click to read your last prompt, Claude's reply and the chat's tasks."))
+
+                MouseArea {
+                    id: stepMouse
+                    anchors.fill: parent
+                    enabled: row.hasPeek
+                    hoverEnabled: true
+                    cursorShape: row.hasPeek ? Qt.PointingHandCursor : Qt.ArrowCursor
+                    onClicked: root.togglePeek(row.rowKey)
+                }
+            }
+        }
+
+        // Your last prompt, Claude's reply since, the chat's tasks, and what it changed
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.topMargin: Kirigami.Units.smallSpacing / 2
+            visible: row.showPeek && row.hasPeek
+            implicitHeight: peekColumn.implicitHeight + Kirigami.Units.smallSpacing * 2
+            radius: Kirigami.Units.cornerRadius
+            color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.06)
+
+            ColumnLayout {
+                id: peekColumn
+                anchors.fill: parent
+                anchors.margins: Kirigami.Units.smallSpacing
+                spacing: Kirigami.Units.smallSpacing
+
+                PlasmaComponents3.Label {
+                    Layout.fillWidth: true
+                    visible: !!row.peek && row.peek.prompt !== ""
+                    text: row.peek ? i18nc("your last prompt", "You: %1", row.peek.prompt) : ""
+                    textFormat: Text.PlainText
+                    wrapMode: Text.Wrap
+                    maximumLineCount: 3
+                    elide: Text.ElideRight
+                    opacity: 0.7
+                    font: Kirigami.Theme.smallFont
+                }
+                PlasmaComponents3.Label {
+                    Layout.fillWidth: true
+                    visible: !!row.peek && row.peek.reply !== ""
+                    text: row.peek ? i18nc("Claude's last reply", "Claude: %1", row.peek.reply) : ""
+                    textFormat: Text.PlainText
+                    wrapMode: Text.Wrap
+                    maximumLineCount: 14
+                    elide: Text.ElideRight
+                    font: Kirigami.Theme.smallFont
+                }
+
+                // The chat's tasks: ✓ done, ▸ the one it's on, ○ still to do
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    visible: row.tasks !== null
+                    spacing: 0
+
+                    Repeater {
+                        model: row.tasks ? row.tasks.items.length : 0
+                        delegate: PlasmaComponents3.Label {
+                            required property int index
+                            readonly property var task: (row.tasks && row.tasks.items[index]) || root.emptyTask
+                            Layout.fillWidth: true
+                            text: (task.status === "completed" ? "✓ " : task.status === "in_progress" ? "▸ " : "○ ") + task.subject
+                            textFormat: Text.PlainText
+                            elide: Text.ElideRight
+                            opacity: task.status === "completed" ? 0.6 : 0.9
+                            font.pointSize: Kirigami.Theme.smallFont.pointSize
+                            font.bold: task.status === "in_progress"
+                        }
+                    }
+                }
+
+                RowLayout {
+                    visible: row.changes !== null && !row.remoteHost
+                    spacing: Kirigami.Units.smallSpacing
+
+                    PlasmaComponents3.ToolButton {
+                        icon.name: "vcs-diff"
+                        text: i18np("Compare %1 changed file", "Compare %1 changed files", row.changes ? row.changes.count : 0)
+                        enabled: row.canCompare
+                        onClicked: root.showChanges(row.session.chatId, row.session.profileDir, false)
+
+                        PlasmaCore.ToolTipArea {
+                            anchors.fill: parent
+                            mainText: i18n("Everything this chat changed")
+                            subText: root.vscodeInstalled
+                                     ? i18n("Opens in VS Code side by side: each file as it was before the chat first changed it, and as it is now.")
+                                     : i18n("Needs VS Code.")
+                        }
+                    }
+                    PlasmaComponents3.ToolButton {
+                        text: i18n("Last turn")
+                        enabled: row.canCompare
+                        onClicked: root.showChanges(row.session.chatId, row.session.profileDir, true)
+
+                        PlasmaCore.ToolTipArea {
+                            anchors.fill: parent
+                            mainText: i18n("What its last turn changed")
+                            subText: i18n("The files as they were when you sent your last prompt, and as they are now.")
+                        }
+                    }
+                }
             }
         }
 

@@ -26,6 +26,7 @@ PlasmoidItem {
 
     // Popup state kept by row key (rows get new data every poll)
     property var expandedAgents: ({})
+    property var expandedPeek: ({})     // rows showing your last prompt, Claude's reply and the tasks
     property var expandedRecent: ({})
     property string stopConfirmSession: ""
     property bool stopConfirmBusy: false   // the chat wasn't idle when you were asked (stop it anyway)
@@ -35,7 +36,9 @@ PlasmoidItem {
     readonly property var emptySession: ({ key: "", profileDir: "", sessionId: "", chatId: "", pid: null, name: "", cwd: "", cwdShort: "", profile: "",
                                            kind: "", entrypoint: "", state: "idle", reason: "", waitingFor: "",
                                            detail: "", since: null, startedAt: null, context: null, model: null,
-                                           costUsd: null, agents: null, shared: null, effort: null, tmux: false })
+                                           costUsd: null, agents: null, shared: null, effort: null, tmux: false,
+                                           peek: null, changes: null, tasks: null })
+    readonly property var emptyTask: ({ subject: "", status: "pending" })
     readonly property var emptyAgent: ({ id: "", parent: null, depth: 0, type: "", description: "",
                                          status: "done", activity: "", started: null, updated: null, model: null })
     readonly property string waitingName: {
@@ -231,7 +234,7 @@ PlasmoidItem {
     readonly property var sharedKeys: ["pollInterval", "idlePollInterval", "extraConfigDirs", "notifyWaiting", "notifyDone",
         "notifyDoneMinSeconds", "notifySound", "soundVolume", "soundWaiting", "soundDone", "soundFailed", "recentChats",
         "sshHosts", "remotePollSeconds", "keepDoneHours", "showUsageInPanel", "showPet", "chatPets", "showTokens",
-        "newChatInVscode", "iconBlink"]
+        "newChatInVscode", "iconBlink", "awayDigest", "awayMinutes"]
     property real settingsSeenAt: 0     // the newest shared settings this copy has seen
     property string settingsSeen: ""    // its own settings as of the last check (to see changes)
 
@@ -289,6 +292,203 @@ PlasmoidItem {
     compactRepresentation: CompactRepresentation {}
     fullRepresentation: FullRepresentation {}
 
+    // The widget's keyboard shortcut (its settings' Keyboard Shortcuts page)
+    // goes to the chat that needs you, or opens the popup when none does
+    // (shortcutGoesToChat). Plasma opens the popup on the shortcut whatever
+    // the widget says (activationTogglesExpanded only stops it from closing),
+    // so a jump closes it again right away, and opening it counts as seeing
+    // the chats only once it stays open (markSeen). In the system tray, the
+    // tray opens the popup.
+    property bool shortcutJump: false
+    Connections {
+        target: Plasmoid
+        function onActivated() {
+            if (root.inTray || !Plasmoid.configuration.shortcutGoesToChat)
+                return
+            const chats = root.chatsNeedingYou()
+            if (!chats.length)
+                return
+            root.shortcutJump = true
+            Qt.callLater(() => {
+                root.goToNextChat(chats)
+                root.expanded = false
+                root.shortcutJump = false
+            })
+        }
+    }
+
+    // Chats that need you, most urgent first: waiting (the longest first),
+    // then ones that finished a turn while you weren't looking (newest first).
+    // Keys as in trackTransitions.
+    function chatsNeedingYou() {
+        const waiting = [], finished = []
+        for (const g of allGroups) {
+            const prefix = g.host ? "ssh:" + g.host + "|" : ""
+            for (const s of g.sessions) {
+                const key = prefix + (s.key || s.sessionId)
+                if (s.state === "waiting")
+                    waiting.push({ key: key, session: s, host: g.host || "" })
+                else if (unseen[key] === "done")
+                    finished.push({ key: key, session: s, host: g.host || "" })
+            }
+        }
+        waiting.sort((a, b) => (a.session.since || 0) - (b.session.since || 0))
+        finished.sort((a, b) => (b.session.since || 0) - (a.session.since || 0))
+        return waiting.concat(finished)
+    }
+
+    property string lastNextKey: ""
+    property real lastNextAt: 0
+
+    // Pressed again within 30 s, the shortcut goes on to the next chat
+    function goToNextChat(chats) {
+        if (!chats.length)
+            return
+        let i = 0
+        if (Date.now() - lastNextAt < 30000) {
+            const j = chats.findIndex(c => c.key === lastNextKey)
+            if (j >= 0)
+                i = (j + 1) % chats.length
+        }
+        const c = chats[i]
+        lastNextKey = c.key
+        lastNextAt = Date.now()
+        forgetUnseen(c.key, "done")
+        if (c.host)
+            remoteShow(c.host, c.session)
+        else
+            jumpTo(c.session.sessionId, c.session.profileDir)
+    }
+
+    // While you're away (the screen is locked) for awayMinutes, chats that
+    // finish or need you don't notify one by one: when you're back, one
+    // notification sums up what happened since you left (awayDigest).
+    property bool away: false
+    property real awaySince: 0
+    property var awayEvents: []         // [{kind: done|failed|stopped|reset, name}]
+    property var awayDigest: null       // the last summary, at the top of the popup until you've seen it
+
+    function holdingBack() {
+        return away && Plasmoid.configuration.awayDigest
+               && Date.now() - awaySince >= Plasmoid.configuration.awayMinutes * 60000
+    }
+
+    function noteAway(kind, name) {
+        if (away)
+            awayEvents = awayEvents.concat([{ kind: kind, name: name }])
+    }
+
+    function setAway(locked) {
+        if (locked === away)
+            return
+        if (locked) {
+            away = true
+            awaySince = Date.now()
+            awayEvents = []
+            return
+        }
+        const took = Date.now() - awaySince
+        away = false
+        if (Plasmoid.configuration.awayDigest && took >= Plasmoid.configuration.awayMinutes * 60000)
+            sendDigest(took)
+        awayEvents = []
+    }
+
+    // "Needs you: fix-parser (waiting 22m)", "Finished: a, b", … for what
+    // happened while you were away (events) and the chats waiting now
+    function digestLines(events, waiting) {
+        const lines = []
+        const names = kind => {
+            const seen = []
+            for (const e of events)
+                if (e.kind === kind && seen.indexOf(e.name) < 0)
+                    seen.push(e.name)
+            return seen
+        }
+        const list = all => all.slice(0, 4).join(", ") + (all.length > 4 ? " " + i18nc("and more", "+%1", all.length - 4) : "")
+        for (const c of waiting.slice(0, 3))
+            lines.push(i18n("Needs you: %1 (waiting %2)", c.session.name + (c.host ? " · " + c.host : ""),
+                            duration(Date.now() - (c.session.since || Date.now()))))
+        if (waiting.length > 3)
+            lines.push(i18np("+%1 more needs you", "+%1 more need you", waiting.length - 3))
+        const done = names("done"), failed = names("failed"), stopped = names("stopped"), resets = names("reset")
+        if (done.length)
+            lines.push(i18n("Finished: %1", list(done)))
+        if (failed.length)
+            lines.push(i18n("Failed: %1", list(failed)))
+        if (stopped.length)
+            lines.push(i18n("Stopped: %1", list(stopped)))
+        for (const r of resets)
+            lines.push(i18n("%1 limit reset", r))
+        return lines
+    }
+
+    function sendDigest(took) {
+        const waiting = chatsNeedingYou().filter(c => c.session.state === "waiting")
+        const lines = digestLines(awayEvents, waiting)
+        if (!lines.length)
+            return
+        const title = i18n("While you were away (%1)", duration(took))
+        awayDigest = { title: title, lines: lines }
+        if (!root.notifier || !(Plasmoid.configuration.notifyWaiting || Plasmoid.configuration.notifyDone))
+            return
+        const first = waiting.length ? waiting[0] : null
+        notify("away-digest", first ? first.session : null, "digest", title, lines.join("\n"), "user-away", first ? first.host : "")
+        queueSound(waiting.length ? "waiting" : awayEvents.some(e => e.kind === "failed") ? "failed" : "done")
+        playQueuedSound()
+    }
+
+    // Is the screen locked? Asked every 10 s by the copy that notifies.
+    P5Support.DataSource {
+        id: lockWatch
+        engine: "executable"
+        connectedSources: []
+        onNewData: (source, data) => {
+            disconnectSource(source)
+            const out = String(data["stdout"] || "")
+            if (/boolean (true|false)/.test(out))
+                root.setAway(out.indexOf("boolean true") >= 0)
+        }
+    }
+
+    Timer {
+        interval: 10000
+        repeat: true
+        running: root.notifier && Plasmoid.configuration.awayDigest
+        triggeredOnStart: true
+        onTriggered: lockWatch.connectSource("dbus-send --session --print-reply=literal --dest=org.freedesktop.ScreenSaver"
+                                             + " /ScreenSaver org.freedesktop.ScreenSaver.GetActive # " + Date.now())
+    }
+
+    // Runs `jump.py --changes`: the files a chat changed, side by side in VS Code
+    P5Support.DataSource {
+        id: differ
+        engine: "executable"
+        connectedSources: []
+        onNewData: (source, data) => {
+            disconnectSource(source)
+            const result = root.helperResult(data)
+            if (result.ok) {
+                root.actionError = ""
+                root.expanded = false
+            } else {
+                root.actionError = i18n("Couldn't compare the changes: %1", result.message)
+                actionErrorTimer.restart()
+            }
+        }
+    }
+
+    function showChanges(chatId, profileDir, turn) {
+        differ.connectSource("python3 -I " + shellQuote(codeDir + "jump.py") + " --changes " + shellQuote(chatId)
+                             + profileArg(profileDir) + (turn ? " --turn" : "") + configDirArgs + " # " + Date.now())
+    }
+
+    function togglePeek(rowKey) {
+        const next = Object.assign({}, expandedPeek)
+        next[rowKey] = !next[rowKey]
+        expandedPeek = next
+    }
+
     Plasmoid.contextualActions: [
         PlasmaCore.Action {
             text: i18n("Refresh")
@@ -300,6 +500,12 @@ PlasmoidItem {
             icon.name: "view-visible"
             visible: root.status !== null && (root.status.dismissed || 0) > 0
             onTriggered: root.runHelper("--undismiss-all")
+        },
+        PlasmaCore.Action {
+            text: i18n("Go to the Chat That Needs You")
+            icon.name: "go-next"
+            visible: root.chatsNeedingYou().length > 0
+            onTriggered: root.goToNextChat(root.chatsNeedingYou())
         },
         PlasmaCore.Action {
             text: i18n("Open Usage Page on claude.ai")
@@ -450,8 +656,10 @@ PlasmoidItem {
         for (const g of groupList) {
             for (const w of (g.limits ? g.limits.windows : [])) {
                 const key = source + "|" + g.id + "/" + w.key
-                if (key in lastWindows && lastWindows[key] >= 25 && w.pct < lastWindows[key] - 20)
+                if (key in lastWindows && lastWindows[key] >= 25 && w.pct < lastWindows[key] - 20) {
                     petEvent("reset", i18n("%1 limit reset!", w.label), "")
+                    noteAway("reset", w.label + (g.host ? " · " + g.host : ""))
+                }
                 next[key] = w.pct
             }
         }
@@ -534,7 +742,7 @@ PlasmoidItem {
                     if (!quiet) {
                         lastWaitingAlert[sid] = nowMs
                         petEvent("waiting", i18n("%1 needs you!", s.name), petKeyOf(s, host))
-                        if (Plasmoid.configuration.notifyWaiting && root.notifier) {
+                        if (Plasmoid.configuration.notifyWaiting && root.notifier && !holdingBack()) {
                             notify(sid, s, "waiting", i18n("%1 needs your input", s.name),
                                    (s.detail || reasonText(s.reason)) + "\n" + s.cwdShort + where, "dialog-warning", host)
                             queueSound("waiting")
@@ -551,7 +759,9 @@ PlasmoidItem {
                     const took = (s.since || nowMs) - (sid in startedAt ? startedAt[sid] : nowMs)
                     if (took >= Plasmoid.configuration.notifyDoneMinSeconds * 1000)
                         markUnseen(sid, "done")
-                    if (Plasmoid.configuration.notifyDone && root.notifier && took >= Plasmoid.configuration.notifyDoneMinSeconds * 1000) {
+                    noteAway(s.reason === "failed" || s.reason === "stopped" ? s.reason : "done", s.name + where)
+                    if (Plasmoid.configuration.notifyDone && root.notifier && !holdingBack()
+                            && took >= Plasmoid.configuration.notifyDoneMinSeconds * 1000) {
                         notify(sid, s, "done", s.reason === "failed" ? i18n("%1 failed", s.name)
                                             : s.reason === "stopped" ? i18n("%1 was stopped", s.name)
                                             : i18n("%1 finished", s.name),
@@ -584,7 +794,9 @@ PlasmoidItem {
         // One notification per row: a newer one replaces the previous.
         closeNotification(key, notifications[key] ? notifications[key].kind : "")
         // With the pet on, notifications show Clawd in a matching pose.
+        const summary = kind === "digest"   // while you were away: someone waits for you, or all went well
         const pose = kind === "done" && session && session.reason === "failed" ? "sad"
+                   : summary ? (session ? "oncall" : "trophy")
                    : { waiting: "oncall", done: "trophy", error: "error" }[kind]
         const n = notificationComponent.createObject(root, {
             sessionId: session ? session.sessionId : "", profileDir: session ? session.profileDir || "" : "",
@@ -615,7 +827,9 @@ PlasmoidItem {
     }
 
     function openFromNotification(n) {
-        if (n.host && n.session)
+        if (n.kind === "digest" && !n.sessionId && !n.host)
+            root.expanded = true   // nothing waits for you: show what happened
+        else if (n.host && n.session)
             remoteShow(n.host, n.session)
         else if (n.host)
             remoteOpen(n.host, n.openCommand)
@@ -637,13 +851,26 @@ PlasmoidItem {
     // (GroupSection.qml). A folder opens a terminal with Claude there; its
     // VS Code button starts the chat in VS Code's Claude extension instead.
     property string newChatGroup: ""   // group key of the account whose folders are open
+    property bool digestSeen: false
     onExpandedChanged: {
         if (!root.expanded) {
             newChatGroup = ""
+            if (digestSeen)
+                awayDigest = null
+            digestSeen = false
         } else {
-            unseen = ({})  // seen now: the icon stops blinking
+            Qt.callLater(markSeen)
             refresh()  // it may have been checked a while ago (see quiet)
         }
+    }
+
+    // The popup stayed open (not just flashed open by the shortcut): what it
+    // shows counts as seen, and the icon stops blinking
+    function markSeen() {
+        if (!root.expanded || shortcutJump)
+            return
+        unseen = ({})
+        digestSeen = awayDigest !== null
     }
 
     function markUnseen(sid, kind) {
@@ -1168,6 +1395,10 @@ PlasmoidItem {
         }
     }
 
+    function escapeHtml(s) {
+        return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    }
+
     function shellQuote(s) {
         return "'" + String(s).replace(/'/g, "'\\''") + "'"
     }
@@ -1208,6 +1439,25 @@ PlasmoidItem {
         // The last minute reads "<1m": a rounded "0m" looked stuck
         return i18n("resets in %1", window.resetsAt - now < 60000 ? i18nc("less than a minute", "<1m")
                                                                    : duration(window.resetsAt - now))
+    }
+
+    // The usage bar's tooltip: the pace, and where it leads (usage_forecast)
+    function forecastText(f, pct, resetsAt) {
+        if (!f)
+            return ""
+        const when = ms => {
+            const d = new Date(ms)
+            const time = d.toLocaleTimeString(Qt.locale(), Locale.ShortFormat)
+            return ms - now > 20 * 3600000 ? d.toLocaleDateString(Qt.locale(), "ddd") + " " + time : time
+        }
+        const lines = [f.basis === "hour" ? i18n("Your pace over the last hour: %1% an hour.", f.rate.toFixed(1))
+                                          : i18n("Your pace in this window so far: %1% an hour.", f.rate.toFixed(1))]
+        if (f.fullAt)
+            lines.push(i18n("At this pace it runs out at %1, %2 before it resets.", when(f.fullAt), duration(resetsAt - f.fullAt)))
+        else if (pct < 100)
+            lines.push(i18n("At this pace: about %1% when it resets (the faded part of the bar).", Math.round(f.atReset)))
+        lines.push(i18n("An even pace through the window would be at %1% by now (the mark).", Math.round(f.evenPct)))
+        return lines.join("\n")
     }
 
     function stateText(s) {

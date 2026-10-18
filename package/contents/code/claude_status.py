@@ -399,6 +399,9 @@ def make_session(profile, home, *, sid, pid, name, cwd, kind, entrypoint, state,
         "agents": None,
         "shared": None,
         "tmux": False,  # runs in a tmux pane: it can be interrupted (Esc)
+        "peek": None,  # what it's doing, your last prompt, Claude's last reply (chat_peek)
+        "changes": None,  # the files it changed: {"count", "files"} (ChatCache.changes)
+        "tasks": None,  # its task list: {"done", "total", "current", "items"} (task_progress)
     }
 
 
@@ -554,6 +557,12 @@ def finish_row(row, job, job_id, profile, ctx, alive):
     attach_snapshot(row, ctx.snapshot_root, profile, [row["sessionId"], row["chatId"], row["jobSessionId"]])
     if ctx.agents is not None:  # a session continuing a chat shows that chat's agents
         row["agents"] = ctx.agents.session_agents(profile, row["chatId"], alive=alive)
+    chats = getattr(ctx, "chats", None)
+    if chats is not None:
+        path = transcript_path(profile, row["chatId"])
+        row["peek"] = chats.peek(path)
+        row["changes"] = chats.changes(path, row["cwd"], ctx.home, ctx.own_folders)
+        row["tasks"] = task_progress(ctx.profiles, [row["sessionId"], row["chatId"], row.get("jobSessionId")])
     return row
 
 
@@ -587,12 +596,12 @@ def describe_tool(block):
     return name
 
 
-def report_line(text):
+def report_line(text, limit=90):
     """First line of an agent's report, without markdown decoration."""
     for line in (text or "").splitlines():
         line = line.replace("**", "").strip().lstrip("#*>-| ").strip()
         if line:
-            return short_text(line, 90)
+            return short_text(line, limit)
     return "finished"
 
 
@@ -806,6 +815,451 @@ class AgentCache:
         if self.changed or set(self.files) != set(self.old_files):
             try:
                 write_json_atomic(self.path, {"version": AGENT_CACHE_VERSION, "files": self.files, "parents": self.parents})
+            except OSError:
+                pass
+
+
+# ---------------------------------------------------------------- what a chat is doing, and what it changed
+#
+# A peek at a chat without switching to it, from the end of its transcript:
+# its newest step (a tool call, thinking, writing), your last prompt and
+# Claude's last reply. Each content block of a reply is an entry of its own,
+# all with the reply's message id.
+#
+# The files it changed: before a chat first edits a file, Claude backs it up
+# as <cfg>/file-history/<session id>/<name>@v<n> and records that in the
+# transcript (a `file-history-delta`, or in older versions a
+# `file-history-snapshot` update); a backup name of null means the file
+# didn't exist yet. Each of your prompts gets a `file-history-snapshot` with
+# every tracked file's backup as of that prompt, which is where the last turn
+# started. Changes made with Bash (sed, scripts) aren't tracked, and a file a
+# chat edited with no backup on record (e.g. in a subagent) is compared with
+# git's HEAD (jump.py --changes).
+
+PEEK_TAIL_BYTES = 262144
+PEEK_TAIL_MAX = 4 << 20  # the last lines can be big tool results
+PEEK_REPLY_CHARS = 1500
+PEEK_PROMPT_CHARS = 300
+PEEK_LINE = re.compile(rb'"type":\s*"(?:user|assistant|last-prompt)"')
+EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
+EDIT_LINE = re.compile(rb'"name":\s*"(?:Edit|Write|MultiEdit|NotebookEdit)"')
+SESSION_ID_FIELD = re.compile(rb'"sessionId":\s*"([0-9A-Za-z_-]{1,80})"')
+CHANGES_LISTED = 12  # file names a row carries (its tooltip lists them)
+CHAT_CACHE_VERSION = 1
+
+
+def message_text(msg):
+    """The text of a transcript message: a string, or its text blocks."""
+    content = msg.get("content") if isinstance(msg, dict) else None
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(c["text"] for c in content
+                         if isinstance(c, dict) and c.get("type") == "text" and isinstance(c.get("text"), str))
+    return ""
+
+
+def human_prompt(e):
+    """What you typed, if this transcript entry is a prompt of yours (not a
+    tool result, a command's output or a note of Claude Code's own)."""
+    if e.get("type") != "user" or e.get("isMeta") or e.get("isCompactSummary") or e.get("isSidechain"):
+        return None
+    msg = e.get("message") if isinstance(e.get("message"), dict) else {}
+    if isinstance(msg.get("content"), list) and any(
+            isinstance(c, dict) and c.get("type") == "tool_result" for c in msg["content"]):
+        return None
+    text = message_text(msg).strip()
+    if not text or text.startswith("<") or text.startswith("[Request interrupted"):
+        return None
+    return text
+
+
+def blocks_of(e):
+    msg = e.get("message") if isinstance(e.get("message"), dict) else {}
+    content = msg.get("content")
+    return msg, [c for c in content if isinstance(c, dict)] if isinstance(content, list) else []
+
+
+def tail_entries(path, size, nbytes):
+    """Conversation entries (and last-prompt records) from the last nbytes
+    of a transcript, newest first."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(max(0, size - nbytes))
+            lines = f.read(min(size, nbytes)).splitlines()
+    except OSError:
+        return []
+    if size > nbytes:
+        lines = lines[1:]  # probably cut in the middle
+    entries = []
+    for line in reversed(lines):
+        if not PEEK_LINE.search(line):
+            continue
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(e, dict) and e.get("type") in ("user", "assistant", "last-prompt"):
+            entries.append(e)
+    return entries
+
+
+def step_text(convo):
+    """What the chat is doing, from its newest entry: "Bash: npm test",
+    "thinking…", "writing…"; "" once its reply is finished."""
+    newest = convo[0]
+    msg, blocks = blocks_of(newest)
+    if newest["type"] == "user":
+        if human_prompt(newest) is None:  # tool results came back: what it ran
+            prev = next((e for e in convo[1:] if e["type"] == "assistant"), None)
+            uses = [c for c in blocks_of(prev)[1] if c.get("type") == "tool_use"] if prev else []
+            if uses:
+                return f"{describe_tool(uses[-1])} (thinking about the result)"
+        return "thinking…"
+    uses = [c for c in blocks if c.get("type") == "tool_use"]
+    if uses:
+        return describe_tool(uses[-1])
+    if isinstance(msg.get("stop_reason"), str):
+        return ""
+    return "writing…" if any(c.get("type") == "text" for c in blocks) else "thinking…"
+
+
+MARKDOWN_EMPHASIS = re.compile(r"(\*\*|__|`)(.+?)\1")
+
+
+def plain_text(markdown):
+    """Claude's markdown, readable as plain text: no heading marks, code
+    fences or emphasis markers; bullets as •."""
+    out = []
+    for line in markdown.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            continue
+        line = re.sub(r"^(\s*)#{1,6}\s+", r"\1", line)
+        line = re.sub(r"^(\s*)[-*]\s+", r"\1• ", line)
+        out.append(MARKDOWN_EMPHASIS.sub(r"\2", line))
+    return "\n".join(out)
+
+
+def tidy_text(text, limit):
+    text = re.sub(r"\n{3,}", "\n\n", "\n".join(line.rstrip() for line in text.strip().splitlines()))
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+def peek_from(entries):
+    """(peek, whether it's complete) from transcript entries, newest first:
+    complete once your last prompt is among them, or Claude's reply since it
+    plus the last-prompt record."""
+    convo = [e for e in entries if e["type"] in ("user", "assistant") and not e.get("isSidechain")]
+    last_prompt = next((e["lastPrompt"] for e in entries
+                        if e["type"] == "last-prompt" and isinstance(e.get("lastPrompt"), str)), "")
+    reply_id, parts, prompt = None, [], None
+    for e in convo:
+        prompt = human_prompt(e)
+        if prompt is not None:
+            break
+        if e["type"] != "assistant":
+            continue
+        msg, blocks = blocks_of(e)
+        texts = [c["text"] for c in blocks
+                 if c.get("type") == "text" and isinstance(c.get("text"), str) and c["text"].strip()]
+        if not texts:
+            continue
+        mid = msg.get("id") if isinstance(msg.get("id"), str) else id(e)
+        if reply_id is None:
+            reply_id = mid
+        if mid == reply_id:
+            parts[:0] = texts  # older blocks of the same reply come first
+    reply = tidy_text(plain_text("\n\n".join(parts)), PEEK_REPLY_CHARS)
+    asked = prompt if prompt is not None else last_prompt
+    peek = {
+        "activity": step_text(convo) if convo else "",
+        "prompt": short_text(asked, PEEK_PROMPT_CHARS) if asked.strip() else "",
+        "reply": reply,
+        "replyLine": report_line(reply, 160) if reply else "",
+        "at": to_ms(convo[0].get("timestamp")) if convo else None,
+    }
+    return peek, prompt is not None or (bool(parts) and bool(last_prompt))
+
+
+def chat_peek(path):
+    """{"activity", "prompt", "reply", "replyLine", "at"} of a chat, read
+    from the end of its transcript (more of it while that isn't enough)."""
+    try:
+        size = path.stat().st_size
+    except (OSError, AttributeError):
+        return None
+    nbytes = PEEK_TAIL_BYTES
+    while True:
+        peek, complete = peek_from(tail_entries(path, size, nbytes))
+        if complete or nbytes >= size or nbytes >= PEEK_TAIL_MAX:
+            return peek
+        nbytes *= 4
+
+
+def new_edits():
+    """What a chat changed so far (fold_edits):
+    files: {path: [backup name, version]} with each file's first backup; the
+        name is None for a file the chat created, False when no backup is on
+        record (an edit tool call is all there is);
+    snap: id of your newest prompt's snapshot; snapFiles: {path: backup name}
+        as of that prompt; turn: {path: backup name} of files first backed up
+        since then;
+    sessions: session ids whose file-history folders hold its backups."""
+    return {"files": {}, "snap": None, "snapFiles": {}, "turn": {}, "sessions": []}
+
+
+def backup_target(key, backup):
+    """The file a backup record is about (absolute, or relative to the chat's folder)."""
+    if not isinstance(key, str) or not key:
+        return None
+    parent = backup.get("realParentDir") if isinstance(backup, dict) else None
+    if isinstance(parent, str) and parent.startswith("/"):
+        return os.path.join(parent, os.path.basename(key))
+    return key
+
+
+def backup_name(backup):
+    name = backup.get("backupFileName") if isinstance(backup, dict) else None
+    return name if isinstance(name, str) and valid_id(name) else None
+
+
+def note_backup(rec, path, backup):
+    version = backup.get("version") if isinstance(backup, dict) and isinstance(backup.get("version"), int) else 0
+    first = rec["files"].get(path)
+    if first is None or first[0] is False or version < first[1]:
+        rec["files"][path] = [backup_name(backup), version]
+
+
+def fold_edits(rec, e):
+    """Fold one transcript entry into rec (new_edits)."""
+    kind = e.get("type")
+    if kind == "file-history-snapshot":
+        snap = e.get("snapshot") if isinstance(e.get("snapshot"), dict) else {}
+        tracked = snap.get("trackedFileBackups") if isinstance(snap.get("trackedFileBackups"), dict) else {}
+        found = {}
+        for key, backup in tracked.items():
+            path = backup_target(key, backup)
+            if path:
+                found[path] = backup
+        mid = e.get("messageId") or snap.get("messageId")
+        if not e.get("isSnapshotUpdate"):
+            rec["snap"], rec["snapFiles"], rec["turn"] = mid, {p: backup_name(b) for p, b in found.items()}, {}
+        elif mid == rec["snap"]:
+            for path, backup in found.items():
+                if path not in rec["snapFiles"] and path not in rec["turn"]:
+                    rec["turn"][path] = backup_name(backup)
+        for path, backup in found.items():
+            note_backup(rec, path, backup)
+    elif kind == "file-history-delta":
+        path = backup_target(e.get("trackingPath"), e.get("backup"))
+        if path:
+            if rec["snap"] is not None and e.get("snapshotMessageId") == rec["snap"] and path not in rec["turn"]:
+                rec["turn"][path] = backup_name(e.get("backup"))
+            note_backup(rec, path, e.get("backup"))
+    elif kind == "assistant":
+        for c in blocks_of(e)[1]:
+            if c.get("type") == "tool_use" and c.get("name") in EDIT_TOOLS and isinstance(c.get("input"), dict):
+                path = c["input"].get("file_path") or c["input"].get("notebook_path")
+                if isinstance(path, str) and path.startswith("/"):
+                    rec["files"].setdefault(os.path.normpath(path), [False, 0])
+
+
+def scan_edits(path, rec, start=0, sessions=None):
+    """Fold the transcript's lines from byte offset start into rec; returns
+    the offset read up to (a half-written last line is left for next time).
+    With a sessions set, the session ids its entries name are added to it."""
+    offset = start
+    try:
+        with open(path, "rb") as f:
+            f.seek(start)
+            for line in f:
+                if not line.endswith(b"\n"):
+                    break
+                if sessions is not None:
+                    m = SESSION_ID_FIELD.search(line)
+                    if m:
+                        sessions.add(m.group(1).decode())
+                if b'"file-history-' in line or EDIT_LINE.search(line):
+                    try:
+                        e = json.loads(line)
+                    except ValueError:
+                        e = None
+                    if isinstance(e, dict):
+                        fold_edits(rec, e)
+                offset += len(line)
+    except OSError:
+        pass
+    return offset
+
+
+def merge_edits(rec, other):
+    """Add the files another transcript (a subagent's) changed to rec's."""
+    for path, first in other["files"].items():
+        mine = rec["files"].get(path)
+        if mine is None or (mine[0] is False and first[0] is not False):
+            rec["files"][path] = list(first)
+
+
+def subagent_transcripts(path):
+    """A chat's subagent transcripts: projects/<proj>/<id>/subagents/agent-*.jsonl."""
+    try:
+        return sorted((path.parent / path.stem / "subagents").glob("agent-*.jsonl"))
+    except OSError:
+        return []
+
+
+def chat_edits(path):
+    """Everything a chat changed (new_edits), subagents included, read in full."""
+    rec, sessions = new_edits(), {path.stem}
+    scan_edits(path, rec, 0, sessions)
+    for sub in subagent_transcripts(path):
+        other = new_edits()
+        scan_edits(sub, other)
+        merge_edits(rec, other)
+    rec["sessions"] = sorted(s for s in sessions if valid_id(s))
+    return rec
+
+
+def file_label(path, cwd, home):
+    """A changed file's name as a row shows it: relative to the chat's folder, else ~/…"""
+    if cwd and (path + "/").startswith(cwd.rstrip("/") + "/") and path != cwd:
+        return path[len(cwd.rstrip("/")) + 1:]
+    return short_path(path, home)
+
+
+def absolute_path(path, cwd):
+    """A path from a backup record, made absolute (they can be relative to the chat's folder)."""
+    if path.startswith("/"):
+        return path
+    return os.path.normpath(os.path.join(cwd, path)) if cwd else None
+
+
+def project_file(path, skip):
+    """Is this changed file part of the chat's work, not in one of Claude's own folders (skip)?"""
+    return path is not None and not any(path == s or path.startswith(s + "/") for s in skip)
+
+
+def changed_paths(rec, cwd, skip):
+    """The absolute paths of the files in rec, minus those in Claude's own folders."""
+    return sorted({a for a in (absolute_path(p, cwd) for p in rec["files"]) if project_file(a, skip)})
+
+
+TASKS_LISTED = 20
+
+
+def task_number(task):
+    try:
+        return (0, int(task.get("id")))
+    except (TypeError, ValueError):
+        return (1, str(task.get("id")))
+
+
+def task_progress(profiles, ids):
+    """A chat's task list (Claude's TaskCreate/TaskUpdate keep it as
+    <cfg>/tasks/<session id>/<n>.json), or None: {"done", "total", "current"
+    (what it's on, e.g. "Running the tests"), "items": [{"subject", "status"}]},
+    status being pending, in_progress or completed."""
+    for sid in dict.fromkeys(i for i in ids if valid_id(i)):
+        for p in profiles:
+            try:
+                files = sorted((p.path / "tasks" / sid).glob("*.json"))
+            except OSError:
+                continue
+            tasks = [t for t in map(read_json, files)
+                     if isinstance(t, dict) and isinstance(t.get("subject"), str) and t.get("status") != "deleted"]
+            if not tasks:
+                continue
+            tasks.sort(key=task_number)
+            current = next((t for t in tasks if t.get("status") == "in_progress"), None)
+            return {
+                "done": sum(t.get("status") == "completed" for t in tasks),
+                "total": len(tasks),
+                "current": clean_text((current.get("activeForm") or current["subject"]) if current else "", 120),
+                "items": [{"subject": clean_text(t["subject"], 120), "status": str(t.get("status") or "pending")}
+                          for t in tasks[:TASKS_LISTED]],
+            }
+    return None
+
+
+def own_folders(profiles):
+    """Folders a chat writes to that aren't its project: Claude's config
+    folders (plans, memory) and its scratchpads (/tmp/claude-<uid>)."""
+    skip = {f"/tmp/claude-{os.getuid()}"}
+    for p in profiles:
+        skip.update((str(p.path).rstrip("/"), str(p.real).rstrip("/")))
+    return sorted(skip)
+
+
+class ChatCache:
+    """What the widget read from the listed chats' transcripts, kept between
+    polls in chats.json: each one's peek (read again when the file changed)
+    and the files it changed (only what was appended is read)."""
+
+    def __init__(self, path):
+        self.path = path
+        data = read_json(path)
+        ok = isinstance(data, dict) and data.get("version") == CHAT_CACHE_VERSION
+        self.old = data if ok else {}
+        self.data = {"version": CHAT_CACHE_VERSION, "peeks": {}, "edits": {}}
+        self.changed = not ok
+
+    def _old(self, section, key):
+        return self.data[section].get(key) or self.old.get(section, {}).get(key)
+
+    def peek(self, path):
+        try:
+            st = path.stat()
+        except (OSError, AttributeError):
+            return None
+        key = file_key(st)
+        old = self._old("peeks", key)
+        if isinstance(old, list) and len(old) == 3 and old[0] == st.st_size and old[1] == st.st_mtime_ns:
+            self.data["peeks"][key] = old
+            return old[2]
+        peek = chat_peek(path)
+        self.data["peeks"][key] = [st.st_size, st.st_mtime_ns, peek]
+        self.changed = True
+        return peek
+
+    def edits(self, path):
+        """new_edits of one transcript, reading only what was appended since last time."""
+        try:
+            st = path.stat()
+        except OSError:
+            return new_edits()
+        key = file_key(st)
+        old = self._old("edits", key)
+        if isinstance(old, dict) and isinstance(old.get("size"), int) and old["size"] <= st.st_size \
+                and isinstance(old.get("rec"), dict):
+            size, rec = old["size"], old["rec"]
+        else:
+            size, rec = 0, new_edits()
+        if size < st.st_size:
+            rec = json.loads(json.dumps(rec))  # a copy: the old one may be kept as is
+            size = scan_edits(path, rec, size)
+            self.changed = True
+        self.data["edits"][key] = {"size": size, "rec": rec}
+        return rec
+
+    def changes(self, path, cwd, home, skip):
+        """{"count", "files"} of the files a chat changed, or None."""
+        if path is None:
+            return None
+        rec = new_edits()
+        merge_edits(rec, self.edits(path))
+        for sub in subagent_transcripts(path):
+            merge_edits(rec, self.edits(sub))
+        paths = changed_paths(rec, cwd, skip)
+        if not paths:
+            return None
+        labels = sorted(file_label(p, cwd, home) for p in paths)
+        return {"count": len(paths), "files": labels[:CHANGES_LISTED]}
+
+    def save(self):
+        if self.changed or any(set(self.data[s]) != set(self.old.get(s, {})) for s in ("peeks", "edits")):
+            try:
+                write_json_atomic(self.path, self.data)
             except OSError:
                 pass
 
@@ -2004,6 +2458,115 @@ def plan_limits(snapshot_root, profiles, now_ms):
     return None
 
 
+# ---------------------------------------------------------------- usage forecast
+#
+# Where a plan window's usage is heading at your pace. The status line only
+# says how much is used now, so the checks keep a few points of each window
+# (usage.json); the pace is the last hour's in the 5-hour window, and the
+# window's so far in the weekly ones (or while there's no hour on record).
+
+WINDOW_HOURS = {"five_hour": 5, "seven_day": 168, "seven_day_opus": 168, "seven_day_sonnet": 168}
+PACE_LOOKBACK_MS = {"five_hour": 3600_000}
+FORECAST_MIN_MS = 15 * 60_000  # too early in a window to tell its pace
+USAGE_POINT_EVERY_MS = 10 * 60_000  # an unchanged value is still noted this often
+USAGE_POINTS_KEPT = 300
+USAGE_HISTORY_VERSION = 1
+
+
+def window_hours(key):
+    return WINDOW_HOURS.get(key) or (168 if str(key).startswith("seven_day") else None)
+
+
+def same_window(a, b):
+    """Two resets_at of the same window (they may differ by a few seconds)."""
+    return isinstance(a, (int, float)) and isinstance(b, (int, float)) and abs(a - b) < 120_000
+
+
+class UsageHistory:
+    """Each account's plan usage over its current windows: {group id:
+    {window key: {"resetsAt", "points": [[ms, percent], …]}}}, in usage.json."""
+
+    def __init__(self, path):
+        self.path = path
+        data = read_json(path)
+        ok = isinstance(data, dict) and data.get("version") == USAGE_HISTORY_VERSION and isinstance(data.get("groups"), dict)
+        self.groups = data["groups"] if ok else {}
+        self.changed = False
+
+    def points(self, gid, window):
+        rec = (self.groups.get(gid) or {}).get(window["key"])
+        if not isinstance(rec, dict) or not same_window(rec.get("resetsAt"), window.get("resetsAt")):
+            return []
+        return [p for p in rec.get("points") or [] if isinstance(p, list) and len(p) == 2]
+
+    def record(self, gid, limits, now_ms):
+        """Note the group's usage as of its newest status-line snapshot."""
+        t = limits["updatedAt"]
+        if not isinstance(self.groups.get(gid), dict):
+            self.groups[gid] = {}
+        group = self.groups[gid]
+        for w in limits["windows"]:
+            if w["reset"] or not w["resetsAt"] or not window_hours(w["key"]):
+                continue
+            rec = group.get(w["key"])
+            if not isinstance(rec, dict) or not same_window(rec.get("resetsAt"), w["resetsAt"]) \
+                    or not isinstance(rec.get("points"), list):
+                rec = {"resetsAt": w["resetsAt"], "points": []}
+            points = rec["points"]
+            last = points[-1] if points else None
+            if last is None or (t > last[0] and (w["pct"] != last[1] or t - last[0] >= USAGE_POINT_EVERY_MS)):
+                points.append([t, w["pct"]])
+                del points[:-USAGE_POINTS_KEPT]
+                group[w["key"]] = rec
+                self.changed = True
+        for key in [k for k, rec in group.items() if not isinstance(rec, dict)
+                    or not isinstance(rec.get("resetsAt"), (int, float)) or rec["resetsAt"] < now_ms - 86400_000]:
+            del group[key]  # a window that ended a day ago
+            self.changed = True
+
+    def save(self):
+        if self.changed:
+            try:
+                write_json_atomic(self.path, {"version": USAGE_HISTORY_VERSION, "groups": self.groups})
+            except OSError:
+                pass
+
+
+def usage_forecast(window, points, now_ms):
+    """Where a plan window is heading at your pace, or None while that can't be told:
+    evenPct: where an even pace through the window would be by now;
+    rate: percent per hour; atReset: where it would be when the window resets;
+    fullAt: when it would run out (ms), if that's before it resets;
+    basis: "hour" (the last hour's pace) or "window" (the window's so far)."""
+    hours = window_hours(window["key"])
+    resets = window.get("resetsAt")
+    if not hours or not resets or window.get("reset") or resets <= now_ms:
+        return None
+    length = hours * 3600_000
+    start = resets - length
+    elapsed = now_ms - start
+    if elapsed < FORECAST_MIN_MS:
+        return None
+    pct = window["pct"]
+    rate, basis = pct / (elapsed / 3600_000), "window"
+    look = PACE_LOOKBACK_MS.get(window["key"])
+    if look and now_ms - look > start:
+        before = [p for p in points if p[0] <= now_ms - look]
+        if before:
+            rate, basis = max(0.0, (pct - before[-1][1]) / (look / 3600_000)), "hour"
+    full_at = None
+    if pct >= 100:
+        at_reset = pct
+    else:
+        at_reset = pct + rate * (resets - now_ms) / 3600_000
+        if rate > 0:
+            when = now_ms + (100 - pct) / rate * 3600_000
+            if when < resets:
+                full_at = int(when)
+    return {"evenPct": round(min(100.0, 100.0 * elapsed / length), 1), "rate": round(rate, 2),
+            "atReset": round(min(at_reset, 999.0), 1), "fullAt": full_at, "basis": basis}
+
+
 # ---------------------------------------------------------------- token totals
 
 
@@ -2265,8 +2828,10 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
         home=home, profiles=profiles, snapshot_root=snapshot_root, now_ms=now_ms,
         keep_done_ms=int(keep_done_hours * 3600_000),
         agents=AgentCache(cache_root / "agents.json"), links=LinkCache(cache_root / "links.json"),
+        chats=ChatCache(cache_root / "chats.json"), own_folders=own_folders(profiles),
         prompts={real: last_prompts(entries) for real, entries in histories.items()},
     )
+    usage = UsageHistory(cache_root / "usage.json")
     with ScanLock(cache_root / "tokens.lock") as lock:
         if lock.held and with_tokens:
             prune_snapshots(snapshot_root, now)
@@ -2325,6 +2890,11 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
             }
             try:
                 group["limits"] = plan_limits(snapshot_root, members, now_ms)
+                if group["limits"]:
+                    if lock.held:
+                        usage.record(group["id"], group["limits"], now_ms)
+                    for w in group["limits"]["windows"]:
+                        w["forecast"] = usage_forecast(w, usage.points(group["id"], w), now_ms)
             except Exception as exc:
                 errors.append(f"{group['title']}: limits: {exc}")
             if with_tokens:
@@ -2334,6 +2904,7 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
                 except Exception as exc:
                     errors.append(f"{group['title']}: tokens: {exc}")
             groups.append(group)
+        usage.save()  # only this check noted anything (lock.held): others mustn't write it now
 
     try:
         place_chats(groups, ctx)
@@ -2368,6 +2939,7 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
             counts[s["state"]] += 1
     ctx.agents.save()
     ctx.links.save()
+    ctx.chats.save()
     if still_dismissed != dismissed:
         try:
             save_dismissed(cache_root, still_dismissed)  # drop sessions that are gone or active again

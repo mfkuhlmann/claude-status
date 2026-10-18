@@ -1,47 +1,101 @@
 import QtQuick
 import QtQuick.Layouts
 import org.kde.plasma.components as PlasmaComponents3
+import org.kde.plasma.core as PlasmaCore
 import org.kde.kirigami as Kirigami
 
-RowLayout {
+// One plan window: how much is used, and where it's heading at your pace
+// (claude_status.py: usage_forecast): a faded stretch up to where it would
+// be when the window resets, a mark where an even pace would be by now, and
+// a warning when it would run out before it resets.
+ColumnLayout {
     id: bar
 
     property string label
     property real pct: 0
     property string detail
+    property var forecast: null
+    property real resetsAt: 0
 
-    spacing: Kirigami.Units.smallSpacing
+    readonly property real atReset: forecast ? Math.min(100, Math.max(pct, forecast.atReset)) : pct
+    readonly property bool runsOut: !!forecast && !!forecast.fullAt
 
-    PlasmaComponents3.Label {
-        text: bar.label
-        Layout.preferredWidth: Kirigami.Units.gridUnit * 3.5
-        elide: Text.ElideRight
-    }
+    spacing: 0
 
-    Rectangle {
+    RowLayout {
         Layout.fillWidth: true
-        Layout.preferredHeight: Math.round(Kirigami.Units.gridUnit * 0.5)
-        radius: height / 2
-        color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.15)
+        spacing: Kirigami.Units.smallSpacing
+
+        PlasmaComponents3.Label {
+            text: bar.label
+            Layout.preferredWidth: Kirigami.Units.gridUnit * 3.5
+            elide: Text.ElideRight
+        }
 
         Rectangle {
-            width: parent.width * Math.min(100, Math.max(0, bar.pct)) / 100
-            height: parent.height
-            radius: parent.radius
-            color: root.usageColor(bar.pct)
+            id: track
+            Layout.fillWidth: true
+            Layout.preferredHeight: Math.round(Kirigami.Units.gridUnit * 0.5)
+            radius: height / 2
+            color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.15)
+
+            // Where it would be when the window resets, at this pace
+            Rectangle {
+                visible: bar.forecast !== null && bar.atReset > bar.pct
+                width: parent.width * bar.atReset / 100
+                height: parent.height
+                radius: parent.radius
+                color: root.usageColor(bar.atReset)
+                opacity: 0.35
+            }
+            Rectangle {
+                width: parent.width * Math.min(100, Math.max(0, bar.pct)) / 100
+                height: parent.height
+                radius: parent.radius
+                color: root.usageColor(bar.pct)
+            }
+            // Where an even pace through the window would be by now
+            Rectangle {
+                visible: bar.forecast !== null
+                x: Math.round(parent.width * Math.min(100, bar.forecast ? bar.forecast.evenPct : 0) / 100) - 1
+                y: -2
+                width: 2
+                height: parent.height + 4
+                radius: 1
+                color: Kirigami.Theme.textColor
+                opacity: 0.55
+            }
+
+            PlasmaCore.ToolTipArea {
+                anchors.fill: parent
+                active: bar.forecast !== null
+                mainText: i18nc("usage window, percent used", "%1: %2% used", bar.label, Math.round(bar.pct))
+                subText: root.forecastText(bar.forecast, bar.pct, bar.resetsAt)
+            }
+        }
+
+        PlasmaComponents3.Label {
+            text: Math.round(bar.pct) + "%"
+            Layout.preferredWidth: Kirigami.Units.gridUnit * 2.2
+            horizontalAlignment: Text.AlignRight
+        }
+
+        PlasmaComponents3.Label {
+            text: bar.detail
+            Layout.preferredWidth: Kirigami.Units.gridUnit * 6.5
+            opacity: 0.7
+            font: Kirigami.Theme.smallFont
+            elide: Text.ElideRight
         }
     }
 
     PlasmaComponents3.Label {
-        text: Math.round(bar.pct) + "%"
-        Layout.preferredWidth: Kirigami.Units.gridUnit * 2.2
-        horizontalAlignment: Text.AlignRight
-    }
-
-    PlasmaComponents3.Label {
-        text: bar.detail
-        Layout.preferredWidth: Kirigami.Units.gridUnit * 6.5
-        opacity: 0.7
+        visible: bar.runsOut
+        Layout.fillWidth: true
+        Layout.leftMargin: Kirigami.Units.gridUnit * 3.5 + Kirigami.Units.smallSpacing
+        text: bar.runsOut ? i18n("At this pace: full in %1, %2 before it resets",
+                                 root.duration(bar.forecast.fullAt - root.now), root.duration(bar.resetsAt - bar.forecast.fullAt)) : ""
+        color: Kirigami.Theme.negativeTextColor
         font: Kirigami.Theme.smallFont
         elide: Text.ElideRight
     }

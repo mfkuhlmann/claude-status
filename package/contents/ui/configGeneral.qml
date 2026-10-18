@@ -14,6 +14,9 @@ KCM.SimpleKCM {
     property alias cfg_notifyWaiting: notifyWaiting.checked
     property alias cfg_notifyDone: notifyDone.checked
     property alias cfg_notifyDoneMinSeconds: notifyDoneMinSeconds.value
+    property alias cfg_awayDigest: awayDigest.checked
+    property alias cfg_awayMinutes: awayMinutes.value
+    property alias cfg_shortcutGoesToChat: shortcutGoesToChat.checked
     property alias cfg_keepDoneHours: keepDoneHours.value
     property alias cfg_showUsageInPanel: showUsage.checked
     property alias cfg_iconBlink: iconBlink.checked
@@ -38,6 +41,9 @@ KCM.SimpleKCM {
     property bool cfg_notifyWaitingDefault
     property bool cfg_notifyDoneDefault
     property int cfg_notifyDoneMinSecondsDefault
+    property bool cfg_awayDigestDefault
+    property int cfg_awayMinutesDefault
+    property bool cfg_shortcutGoesToChatDefault
     property int cfg_keepDoneHoursDefault
     property bool cfg_showUsageInPanelDefault
     property bool cfg_iconBlinkDefault
@@ -113,6 +119,22 @@ KCM.SimpleKCM {
             from: 0
             to: 3600
             stepSize: 10
+        }
+
+        QQC2.CheckBox {
+            id: awayDigest
+            Kirigami.FormData.label: i18n("While you're away:")
+            text: i18n("Sum it all up in one notification when you're back")
+        }
+
+        QQC2.SpinBox {
+            id: awayMinutes
+            Kirigami.FormData.label: i18n("…once the screen was locked for (min):")
+            enabled: awayDigest.checked
+            from: 1
+            to: 240
+            QQC2.ToolTip.visible: hovered
+            QQC2.ToolTip.text: i18n("After this long, chats that finish or need you don't notify one by one: when you unlock the screen, one notification says what happened meanwhile.")
         }
 
         QQC2.CheckBox {
@@ -199,6 +221,20 @@ KCM.SimpleKCM {
             id: showUsage
             Kirigami.FormData.label: i18n("Panel:")
             text: i18n("Show 5-hour usage next to the icon")
+        }
+
+        QQC2.CheckBox {
+            id: shortcutGoesToChat
+            Kirigami.FormData.label: i18n("Keyboard shortcut:")
+            text: i18n("Goes to the chat that needs you")
+        }
+
+        QQC2.Label {
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 20
+            wrapMode: Text.Wrap
+            font: Kirigami.Theme.smallFont
+            opacity: 0.7
+            text: i18n("Set the key on the Keyboard Shortcuts page of these settings. It brings up the chat that has waited longest for you, then one that finished while you weren't looking; press it again for the next one. With none, it opens the popup. In the system tray, the shortcut opens the popup.")
         }
 
         QQC2.CheckBox {

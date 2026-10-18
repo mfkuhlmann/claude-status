@@ -8,7 +8,7 @@ import St from 'gi://St';
 
 import * as L from '../logic.js';
 import {buildSessionRow, buildKeepOnly, buildShareMenu} from './sessionRow.js';
-import {box, column, iconButton, label, link, meter, separator, textButton} from './widgets.js';
+import {box, column, iconButton, label, link, separator, textButton, usageMeter} from './widgets.js';
 
 export function buildGroupSection(ctx, group, {last = false, remoteHost = ''} = {}) {
     const tips = ctx.tips;
@@ -42,10 +42,24 @@ export function buildGroupSection(ctx, group, {last = false, remoteHost = ''} = 
     for (const w of group.limits ? group.limits.windows : []) {
         const bar = box('claude-usage', {x_expand: true});
         bar.add_child(label(w.label, 'claude-usage-label'));
-        bar.add_child(meter(w.pct, L.usageClass(w.pct)));
+        // with a forecast: lighter up to where it'd be at the reset, and a tick for an even pace
+        const projected = L.projectedPct(w);
+        const m = usageMeter(w.pct, L.usageClass(w.pct), projected, L.usageClass(projected),
+            w.forecast ? w.forecast.evenPct : null);
+        bar.add_child(m);
+        const forecastTip = w.forecast ? () => L.forecastTooltip(w, ctx.now) : null;   // when you hover
+        if (forecastTip)
+            tips.add(m, forecastTip);
         bar.add_child(label(`${Math.round(w.pct)}%`, 'claude-usage-pct'));
         bar.add_child(label(L.resetText(w, ctx.now), 'claude-usage-detail claude-small claude-dim'));
         limits.add_child(bar);
+        const warning = L.forecastWarning(w, ctx.now);
+        if (warning) {
+            const line = label(warning, `claude-forecast claude-small claude-fg-${L.usageClass(Math.max(70, w.pct))}`, {x_expand: true});
+            if (forecastTip)
+                tips.add(line, forecastTip);
+            limits.add_child(line);
+        }
     }
     const asOf = label(L.planUsageText(group.limits, ctx.now), 'claude-small claude-dim', {x_expand: true});
     if (!group.limits) {

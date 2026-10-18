@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **What a chat is doing, without switching to it:** a line under each session says what it's doing right now (*▸ Bash: npm test*), what it needs, or what Claude said last. Click it for your last prompt, Claude's reply and the chat's tasks.
+- **Task progress:** a chat's task list (Claude's own) shows as a bar with *2/5* and, unfolded, as a checklist.
+- **What a chat changed, side by side:** **±3** next to a chat counts the files it changed. Click it, or *Compare changed files* / *Last turn* in the unfolded box, and VS Code shows each file as it was before the chat (or before its last turn) next to the file now. With the VS Code extension 1.8 or newer they open in one multi-file view.
+- **Usage forecast:** usage bars show where you'll be when the window resets at your pace, a mark for an even pace, and a warning when you'd run out before it resets.
+- **A shortcut to the chat that needs you:** the widget's keyboard shortcut (Plasma: set it in its settings; GNOME: Super+Shift+C; VS Code: Ctrl+Alt+Shift+C) goes to the chat that has waited longest, then to ones that finished while you weren't looking; again for the next one.
+- **While you were away:** after the screen has been locked for 5 minutes (a setting), notifications wait; when you're back, one notification and a card at the top of the popup sum up what finished, failed or needs you.
+- The GNOME and VS Code extensions have all of this too.
+
 ## 1.7.0 (2026-10-18)
 
 - **Stop or interrupt any running chat:** the ■ stop button works on every chat with a process, whatever it's doing, and asks first with what will happen. In a terminal, Claude quits as when the terminal closes: the current step is cut off, the terminal stays open and the chat moves to **Recent chats**. In VS Code's Claude tab it's like the tab's own stop button: the tab says *Interrupted*, keeps the chat and goes on with your next message (Claude gets SIGINT there, its clean exit; SIGTERM showed an error). A working chat in tmux can be **interrupted** instead: Ctrl+C in its pane, which stops the turn and its subagents, background ones too, and keeps the chat open. Commands a stopped chat leaves behind are ended too. Also on SSH hosts.

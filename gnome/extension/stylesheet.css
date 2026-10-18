@@ -37,6 +37,14 @@
 .claude-summary { text-align: right; }
 .claude-messages { padding: 0 8px; spacing: 4px; }
 .claude-message { padding: 2px 0; }
+.claude-digest {
+    margin: 2px 0 4px;
+    padding: 6px 8px;
+    spacing: 4px;
+    border-radius: 10px;
+    border: 1px solid #3584e4;
+    background-color: rgba(53, 132, 228, 0.1);
+}
 .claude-scroll { padding: 0 4px; }
 .claude-list { spacing: 6px; padding: 0 4px; }
 .claude-placeholder { padding: 16px; spacing: 6px; }
@@ -62,6 +70,8 @@
 .claude-meter { height: 7px; border-radius: 4px; background-color: rgba(127, 127, 127, 0.25); }
 .claude-meter-fill { border-radius: 4px; }
 .claude-context-meter { width: 40px; height: 5px; }
+.claude-meter-tick { background-color: rgba(127, 127, 127, 0.95); border-radius: 1px; }
+.claude-forecast { padding-left: 5.4em; }
 
 .claude-session-row { spacing: 6px; padding: 3px 4px; border-radius: 8px; }
 .claude-session-row:hover { background-color: rgba(127, 127, 127, 0.1); }
@@ -76,6 +86,16 @@
 .claude-agents { spacing: 2px; padding-top: 3px; }
 .claude-agent { spacing: 6px; }
 .claude-recent { padding-left: 14px; }
+.claude-peek-line { border-radius: 4px; }
+.claude-peek-line:hover { background-color: rgba(127, 127, 127, 0.15); }
+.claude-peek {
+    margin: 3px 0 2px;
+    padding: 6px 8px;
+    spacing: 4px;
+    border-radius: 8px;
+    background-color: rgba(127, 127, 127, 0.1);
+}
+.claude-tasks { spacing: 1px; }
 
 .claude-tag {
     font-size: 0.8em;

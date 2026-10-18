@@ -33,7 +33,7 @@ def alive(profile):
     return p.pid, stat[stat.rfind(")") + 2:].split()[19]
 
 
-def session(profile, sid, name, folder, status, minutes_ago, **extra):
+def session(profile, sid, name, folder, status, minutes_ago, more=(), **extra):
     pid, start = alive(profile)
     cwd = str(home / folder)
     os.makedirs(cwd, exist_ok=True)
@@ -41,11 +41,11 @@ def session(profile, sid, name, folder, status, minutes_ago, **extra):
         "pid": pid, "procStart": start, "sessionId": sid, "cwd": cwd, "name": name,
         "kind": "interactive", "status": status, "startedAt": int((now - 3600) * 1000),
         "statusUpdatedAt": int((now - minutes_ago * 60) * 1000), **extra})
-    transcript(profile, sid, folder, name, minutes_ago)
+    transcript(profile, sid, folder, name, minutes_ago, more=more)
     return sid
 
 
-def transcript(profile, sid, folder, title, minutes_ago, tokens=4000):
+def transcript(profile, sid, folder, title, minutes_ago, tokens=4000, more=()):
     cwd = str(home / folder)
     os.makedirs(cwd, exist_ok=True)
     project = home / profile / "projects" / cwd.replace("/", "-")
@@ -54,7 +54,8 @@ def transcript(profile, sid, folder, title, minutes_ago, tokens=4000):
              {"type": "assistant", "cwd": cwd, "timestamp": day, "requestId": f"req-{sid}",
               "message": {"id": f"msg-{sid}", "model": "claude-opus-5-5",
                           "usage": {"input_tokens": 1200, "output_tokens": tokens,
-                                    "cache_read_input_tokens": tokens * 30, "cache_creation_input_tokens": 900}}}]
+                                    "cache_read_input_tokens": tokens * 30, "cache_creation_input_tokens": 900}}},
+             *more]
     path = project / f"{sid}.jsonl"
     write(path, "\n".join(json.dumps(line) for line in lines) + "\n")
     os.utime(path, (now - minutes_ago * 60, now - minutes_ago * 60))
@@ -81,15 +82,50 @@ def limits(profile, sid, five, week, context, model="Opus 5.5"):
         "model": {"display_name": model}})
 
 
+# What the chats said last, what they're doing, their tasks and the files they changed
+prompt = lambda text: {"type": "user", "timestamp": day, "message": {"role": "user", "content": text}}
+said = lambda mid, blocks, stop=None: {"type": "assistant", "timestamp": day,
+                                       "message": {"id": mid, "role": "assistant", "content": blocks, "stop_reason": stop}}
+text = lambda t: {"type": "text", "text": t}
+use = lambda name, inp: {"type": "tool_use", "id": "toolu_" + name, "name": name, "input": inp}
+parser_work = [prompt("The parser crashes on an empty file. Fix it and add a test."),
+               {"type": "file-history-snapshot", "messageId": "p1", "isSnapshotUpdate": False,
+                "snapshot": {"messageId": "p1", "trackedFileBackups": {}}},
+               said("m1", [text("Found it: `parse()` reads the first token before checking for one. Fixing that, then the tests.")]),
+               said("m1", [use("Edit", {"file_path": str(home / "repos/parser/parser.py")})]),
+               {"type": "file-history-delta", "snapshotMessageId": "p1", "trackingPath": "parser.py",
+                "backup": {"backupFileName": "pp@v1", "version": 1, "realParentDir": str(home / "repos/parser")}},
+               {"type": "file-history-delta", "snapshotMessageId": "p1", "trackingPath": "tests/test_empty.py",
+                "backup": {"backupFileName": None, "version": 1, "realParentDir": str(home / "repos/parser/tests")}},
+               said("m2", [use("Bash", {"command": "pytest -x tests/"})])]
+release_wait = [prompt("Write the release notes for 2.4 from the merged PRs."),
+                said("m1", [text("Here's a draft. I'll put it in CHANGELOG.md.")]),
+                said("m1", [use("Write", {"file_path": str(home / "repos/site/CHANGELOG.md")})])]
+api_done = [prompt("Why do the API tests time out on CI?"),
+            said("m1", [text("All 42 API tests pass now. The client waited 30 s for a server that never started on CI: "
+                             "the fixture now starts it and waits until it answers.\n\nWant me to open a PR?")], "end_turn")]
+blog_done = [prompt("Tighten the intro of the garden post."),
+             said("m1", [text("Done: the intro is two sentences now, and the photo caption moved under the photo.")], "end_turn")]
+
 account(".claude-work", "work", "acct-work", "claude_team", "Sam")
 account(".claude-personal", "personal", "acct-pro", "claude_max", "Sam")
 
-fix = session(".claude-work", "9a1c7e2b-0000-4000-8000-000000000001", "fix parser", "repos/parser", "busy", 4)
+fix = session(".claude-work", "9a1c7e2b-0000-4000-8000-000000000001", "fix parser", "repos/parser", "busy", 4,
+              more=parser_work)
 rel = session(".claude-work", "9a1c7e2b-0000-4000-8000-000000000002", "release notes", "repos/site", "waiting", 1,
-              waitingFor="permission")
-session(".claude-work", "9a1c7e2b-0000-4000-8000-000000000003", "api tests", "repos/api", "idle", 12)
+              waitingFor="permission", more=release_wait)
+session(".claude-work", "9a1c7e2b-0000-4000-8000-000000000003", "api tests", "repos/api", "idle", 12, more=api_done)
 blog = session(".claude-personal", "9a1c7e2b-0000-4000-8000-000000000004", "blog draft", "notes/blog", "idle", 25,
-               entrypoint="claude-vscode")
+               entrypoint="claude-vscode", more=blog_done)
+write(home / ".claude-work/file-history" / fix / "pp@v1", "def parse(tokens):\n    first = tokens[0]\n")
+write(home / "repos/parser/parser.py", "def parse(tokens):\n    if not tokens:\n        return None\n    first = tokens[0]\n")
+write(home / "repos/parser/tests/test_empty.py", "def test_empty():\n    assert parse([]) is None\n")
+for n, subject, status, active in ((1, "Find where the parser fails", "completed", ""),
+                                   (2, "Fix the empty-file case", "completed", ""),
+                                   (3, "Add a test for empty files", "in_progress", "Running the parser tests"),
+                                   (4, "Check the other entry points", "pending", "")):
+    write(home / ".claude-work/tasks" / fix / f"{n}.json", {"id": str(n), "subject": subject, "status": status,
+                                                            "activeForm": active, "blocks": [], "blockedBy": []})
 transcript(".claude-personal", "9a1c7e2b-0000-4000-8000-000000000005", "notes/garden", "garden planner", 300)
 transcript(".claude-personal", "9a1c7e2b-0000-4000-8000-000000000006", "notes/trip", "trip to Lisbon", 1500)
 transcript(".claude-work", "9a1c7e2b-0000-4000-8000-000000000007", "repos/site", "landing page copy", 2900)

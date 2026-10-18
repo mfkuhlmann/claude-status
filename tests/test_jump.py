@@ -11,6 +11,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 sys.dont_write_bytecode = True  # keep __pycache__ out of the plasmoid package
 CODE = Path(__file__).resolve().parent.parent / "package/contents/code"
@@ -1123,3 +1124,147 @@ class RemoteShowTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ChangesTests(Fixture):
+    """jump.py --changes: what a chat changed, before ↔ now, opened in VS Code."""
+
+    def setUp(self):
+        super().setUp()
+        self.proj = self.home / "repos/app"
+        (self.proj / "src").mkdir(parents=True)
+        self.backups = self.home / ".claude-work/file-history/chat1"
+        lines = [
+            {"type": "user", "cwd": str(self.proj), "sessionId": "chat1", "message": {"content": "go"}},
+            {"type": "file-history-snapshot", "messageId": "p1", "isSnapshotUpdate": False,
+             "snapshot": {"messageId": "p1", "trackedFileBackups": {}}},
+            self.delta("p1", "src/edited.py", "e@v1"),
+            self.delta("p1", "src/same.py", "s@v1"),
+            self.delta("p1", "src/new.py", None),
+            self.delta("p1", "src/gone.py", "g@v1"),
+            {"type": "file-history-snapshot", "messageId": "p2", "isSnapshotUpdate": False,
+             "snapshot": {"messageId": "p2", "trackedFileBackups": {
+                 "src/edited.py": {"backupFileName": "e@v2", "version": 2, "realParentDir": str(self.proj / "src")}}}},
+            {"type": "assistant", "sessionId": "chat1", "message": {"content": [
+                {"type": "tool_use", "id": "t", "name": "Edit", "input": {"file_path": str(self.proj / "notes.md")}},
+                {"type": "tool_use", "id": "u", "name": "Write", "input": {"file_path": str(self.home / ".claude-work/plans/p.md")}}]}},
+        ]
+        write(self.home / ".claude-work/projects/-app/chat1.jsonl", "".join(json.dumps(l) + "\n" for l in lines))
+        for name, data in (("e@v1", "v1\n"), ("e@v2", "v2\n"), ("s@v1", "same\n"), ("g@v1", "old\n")):
+            write(self.backups / name, data)
+        for rel, data in (("src/edited.py", "v3\n"), ("src/same.py", "same\n"), ("src/new.py", "hi\n"), ("notes.md", "now\n")):
+            write(self.proj / rel, data)
+
+    def delta(self, snap, rel, name):
+        return {"type": "file-history-delta", "snapshotMessageId": snap, "trackingPath": rel,
+                "backup": {"backupFileName": name, "version": 1, "realParentDir": str(self.proj / os.path.dirname(rel))}}
+
+    def compare(self, **kw):
+        return jump.chat_comparison(self.home, [], "chat1", ".claude-work", **kw)
+
+    def test_before_the_chat_and_now(self):
+        with Patch(git_original=lambda path: b"committed\n" if path.endswith("notes.md") else None):
+            ok, message, comparison = self.compare()
+        self.assertTrue(ok, message)
+        self.assertEqual(message, "4 changed files since it started")
+        items = {i["label"]: i for i in comparison["items"]}
+        self.assertEqual(sorted(items), ["notes.md", "src/edited.py", "src/gone.py", "src/new.py"])  # same.py unchanged
+        self.assertEqual(Path(items["src/edited.py"]["original"]).read_text(), "v1\n")
+        self.assertEqual(Path(items["src/edited.py"]["original"]).name, "edited.py")  # named for highlighting
+        self.assertEqual((items["src/new.py"]["created"], Path(items["src/new.py"]["original"]).read_text()), (True, ""))
+        self.assertTrue(items["src/gone.py"]["deleted"])
+        self.assertEqual(Path(items["notes.md"]["original"]).read_text(), "committed\n")  # no backup: git's HEAD
+        self.assertEqual(comparison["folder"], str(self.proj))
+
+    def test_last_turn(self):
+        ok, message, comparison = self.compare(turn=True)
+        self.assertEqual((ok, message), (True, "1 changed file in its last turn"))
+        (item,) = comparison["items"]
+        self.assertEqual((item["label"], Path(item["original"]).read_text()), ("src/edited.py", "v2\n"))
+
+    def test_without_earlier_versions(self):
+        for f in self.backups.iterdir():
+            f.unlink()
+        with Patch(git_original=lambda path: None):
+            ok, message, comparison = self.compare()
+        self.assertTrue(ok)
+        self.assertEqual([i["label"] for i in comparison["items"]], ["src/new.py"])
+        self.assertIn("4 more with no earlier version to compare with", message)  # edited, same, gone, notes
+
+    def test_real_git_fallback(self):
+        if not shutil.which("git"):
+            self.skipTest("no git")
+        env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t",
+                   GIT_COMMITTER_EMAIL="t@t", GIT_CONFIG_GLOBAL=os.devnull)
+        git = lambda *a: subprocess.run(["git", "-C", str(self.proj), *a], env=env, capture_output=True, check=True)
+        git("init", "-q")
+        (self.proj / "notes.md").write_text("committed\n")
+        git("add", "notes.md")
+        git("commit", "-qm", "x")
+        (self.proj / "notes.md").write_text("now\n")
+        self.assertEqual(jump.git_original(str(self.proj / "notes.md")), b"committed\n")
+        self.assertEqual(jump.git_original(str(self.proj / "src/new.py")), b"")  # not committed: new
+        self.assertIsNone(jump.git_original(str(self.home / "x.txt")))  # no repository
+
+    def test_opens_one_view_through_the_extension(self):
+        write(self.home / ".vscode/extensions/extensions.json",
+              [{"identifier": {"id": "wzaielamri.claude-status"}, "version": "1.8.0"}])
+        started, diffs = [], []
+        with Patch(start_vscode_chat=lambda code, folder, link: started.append((folder, link)),
+                   later=lambda task: diffs.append(task)), \
+                mock_home(self.home), mock_vscode():
+            ok, message = jump.show_changes(self.home, [], "chat1", ".claude-work", turn=True)
+        self.assertEqual((ok, message), (True, "Comparing 1 changed file in its last turn in VS Code"))
+        ((folder, link),) = started
+        self.assertEqual(folder, str(self.proj))
+        self.assertTrue(link.startswith("vscode://wzaielamri.claude-status/changes?file="), link)
+        manifest = json.loads(Path(parse_qs(urlsplit(link).query)["file"][0]).read_text())
+        self.assertEqual([i["label"] for i in manifest["items"]], ["src/edited.py"])
+        self.assertEqual(diffs, [])
+
+    def test_one_by_one_without_the_extension(self):
+        write(self.home / ".vscode/extensions/extensions.json",
+              [{"identifier": {"id": "wzaielamri.claude-status"}, "version": "1.7.0"}])  # too old
+        tasks, runs = [], []
+        with Patch(later=lambda task: tasks.append(task)), mock_home(self.home), mock_vscode(), \
+                Patch(subprocess=FakeRun(runs)):
+            ok, message = jump.show_changes(self.home, [], "chat1", ".claude-work", turn=True)
+            self.assertTrue(ok, message)
+            (task,) = tasks
+            task()
+        ((cmd, *_),) = runs
+        self.assertEqual(cmd[:3], ["/usr/bin/code", "--reuse-window", "--diff"])
+        self.assertEqual(cmd[4], str(self.proj / "src/edited.py"))
+
+
+class FakeRun:
+    """Stands in for the subprocess module: records run() calls."""
+
+    def __init__(self, runs):
+        self.runs, self.DEVNULL, self.PIPE = runs, subprocess.DEVNULL, subprocess.PIPE
+
+    def run(self, cmd, **kw):
+        self.runs.append((cmd, kw))
+        return subprocess.CompletedProcess(cmd, 0, b"", b"")
+
+
+@contextlib.contextmanager
+def mock_home(home):
+    saved = os.environ.get("HOME")
+    os.environ["HOME"] = str(home)
+    try:
+        yield
+    finally:
+        os.environ["HOME"] = saved
+
+
+@contextlib.contextmanager
+def mock_vscode():
+    real = cs.vscode_app
+    cs.vscode_app = lambda: ("/usr/bin/code", "Code")
+    try:
+        with Patch(shutil=type("W", (), {"which": staticmethod(lambda n: "/usr/bin/" + n),
+                                         "rmtree": staticmethod(shutil.rmtree)})):
+            yield
+    finally:
+        cs.vscode_app = real

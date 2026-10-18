@@ -351,9 +351,10 @@ export class Tracker {
     }
 
     // settings: {notifyWaiting, notifyDone, notifyDoneMinSeconds}
-    // Returns {notify: [...], close: [...], pets: [...], sound: "" | "waiting" | "done" | "failed", present: Set}
+    // Returns {notify: [...], close: [...], pets: [...], sound: "" | "waiting" | "done" | "failed",
+    // present: Set, states: {key: state}, finished: [{key, took}] (every turn that ended)}
     track(source, groupList, nowMs, host, settings) {
-        const out = {notify: [], close: [], pets: [], sound: '', present: new Set()};
+        const out = {notify: [], close: [], pets: [], sound: '', present: new Set(), states: {}, finished: []};
         const next = {}, starts = {};
         const before = this.lastStates[source] || {};
         const startedAt = this.turnStarts[source] || {};
@@ -369,6 +370,7 @@ export class Tracker {
                 const prev = before[sid];
                 const active = s.state === 'working' || s.state === 'waiting';
                 next[sid] = s.state;
+                out.states[sid] = s.state;
                 out.present.add(sid);
                 // A turn runs from leaving idle/done until returning to it.
                 if (active)
@@ -401,6 +403,7 @@ export class Tracker {
                     else
                         out.pets.push({kind: 'done', text: fmt('%1 is done!', s.name), key: pk});
                     const took = (s.since || nowMs) - (sid in startedAt ? startedAt[sid] : nowMs);
+                    out.finished.push({key: sid, took});
                     if (settings.notifyDone && took >= settings.notifyDoneMinSeconds * 1000) {
                         const title = s.reason === 'failed' ? fmt('%1 failed', s.name)
                             : s.reason === 'stopped' ? fmt('%1 was stopped', s.name)
@@ -618,4 +621,212 @@ export function vscodeHint(group, host, status, resuming = false) {
     const on = status.vscode.on;
     return on ? fmt("VS Code's Claude runs on %1, not %2: switch its profile to use this account there.", on, group.title)
         : "VS Code's Claude doesn't run on this account.";
+}
+
+
+// ---------------------------------------------------------------- what a chat is doing
+
+// The line under a chat's folder: what it needs, what it's doing, or what
+// Claude said last ({text, title, full}), or null. A finished background
+// session keeps its result (detail).
+export function peekLine(s) {
+    const peek = s.peek || null;
+    const activity = (peek && peek.activity) || (s.tasks && s.tasks.current) || '';
+    const reply = peek && peek.replyLine ? fmt('Claude: %1', peek.replyLine) : '';
+    if (s.state === 'waiting') {
+        if (s.detail)
+            return {text: s.detail, title: 'What it needs', full: s.detail};
+        return activity ? {text: `▸ ${activity}`, title: 'What it needs', full: activity} : null;
+    }
+    if (s.state === 'working')
+        return activity ? {text: `▸ ${activity}`, title: 'Working on', full: activity} : null;
+    if (s.state === 'done' && s.detail)
+        return {text: s.detail, title: 'Result', full: s.detail};
+    return reply ? {text: reply, title: "Claude's last reply", full: peek.reply || peek.replyLine} : null;
+}
+
+// Is there more to show when the peek line is clicked?
+export function canPeek(s, remoteHost) {
+    const peek = s.peek || null;
+    return !!((peek && (peek.prompt || peek.reply)) || (s.tasks && s.tasks.total) || (s.changes && !remoteHost));
+}
+
+// At most maxLines lines and maxChars characters, with … when cut
+export function clampText(text, maxLines = 12, maxChars = 900) {
+    let lines = (text || '').split('\n');
+    let cut = false;
+    if (lines.length > maxLines) {
+        lines = lines.slice(0, maxLines);
+        cut = true;
+    }
+    let out = lines.join('\n');
+    if (out.length > maxChars) {
+        out = out.slice(0, maxChars);
+        cut = true;
+    }
+    return cut ? `${out.trimEnd()}…` : out;
+}
+
+export function taskMark(status) {
+    return status === 'completed' ? '✓' : status === 'in_progress' ? '▸' : '○';
+}
+
+export function tasksTooltip(tasks, open) {
+    const lines = [];
+    if (tasks.current)
+        lines.push(fmt('Now: %1', tasks.current));
+    for (const t of tasks.items)
+        lines.push(`${taskMark(t.status)} ${t.subject}`);
+    if (tasks.total > tasks.items.length)
+        lines.push(fmt('… and %1 more', tasks.total - tasks.items.length));
+    lines.push(fmt('Click to %1 the list.', open ? 'hide' : 'show'));
+    return [fmt('Tasks: %1 of %2 done', tasks.done, tasks.total), lines.join('\n')];
+}
+
+export function changesTag(changes) {
+    return plural(changes.count, '± %1 file', '± %1 files');
+}
+
+export function changesTooltip(changes, remoteHost) {
+    const lines = changes.files.slice();
+    if (changes.count > changes.files.length)
+        lines.push(fmt('… and %1 more', changes.count - changes.files.length));
+    lines.push('');
+    lines.push(remoteHost
+        ? fmt('On %1: comparing them works for chats on this computer.', remoteHost)
+        : 'Click to compare them with how they were before the chat, side by side in VS Code.');
+    return ['Files this chat changed', lines.join('\n')];
+}
+
+// ---------------------------------------------------------------- usage forecast
+
+// Where the bar's lighter part ends: the usage when the window resets, at your pace
+export function projectedPct(w) {
+    const f = w.forecast;
+    if (!f || typeof f.atReset !== 'number')
+        return w.pct;
+    return Math.max(w.pct, Math.min(100, f.atReset));
+}
+
+// The line under a bar when the window would run out before it resets
+export function forecastWarning(w, now) {
+    const f = w.forecast;
+    if (!f || !f.fullAt || !w.resetsAt)
+        return '';
+    return fmt('At this pace: full in %1 (resets in %2)', duration(f.fullAt - now), duration(w.resetsAt - now));
+}
+
+export function forecastTooltip(w, now) {
+    const f = w.forecast;
+    if (!f)
+        return null;
+    const rate = Math.round(f.rate * 10) / 10;
+    const pace = f.basis === 'hour' ? fmt('%1%/h over the last hour', rate) : fmt('%1%/h so far in this window', rate);
+    const lines = [f.fullAt
+        ? fmt('At this pace (%1) it runs out in %2, %3 before it resets.', pace, duration(f.fullAt - now),
+            duration(w.resetsAt - f.fullAt))
+        : fmt('At this pace (%1) it would be at %2% when it resets.', pace, Math.round(f.atReset)),
+    fmt('An even pace through the window would be at %1% by now (the tick).', Math.round(f.evenPct))];
+    return [fmt('%1 limit: %2% used', w.label, Math.round(w.pct)), lines.join('\n')];
+}
+
+// ---------------------------------------------------------------- the chat that needs you
+
+// The key of a session on the dashboard, as Tracker.track names it
+export function sessionKey(s, host) {
+    return (host ? `ssh:${host}|` : '') + (s.key || s.sessionId);
+}
+
+// The chats the hotkey goes to, in order: the ones waiting for you (the one
+// waiting longest first), then the ones that finished a turn you haven't
+// seen (newest first). groups: this computer's and the hosts' (with .host).
+export function chatsNeedingYou(groups, unseen = {}) {
+    const waiting = [], done = [];
+    for (const g of groups) {
+        for (const s of g.sessions) {
+            const key = sessionKey(s, g.host);
+            const entry = {key, session: s, host: g.host || ''};
+            if (s.state === 'waiting')
+                waiting.push(entry);
+            else if (unseen[key] === 'done' && s.state !== 'working')
+                done.push(entry);
+        }
+    }
+    waiting.sort((a, b) => (a.session.since || 0) - (b.session.since || 0));
+    done.sort((a, b) => (b.session.since || 0) - (a.session.since || 0));
+    return waiting.concat(done);
+}
+
+// Which of them the hotkey goes to now: the first, or the one after the
+// last one it went to if that was less than windowMs ago; -1 for none
+export function nextChatIndex(list, last, now, windowMs = 30000) {
+    if (!list.length)
+        return -1;
+    if (last && now - last.at < windowMs) {
+        const i = list.findIndex(c => c.key === last.key);
+        if (i >= 0)
+            return (i + 1) % list.length;
+    }
+    return 0;
+}
+
+// ---------------------------------------------------------------- while you were away
+
+// What the dashboard looked like when the screen locked: {sessions: {key:
+// {state, name}}, windows: {key: {resetsAt}}}. groups: this computer's and the hosts'.
+export function awaySnapshot(groups) {
+    const sessions = {}, windows = {};
+    for (const g of groups) {
+        for (const s of g.sessions)
+            sessions[sessionKey(s, g.host)] = {state: s.state, name: s.name};
+        for (const w of g.limits ? g.limits.windows : [])
+            windows[`${g.host || ''}|${g.id}/${w.key}`] = {resetsAt: w.resetsAt || null};
+    }
+    return {sessions, windows};
+}
+
+function nameList(names, max = 4) {
+    const shown = names.slice(0, max).join(', ');
+    return names.length > max ? fmt('%1 +%2 more', shown, names.length - max) : shown;
+}
+
+// One summary for when you come back: {title, body, first: the chat that
+// waited longest (chatsNeedingYou entry) or null}, or null when you were away
+// less than minMinutes or nothing happened. away: {lockedAt, snapshot}.
+export function awayDigest(away, groups, now, minMinutes) {
+    const awayMs = now - away.lockedAt;
+    if (!(awayMs >= minMinutes * 60000))
+        return null;
+    const before = away.snapshot.sessions;
+    const named = (s, host) => (host ? fmt('%1 (%2)', s.name, host) : s.name);
+    const finished = [], failed = [], resets = [];
+    for (const g of groups) {
+        for (const s of g.sessions) {
+            const prev = before[sessionKey(s, g.host)];
+            const ended = s.state === 'idle' || s.state === 'done';
+            const ran = prev ? prev.state === 'working' || prev.state === 'waiting'
+                : (s.since || 0) >= away.lockedAt;   // a chat that came and finished meanwhile
+            if (!ended || !ran || s.reason === 'stopped')
+                continue;
+            (s.reason === 'failed' ? failed : finished).push(named(s, g.host));
+        }
+        for (const w of g.limits ? g.limits.windows : []) {
+            const prev = away.snapshot.windows[`${g.host || ''}|${g.id}/${w.key}`];
+            if (prev && prev.resetsAt && prev.resetsAt > away.lockedAt && prev.resetsAt <= now)
+                resets.push(fmt('%1 limit reset (%2)', w.label, groupLabel(g)));
+        }
+    }
+    const waiting = chatsNeedingYou(groups);
+    if (!waiting.length && !finished.length && !failed.length)
+        return null;
+    const lines = waiting.slice(0, 3).map(c => fmt('Needs you: %1 (waiting %2)', named(c.session, c.host),
+        duration(now - (c.session.since || now))));
+    if (waiting.length > 3)
+        lines.push(fmt('+%1 more need you', waiting.length - 3));
+    if (finished.length)
+        lines.push(fmt('Finished: %1', nameList(finished)));
+    if (failed.length)
+        lines.push(fmt('Failed: %1', nameList(failed)));
+    lines.push(...resets);
+    return {title: fmt('While you were away (%1)', duration(awayMs)), body: lines.join('\n'), first: waiting[0] || null};
 }

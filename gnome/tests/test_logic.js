@@ -201,6 +201,104 @@ test('raising: nearest ancestor, caption, prefer, require', () => {
     eq(L.pickWindow(windows, {pids: 'bad'}), null, 'bad input');
 });
 
+test('peek line: what it needs, is doing, or said last', () => {
+    const peek = {activity: 'Bash: pytest -x', prompt: 'fix it', reply: 'Fixed.\nDetails', replyLine: 'Fixed.', at: T};
+    eq(L.peekLine(session('a', 'working', {peek})).text, '▸ Bash: pytest -x');
+    eq(L.peekLine(session('a', 'working', {peek: {...peek, activity: ''}, tasks: {current: 'Testing the parser'}})).text,
+        '▸ Testing the parser', 'the current task when there is no step');
+    eq(L.peekLine(session('a', 'waiting', {peek, detail: 'approve Bash: rm -rf build'})).text, 'approve Bash: rm -rf build');
+    eq(L.peekLine(session('a', 'waiting', {peek})).text, '▸ Bash: pytest -x', 'the pending tool call');
+    const idle = L.peekLine(session('a', 'idle', {peek: {...peek, activity: ''}}));
+    eq([idle.text, idle.full], ['Claude: Fixed.', 'Fixed.\nDetails']);
+    eq(L.peekLine(session('a', 'done', {peek, detail: 'All tests pass'})).text, 'All tests pass', 'a result stays');
+    eq(L.peekLine(session('a', 'idle')), null);
+    eq(L.canPeek(session('a', 'idle'), ''), false);
+    eq(L.canPeek(session('a', 'idle', {changes: {count: 1, files: ['a.py']}}), ''), true);
+    eq(L.canPeek(session('a', 'idle', {changes: {count: 1, files: ['a.py']}}), 'lab'), false, 'no comparing on hosts');
+    eq(L.clampText('a\nb\nc', 2), 'a\nb…');
+    eq(L.clampText('abcdef', 5, 4), 'abcd…');
+    eq(L.clampText('ok'), 'ok');
+});
+
+test('tasks and changes tags', () => {
+    const tasks = {done: 1, total: 3, current: 'Testing', items: [{subject: 'Write', status: 'completed'},
+        {subject: 'Test', status: 'in_progress'}, {subject: 'Ship', status: 'pending'}]};
+    const [title, text] = L.tasksTooltip(tasks, false);
+    eq(title, 'Tasks: 1 of 3 done');
+    eq(text.split('\n'), ['Now: Testing', '✓ Write', '▸ Test', '○ Ship', 'Click to show the list.']);
+    eq(L.changesTag({count: 1, files: ['a']}), '± 1 file');
+    eq(L.changesTag({count: 14, files: []}), '± 14 files');
+    eq(L.changesTooltip({count: 13, files: ['a.py']}, '')[1].split('\n').slice(0, 2), ['a.py', '… and 12 more']);
+    eq(L.changesTooltip({count: 1, files: ['a.py']}, 'lab')[1].includes('On lab'), true);
+});
+
+test('usage forecast text', () => {
+    const H = 3600000;
+    const w = {key: 'five_hour', label: '5h', pct: 60, resetsAt: T + 2 * H, reset: false,
+        forecast: {evenPct: 60, rate: 30, atReset: 120, fullAt: T + 80 * 60000, basis: 'hour'}};
+    eq(L.projectedPct(w), 100, 'capped at 100');
+    eq(L.projectedPct({pct: 40, forecast: null}), 40);
+    eq(L.projectedPct({pct: 40, forecast: {atReset: 30}}), 40, 'never below the use so far');
+    eq(L.forecastWarning(w, T), 'At this pace: full in 1h 20m (resets in 2h 0m)');
+    eq(L.forecastWarning({...w, forecast: {...w.forecast, fullAt: null}}, T), '');
+    const [title, text] = L.forecastTooltip(w, T);
+    eq(title, '5h limit: 60% used');
+    eq(text.split('\n'), ['At this pace (30%/h over the last hour) it runs out in 1h 20m, 40m before it resets.',
+        'An even pace through the window would be at 60% by now (the tick).']);
+    eq(L.forecastTooltip({...w, forecast: {evenPct: 50, rate: 2.04, atReset: 64.4, fullAt: null, basis: 'window'}}, T)[1]
+        .split('\n')[0], 'At this pace (2%/h so far in this window) it would be at 64% when it resets.');
+    eq(L.forecastTooltip({...w, forecast: null}, T), null);
+});
+
+test('hotkey: waiting longest first, then unseen finished turns, then the next', () => {
+    const groups = [group([session('a', 'waiting', {since: 300}), session('b', 'idle', {since: 500}),
+        session('c', 'waiting', {since: 100}), session('d', 'done', {since: 900}), session('e', 'working')]),
+    group([session('r', 'waiting', {since: 200})], {host: 'lab'})];
+    const unseen = {b: 'done', d: 'done', e: 'done'};
+    const list = L.chatsNeedingYou(groups, unseen);
+    eq(list.map(c => c.key), ['c', 'ssh:lab|r', 'a', 'd', 'b'], 'working e is no longer unseen');
+    eq(list[1].host, 'lab');
+    eq(L.nextChatIndex(list, null, T), 0);
+    eq(L.nextChatIndex(list, {key: 'ssh:lab|r', at: T - 5000}, T), 2, 'pressed again: the next');
+    eq(L.nextChatIndex(list, {key: 'b', at: T - 5000}, T), 0, 'wraps around');
+    eq(L.nextChatIndex(list, {key: 'ssh:lab|r', at: T - 60000}, T), 0, 'later: from the top');
+    eq(L.nextChatIndex(list, {key: 'gone', at: T}, T), 0);
+    eq(L.nextChatIndex([], null, T), -1);
+});
+
+test('hotkey: unseen finished turns come from the tracker', () => {
+    const tracker = new L.Tracker();
+    tracker.track('', [group([session('a', 'working', {since: T - 120000})])], T, '', settings);
+    const out = tracker.track('', [group([session('a', 'idle', {since: T})])], T + 2000, '', settings);
+    eq(out.finished, [{key: 'a', took: 120000}]);
+    eq(out.states, {a: 'idle'});
+});
+
+test('while you were away', () => {
+    const M = 60000;
+    const before = [group([session('a', 'working'), session('b', 'working'), session('c', 'idle'),
+        session('f', 'working'), session('s', 'working')],
+    {limits: {windows: [{key: 'five_hour', label: '5h', pct: 80, resetsAt: T + 30 * M}]}}),
+    group([session('r', 'working')], {host: 'lab'})];
+    const away = {lockedAt: T, snapshot: L.awaySnapshot(before)};
+    const now = T + 72 * M;
+    const after = [group([session('a', 'done'), session('b', 'waiting', {since: now - 22 * M}), session('c', 'idle'),
+        session('f', 'done', {reason: 'failed'}), session('s', 'done', {reason: 'stopped'}),
+        session('n', 'done', {since: T + 10 * M})],
+    {limits: {windows: [{key: 'five_hour', label: '5h', pct: 3, resetsAt: T + 330 * M}]}}),
+    group([session('r', 'idle')], {host: 'lab'})];
+    const d = L.awayDigest(away, after, now, 5);
+    eq(d.title, 'While you were away (1h 12m)');
+    eq(d.body.split('\n'), ['Needs you: chat b (waiting 22m)', 'Finished: chat a, chat n, chat r (lab)', 'Failed: chat f',
+        '5h limit reset (work)']);
+    eq(d.first.key, 'b');
+    eq(L.awayDigest(away, after, T + 4 * M, 5), null, 'not away long enough');
+    eq(L.awayDigest(away, before, now, 5), null, 'nothing happened');
+    const many = group(['w1', 'w2', 'w3', 'w4', 'w5'].map((k, i) => session(k, 'waiting', {since: now - (10 - i) * M})));
+    eq(L.awayDigest(away, [many], now, 5).body.split('\n'), ['Needs you: chat w1 (waiting 10m)',
+        'Needs you: chat w2 (waiting 9m)', 'Needs you: chat w3 (waiting 8m)', '+2 more need you']);
+});
+
 print(`${count - failures}/${count} passed`);
 if (failures)
     System.exit(1);

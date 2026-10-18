@@ -63,7 +63,16 @@ export default class ClaudeStatusPreferences extends ExtensionPreferences {
         notify.add(toggle('notify-done', 'When a session finishes its turn'));
         notify.add(needs(spin('notify-done-min-seconds', '…if the turn took at least', 'seconds', 0, 3600, 10),
             'notify-done'));
+        notify.add(toggle('away-digest', 'A summary when you come back',
+            'after the screen was locked: what finished, failed or needs you, at the top of the menu, and as one notification while the ones above are on'));
+        notify.add(needs(spin('away-minutes', '…if you were away at least', 'minutes', 1, 240, 1), 'away-digest'));
         page.add(notify);
+
+        // (a group's description is Pango markup: < is &lt;)
+        const keys = new Adw.PreferencesGroup({title: 'Keyboard shortcut',
+            description: "Goes to the chat that needs you: the one waiting longest, then a finished turn you haven't seen. Press it again soon after for the next one. With none, it opens the menu. E.g. &lt;Super&gt;&lt;Shift&gt;c; empty for none."});
+        keys.add(this._shortcutRow(settings, 'next-chat-shortcut', 'Go to the chat that needs you'));
+        page.add(keys);
 
         const sounds = new Adw.PreferencesGroup({title: 'Sounds',
             description: "Sounds come from your sound theme. They stay quiet while Do Not Disturb is on."});
@@ -86,6 +95,23 @@ export default class ClaudeStatusPreferences extends ExtensionPreferences {
             'show-pet'));
         look.add(toggle('show-tokens', 'Show token totals', 'from local transcripts'));
         page.add(look);
+    }
+
+    // An accelerator like <Super><Shift>c, checked before it's kept
+    _shortcutRow(settings, key, title) {
+        const row = new Adw.EntryRow({title, show_apply_button: true, text: settings.get_strv(key)[0] || ''});
+        row.connect('apply', () => {
+            const text = row.text.trim();
+            const [ok, keyval] = text ? Gtk.accelerator_parse(text) : [true, 0];
+            if (text && (!ok || !keyval)) {
+                row.add_css_class('error');
+                return;
+            }
+            row.remove_css_class('error');
+            settings.set_strv(key, text ? [text] : []);
+        });
+        row.connect('changed', () => row.remove_css_class('error'));
+        return row;
     }
 
     // A sound: one of the theme's, none, or a file; with a button to hear it

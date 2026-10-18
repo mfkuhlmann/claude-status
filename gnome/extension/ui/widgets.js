@@ -83,6 +83,41 @@ export function meter(pct, colorClass, styleClass = 'claude-meter') {
     return trough;
 }
 
+// A plan usage bar: filled to pct%, then, lighter, to where it would be when
+// the window resets at your pace (projected, e.g. claude_status.py's
+// forecast.atReset), and a thin tick where an even pace would be by now
+export function usageMeter(pct, colorClass, projected = pct, projectedClass = colorClass, evenPct = null) {
+    const trough = new St.Widget({style_class: 'claude-meter', x_expand: true, y_align: Clutter.ActorAlign.CENTER});
+    const share = v => Math.min(100, Math.max(0, v)) / 100;
+    const ahead = projected > pct
+        ? new St.Widget({style_class: `claude-meter-fill claude-bg-${projectedClass}`, opacity: 90}) : null;
+    const fill = new St.Widget({style_class: `claude-meter-fill claude-bg-${colorClass}`});
+    const tick = evenPct !== null && evenPct !== undefined ? new St.Widget({style_class: 'claude-meter-tick'}) : null;
+    for (const part of [ahead, fill, tick]) {
+        if (part)
+            trough.add_child(part);
+    }
+    const layout = () => {
+        const [w, h] = [trough.width, trough.height];
+        const filled = Math.round(w * share(pct));
+        fill.set_position(0, 0);
+        fill.set_size(filled, h);
+        if (ahead) {
+            // under the fill's rounded end, so there's no gap between them
+            const from = Math.max(0, filled - h);
+            ahead.set_position(from, 0);
+            ahead.set_size(Math.max(0, Math.round(w * share(projected)) - from), h);
+        }
+        if (tick) {   // sticks out above and below, so it shows over the fill too
+            tick.set_position(Math.max(0, Math.round(w * share(evenPct)) - 1), -3);
+            tick.set_size(2, h + 6);
+        }
+    };
+    trough.connect('notify::width', layout);
+    trough.connect('notify::height', layout);
+    return trough;
+}
+
 export function dot(colorClass, styleClass = 'claude-dot') {
     return new St.Widget({style_class: `${styleClass} claude-bg-${colorClass}`, y_align: Clutter.ActorAlign.CENTER});
 }

@@ -1,7 +1,9 @@
 // One session in an account's list (port of the Plasma widget's
 // SessionRow.qml): state dot, name (click to jump there), tags, state, and
 // on hover the share, remove and stop buttons; below it the folder, model,
-// context fill, what it needs, its subagents and any question to confirm.
+// context fill, what it needs or is doing or said last (click for the last
+// exchange, its tasks and its changes), its subagents and any question to
+// confirm.
 
 import Clutter from 'gi://Clutter';
 import St from 'gi://St';
@@ -24,6 +26,9 @@ export function buildSessionRow(ctx, session, {showProfile = false, remoteHost =
     const petColor = ctx.petColors[L.petKeyOf(s, remoteHost)] || '';
     const agents = s.agents || null;
     const showAgents = ctx.ui.expandedAgents[rowKey] === true;
+    const tasks = s.tasks && s.tasks.total ? s.tasks : null;
+    const canPeek = L.canPeek(s, remoteHost);
+    const showPeek = canPeek && ctx.ui.expandedPeek[rowKey] === true;
     const open = () => (remoteHost ? ctx.remoteShow(remoteHost, s) : ctx.jumpTo(s.sessionId, s.profileDir));
 
     const row = box('claude-session-row', {x_expand: true, reactive: true, track_hover: true});
@@ -66,6 +71,28 @@ export function buildSessionRow(ctx, session, {showProfile = false, remoteHost =
         });
         line1.add_child(tips.add(t, () => ['Subagents', L.fmt('%1 done, %2 running, %3 stopped. Click to %4 what each one is doing.',
             agents.done, agents.running, agents.stopped, showAgents ? 'hide' : 'show')]));
+    }
+    if (tasks) {
+        // its task list (TaskCreate), done/total; outlined while it's on one
+        const t = tag(L.fmt('tasks %1/%2', tasks.done, tasks.total), tasks.items.some(i => i.status === 'in_progress'));
+        t.add_style_class_name('claude-clickable');
+        t.connect('button-release-event', () => {
+            ctx.togglePeek(rowKey);
+            return Clutter.EVENT_STOP;
+        });
+        line1.add_child(tips.add(t, () => L.tasksTooltip(tasks, showPeek)));
+    }
+    if (s.changes) {
+        // the files it changed: compared in VS Code (chats on this computer)
+        const t = tag(L.changesTag(s.changes));
+        if (!remoteHost) {
+            t.add_style_class_name('claude-clickable');
+            t.connect('button-release-event', () => {
+                ctx.showChanges(s.chatId || s.sessionId, s.profileDir, false);
+                return Clutter.EVENT_STOP;
+            });
+        }
+        line1.add_child(tips.add(t, () => L.changesTooltip(s.changes, remoteHost)));
     }
     line1.add_child(label(L.stateText(s, ctx.now),
         `claude-state${s.state === 'waiting' ? ' claude-fg-waiting claude-strong' : ''}`));
@@ -126,11 +153,26 @@ export function buildSessionRow(ctx, session, {showProfile = false, remoteHost =
     }
     body.add_child(line2);
 
-    if (s.detail && (s.state === 'waiting' || s.state === 'done')) {
-        const detail = label(s.detail, 'claude-detail claude-small', {x_expand: true});
-        tips.add(detail, [s.state === 'waiting' ? 'What it needs' : 'Result', s.detail]);
-        body.add_child(detail);
+    // What it needs, is doing, or said last; click for more
+    const peekLine = L.peekLine(s);
+    if (peekLine) {
+        const text = label(peekLine.text, 'claude-detail claude-small', {x_expand: true});
+        let line = text;
+        if (canPeek) {
+            line = new St.Button({style_class: 'claude-link claude-peek-line', can_focus: true, child: text,
+                x_expand: true, x_align: Clutter.ActorAlign.FILL});
+            line.connect('clicked', () => ctx.togglePeek(rowKey));
+        }
+        tips.add(line, () => [peekLine.title, canPeek
+            ? `${L.clampText(peekLine.full, 8, 500)}\n\n${L.fmt('Click to %1 the last exchange.', showPeek ? 'hide' : 'show')}`
+            : peekLine.full]);
+        body.add_child(line);
+    } else if (canPeek) {
+        const more = link(showPeek ? 'Hide details' : 'Details', () => ctx.togglePeek(rowKey), 'claude-detail claude-small');
+        body.add_child(more);
     }
+    if (showPeek)
+        body.add_child(buildPeek(ctx, s, remoteHost));
 
     if (showAgents && agents)
         body.add_child(buildAgentsTree(ctx, agents));
@@ -189,6 +231,44 @@ function sharedTooltip(s) {
     if (info.stoppedCopies)
         text += `\n${L.fmt('Its background session on %1 was stopped; %1 shows a link to this chat.', info.stoppedCopies.join(', '))}`;
     return ['Shared chat', text];
+}
+
+// The last exchange (your prompt, Claude's reply), its tasks, and buttons
+// that compare the files it changed (all of them, or the last turn's)
+function buildPeek(ctx, s, remoteHost) {
+    const peek = s.peek || {};
+    const box_ = column('claude-peek', {x_expand: true});
+    if (peek.prompt)
+        box_.add_child(paragraph(L.fmt('You: %1', L.clampText(peek.prompt, 4, 300)), 'claude-small claude-dim'));
+    if (peek.reply)
+        box_.add_child(paragraph(L.fmt('Claude: %1', L.clampText(peek.reply)), 'claude-small'));
+    else if (s.state === 'working' && peek.activity)
+        box_.add_child(paragraph(L.fmt('Claude is on it: %1', peek.activity), 'claude-small claude-dim'));
+    if (s.tasks && s.tasks.total) {
+        const list = column('claude-tasks', {x_expand: true});
+        list.add_child(label(L.fmt('Tasks: %1 of %2 done', s.tasks.done, s.tasks.total), 'claude-small claude-strong'));
+        for (const t of s.tasks.items) {
+            list.add_child(label(`${L.taskMark(t.status)} ${t.subject}`,
+                `claude-small${t.status === 'completed' ? ' claude-dim' : t.status === 'in_progress' ? ' claude-fg-working' : ''}`,
+                {x_expand: true}));
+        }
+        if (s.tasks.total > s.tasks.items.length)
+            list.add_child(label(L.fmt('… and %1 more', s.tasks.total - s.tasks.items.length), 'claude-small claude-dim'));
+        box_.add_child(list);
+    }
+    if (s.changes && !remoteHost) {
+        const buttons = box('claude-confirm-buttons');
+        const all = textButton(L.fmt(s.changes.count === 1 ? 'Compare changes (%1 file)' : 'Compare changes (%1 files)', s.changes.count),
+            () => ctx.showChanges(s.chatId || s.sessionId, s.profileDir, false), 'claude-text-button claude-confirm-button');
+        ctx.tips.add(all, ['Compare changes', 'Every file this chat changed, as it was before the chat and as it is now, side by side in VS Code.']);
+        buttons.add_child(all);
+        const turn = textButton('Last turn', () => ctx.showChanges(s.chatId || s.sessionId, s.profileDir, true),
+            'claude-text-button claude-confirm-button');
+        ctx.tips.add(turn, ['Compare the last turn', 'Only what changed since your last prompt.']);
+        buttons.add_child(turn);
+        box_.add_child(buttons);
+    }
+    return box_;
 }
 
 // Subagents as a tree: what each one is doing

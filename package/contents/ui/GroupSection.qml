@@ -199,6 +199,8 @@ ColumnLayout {
                 label: modelData.label
                 pct: modelData.pct
                 detail: root.resetText(modelData)
+                forecast: modelData.forecast || null
+                resetsAt: modelData.resetsAt || 0
             }
         }
 
