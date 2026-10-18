@@ -7,6 +7,7 @@ import { test } from "node:test";
 import {
   canEndChat,
   claudeCodeHere,
+  hasTurn,
   claudeCodeReopenHint,
   cliInstalled,
   reopensInClaudeCode,
@@ -16,14 +17,14 @@ import type { Group } from "../src/shared/types";
 
 const chat = { kind: "interactive", entrypoint: "cli", state: "idle", pid: 42 };
 
-test("an idle chat in a terminal can be stopped; not a busy one, nor one in Claude Code", () => {
+test("a chat with a process can be stopped, whatever it's doing; a working one interrupted", () => {
   assert.equal(canEndChat(chat), true);
-  assert.equal(canEndChat({ ...chat, state: "working" }), false);
-  assert.equal(canEndChat({ ...chat, state: "waiting" }), false);
-  assert.equal(canEndChat({ ...chat, entrypoint: "claude-vscode" }), false, "the Claude Code tab would show an error");
+  assert.equal(canEndChat({ ...chat, state: "working" }), true, "it asks first");
+  assert.equal(canEndChat({ ...chat, entrypoint: "claude-vscode" }), true, "its Claude Code tab goes on");
   assert.equal(canEndChat({ ...chat, kind: "bg" }), false, "background sessions: claude stop");
   assert.equal(canEndChat({ ...chat, pid: null }), false, "no process");
-  assert.equal(canEndChat({ ...chat, state: undefined }), false, "a recent chat's reference");
+  assert.equal(canEndChat({ kind: "chat", pid: null }), false, "a recent chat's reference");
+  assert.deepEqual(["working", "waiting", "idle", "done"].map((state) => hasTurn({ state })), [true, true, false, false]);
 });
 
 test("the claude command counts as there unless the backend says it isn't", () => {

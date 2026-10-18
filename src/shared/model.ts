@@ -12,11 +12,18 @@ export function allGroups(status: Status | null, hosts: HostState[]): Group[] {
   return out;
 }
 
-// An idle chat in a terminal can be stopped too (besides background
-// sessions): its claude quits and the chat is kept. Not one in the Claude Code
-// extension: it would show that as an error in its tab.
-export function canEndChat(s: { kind?: string; entrypoint?: string; state?: string; pid?: number | null }): boolean {
-  return s.kind === "interactive" && s.entrypoint !== "claude-vscode" && s.state === "idle" && s.pid != null;
+// A chat with a process of its own can be stopped too (besides background
+// sessions), whatever it's doing: in a terminal its claude quits (the chat is
+// kept), in a Claude Code tab the tab shows it as interrupted and goes on with
+// the next message (the widget's backend: stopping and interrupting chats).
+export function canEndChat(s: { kind?: string; pid?: number | null; state?: string; entrypoint?: string }): boolean {
+  return s.kind === "interactive" && s.pid != null;
+}
+
+// A chat that's working or waiting has something to interrupt (Ctrl+C), where
+// it can be pressed: in a terminal of this window, or a tmux pane
+export function hasTurn(s: { state?: string }): boolean {
+  return s.state === "working" || s.state === "waiting";
 }
 
 // The claude command is on the machine a status came from (when unsure: no

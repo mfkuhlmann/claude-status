@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+- The same version as the widget and the GNOME extension: all three are 1.7.0.
+- **Stop or interrupt any running chat:** the ■ button works on every chat
+  with a process, whatever it's doing, and asks first, saying what will
+  happen. In a terminal, Claude quits as when its terminal closes (the chat
+  is kept and moves to Recent chats); in a Claude Code tab it's like the tab's
+  own stop button (the tab says *Interrupted* and goes on with your next
+  message). A working chat in one of this window's terminals, or in tmux, can
+  be interrupted instead: Ctrl+C, which stops the turn and its subagents, and
+  keeps the chat open. Also on SSH hosts.
+- **Model and effort:** chats show their reasoning effort next to the model,
+  subagents the model they run on.
+- From the widget's backend 1.7.0: stopping by signal as each host expects
+  (SIGINT for Claude Code tabs, SIGTERM in terminals) and ending what a
+  stopped chat leaves behind; `jump.py --interrupt`; models and effort.
+
 ## 1.6.0
 
 - The same version as the widget and the GNOME extension: all three are 1.6.0.

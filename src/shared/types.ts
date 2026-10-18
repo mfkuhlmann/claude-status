@@ -14,6 +14,7 @@ export interface Agent {
   activity: string;
   started: number | null;
   updated: number | null;
+  model?: string | null; // e.g. "Haiku 4.5", from its replies
 }
 
 export interface SharedInfo {
@@ -44,11 +45,13 @@ export interface Session {
   startedAt: number | null;
   context: number | null;
   model: string | null;
+  effort?: string | null; // reasoning effort, from the status line (low … max)
   costUsd: number | null;
   agents: { running: number; done: number; stopped: number; total: number; tree: Agent[] } | null;
   shared: SharedInfo | null;
   jobId: string | null;
   jobSessionId: string | null;
+  tmux?: boolean; // runs in a tmux pane: a working one can be interrupted (Ctrl+C)
   // --remote: shell commands, run on the machine the session is on
   openCommand?: string | null;
   stopCommand?: string | null;
@@ -220,6 +223,7 @@ export interface ChatRef {
   cwd?: string;
   kind?: string;
   state?: SessionState;
+  tmux?: boolean;
   jobId?: string | null;
   openCommand?: string | null;
   stopCommand?: string | null;

@@ -83,11 +83,21 @@ to it). A half is greyed out where it can't work, and its tooltip says why: no
 `claude` command on the chat's machine (the chats then reopen in Claude Code),
 or Claude Code not installed or on another account.
 
-**Stopping** (■, asks first): a background session is stopped with
-`claude stop`. An idle chat in a terminal (its turn is over, nothing runs) can
-be stopped too: Claude quits as when its terminal closes, the terminal stays
-open, and the chat moves to Recent chats. One that got back to work meanwhile
-isn't touched. Chats in a Claude Code tab are closed there instead.
+**Stopping and interrupting** (■, asks first, saying what will happen): a
+background session is stopped with `claude stop`. Any other running chat can
+be stopped whatever it's doing: in a terminal, Claude quits as when its
+terminal closes (the current step is cut off, the terminal stays open, and the
+chat moves to Recent chats); in a Claude Code tab it's like the tab's own stop
+button (the tab says *Interrupted*, keeps the chat and goes on with your next
+message). A working chat in one of this window's terminals, or in tmux, can be
+**interrupted** instead: Ctrl+C, as if pressed there, which, like the Claude
+Code tab's stop button, stops the turn and its subagents (background ones
+too) and keeps the chat open. Stopping ends every subagent of the chat, since
+they run inside its Claude, and an idle chat that got back to work since you
+asked isn't touched.
+
+Each chat shows its model and reasoning effort (*Opus 5.5 · max*, from the
+status line), and each subagent the model it runs on.
 
 ## Requirements
 

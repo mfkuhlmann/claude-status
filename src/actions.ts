@@ -11,7 +11,7 @@ import { configDirArgs, setSshHosts, settings } from "./config";
 import { claudePanelAvailable, localPanelProfileKey, openPanelChat } from "./claudePanel";
 import type { Dashboard } from "./dashboard";
 import { canRaiseWindows, isGnome } from "./desktop";
-import { allGroups, canEndChat, cliInstalled, groupLabel, shellQuote } from "./shared/model";
+import { allGroups, canEndChat, cliInstalled, groupLabel, hasTurn, shellQuote } from "./shared/model";
 import type { ChatRef, Group } from "./shared/types";
 import { localAncestors, type Place, type Terminals } from "./terminals";
 
@@ -158,34 +158,75 @@ export class Actions {
 
   // ---------------------------------------------------------------- stop / remove
 
-  // A background session (`claude stop`), or an idle chat in a terminal: its
-  // claude quits as when the terminal closes (the backend looks again first,
-  // and leaves one that got back to work)
+  // A background session (`claude stop`), or a chat with a process of its
+  // own. A working chat can be interrupted, as if Ctrl+C were pressed (what
+  // the stop button of the Claude Code tab does: the turn and its subagents
+  // stop, the chat stays), where that can be done: in a terminal of this
+  // window (typed into it) or in tmux (the backend sends it to the pane; Esc
+  // would leave background subagents running). Else, and when you choose to,
+  // it's stopped: its claude quits as when its terminal closes; in a Claude
+  // Code tab the tab shows it as interrupted and goes on with your next
+  // message. The backend looks again first and leaves an idle chat that got
+  // back to work alone.
   async stop(chat: ChatRef): Promise<void> {
     if (this.demoOnly()) return;
-    const idleChat = canEndChat(chat);
+    const chatProcess = canEndChat(chat);
+    const busy = chat.state !== "idle";
+    const inTab = chat.entrypoint === "claude-vscode";
+    let terminal: vscode.Terminal | undefined;
+    if (chatProcess && hasTurn(chat) && !inTab && chat.pid) {
+      const onWindowHost = !!chat.host && chat.host === this.dash.currentHost;
+      const ancestors = chat.host
+        ? onWindowHost ? await this.remoteAncestors(chat.host, chat.pid) : new Set<number>()
+        : localAncestors(chat.pid);
+      terminal = await this.terminals.find(ancestors, onWindowHost);
+    }
+    const interruptible = !!terminal || (chatProcess && hasTurn(chat) && !inTab && !!chat.tmux);
+    const detail = !chatProcess
+      ? "It's interrupted; its conversation is kept, and `claude attach` resumes it."
+      : interruptible
+        ? `Interrupt: like Ctrl+C in its ${terminal ? "terminal" : "tmux pane"}, or the stop button of a Claude Code tab; the current step and its subagents stop, and the chat stays open there.\n\nStop: Claude quits (the current step is cut off) and its terminal stays open; the chat is kept and shows under Recent chats.`
+        : inTab
+          ? chat.state === "working"
+            ? "It's working right now: the current step is interrupted, as with the stop button in its tab, and anything it was running stops. The tab keeps the chat and goes on with your next message."
+            : chat.state === "waiting"
+              ? "It's waiting for you: what it asks is refused, as with the stop button in its tab. The tab keeps the chat and goes on with your next message."
+              : "It's idle, so nothing is interrupted: its Claude process quits. The tab keeps the chat and goes on with your next message."
+          : chat.state === "working"
+            ? "It's working right now: the current step is cut off and anything it was running stops. Claude quits and its terminal stays open; the chat is kept and shows under Recent chats."
+            : chat.state === "waiting"
+              ? "It's waiting for you: Claude quits without your answer and its terminal stays open. The chat is kept and shows under Recent chats."
+              : "It's idle, so nothing is interrupted: Claude quits and its terminal stays open. The chat is kept and shows under Recent chats.";
     const choice = await vscode.window.showWarningMessage(
-      `Stop “${chat.name}”?`,
-      {
-        modal: true,
-        detail: idleChat
-          ? "It's idle, so nothing is interrupted: Claude quits and its terminal stays open. The chat is kept; reopen it from Recent chats."
-          : "It's interrupted; its conversation is kept, and `claude attach` resumes it.",
-      },
-      "Stop",
+      interruptible ? `Interrupt or stop “${chat.name}”?` : `Stop “${chat.name}”?`,
+      { modal: true, detail },
+      ...(interruptible ? ["Interrupt", "Stop"] : ["Stop"]),
     );
+    if (choice === "Interrupt") {
+      if (terminal) {
+        terminal.sendText("\x03", false); // Ctrl+C, as if pressed in it (Claude's terminal is raw: a key, not a signal)
+        return;
+      }
+      const profile = chat.profileDir ? [chat.profileDir] : [];
+      const answer = chat.host
+        ? await this.backend.action("remote.py", ["--interrupt", chat.host, chat.sessionId, ...profile])
+        : await this.backend.action("jump.py", ["--interrupt", chat.sessionId, ...(chat.profileDir ? ["--profile", chat.profileDir] : []), ...configDirArgs()]);
+      this.report(answer, "Couldn't interrupt the chat");
+      this.refresh(chat.host);
+      return;
+    }
     if (choice !== "Stop") return;
     let answer: Answer;
-    if (chat.host && idleChat) {
-      answer = await this.backend.action("remote.py", ["--end", chat.host, chat.sessionId, ...(chat.profileDir ? [chat.profileDir] : [])]);
+    if (chat.host && chatProcess) {
+      answer = await this.backend.action("remote.py", ["--end", chat.host, chat.sessionId, ...(chat.profileDir ? [chat.profileDir] : []), ...(busy ? ["--busy"] : [])]);
     } else if (chat.host) {
       if (!chat.stopCommand) return this.fail(`${chat.name} can't be stopped from here.`);
       answer = await this.backend.action("remote.py", ["--run", chat.host, chat.stopCommand]);
     } else {
       const profile = chat.profileDir ? ["--profile", chat.profileDir] : [];
-      answer = await this.backend.action("jump.py", ["--stop", chat.sessionId, ...profile, ...configDirArgs()]);
+      answer = await this.backend.action("jump.py", ["--stop", chat.sessionId, ...profile, ...(busy ? ["--busy"] : []), ...configDirArgs()]);
     }
-    this.report(answer, "Couldn't stop the chat");
+    if (this.report(answer, "Couldn't stop the chat") && /killed|ended/.test(answer.message)) this.dash.setActionInfo(answer.message);
     this.refresh(chat.host);
   }
 

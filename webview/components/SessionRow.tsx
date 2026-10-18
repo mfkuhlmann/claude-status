@@ -1,4 +1,4 @@
-import { canEndChat, petKeyOf, reasonText, stateText, usageLevel } from "../../src/shared/model";
+import { canEndChat, hasTurn, petKeyOf, reasonText, stateText, usageLevel } from "../../src/shared/model";
 import type { Session } from "../../src/shared/types";
 import { post } from "../env";
 import { pets } from "../pets";
@@ -72,7 +72,11 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
 
         <div class="session-line small">
           <Elided text={s.cwdShort || s.cwd || "~"} class="folder muted" title={s.cwd || s.cwdShort} />
-          {s.model ? <span class="muted nowrap">{s.model}</span> : null}
+          {s.model ? (
+            <span class="muted nowrap" title={s.effort ? `${s.model}\nEffort: ${s.effort} (how hard it thinks; /effort changes it)` : s.model}>
+              {s.effort ? `${s.model} · ${s.effort}` : s.model}
+            </span>
+          ) : null}
           {s.context !== null ? (
             <>
               {/* Context window fill */}
@@ -124,8 +128,14 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
             canEndChat(s) ? (
               <IconButton
                 icon="stop"
-                label="Stop this chat…"
-                title="Stop this chat. Asks first; Claude quits and its terminal stays open. The chat is kept and shows under Recent chats."
+                label={hasTurn(s) ? "Interrupt or stop this chat…" : "Stop this chat…"}
+                title={
+                  s.entrypoint === "claude-vscode"
+                    ? "Stop this chat. Asks first; its Claude Code tab shows it as interrupted and goes on with your next message."
+                    : hasTurn(s)
+                      ? "Interrupt or stop this chat. Asks first. Interrupting is like Ctrl+C or the stop button of a Claude Code tab (where it runs in a terminal of this window, or in tmux): its subagents stop too and the chat stays open. Stopping cuts off the current step, Claude quits and its terminal stays open."
+                      : "Stop this chat. Asks first; Claude quits and its terminal stays open. The chat is kept and shows under Recent chats."
+                }
                 onClick={() => post({ type: "stop", chat })}
               />
             ) : (

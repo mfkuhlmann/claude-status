@@ -31,7 +31,11 @@ export function AgentTree({ tree, now }: { tree: Agent[]; now: number }) {
                 <span class="agent-desc" title={title}>
                   {title}
                 </span>
-                {a.description && a.type ? <span class="agent-type">{a.type}</span> : null}
+                {a.description && a.type ? (
+                  <span class="agent-type" title={a.model ? `${a.type} on ${a.model}` : a.type}>
+                    {a.model ? `${a.type} · ${a.model}` : a.type}
+                  </span>
+                ) : null}
                 <span class="agent-status">{statusText(a, now)}</span>
               </div>
               {a.activity ? (

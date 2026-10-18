@@ -29,6 +29,7 @@ export function chatRefOf(s: Session, host?: string): ChatRef {
     cwd: s.cwd,
     kind: s.kind,
     state: s.state,
+    tmux: !!s.tmux,
     jobId: s.jobId,
     openCommand: s.openCommand ?? null,
     stopCommand: s.stopCommand ?? null,

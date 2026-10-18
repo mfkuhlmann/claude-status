@@ -364,6 +364,8 @@ def attach_snapshot(session, snapshot_root, profile, ids=None):
             ctx = snap.get("context_window") or {}
             session["context"] = number(ctx.get("used_percentage"))
             session["model"] = (snap.get("model") or {}).get("display_name")
+            effort = (snap.get("effort") or {}).get("level") if isinstance(snap.get("effort"), dict) else None
+            session["effort"] = effort if isinstance(effort, str) and effort else None
             session["costUsd"] = number((snap.get("cost") or {}).get("total_cost_usd"))
             return
 
@@ -392,9 +394,11 @@ def make_session(profile, home, *, sid, pid, name, cwd, kind, entrypoint, state,
         "startedAt": started_at,
         "context": None,
         "model": None,
+        "effort": None,  # the reasoning effort, from the status line (low … max)
         "costUsd": None,
         "agents": None,
         "shared": None,
+        "tmux": False,  # runs in a tmux pane: it can be interrupted (Esc)
     }
 
 
@@ -504,6 +508,7 @@ def live_row(entry, profile, holder, home, ctx):
         reason=reason, waiting_for=waiting_for or "", detail=detail,
         since=number(entry.get("statusUpdatedAt")) or number(entry.get("startedAt")),
         started_at=number(entry.get("startedAt")))
+    row["tmux"] = isinstance(entry.get("tmux"), str) and bool(entry["tmux"])
     return finish_row(row, job, job_id, profile, ctx, alive=True)
 
 
@@ -555,7 +560,7 @@ def finish_row(row, job, job_id, profile, ctx, alive):
 # ---------------------------------------------------------------- subagents
 
 AGENT_TAIL_BYTES = 65536
-AGENT_CACHE_VERSION = 2  # bump when agent_progress() reads transcripts differently
+AGENT_CACHE_VERSION = 3  # bump when agent_progress() reads transcripts differently (3: the model)
 AGENT_TREE_LIMIT = 30
 
 
@@ -591,20 +596,50 @@ def report_line(text):
     return "finished"
 
 
+def model_label(model):
+    """claude-opus-5-5 -> "Opus 5.5", claude-haiku-4-5-20251001 -> "Haiku 4.5"
+    (a model id as transcripts record it); None for none or a stand-in."""
+    if not isinstance(model, str) or not model.startswith("claude"):
+        return None
+    words = [w for w in re.split(r"[-_]", model.split("[")[0])[1:] if not (w.isdigit() and len(w) >= 6)]
+    family = next((w for w in words if w.isalpha()), None)
+    version = ".".join(w for w in words if w.isdigit())
+    if family is None:
+        return model
+    return f"{family.capitalize()} {version}".strip()
+
+
+def transcript_model(entries):
+    """The model of the newest assistant entry (not a stand-in like <synthetic>)."""
+    for e in entries:
+        msg = e.get("message") if isinstance(e.get("message"), dict) else {}
+        label = model_label(msg.get("model")) if e.get("type") == "assistant" else None
+        if label:
+            return label
+    return None
+
+
 def agent_progress(path):
-    """(status, activity, last timestamp ms) from the end of a subagent transcript.
+    """(status, activity, last timestamp ms, model) from the end of a subagent
+    transcript.
 
     Done = it handed its report back (a SubagentHandback call) or its last entry
     is a final answer (end_turn); otherwise it's still working: on a tool call
     (shown) or thinking about tool results.
     """
+    status, activity, ts, recent = agent_status(path)
+    return status, activity, ts, transcript_model(recent)
+
+
+def agent_status(path):
+    """agent_progress without the model, plus the entries it looked at."""
     try:
         size = path.stat().st_size
         with open(path, "rb") as f:
             f.seek(max(0, size - AGENT_TAIL_BYTES))
             lines = f.read().splitlines()
     except OSError:
-        return "running", "", None
+        return "running", "", None, []
     if size > AGENT_TAIL_BYTES:
         lines = lines[1:]  # probably cut in the middle
     recent = []
@@ -618,7 +653,7 @@ def agent_progress(path):
             if len(recent) >= 8:
                 break
     if not recent:
-        return "running", "starting…", None
+        return "running", "starting…", None, recent
     ts = to_ms(recent[0].get("timestamp"))
     for e in recent:
         msg = e.get("message") if isinstance(e.get("message"), dict) else {}
@@ -627,19 +662,19 @@ def agent_progress(path):
         if e["type"] == "user":
             if e is recent[0]:
                 continue  # tool results just came back; look at what it ran
-            return "running", "thinking…", ts
+            return "running", "thinking…", ts, recent
         uses = [c for c in content if c.get("type") == "tool_use"]
         if uses and uses[-1].get("name") == "SubagentHandback":
             report = (uses[-1].get("input") or {}).get("message")
-            return "done", report_line(report if isinstance(report, str) else ""), ts
+            return "done", report_line(report if isinstance(report, str) else ""), ts, recent
         if uses:
             label = describe_tool(uses[-1])
-            return "running", (label if e is recent[0] else f"{label} (thinking about the result)"), ts
+            return "running", (label if e is recent[0] else f"{label} (thinking about the result)"), ts, recent
         if msg.get("stop_reason") == "end_turn":
             text = next((c.get("text") for c in content if c.get("type") == "text" and c.get("text")), "")
-            return "done", report_line(text), ts
-        return "running", "writing…", ts
-    return "running", "thinking…", ts
+            return "done", report_line(text), ts, recent
+        return "running", "writing…", ts, recent
+    return "running", "thinking…", ts, recent
 
 
 def agent_started(path):
@@ -671,21 +706,23 @@ class AgentCache:
         self.files, self.parents, self.changed = {}, {}, not ok
 
     def progress(self, transcript):
-        """(status, activity, last ts, started ts) of a subagent transcript."""
+        """(status, activity, last ts, started ts, model) of a subagent transcript."""
         try:
             st = transcript.stat()
         except OSError:
-            return "running", "starting…", None, None
+            return "running", "starting…", None, None, None
         key = str(transcript)
         old = self.old_files.get(key)
-        if old and len(old) == 6 and old[0] == st.st_size and old[1] == st.st_mtime_ns:
+        if old and len(old) == 7 and old[0] == st.st_size and old[1] == st.st_mtime_ns:
             self.files[key] = old
-            return old[2], old[3], old[4], old[5]
-        status, activity, ts = agent_progress(transcript)
-        started = old[5] if old and len(old) == 6 and old[5] is not None else agent_started(transcript)
-        self.files[key] = [st.st_size, st.st_mtime_ns, status, activity, ts, started]
+            return old[2], old[3], old[4], old[5], old[6]
+        status, activity, ts, model = agent_progress(transcript)
+        if model is None and old and len(old) == 7:
+            model = old[6]  # its newest entries are tool results; the model came earlier
+        started = old[5] if old and len(old) == 7 and old[5] is not None else agent_started(transcript)
+        self.files[key] = [st.st_size, st.st_mtime_ns, status, activity, ts, started, model]
         self.changed = True
-        return status, activity, ts, started
+        return status, activity, ts, started, model
 
     def parent(self, agent_dir, agent_id, tool_use_id):
         """Which other agent of the session started this one (nested agents), if any."""
@@ -717,7 +754,7 @@ class AgentCache:
                 if not isinstance(meta, dict):
                     continue
                 agent_id = meta_path.name[len("agent-"):-len(".meta.json")]
-                status, activity, ts, started = self.progress(agent_dir / f"agent-{agent_id}.jsonl")
+                status, activity, ts, started, model = self.progress(agent_dir / f"agent-{agent_id}.jsonl")
                 if status == "running" and not alive:
                     status = "stopped"  # its session ended before it finished
                 depth = meta.get("spawnDepth") if isinstance(meta.get("spawnDepth"), int) else 1
@@ -739,6 +776,7 @@ class AgentCache:
                     "activity": activity,
                     "started": started,
                     "updated": ts,
+                    "model": model,  # e.g. "Haiku 4.5", from its replies
                 })
         if not agents:
             return None
@@ -1578,16 +1616,30 @@ def short_folder(folder, home=None):
     return "~" + folder[len(home):] if folder == home or folder.startswith(home + "/") else folder
 
 
-# ---------------------------------------------------------------- stopping idle chats
+# ---------------------------------------------------------------- stopping and interrupting chats
 #
-# A chat in a terminal whose turn is over (idle: nothing runs, nothing asks)
-# can be stopped from the widget. Claude gets SIGTERM, which it handles like
-# its terminal closing: it shuts down cleanly, and its transcript is saved as
-# it goes, so `claude --resume` reopens the chat. Only if it hasn't quit after
-# END_WAIT seconds is it killed. VS Code's chats are left alone: the extension
-# would show the stop as an error in that tab.
+# A chat with a process of its own (in a terminal, or in VS Code's Claude
+# panel) can be stopped from the widget, whatever it's doing; one in tmux can
+# be interrupted too.
+#
+# Stopping: Claude gets the signal its own host would send and shuts down
+# cleanly. In a terminal that's SIGTERM, as when the terminal closes: the
+# current step is cut off, the terminal stays open, and `claude --resume`
+# reopens the chat. VS Code's panel runs Claude in print mode, where SIGINT
+# cancels the turn and exits with code 0: the panel takes that like its own
+# stop button (the tab says "Interrupted") and starts Claude again with the
+# next message; SIGTERM would show an error there. Commands it was running
+# that outlive it are ended too (the panel's Claude leaves them behind), and
+# a Claude that hangs on is killed after END_WAIT seconds.
+#
+# Interrupting (tmux only): Ctrl+C, sent to its pane as if pressed there,
+# which does what the stop button of VS Code's Claude tab does: the turn stops
+# and so do its subagents, background ones too (Esc would leave those
+# running), while the chat stays open, a draft you typed included. Other
+# terminals take no input from outside.
 
 END_WAIT = 10  # seconds Claude gets to shut down before it's killed
+LEFTOVER_WAIT = 3  # seconds its leftover commands get after SIGTERM
 
 
 def process_gone(entry):
@@ -1602,50 +1654,222 @@ def process_gone(entry):
     return stat[stat.rfind(")") + 2:][:1] in ("Z", "X")
 
 
-def end_idle_chat(entry, wait=END_WAIT):
-    """Stop the process of an idle chat in a terminal: (ok, message). It's
-    looked at again first: one that got back to work isn't stopped."""
+def process_tree(pid):
+    """[(pid, start time)] of every process below pid."""
+    children = {}
+    try:
+        names = [n for n in os.listdir("/proc") if n.isdigit()]
+    except OSError:
+        return []
+    for name in names:
+        try:
+            with open(f"/proc/{name}/stat", encoding="utf-8", errors="replace") as f:
+                stat = f.read()
+            fields = stat[stat.rfind(")") + 2:].split()
+            children.setdefault(int(fields[1]), []).append((int(name), fields[19]))
+        except (OSError, ValueError, IndexError):
+            continue
+    found, todo = [], [pid]
+    while todo:
+        for child in children.get(todo.pop(), []):
+            found.append(child)
+            todo.append(child[0])
+    return found
+
+
+def end_leftovers(tree, wait=LEFTOVER_WAIT):
+    """End what's left of a stopped chat's processes (same pid and start time
+    as before, so never a newcomer with a reused pid): SIGTERM, then SIGKILL.
+    Returns how many were still running."""
+    import signal
+    alive = lambda: [p for p in tree if not process_gone({"pid": p[0], "procStart": p[1]})]
+    left = alive()
+    for pid, _ in left:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
+    deadline = time.time() + wait
+    while alive() and time.time() < deadline:
+        time.sleep(0.1)
+    for pid, _ in alive():
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+    return len(left)
+
+
+def stop_chat(entry, busy_ok=False, wait=END_WAIT):
+    """Stop the process of a chat (see above): (ok, message). Unless busy_ok
+    (you were told it's working or waiting), only an idle one: a chat that got
+    back to work since you asked isn't touched."""
     import signal
     if entry.get("kind") != "interactive":
-        return False, "Only chats in a terminal can be stopped this way"
-    if entry.get("entrypoint") == "claude-vscode":
-        return False, "It runs in VS Code: close its tab there to end it"
+        return False, "Only chats in a terminal or in VS Code can be stopped this way"
     state = session_state(entry)
-    if state != "idle":
+    if not busy_ok and state != "idle":
         return False, ("It's working again" if state == "working" else "It's waiting for you now") + ", so it wasn't stopped"
     if process_gone(entry):
         return True, "It had quit already"
+    tree = process_tree(entry["pid"])
+    sig = signal.SIGINT if entry.get("entrypoint") == "claude-vscode" else signal.SIGTERM
     try:
-        os.kill(entry["pid"], signal.SIGTERM)
+        os.kill(entry["pid"], sig)
     except ProcessLookupError:
         return True, "It had quit already"
     except OSError as exc:
         return False, f"Couldn't stop it: {exc}"
     deadline = time.time() + wait
-    while time.time() < deadline:
-        if process_gone(entry):
-            return True, "Stopped; the chat is kept"
+    while not process_gone(entry) and time.time() < deadline:
         time.sleep(0.1)
-    if not process_gone(entry):  # checked again: the pid mustn't be someone else's by now
+    killed = not process_gone(entry)
+    if killed:  # checked again just before: the pid mustn't be someone else's by now
         try:
             os.kill(entry["pid"], signal.SIGKILL)
         except OSError:
             pass
-    return True, f"It hadn't quit after {wait} s, so it was killed; the chat is kept"
+    leftovers = end_leftovers(tree)
+    message = (f"It hadn't quit after {wait} s, so it was killed; the chat is kept" if killed
+               else "Stopped; the chat is kept")
+    if leftovers:
+        message += f" (and {leftovers} command{'s' if leftovers > 1 else ''} it was running ended)"
+    return True, message
 
 
-def end_idle_session(home, extra_dirs, session_id, profile_key=None, wait=END_WAIT):
-    """Stop an idle chat in a terminal, found by its session id (and the
-    profile it's listed under: a shared chat can run on two)."""
+def tmux_socket(pid):
+    """The socket of the tmux server a process runs under ($TMUX), or None."""
+    try:
+        with open(f"/proc/{pid}/environ", "rb") as f:
+            env = f.read().split(b"\0")
+    except OSError:
+        return None
+    value = next((e[5:].decode(errors="replace") for e in env if e.startswith(b"TMUX=")), "")
+    socket = value.split(",", 1)[0]
+    return socket if socket.startswith("/") else None
+
+
+def interrupt_chat(entry):
+    """Interrupt a working or waiting chat in tmux: Ctrl+C in its pane, as if
+    you pressed it there (the turn and its subagents stop; the chat stays).
+    Only while it works: at an idle prompt a second Ctrl+C would end Claude.
+    (ok, message)"""
+    import shutil
+    import subprocess
+    pane = entry.get("tmux")
+    if not isinstance(pane, str) or not pane:
+        return False, "It doesn't run in tmux, so it can't be interrupted from here; stop it instead"
+    state = session_state(entry)
+    if state not in ("working", "waiting"):
+        return False, "It isn't working any more, so there's nothing to interrupt"
+    tmux = shutil.which("tmux", path=os.pathsep.join([os.environ.get("PATH", ""), "/usr/bin", "/usr/local/bin", "/bin"]))
+    if tmux is None:
+        return False, "tmux isn't installed here"
+    socket = tmux_socket(entry["pid"])
+    target = pane.rsplit(".", 1)[-1] if "." in pane else pane  # its pane id, e.g. %3
+    try:
+        r = subprocess.run([tmux, *(["-S", socket] if socket else []), "send-keys", "-t", target, "C-c"],
+                           stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, f"tmux didn't answer: {exc}"
+    if r.returncode != 0:
+        lines = [l for l in (r.stderr + "\n" + r.stdout).splitlines() if l.strip()]
+        return False, f"tmux: {lines[-1].strip() if lines else f'exit {r.returncode}'}"
+    return True, "Interrupted (Ctrl+C in its tmux pane); the chat stays open there"
+
+
+def find_chat_entry(home, extra_dirs, session_id, profile_key=None):
+    """The live session entry of a chat with a process (terminal or VS Code),
+    found by its session id and the profile it's listed under (a shared chat
+    can run on two), or None."""
     for entry, runs_on, holder in live_entries_all(discover_profiles(home, extra_dirs)):
         if entry.get("sessionId") != session_id or entry.get("kind") not in SESSION_KINDS \
                 or entry.get("spare") or entry.get("parkedJobId"):
             continue
         if profile_key and profile_key not in (runs_on.key, holder.key):
             continue
-        return end_idle_chat(entry, wait)
-    return False, "That session isn't running any more"
+        return entry
+    return None
 
+
+def stop_chat_by_id(home, extra_dirs, session_id, profile_key=None, busy_ok=False, wait=END_WAIT):
+    entry = find_chat_entry(home, extra_dirs, session_id, profile_key)
+    return stop_chat(entry, busy_ok, wait) if entry else (False, "That session isn't running any more")
+
+
+def interrupt_chat_by_id(home, extra_dirs, session_id, profile_key=None):
+    entry = find_chat_entry(home, extra_dirs, session_id, profile_key)
+    return interrupt_chat(entry) if entry else (False, "That session isn't running any more")
+
+
+# ---------------------------------------------------------------- several widgets at once
+#
+# The Plasma widget can run twice, e.g. on a panel and in the system tray.
+# Each copy says it's there on every status check (--instance). The copy
+# that has been running longest sends the notifications and plays the sounds,
+# so they come once. Settings are shared: a copy saves them on every change
+# (jump.py --save-settings) and the others take them over at their next check;
+# a new copy takes over what the others use.
+
+INSTANCE_GRACE_MS = 15000  # a copy not heard from for 3 of its check intervals plus this has gone
+
+
+def elect_notifier(cache_root, instance, interval_ms, now_ms):
+    """Note that this copy of the widget is running; is it the one that notifies?"""
+    path = cache_root / "instances.json"
+    private_dir(cache_root)
+    with open(cache_root / "instances.lock", "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        data = read_json(path)
+        seen = {}
+        for key, v in (data.items() if isinstance(data, dict) else []):
+            if isinstance(v, dict) and number(v.get("seen")) is not None and number(v.get("since")) is not None \
+                    and now_ms - v["seen"] <= 3 * (number(v.get("interval")) or 2000) + INSTANCE_GRACE_MS:
+                seen[key] = v
+        me = seen.get(instance)
+        seen[instance] = {"since": me["since"] if me else now_ms, "seen": now_ms, "interval": interval_ms}
+        write_json_atomic(path, seen)
+    first = min(seen.items(), key=lambda kv: (kv[1]["since"], kv[0]))[0]
+    return first == instance
+
+
+def config_defaults(main_xml=None):
+    """{key: default} of the widget's settings (contents/config/main.xml)."""
+    import xml.etree.ElementTree as ET
+    path = main_xml or Path(__file__).resolve().parent.parent / "config" / "main.xml"
+    try:
+        root = ET.parse(str(path)).getroot()
+    except (OSError, ET.ParseError):
+        return {}
+    ns = {"k": "http://www.kde.org/standards/kcfg/1.0"}
+    defaults = {}
+    for entry in root.iterfind(".//k:entry", ns):
+        kind, text = entry.get("type"), (entry.findtext("k:default", "", ns) or "").strip()
+        defaults[entry.get("name")] = (text == "true" if kind == "Bool" else int(text) if kind == "Int" and text
+                                       else 0 if kind == "Int" else text)
+    return defaults
+
+
+def shared_settings(cache_root):
+    """The settings the widgets share: {"at", "by", "values"}, or None."""
+    data = read_json(cache_root / "settings.json")
+    if not isinstance(data, dict) or not isinstance(data.get("values"), dict) or number(data.get("at")) is None:
+        return None
+    return {"at": data["at"], "by": str(data.get("by") or ""), "values": data["values"]}
+
+
+def save_shared_settings(cache_root, by, values, now_ms, unless_default=False):
+    """Save a widget's settings for the others (only known keys). With
+    unless_default, settings that are all defaults (a widget nobody set up
+    yet) aren't saved: they mustn't replace what another one uses."""
+    defaults = config_defaults()
+    values = {k: v for k, v in values.items() if k in defaults} if defaults else dict(values)
+    if unless_default and defaults and all(values.get(k, d) == d for k, d in defaults.items()):
+        return False, "Nothing set up yet"
+    private_dir(cache_root)
+    write_json_atomic(cache_root / "settings.json", {"at": now_ms, "by": by, "values": values})
+    os.chmod(cache_root / "settings.json", 0o600)  # your SSH hosts are in it
+    return True, "Settings saved"
 
 
 # ---------------------------------------------------------------- prompt history
@@ -2450,7 +2674,8 @@ def add_remote_commands(result, home, extra_dirs=(), claude=None):
 
 USAGE = """usage: claude_status.py [--config-dir DIR]... [--done-hours H] [--recent N] [--no-tokens] [--pretty] [--remote]
        claude_status.py --dismiss SESSION_ID | --undismiss-all
-       claude_status.py --end SESSION_ID [--profile PROFILE] [--config-dir DIR]...
+       claude_status.py --end SESSION_ID [--profile PROFILE] [--busy] [--config-dir DIR]...
+       claude_status.py --interrupt SESSION_ID [--profile PROFILE] [--config-dir DIR]...
   --config-dir DIR  extra Claude config dir (repeatable)
   --done-hours H    keep finished background jobs listed for H hours (default 24, 0 = never)
   --recent N        list each account's N latest other chats (default 5, 0 = none)
@@ -2459,7 +2684,11 @@ USAGE = """usage: claude_status.py [--config-dir DIR]... [--done-hours H] [--rec
   --remote          for the widget on another machine: add the shell commands that open
                     each chat here, and print the JSON after a marker line
   --dismiss ID      hide a finished session in the widget (--undismiss-all shows them again)
-  --end ID          stop an idle chat in a terminal (it's kept: claude --resume reopens it)"""
+  --end ID          stop a chat in a terminal or VS Code (it's kept); only an idle one
+                    unless --busy (you were told it's working or waiting)
+  --interrupt ID    interrupt a working chat in tmux (Ctrl+C in its pane)
+  --instance ID     this copy of the widget (with --interval-ms N, how often it checks):
+                    says whether it sends the notifications, and the shared settings"""
 
 
 def main(argv=None):
@@ -2468,15 +2697,26 @@ def main(argv=None):
     args = sys.argv[1:] if argv is None else list(argv)
     config_dirs, with_tokens, pretty, done_hours = [], True, False, KEEP_DONE_HOURS
     recent, remote, dismiss, undismiss = RECENT_CHATS, False, None, False
-    end, profile_key = None, None
+    end, interrupt, profile_key, busy, instance, interval_ms = None, None, None, False, None, 2000
     while args:
         arg = args.pop(0)
         if arg == "--config-dir" and args:
             config_dirs.append(args.pop(0))
         elif arg == "--end" and args:
             end = args.pop(0)
+        elif arg == "--interrupt" and args:
+            interrupt = args.pop(0)
+        elif arg == "--busy":
+            busy = True
         elif arg == "--profile" and args:
             profile_key = args.pop(0)
+        elif arg == "--instance" and args:
+            instance = args.pop(0)
+        elif arg == "--interval-ms" and args:
+            try:
+                interval_ms = max(1000, int(args.pop(0)))
+            except ValueError:
+                sys.exit(USAGE)
         elif arg == "--done-hours" and args:
             try:
                 done_hours = max(0.0, float(args.pop(0)))
@@ -2504,9 +2744,10 @@ def main(argv=None):
     os.umask(0o077)  # cache files are private to the user
     home = Path.home()
     cache_root = cache_dir(home)
-    if end is not None:
+    if end is not None or interrupt is not None:
         try:
-            ok, message = end_idle_session(home, config_dirs, end, profile_key)
+            ok, message = (stop_chat_by_id(home, config_dirs, end, profile_key, busy) if end is not None
+                           else interrupt_chat_by_id(home, config_dirs, interrupt, profile_key))
         except Exception as exc:
             ok, message = False, f"{type(exc).__name__}: {exc}"
         result = {"ok": ok, "message": message}
@@ -2536,6 +2777,12 @@ def main(argv=None):
                 result["cli"] = {"installed": claude is not None}
             except Exception as exc:
                 result["errors"].append(f"claude command: {exc}")
+            if instance is not None:
+                try:
+                    result["notifier"] = elect_notifier(cache_root, instance, interval_ms, int(time.time() * 1000))
+                    result["sharedSettings"] = shared_settings(cache_root)
+                except (OSError, ValueError) as exc:
+                    result["errors"].append(f"other widgets: {exc}")
             if remote:
                 result["host"] = os.uname().nodename
                 add_remote_commands(result, home, config_dirs, claude)
