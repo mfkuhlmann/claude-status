@@ -8,6 +8,7 @@ import {
   maxFiveHour,
   overallState,
 } from "../../src/shared/model";
+import { Component, type ComponentChildren } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { editorTab } from "../env";
 import { pets } from "../pets";
@@ -36,6 +37,27 @@ function useScrolled(): boolean {
   return scrolled;
 }
 
+// One account's (or host's) section: if drawing it fails, the others still
+// show, and it says so instead of the view going blank
+class Guarded extends Component<{ what: string; children: ComponentChildren }, { failed: string }> {
+  state = { failed: "" };
+  componentDidCatch(error: unknown): void {
+    this.setState({ failed: error instanceof Error ? error.message : String(error) });
+  }
+  componentDidUpdate(previous: { children: ComponentChildren }): void {
+    if (this.state.failed && previous.children !== this.props.children) this.setState({ failed: "" }); // new data: try again
+  }
+  render() {
+    return this.state.failed ? (
+      <div class="msg error" role="alert">
+        Couldn't show {this.props.what}: {this.state.failed}
+      </div>
+    ) : (
+      this.props.children
+    );
+  }
+}
+
 // The popup's layout: header and the big Clawd on top (they stay while the
 // list scrolls), then this computer's accounts, then each SSH host's.
 export function App() {
@@ -57,7 +79,7 @@ export function App() {
   const waiting = firstWaiting(groups);
   const hero: HeroInput = {
     mood: heroMood(state, overall, groups),
-    headline: headlineText(state, counts),
+    headline: headlineText(state, counts, groups.length > 0),
     counts,
     highUsageText: highUsageText(groups),
     contextFullText: contextFullText(groups, (key) => pets.petColor(key)),
@@ -85,10 +107,15 @@ export function App() {
           <Messages state={state} />
           {!state.status && !state.errorText ? <div class="empty muted">Looking for your chats…</div> : null}
           {local.map((g) => (
-            <GroupSection key={groupKeyOf(g)} group={g} />
+            <Guarded key={groupKeyOf(g)} what={g.name}>
+              <GroupSection group={g} />
+            </Guarded>
           ))}
           {state.hosts.map((h) => (
-            <HostSection key={h.name} host={h} groups={groups.filter((g) => g.host === h.name)} />
+            <Guarded key={h.name} what={h.name}>
+              {/* its last answer, also when the last check failed (dimmed): allGroups leaves that one out */}
+              <HostSection host={h} groups={(h.result?.groups ?? []).map((g) => ({ ...g, host: h.name }))} />
+            </Guarded>
           ))}
           {state.status && groups.length === 0 && state.hosts.length === 0 ? (
             <div class="empty">

@@ -53,7 +53,8 @@ test("an SSH host's chats are tracked apart and name the host", () => {
   t.track("ssh:build-server", oneChat("working", NOW), NOW, "build-server", OPTS);
   const r = t.track("ssh:build-server", oneChat("waiting", NOW + 1000), NOW + 1000, "build-server", OPTS);
   assert.match(r.notices[0].body, /build-server/);
-  assert.equal(r.petEvents[0].key, "ssh:build-server|" + oneChat("waiting", 0)[0].sessions[0].chatId);
+  const s = oneChat("waiting", 0)[0].sessions[0];
+  assert.equal(r.petEvents[0].key, `ssh:build-server|${s.profileDir}/${s.chatId}`);
 });
 
 test("a plan limit that drops a lot is celebrated as a reset", () => {
@@ -69,5 +70,22 @@ test("finished turns are reported with how long they took", () => {
   t.track("ssh:lab", oneChat("working", NOW - 60000), NOW, "lab", OPTS);
   const r = t.track("ssh:lab", oneChat("done", NOW + 60000, "failed"), NOW + 60000, "lab", OPTS);
   assert.equal(r.finished.length, 1);
-  assert.deepEqual([r.finished[0].id, r.finished[0].host, r.finished[0].took], ["ssh:lab|chat-1", "lab", 120000]);
+  const s = oneChat("done", 0)[0].sessions[0];
+  assert.deepEqual([r.finished[0].id, r.finished[0].host, r.finished[0].took], [`ssh:lab|${s.profileDir}/${s.chatId}`, "lab", 120000]);
+});
+
+test("a chat keeps its notifications while its row changes, and a chat listed twice counts once", () => {
+  const t = new TransitionTracker();
+  const row = (state: SessionState, suffix: string, since: number) => {
+    const g = demoState(NOW).status!.groups[0];
+    return { ...g.sessions[0], key: `${g.sessions[0].profileDir}/job-1/${suffix}`, chatId: "job-1", sessionId: "job-1", state, since };
+  };
+  const g = demoState(NOW).status!.groups[0];
+  t.track("", [{ ...g, sessions: [row("working", "live", NOW - 120000)] }], NOW, undefined, OPTS);
+  // its process ended as it finished: the row is the job's record now (…/job)
+  const done = t.track("", [{ ...g, sessions: [row("done", "job", NOW)] }], NOW + 2000, undefined, OPTS);
+  assert.deepEqual(done.notices.map((n) => n.kind), ["done"]);
+  const twice = [{ ...g, sessions: [row("waiting", "live", NOW), row("idle", "job", NOW)] }];
+  t.track("", twice, NOW + 4000, undefined, OPTS);
+  assert.deepEqual(t.track("", twice, NOW + 70000, undefined, OPTS).notices, [], "not an alert every minute");
 });

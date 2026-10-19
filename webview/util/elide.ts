@@ -4,15 +4,17 @@
 // Keep this much of the kept text from the start, the rest from the end
 const HEAD_SHARE = 0.4;
 
+// (by characters, not UTF-16 units: an emoji isn't cut in half)
 function cut(text: string, keep: number): string {
+  const chars = Array.from(text);
   const head = Math.floor(keep * HEAD_SHARE);
-  return text.slice(0, head) + "…" + text.slice(text.length - (keep - head));
+  return chars.slice(0, head).join("") + "…" + chars.slice(chars.length - (keep - head)).join("");
 }
 
 export function elideMiddle(text: string, maxWidth: number, measure: (s: string) => number): string {
   if (maxWidth <= 0 || measure(text) <= maxWidth) return text;
   let lo = 0;
-  let hi = text.length - 1;
+  let hi = Array.from(text).length - 1;
   while (lo < hi) {
     const mid = (lo + hi + 1) >> 1;
     if (measure(cut(text, mid)) <= maxWidth) lo = mid;

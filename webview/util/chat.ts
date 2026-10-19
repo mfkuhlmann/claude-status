@@ -16,55 +16,8 @@ export function rowKeyOf(s: Pick<Session, "key">, host?: string): string {
   return (host ? host + "|" : "") + s.key;
 }
 
-export function chatRefOf(s: Session, host?: string): ChatRef {
-  return {
-    host,
-    key: s.key,
-    sessionId: s.sessionId,
-    chatId: s.chatId,
-    profileDir: s.profileDir,
-    name: s.name,
-    entrypoint: s.entrypoint,
-    pid: s.pid,
-    cwd: s.cwd,
-    kind: s.kind,
-    state: s.state,
-    tmux: !!s.tmux,
-    jobId: s.jobId,
-    openCommand: s.openCommand ?? null,
-    stopCommand: s.stopCommand ?? null,
-    // a fork of a shared chat is a chat of its own
-    shared: !!s.shared && !s.shared.forkOf,
-  };
-}
-
-export function recentRef(c: RecentChat, host?: string): ChatRef {
-  return {
-    host,
-    key: c.key,
-    sessionId: c.sessionId,
-    chatId: c.sessionId,
-    profileDir: c.profileDir,
-    name: c.name,
-    cwd: c.cwd,
-    kind: "chat",
-    openCommand: c.openCommand ?? null,
-    shared: c.shared,
-  };
-}
-
-export function sharedRef(p: SharedPointer, host?: string): ChatRef {
-  return {
-    host,
-    key: p.key,
-    sessionId: p.sessionId,
-    chatId: p.sessionId,
-    profileDir: p.profileDir,
-    name: p.name,
-    openCommand: p.openCommand ?? null,
-    shared: true,
-  };
-}
+// (built where the extension can rebuild them from its own state: model.ts)
+export { chatRefOf, recentRef, sharedRef } from "../../src/shared/model";
 
 // The account's chats for its pet stage: the ones that need you or work
 // first, one per conversation (a chat can have a running and a finished row)
@@ -92,7 +45,7 @@ export function fiveHourOf(g: Group): number {
 export function contextFullText(groups: Group[], petColor: (key: string) => string): string {
   for (const g of groups)
     for (const s of g.sessions)
-      if (s.state === "working" && s.context !== null && s.context >= 85 && petColor(petKeyOf(s, g.host)) === "")
+      if (s.state === "working" && s.context != null && s.context >= 85 && petColor(petKeyOf(s, g.host)) === "")
         return `${s.name}: context ${Math.round(s.context)}% full`;
   return "";
 }
@@ -144,7 +97,7 @@ export function openHint(s: Session, host?: string): string {
 export function sharedTagTitle(s: Session): string {
   const info = s.shared;
   if (!info) return "";
-  const profiles = info.profiles.join(" + ");
+  const profiles = (info.profiles ?? []).join(" + ");
   const stopped = info.stoppedCopies?.length
     ? `\nIts background session on ${info.stoppedCopies.join(", ")} was stopped; ${info.stoppedCopies.join(", ")} shows a link to this ${info.forkOf ? "copy" : "chat"}.`
     : "";

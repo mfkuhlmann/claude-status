@@ -99,6 +99,28 @@ def links(path):
         return 0
 
 
+def entry(path):
+    """The directory entry a path names, through linked folders: two profiles
+    whose projects/ is one folder (a symlink) reach the same entry, which is
+    one copy of the chat, not two."""
+    return os.path.realpath(str(path))
+
+
+def merge_into(src, dst):
+    """Move what's in the folder src into the folder dst (whatever dst
+    doesn't have yet), then remove src if that emptied it."""
+    for child in list(src.iterdir()):
+        there = dst / child.name
+        if not present(there):
+            shutil.move(str(child), str(there))
+        elif child.is_dir() and not child.is_symlink() and there.is_dir():
+            merge_into(child, there)
+    try:
+        src.rmdir()
+    except OSError:
+        pass  # something both had: left where it was
+
+
 def copies(profiles, chat_id):
     """The profiles that have this chat, grouped by file: [[(profile, transcript)]],
     the file most profiles link to first (then the newest)."""
@@ -189,13 +211,20 @@ def share(profiles, chat_id, into, root, source=None):
         return False, (f"Can't share it: {', '.join(apart)} {'is' if len(apart) == 1 else 'are'} on another disk or "
                        f"partition than this chat, and a shared chat is one file linked into each account. "
                        f"Keep the Claude folders and {store[TRANSCRIPT].parent.parent} on one filesystem")
+    if present(store[TRANSCRIPT]) and not same(store[TRANSCRIPT], path):
+        return False, f"{store[TRANSCRIPT]} is a different chat with the same id; left everything as it is"
+    for part in FOLDERS:  # also checked before anything changes
+        there = store[part]
+        heres = [in_profile(p, key, chat_id, part) for p in sharers]
+        linked = any(here.is_symlink() and target(here) == there for here in heres)
+        stray = there.is_dir() and any(there.iterdir()) or present(there) and not there.is_dir()
+        if not linked and stray and any(here.is_dir() and not here.is_symlink() for here in heres):
+            return False, f"{there} is already there; left the chat as it is"
     old_umask = os.umask(0o077)  # the store holds chats: only you can read it
     try:
         if not present(store[TRANSCRIPT]):
             store[TRANSCRIPT].parent.mkdir(parents=True, exist_ok=True)
             os.link(str(path), str(store[TRANSCRIPT]))
-        elif not same(store[TRANSCRIPT], path):
-            return False, f"{store[TRANSCRIPT]} is a different chat with the same id; left everything as it is"
         # The chat's folders move to the store (the ones Claude makes later are
         # made there now), and the profiles that have it link to them.
         for part in FOLDERS:
@@ -215,8 +244,6 @@ def share(profiles, chat_id, into, root, source=None):
                         shutil.move(str(here), str(there))
                         os.symlink(str(there), str(here))
                         linked = True
-                    elif not linked:
-                        return False, f"{there} is already there; left the chat as it is"
                     # else: this profile keeps a folder of its own
                 elif not present(here):
                     there.mkdir(parents=True, exist_ok=True)
@@ -267,12 +294,17 @@ def keep_only(profiles, chat_id, keep, root):
     if not PROJECT_KEY.match(key) or key in (".", ".."):
         return False, f"Unexpected project folder {key}; left the chat as it is"
     sharers = sorted((p for p, _ in chat), key=lambda p: p.real != keep.real)  # keep's own links first
-    shared = len(chat) > 1 or links(path) > 1 or any(
+    entries = {entry(t) for _, t in chat}
+    shared = len(entries) > 1 or links(path) > 1 or any(
         in_profile(p, key, chat_id, part).is_symlink() for p in sharers for part in FOLDERS)
     if not shared:
-        if any(len(g) > 1 for g in groups):
+        if any(len({entry(t) for _, t in g}) > 1 for g in groups):
             return False, f"{keep.label} has its own, different copy of this chat; left everything as it is"
         return False, "This chat isn't shared"
+    kept = in_profile(keep, key, chat_id, TRANSCRIPT)
+    if not present(kept) and elsewhere(path, [(keep.label, kept)]):
+        return False, (f"Can't keep it only on {keep.label}: its folder is on another disk or partition than this "
+                       f"chat, and the chat would have to be copied there. Left everything as it is")
     store = store_paths(sharers, key, chat_id, root)
     own_dirs = [p.real for p in profiles]
     moved = {}  # part: where its folder was
@@ -292,17 +324,20 @@ def keep_only(profiles, chat_id, keep, root):
                 here.parent.mkdir(parents=True, exist_ok=True)
                 shutil.move(str(store[part]), str(here))
                 moved[part] = store[part]
-            # a real folder of its own stays
-        kept = in_profile(keep, key, chat_id, TRANSCRIPT)
+            elif here.is_dir() and store[part].is_dir() and entry(store[part]) != entry(here):
+                # A folder of its own stays; what the others kept in the store
+                # (their subagents, checkpoints of this chat) joins it
+                merge_into(store[part], here)
+                moved[part] = store[part]
         if not present(kept):
             link_into(kept, path)
-        # the others lose it
+        # the others lose it (not keep's own entry, seen through a linked folder)
         for q in profiles:
             if q.real == keep.real:
                 continue
             gone = False
             t = in_profile(q, key, chat_id, TRANSCRIPT)
-            if not t.is_symlink() and t.is_file() and same(t, kept):
+            if not t.is_symlink() and t.is_file() and same(t, kept) and entry(t) != entry(kept):
                 os.unlink(str(t))
                 gone = True
             for part in FOLDERS:
@@ -314,7 +349,8 @@ def keep_only(profiles, chat_id, keep, root):
                 removed.append(q.label)
         # and so does the store
         stored = store[TRANSCRIPT]
-        if stored != kept and not any(inside(stored, d) for d in own_dirs) and stored.is_file() and same(stored, kept):
+        if (entry(stored) != entry(kept) and not any(inside(stored, d) for d in own_dirs) and stored.is_file()
+                and same(stored, kept)):
             os.unlink(str(stored))
         for folder in {stored.parent, *(m.parent for m in moved.values())}:
             if not any(inside(folder, d) for d in own_dirs):
@@ -443,8 +479,8 @@ def main(argv=None):
     if remote:
         # Login scripts on the host may print things first: the JSON follows a marker
         sys.stdout.write("\n" + cs.REMOTE_MARK + " ")
-    json.dump({"ok": ok, "message": message, **({"command": command} if command else {})}, sys.stdout,
-              ensure_ascii=False)
+    # ASCII: a lone surrogate in a name can't break the answer
+    json.dump({"ok": ok, "message": message, **({"command": command} if command else {})}, sys.stdout)
     sys.stdout.write("\n")
 
 

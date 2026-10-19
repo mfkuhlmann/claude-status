@@ -73,9 +73,9 @@ test("the shortcut goes to the chat waiting longest, then to finished ones you h
   const groups = allGroups(s.status, s.hosts);
   const g = groups[0];
   const extra: Session[] = [
-    { ...g.sessions[1], key: "w-old", name: "older wait", since: NOW - 20 * MIN },
-    { ...g.sessions[2], key: "f-1", name: "finished first", state: "done" },
-    { ...g.sessions[2], key: "f-2", name: "finished last", state: "idle" },
+    { ...g.sessions[1], key: "w-old", sessionId: "w-old", chatId: "w-old", name: "older wait", since: NOW - 20 * MIN },
+    { ...g.sessions[2], key: "f-1", sessionId: "f-1", chatId: "f-1", name: "finished first", state: "done" },
+    { ...g.sessions[2], key: "f-2", sessionId: "f-2", chatId: "f-2", name: "finished last", state: "idle" },
   ];
   groups[0] = { ...g, sessions: [...g.sessions, ...extra] };
   const host = groups[1];
@@ -86,7 +86,7 @@ test("the shortcut goes to the chat waiting longest, then to finished ones you h
   ]);
   const list = chatsNeedingYou(groups, unseen);
   assert.deepEqual(list.map((c) => c.session.name), ["older wait", "Release notes for 2.0", "finished last", "finished first"]);
-  assert.equal(trackKey(host.sessions[0], host.host), "ssh:build-server|demo-4");
+  assert.equal(trackKey(host.sessions[0], host.host), `ssh:build-server|${host.sessions[0].profileDir}/demo-4`);
   assert.equal(nextChatIndex(list, null, NOW), 0);
   assert.equal(nextChatIndex(list, { id: list[0].id, at: NOW - 10000 }, NOW), 1);
   assert.equal(nextChatIndex(list, { id: list[3].id, at: NOW - 10000 }, NOW), 0, "round and round");

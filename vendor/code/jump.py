@@ -57,10 +57,12 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -359,13 +361,16 @@ def konsole_tab(konsole_pid, pids):
     return None
 
 
-def tmux_client_pids(pane):
-    """Select the tmux pane (session:@window.%pane) and return the pids of clients showing it."""
+def tmux_client_pids(pane, socket=None):
+    """Select the tmux pane (session:@window.%pane) and return the pids of
+    clients showing it. socket: its tmux server's ($TMUX of the chat's
+    process; a chat in `tmux -L work` isn't on the default server)."""
     session = pane.split(":", 1)[0]
     target = pane.rsplit(".", 1)[-1] if "." in pane else pane
-    run(["tmux", "select-window", "-t", target])
-    run(["tmux", "select-pane", "-t", target])
-    code, out = run(["tmux", "list-clients", "-F", "#{client_pid} #{session_name}"])
+    tmux = ["tmux", *(["-S", socket] if socket else [])]
+    run([*tmux, "select-window", "-t", target])
+    run([*tmux, "select-pane", "-t", target])
+    code, out = run([*tmux, "list-clients", "-F", "#{client_pid} #{session_name}"])
     pids = []
     for line in out.splitlines() if code == 0 else []:
         pid, _, name = line.partition(" ")
@@ -379,9 +384,12 @@ def jump_terminal(entry, what="session"):
     if not pids:
         return False, f"This {what} has no running process to show"
     if isinstance(entry.get("tmux"), str) and entry["tmux"]:
-        clients = tmux_client_pids(entry["tmux"])
-        if clients:
-            pids = [p for c in clients for p in ancestors(c)]
+        clients = tmux_client_pids(entry["tmux"], cs.tmux_socket(entry.get("pid")))
+        if not clients:
+            return False, f"This {what} runs in a tmux session no terminal shows right now: attach to it to see it"
+        pids = [p for c in clients for p in ancestors(c)]
+    if any(proc_name(p).startswith("sshd") for p in pids):
+        return False, f"This {what} runs in an SSH login to this computer: there's no window here to show"
     caption = ""
     konsole = next((p for p in pids if proc_name(p) == "konsole"), None)
     if konsole:
@@ -470,7 +478,7 @@ def jump_remote_vscode(host, session_id, folder=""):
     code = next((shutil.which(n) for n in VSCODE_NAMES if shutil.which(n)), None)
     if not code:
         return False, f"This chat runs in VS Code on {host}, and VS Code isn't installed here"
-    remote_folder = f"vscode-remote://ssh-remote+{host}{folder}" if folder.startswith("/") else None
+    remote_folder = remote_folder_uri(host, folder) if folder.startswith("/") else None
     args = [code, "--folder-uri", remote_folder] if remote_folder else [code, "--remote", f"ssh-remote+{host}"]
     start_app(args)
     # the link once the window has connected (VS Code passes it to the extension there)
@@ -581,6 +589,12 @@ def start_app(args, cwd=None):
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
 
 
+def remote_folder_uri(host, folder):
+    """VS Code's address of a folder on an SSH host (# ? % and spaces in a
+    folder name would end or change it)."""
+    return f"vscode-remote://ssh-remote+{host}{urllib.parse.quote(folder)}"
+
+
 def open_terminal(cwd, command):
     """Open a terminal window running command, then an interactive shell.
 
@@ -593,8 +607,11 @@ def open_terminal(cwd, command):
     plasmashell doesn't kill the chat in it.
     """
     cwd = cwd if cwd and os.path.isdir(cwd) else str(Path.home())
-    shell = os.environ.get("SHELL") or "/bin/bash"
-    script = f"trap : INT; {command}; exec {shlex.quote(shell)}"
+    # The commands are POSIX shell: sh runs them whatever your shell is
+    # (fish, nushell…), and then your shell takes over the window
+    yours = os.environ.get("SHELL") or "/bin/bash"
+    script = f"trap : INT; {command}; exec {shlex.quote(yours)}"
+    shell = "/bin/sh"
     if on_gnome():
         args = gnome_terminal_args(shell, cwd, script)
         if not args:
@@ -719,7 +736,7 @@ def stop(home, extra_dirs, session_id, profile_dir=None, busy=False):
     if not claude:
         return False, NO_CLAUDE
     env = dict(os.environ)
-    value = config_dir_value(profile, home, job)
+    value = config_dir_value(profile, home, job, for_job=True)
     if value is None:
         env.pop("CLAUDE_CONFIG_DIR", None)
     else:
@@ -917,7 +934,7 @@ def remote_vscode(host, folder, link, what):
     if not shutil.which("xdg-open"):
         return False, "xdg-open is missing; can't hand the chat to VS Code"
     if folder.startswith("/"):
-        start_app([code, "--folder-uri", f"vscode-remote://ssh-remote+{host}{folder}"])
+        start_app([code, "--folder-uri", remote_folder_uri(host, folder)])
     else:
         start_app([code, "--remote", f"ssh-remote+{host}"])
     later(lambda: open_vscode_chat(f"[SSH: {host}]", 10, prefer=os.path.basename(folder.rstrip("/")), link=link))
@@ -1291,11 +1308,7 @@ def unshare(home, extra_dirs, session_id, profile_dir):
 
 def dismiss(home, extra_dirs, session_id):
     """Hide a finished session from the widget's list. Nothing of Claude's is touched."""
-    cache_root = cs.cache_dir(home)
-    sessions = cs.load_dismissed(cache_root)
-    sessions[session_id] = int(time.time() * 1000)
-    cs.private_dir(cache_root)
-    cs.save_dismissed(cache_root, sessions)
+    cs.change_dismissed(cs.cache_dir(home), add=session_id)
     return True, "Removed from the list"
 
 
@@ -1303,7 +1316,7 @@ def undismiss_all(home, extra_dirs, _session_id=None):
     cache_root = cs.cache_dir(home)
     count = len(cs.load_dismissed(cache_root))
     if count:
-        cs.save_dismissed(cache_root, {})
+        cs.change_dismissed(cache_root, clear=True)
     return True, f"{count} session(s) shown again"
 
 
@@ -1324,7 +1337,15 @@ USAGE = ("usage: jump.py [--stop [--busy] | --interrupt] SESSION_ID [--profile P
          "       jump.py --agent-run AGENT_ID --chat CHAT_ID [--profile PROFILE] [--no-open]")
 
 
+def stop_on_term(signum, frame):
+    """Given up on (e.g. a folder dialog nobody answered): exiting through
+    Python ends what subprocess.run runs (the dialog) too."""
+    sys.exit(128 + signum)
+
+
 def main(argv=None):
+    if argv is None:
+        signal.signal(signal.SIGTERM, stop_on_term)
     args = sys.argv[1:] if argv is None else list(argv)
     extra, session_id, action, folder, profile_dir = [], None, jump, None, None
     remote_host, name_arg, choose, vscode, print_command = None, "", False, False, False

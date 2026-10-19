@@ -11,7 +11,7 @@ import { settings, statusArgs, configDirArgs, viewSettings } from "./config";
 import type { Notifier } from "./notify";
 import { currentRemoteHost } from "./remoteHost";
 import { demoState } from "./shared/demo";
-import { allGroups, chatsNeedingYou, trackKey, type ChatSpot } from "./shared/model";
+import { allGroups, chatsNeedingYou, toLocalClock, trackKey, type ChatSpot } from "./shared/model";
 import { chatRef } from "./notify";
 import type { ClaudeCodeInfo, DigestCard, HostState, PetEventKind, Status, ViewState } from "./shared/types";
 import { TransitionTracker, type Changes, type PetEvent } from "./transitions";
@@ -34,6 +34,7 @@ export class Dashboard implements vscode.Disposable {
   private hostBusy = new Set<string>();
   private localTimer?: NodeJS.Timeout;
   private hostTimer?: NodeJS.Timeout;
+  private retryTimer?: NodeJS.Timeout; // Python didn't work: try again (its own timer: polls mustn't cancel it)
   private demoTimer?: NodeJS.Timeout;
   private demoPhase: number | null = null;
   private tracker = new TransitionTracker();
@@ -95,14 +96,17 @@ export class Dashboard implements vscode.Disposable {
   }
 
   async start(): Promise<void> {
+    if (this.disposed) return;
     void this.checkClaudeCode();
     const problem = await this.backend.checkPython();
+    if (this.disposed) return;
     if (problem) {
       this.errorText = problem;
       this.log.error(problem);
       this.emit();
       // try again later: the setting may get fixed
-      this.localTimer = setTimeout(() => void this.start(), 30000);
+      clearTimeout(this.retryTimer);
+      this.retryTimer = setTimeout(() => void this.start(), 30000);
       return;
     }
     this.syncHosts();
@@ -114,6 +118,7 @@ export class Dashboard implements vscode.Disposable {
     this.disposed = true;
     clearTimeout(this.localTimer);
     clearTimeout(this.hostTimer);
+    clearTimeout(this.retryTimer);
     clearInterval(this.demoTimer);
     clearTimeout(this.messageTimers.error);
     clearTimeout(this.messageTimers.info);
@@ -226,7 +231,8 @@ export class Dashboard implements vscode.Disposable {
       const now = this.hosts.get(host);
       if (!now) return; // unpicked while it was being checked
       if (answer.ok && answer.result) {
-        const result = answer.result;
+        // on this computer's clock: the host's may be off
+        const result = toLocalClock(answer.result, Date.now() - (answer.result.generatedAt || Date.now()));
         const changes = this.tracker.track("ssh:" + host, result.groups, result.generatedAt, host, this.notifyOptions());
         const resets = this.tracker.resets("ssh:" + host, result.groups);
         Object.assign(now, { loading: false, ok: true, error: "", result, updatedAt: Date.now() });
@@ -256,6 +262,7 @@ export class Dashboard implements vscode.Disposable {
   // fails can't hold the dashboard back (the widget froze that way once, at
   // every plan-limit reset).
   private react(changes: Changes, resets: PetEvent[]): void {
+    if (this.disposed) return; // a poll that finished after the window closed: no toasts or sounds
     try {
       this.petEvents([...changes.petEvents, ...resets]);
       const now = Date.now();
@@ -383,7 +390,9 @@ export class Dashboard implements vscode.Disposable {
       platformNote:
         process.platform === "linux"
           ? ""
-          : "Running chats on this computer are only detected on Linux for now; SSH hosts still work.",
+          : process.platform === "win32"
+            ? "Claude Status needs Linux or macOS: its status script doesn't run on Windows, so nothing shows here."
+            : "Running chats on this computer are only detected on Linux for now; SSH hosts still work.",
       claudeCode: this.claudeCodeInfo(),
       actionError: this.actionError,
       actionInfo: this.actionInfo,

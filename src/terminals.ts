@@ -14,11 +14,15 @@ import { controlOptions } from "./sshControl";
 export type Place = { kind: "local" } | { kind: "windowHost" } | { kind: "ssh"; host: string };
 
 // The same connection sharing as remote.py, without batch mode: ssh may ask
-// for a password or a host key in the terminal.
+// for a password or a host key in the terminal. Like remote.py, it leaves out
+// the host's own RemoteCommand and port forwards, and has sh run the command
+// (it's POSIX shell; the login shell there may be csh or fish).
 export function sshCommand(host: string, command: string): string {
-  const opts = [...controlOptions(), "-o", "ServerAliveInterval=10"];
-  return ["ssh", ...opts, "-t", host, command].map(shellQuote).join(" ");
+  const opts = [...controlOptions(), "-o", "ServerAliveInterval=10", "-o", "RemoteCommand=none", "-o", "ClearAllForwardings=yes"];
+  return ["ssh", ...opts, "-t", host, "sh -c " + shellQuote(command)].map(shellQuote).join(" ");
 }
+
+const JUST_STARTED_MS = 10000; // a second click this soon shows the terminal the first one opened
 
 // Parent of a process here, from /proc (Linux); null when unknown
 export function parentPid(pid: number): number | null {
@@ -53,6 +57,7 @@ function hasChildren(pid: number): boolean {
 export class Terminals implements vscode.Disposable {
   private local = new WeakSet<vscode.Terminal>(); // the ones made here on this computer
   private byKey = new Map<string, vscode.Terminal>();
+  private startedAt = new WeakMap<vscode.Terminal, number>();
   private subscription: vscode.Disposable;
 
   constructor() {
@@ -86,9 +91,12 @@ export class Terminals implements vscode.Disposable {
   // (a local terminal whose command hasn't finished: its shell has a child).
   async run(key: string, name: string, command: string, place: Place): Promise<vscode.Terminal> {
     const existing = this.byKey.get(key);
-    if (existing && !existing.exitStatus && this.local.has(existing)) {
-      const pid = await existing.processId;
-      if (pid && hasChildren(pid)) {
+    if (existing && !existing.exitStatus) {
+      // just opened (its command may not have started yet, and a host's can't
+      // be looked at), or here and still running its command
+      const fresh = Date.now() - (this.startedAt.get(existing) ?? 0) < JUST_STARTED_MS;
+      const pid = fresh || !this.local.has(existing) ? undefined : await existing.processId;
+      if (fresh || (pid && hasChildren(pid))) {
         existing.show();
         return existing;
       }
@@ -106,6 +114,7 @@ export class Terminals implements vscode.Disposable {
     const t = vscode.window.createTerminal(options);
     if (place.kind !== "windowHost") this.local.add(t);
     this.byKey.set(key, t);
+    this.startedAt.set(t, Date.now());
     t.show();
     return t;
   }

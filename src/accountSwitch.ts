@@ -111,6 +111,14 @@ export class AccountSwitch implements vscode.Disposable {
     const dir = profileDirs().find((d) => profileKey(d) === group.chatProfile);
     if (!dir) return this.fail(`Can't find the Claude folder of ${group.name}.`);
     const value = configDirFor(dir);
+    if (value === null && process.env.CLAUDE_CONFIG_DIR) {
+      // A plain ~/.claude runs without the variable, but VS Code itself has
+      // one: its Claude would stay on that
+      return this.fail(
+        `VS Code was started with CLAUDE_CONFIG_DIR=${process.env.CLAUDE_CONFIG_DIR}, so its Claude keeps using that. ` +
+          `Start VS Code without it to use ${group.name}.`,
+      );
+    }
     const ok = await vscode.window.showWarningMessage(
       `Use ${group.name} for VS Code's Claude?`,
       {
@@ -135,6 +143,8 @@ export class AccountSwitch implements vscode.Disposable {
       return this.fail(`Couldn't change VS Code's Claude settings: ${(err as Error).message}`);
     }
     setTimeout(() => void vscode.commands.executeCommand(RELOAD), 300);
+    // the reload can be declined (unsaved files): then other switches count again
+    setTimeout(() => (this.switching = false), 15000);
   }
 
   private fail(message: string): void {

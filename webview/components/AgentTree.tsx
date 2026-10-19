@@ -80,7 +80,7 @@ export function AgentTree({ tree, now, rowKey, chat, host }: { tree: Agent[]; no
                 <span class="agent-line">
                   <span class="agent-desc">{title}</span>
                   {a.description && a.type ? <span class="agent-type">{a.model ? `${a.type} · ${a.model}` : a.type}</span> : null}
-                  <span class="agent-status">{statusText(a, now)}</span>
+                  <span class={"agent-status" + (a.status === "failed" ? " failed" : "")}>{statusText(a, now)}</span>
                   <Icon name="chevron" class={open ? "open" : ""} />
                 </span>
                 {a.activity ? <span class="agent-activity">{a.activity}</span> : null}

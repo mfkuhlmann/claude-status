@@ -47,18 +47,19 @@ TOKENS = [
     ("password in URL", r"[a-z][a-z0-9+.-]*://[^/\s:@]+:[^/\s@]+@"),
 ]
 TOKEN_RES = [(name, re.compile(rx)) for name, rx in TOKENS]
-IPV4 = re.compile(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?![\w.])")
+IPV4 = re.compile(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?!\w|\.\d)")  # also at a sentence's end
 EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}")
 HOME_PATH = re.compile(r"(?:/home|/Users|[A-Za-z]:\\+Users)[/\\]+([A-Za-z0-9._-]+)")
 EXAMPLE_USERS = {"alice", "bob", "carol", "user", "you", "me", "example", "someone"}
-EXAMPLE_DOMAINS = ("example.com", "example.org", "example.net", ".example", ".invalid", ".test", ".localhost")
+EXAMPLE_DOMAINS = ("example.com", "example.org", "example.net")  # the domain itself or a subdomain
+EXAMPLE_TLDS = (".example", ".invalid", ".test", ".localhost")
 # Values from ~/.ssh/config that are far too common to be personal
 COMMON = {"root", "git", "ubuntu", "admin", "user", "debian", "pi", "localhost", "github.com", "gitlab.com",
           "bitbucket.org", "ssh.github.com", "ssh.dev.azure.com", "vs-ssh.visualstudio.com"}
 
 
 def mask(text):
-    return text[:3] + "…" if len(text) > 4 else "…"
+    return text[:1] + "…"  # CI logs are public: the rule and place say enough
 
 
 def public_identities():
@@ -139,15 +140,16 @@ class Checker:
     def email_ok(self, email):
         e = email.lower()
         local, _, domain = e.partition("@")
-        return (e in self.identities or domain.endswith(EXAMPLE_DOMAINS) or domain == "users.noreply.github.com"
+        example = any(domain == d or domain.endswith("." + d) for d in EXAMPLE_DOMAINS) or domain.endswith(EXAMPLE_TLDS)
+        return (e in self.identities or example or domain == "users.noreply.github.com"
                 or local in ("noreply", "no-reply") or e == "git@github.com")
 
     def check_line(self, where, line):
-        if SKIP_LINE in line:
-            return
-        for name, rx in TOKEN_RES:
+        for name, rx in TOKEN_RES:  # never allowed, "check-public: ok" or not
             for m in rx.finditer(line):
                 self.report(where, name, m.group(0))
+        if SKIP_LINE in line:
+            return
         for m in IPV4.finditer(line):
             ip = m.group(0)
             octets = [int(o) for o in ip.split(".")]
@@ -172,6 +174,9 @@ class Checker:
             self.check_line(f"{label}:{n}", line)
 
     def check_bytes(self, label, data):
+        if data.startswith((b"\xff\xfe", b"\xfe\xff")) and Path(label).suffix.lower() not in BINARY_SUFFIXES:
+            self.check_text(label, data.decode("utf-16", errors="replace"))  # text, with NULs between its letters
+            return
         if Path(label).suffix.lower() in BINARY_SUFFIXES or b"\0" in data[:8192]:
             self.check_line(label + " (path)", label)
             if Path(label).suffix.lower() in {".png", ".gif", ".jpg", ".jpeg", ".webp"}:
@@ -231,7 +236,7 @@ def main(argv):
                     if line.startswith("+++ b/"):
                         path = line[6:]
                         checker.check_line(f"commit {sha} {path} (path)", path)
-                    elif line.startswith("+") and not line.startswith("+++"):
+                    elif line.startswith("+") and line != "+++ /dev/null":  # (a line of its own may start with ++)
                         checker.check_line(f"commit {sha} {path}", line[1:])
                     elif path == "message":
                         checker.check_line(f"commit {sha} message", line)

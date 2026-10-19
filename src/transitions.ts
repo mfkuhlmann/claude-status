@@ -68,9 +68,11 @@ export class TransitionTracker {
     };
     for (const g of groups) {
       for (const s of g.sessions) {
-        // Rows are tracked by key, not chat id: a chat shared across profiles
-        // is listed once per profile with the same id.
-        const sid = (source ? source + "|" : "") + (s.key || s.sessionId);
+        // Tracked by account and chat (petKeyOf), not the chat id alone: a
+        // chat shared across profiles is listed once per profile with the same
+        // id. A chat listed twice: its most urgent row (they come first) counts.
+        const sid = petKeyOf(s, host);
+        if (next.has(sid)) continue;
         const prev = before?.get(sid);
         next.set(sid, s.state);
         // A turn runs from leaving idle/done until coming back to it.
@@ -115,6 +117,8 @@ export class TransitionTracker {
         }
       }
     }
+    for (const key of [...this.lastWaitingAlert.keys()])
+      if ((source ? key.startsWith(source + "|") : !key.includes("|")) && !next.has(key)) this.lastWaitingAlert.delete(key);
     this.lastStates.set(source, next);
     this.turnStarts.set(source, starts);
     return changes;

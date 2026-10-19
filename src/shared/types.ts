@@ -77,7 +77,7 @@ export interface Session {
   model: string | null;
   effort?: string | null; // reasoning effort, from the status line (low … max)
   costUsd: number | null;
-  agents: { running: number; done: number; stopped: number; total: number; tree: Agent[] } | null;
+  agents: { running: number; done: number; stopped: number; failed?: number; total: number; tree: Agent[] } | null;
   shared: SharedInfo | null;
   jobId: string | null;
   jobSessionId: string | null;

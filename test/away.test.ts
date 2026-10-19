@@ -11,7 +11,8 @@ const OPTS = { notifyWaiting: true, notifyDone: true, notifyDoneMinSeconds: 30 }
 
 function groups(sessions: Partial<Session>[]): Group[] {
   const g = demoState(NOW).status!.groups[0];
-  return [{ ...g, sessions: sessions.map((p, i) => ({ ...g.sessions[0], key: `c${i}`, ...p }) as Session) }];
+  // each its own chat (its own id), not one chat's rows
+  return [{ ...g, sessions: sessions.map((p, i) => ({ ...g.sessions[0], key: `c${i}`, sessionId: `c${i}`, chatId: `c${i}`, ...p }) as Session) }];
 }
 
 test("coming back after a while sums up what happened", () => {

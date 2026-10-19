@@ -67,6 +67,20 @@ test("a stock ~/.claude is all it takes", { skip: !linux && "sessions are detect
   assert.ok(g.homeChatCommand, "--remote mode gives the command that starts a chat");
 });
 
+test("a chat that mentions the answer's marker can't break the answer", { skip: !linux && "sessions are detected through /proc" }, async () => {
+  const home = fakeHome();
+  liveSession(path.join(home, ".claude"), { HOME: home }, {
+    sessionId: "33333333-3333-4333-8333-333333333333",
+    cwd: home,
+    status: "idle",
+    name: "Why does @@claude-status@@ break the view?",
+  });
+  const backend = new Backend(path.resolve("."), () => "python3");
+  const { status, error } = await backend.status([]);
+  assert.equal(error, undefined);
+  assert.equal(status?.groups[0].sessions[0].name, "Why does @@claude-status@@ break the view?");
+});
+
 test("a custom CLAUDE_CONFIG_DIR is found when passed along", { skip: !linux && "sessions are detected through /proc" }, async () => {
   const home = fakeHome();
   const custom = path.join(home, "config", "claude");

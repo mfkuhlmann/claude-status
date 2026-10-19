@@ -16,9 +16,17 @@ export function Elided({ text, class: cls, title }: { text: string; class?: stri
     return observeWidth(el, setWidth);
   }, []);
 
+  // Cut again only when the text or the room changed: most polls change
+  // neither, and measuring reads the element's styles
+  const last = useRef({ text: "", width: 0, shown: "" });
   const el = ref.current;
-  // a pixel of slack: layout widths are fractional, the observer's too
-  const shown = el && width > 0 ? elideMiddle(text, width - 1, textMeasurer(el)) : text;
+  let shown = text;
+  if (el && width > 0) {
+    if (last.current.text !== text || last.current.width !== width)
+      // a pixel of slack: layout widths are fractional, the observer's too
+      last.current = { text, width, shown: elideMiddle(text, width - 1, textMeasurer(el)) };
+    shown = last.current.shown;
+  }
   return (
     <span ref={ref} class={"elided" + (cls ? " " + cls : "")} title={title ?? text}>
       <span class="elided-full" aria-hidden="true">

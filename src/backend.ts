@@ -8,6 +8,7 @@ import { isComparison, type Comparison } from "./changes";
 import type { Status } from "./shared/types";
 
 export const REMOTE_MARK = "@@claude-status@@";
+const KILL_GRACE_MS = 3000;
 
 export interface RunResult {
   code: number | null;
@@ -54,16 +55,21 @@ export function runProcess(
     let settled = false;
     let timedOut = false;
     const child = spawn(command, args, { cwd: opts.cwd, env: helperEnv(), stdio: ["pipe", "pipe", "pipe"] });
+    // Too slow: SIGTERM first, so remote.py can end the ssh it runs (SIGKILL
+    // would leave that behind), and SIGKILL if it's still there after a bit
+    let killer: NodeJS.Timeout | undefined;
     const timer = opts.timeoutMs
       ? setTimeout(() => {
           timedOut = true;
-          child.kill("SIGKILL");
+          child.kill("SIGTERM");
+          killer = setTimeout(() => child.kill("SIGKILL"), KILL_GRACE_MS);
         }, opts.timeoutMs)
       : undefined;
     const done = (result: RunResult) => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
+      if (killer) clearTimeout(killer);
       resolve(result);
     };
     child.stdout.setEncoding("utf8").on("data", (d: string) => (stdout += d));
@@ -116,10 +122,12 @@ export class Backend {
     const r = await runProcess(this.python(), ["-I", this.script("claude_status.py"), "--remote", ...args], { timeoutMs: 60000 });
     if (r.spawnError) return { error: `Can't run Python: ${r.spawnError.message}` };
     if (r.timedOut) return { error: "The status check took longer than a minute." };
-    const mark = r.stdout.lastIndexOf(REMOTE_MARK);
+    // The JSON is the one line after the marker; a chat's prompt or reply
+    // inside it may mention the marker too, so only one at a line start counts
+    const mark = r.stdout.lastIndexOf("\n" + REMOTE_MARK);
     if (mark < 0) return { error: `Status script failed: ${lastLine(r.stderr) || "no output"}` };
     try {
-      const parsed = JSON.parse(r.stdout.slice(mark + REMOTE_MARK.length));
+      const parsed = JSON.parse(r.stdout.slice(mark + 1 + REMOTE_MARK.length));
       if (!parsed.ok) return { error: `Status unavailable: ${parsed.error}` };
       return { status: parsed as Status };
     } catch {

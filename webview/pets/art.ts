@@ -65,7 +65,10 @@ function load(pose: string): Promise<PoseArt | null> {
     art = fetch(`${petsBase}/clawd-${pose}.svg`)
       .then((r) => (r.ok ? r.text() : Promise.reject(new Error(`${r.status}`))))
       .then(parse)
-      .catch(() => null);
+      .catch(() => {
+        poses.delete(pose); // tried again next time (the page may have been reloading)
+        return null;
+      });
     poses.set(pose, art);
   }
   return art;

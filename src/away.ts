@@ -115,11 +115,15 @@ export class AwayWatch implements vscode.Disposable {
   private subscription: vscode.Disposable;
 
   constructor(private onBack: (now: number, lastUse: number) => void) {
+    // Started in the background (unfocused) isn't being away from it: you
+    // haven't used this window yet, so there's nothing to sum up later
     if (inUse(vscode.window.state)) this.inUse();
-    else this.tracker.leave(Date.now());
     this.subscription = vscode.window.onDidChangeWindowState((s) => {
       if (inUse(s)) {
-        if (this.tracker.since === null) return;
+        if (this.tracker.since === null) {
+          if (!this.timer) this.inUse(); // the first use of this window
+          return;
+        }
         const lastUse = this.lastUse();
         this.inUse();
         this.onBack(Date.now(), lastUse);

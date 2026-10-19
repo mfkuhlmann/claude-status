@@ -7,7 +7,10 @@ import * as vscode from "vscode";
 import type { Actions } from "./actions";
 import { setReopenIn } from "./config";
 import type { Dashboard } from "./dashboard";
-import type { HostMessage, WebviewMessage } from "./shared/types";
+import { findChatRef } from "./shared/model";
+import type { ChatRef, HostMessage, WebviewMessage } from "./shared/types";
+
+const AGENT_ID = /^[A-Za-z0-9_-]{1,100}$/;
 
 export class ViewHost implements vscode.WebviewViewProvider, vscode.Disposable {
   static readonly viewId = "claudeStatus.view";
@@ -101,58 +104,78 @@ export class ViewHost implements vscode.WebviewViewProvider, vscode.Disposable {
     webview.options = { enableScripts: true, localResourceRoots: this.roots() };
     webview.html = this.html(webview, editorTab);
     this.webviews.add(webview);
-    webview.onDidReceiveMessage((m: WebviewMessage) => this.receive(webview, m));
+    webview.onDidReceiveMessage((m: unknown) => this.receive(webview, m));
+  }
+
+  // A page that loads while its view is hidden mustn't start its pets
+  private isVisible(webview: vscode.Webview): boolean {
+    if (this.view?.webview === webview) return this.view.visible;
+    if (this.panel?.webview === webview) return this.panel.visible;
+    return true;
   }
 
   private broadcast(message: HostMessage): void {
     for (const w of this.webviews) void w.postMessage(message);
   }
 
-  private receive(webview: vscode.Webview, m: WebviewMessage): void {
+  // A chat the page names, as the extension knows it: what runs for it (its
+  // open or stop command, its process) comes from the extension's own state,
+  // never from the page
+  private chatOf(m: { chat?: unknown }): ChatRef | null {
+    const ref = m.chat && typeof m.chat === "object" ? (m.chat as { host?: unknown; key?: unknown }) : null;
+    const state = this.dash.state();
+    return ref ? findChatRef(state.status, state.hosts, ref.host, ref.key) : null;
+  }
+
+  private receive(webview: vscode.Webview, raw: unknown): void {
+    if (!raw || typeof raw !== "object" || typeof (raw as { type?: unknown }).type !== "string") return;
+    const m = raw as WebviewMessage;
+    const text = (v: unknown) => (typeof v === "string" && v ? v : undefined);
+    const chat = "chat" in m ? this.chatOf(m) : null;
     switch (m.type) {
       case "ready":
         void webview.postMessage({ type: "state", state: this.dash.state() } satisfies HostMessage);
-        void webview.postMessage({ type: "visible", visible: true } satisfies HostMessage);
+        void webview.postMessage({ type: "visible", visible: this.isVisible(webview) } satisfies HostMessage);
         break;
       case "open":
-        void this.actions.open(m.chat);
+        if (chat) void this.actions.open(chat);
         break;
       case "openInClaudeCode":
-        void this.actions.openInClaudeCode(m.chat);
+        if (chat) void this.actions.openInClaudeCode(chat);
         break;
       case "setReopenIn":
-        void setReopenIn(m.where);
+        if (m.where === "terminal" || m.where === "claudeCode") void setReopenIn(m.where);
         break;
       case "stop":
-        void this.actions.stop(m.chat);
+        if (chat) void this.actions.stop(chat);
         break;
       case "dismiss":
-        void this.actions.dismiss(m.chat);
+        if (chat) void this.actions.dismiss(chat);
         break;
       case "share":
-        void this.actions.share(m.chat);
+        if (chat) void this.actions.share(chat);
         break;
       case "compareChanges":
-        void this.actions.compareChanges(m.chat, m.turn);
+        if (chat) void this.actions.compareChanges(chat, m.turn === true);
         break;
       case "openAgentRun":
-        void this.actions.openAgentRun(m.chat, m.agentId);
+        if (chat && typeof m.agentId === "string" && AGENT_ID.test(m.agentId)) void this.actions.openAgentRun(chat, m.agentId);
         break;
       case "dismissDigest":
         this.dash.dismissDigest();
         break;
       case "newChat":
-        void this.actions.newChat(m.groupId, m.host);
+        void this.actions.newChat(text(m.groupId), text(m.host));
         break;
       case "refresh":
-        if (m.host) void this.dash.pollHost(m.host);
+        if (text(m.host)) void this.dash.pollHost(m.host as string);
         else this.dash.refreshAll();
         break;
       case "showRemoved":
-        void this.actions.showRemoved(m.host ?? null);
+        void this.actions.showRemoved(text(m.host) ?? null);
         break;
       case "hideHost":
-        void this.actions.hideHost(m.host);
+        if (text(m.host)) void this.actions.hideHost(m.host);
         break;
       case "pickHosts":
         void this.actions.pickHosts();
@@ -175,6 +198,8 @@ export class ViewHost implements vscode.WebviewViewProvider, vscode.Disposable {
     // styles; their SVGs' own styles go into constructed stylesheets).
     const csp = [
       "default-src 'none'",
+      "base-uri 'none'",
+      "form-action 'none'",
       `img-src ${webview.cspSource} data:`,
       `style-src ${webview.cspSource} 'unsafe-inline'`,
       `font-src ${webview.cspSource}`,

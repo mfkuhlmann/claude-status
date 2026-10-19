@@ -3,7 +3,7 @@
 // its reset reaction threw before the status was stored.
 
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import type * as vscode from "vscode";
 import type { Backend } from "../src/backend";
 import { Dashboard } from "../src/dashboard";
@@ -45,4 +45,25 @@ test("the status keeps updating after a reaction to a limit reset throws", async
   await dash.refresh();
   assert.equal(fiveHour(), 3, "later polls still update");
   dash.dispose();
+});
+
+test("opening the view doesn't cancel the next try of a Python that didn't work", async () => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    let checks = 0;
+    const backend = {
+      checkPython: async () => (++checks === 1 ? "python3 doesn't work" : ""),
+      status: async () => ({ status: demoState(NOW).status! }),
+    } as unknown as Backend;
+    const log = { warn() {}, info() {}, error() {} } as unknown as vscode.LogOutputChannel;
+    const dash = new Dashboard(backend, { handle() {} } as unknown as Notifier, log);
+    await dash.start();
+    dash.setVisible(true); // polls right away (its timer used to be the retry's too)
+    mock.timers.tick(30000);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(checks, 2, "Python is checked again");
+    dash.dispose();
+  } finally {
+    mock.timers.reset();
+  }
 });

@@ -2,7 +2,7 @@
 // input when it changed, and animations only while someone can see them.
 
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import type { ChatRef } from "../../src/shared/types";
+import type { ChatRef, Session } from "../../src/shared/types";
 import { post } from "../env";
 import type { AccountInput, HeroInput, PetStage, StageCallbacks } from "../pets/api";
 import { useStore } from "./store";
@@ -18,6 +18,12 @@ export function useViewVisible(): boolean {
   const host = useStore(hostVisible);
   const page = useStore(pageVisible);
   return host && page;
+}
+
+function petFields(key: string, value: unknown): unknown {
+  if (key !== "session" || !value || typeof value !== "object") return value;
+  const s = value as Session;
+  return [s.key, s.chatId, s.sessionId, s.state, s.reason, s.name, s.since, s.context, s.agents?.running ?? 0, s.openCommand ?? ""];
 }
 
 // `active`: the stage is open (an account's stage folds away without chats)
@@ -48,8 +54,10 @@ export function usePetStage(
     };
   }, []);
 
-  // Every poll brings new objects: only pass on what really changed
-  const json = JSON.stringify(input);
+  // Every poll brings new objects: only pass on what really changed, and only
+  // what the pets show of a chat (the rest of its row, its reply, its agents'
+  // trees, its tasks, changes with every poll)
+  const json = JSON.stringify(input, petFields);
   useLayoutEffect(() => {
     if (stage.current && json !== lastInput.current) {
       lastInput.current = json;

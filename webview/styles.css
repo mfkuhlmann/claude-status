@@ -1431,3 +1431,8 @@ body.vscode-high-contrast .top.scrolled {
     display: none;
   }
 }
+
+/* a subagent that ended on an API error (e.g. a usage limit) */
+.agent-status.failed {
+  color: var(--cs-failed);
+}

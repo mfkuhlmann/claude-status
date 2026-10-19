@@ -7,6 +7,7 @@ import {
   agentSummary,
   allGroups,
   countStates,
+  findChatRef,
   duration,
   formatTokens,
   headlineText,
@@ -18,6 +19,7 @@ import {
   resetText,
   shareAccounts,
   shellQuote,
+  toLocalClock,
   stateText,
   summaryText,
 } from "../src/shared/model";
@@ -98,7 +100,8 @@ test("formatting", () => {
   assert.equal(resetText({ ...window, resetsAt: NOW + 90 * 60000 }, NOW), "resets in 1h 30m");
   assert.equal(resetText({ ...window, resetsAt: null }, NOW), "");
   assert.equal(resetText({ ...window, resetsAt: NOW - 1000, reset: true }, NOW), "reset");
-  assert.equal(petKeyOf({ chatId: "c", sessionId: "s", key: "k" }, "build-server"), "ssh:build-server|c");
+  assert.equal(petKeyOf({ chatId: "c", sessionId: "s", key: "k" }, "build-server"), "ssh:build-server|/c");
+  assert.equal(petKeyOf({ chatId: "c", sessionId: "s", key: "k", profileDir: ".claude-work" }), ".claude-work/c");
 });
 
 test("an unfolded subagent: its numbers, its open state's key, the run's tooltip", () => {
@@ -109,4 +112,29 @@ test("an unfolded subagent: its numbers, its open state's key, the run's tooltip
   assert.equal(agentDetailKey("lab|.claude/s1/live", "a1"), "lab|.claude/s1/live|a1");
   assert.match(agentRunTitle(), /as Markdown\. Claude Code itself can't open a subagent from outside\.$/);
   assert.match(agentRunTitle("lab"), /from outside\. Fetched from lab over ssh\.$/);
+});
+
+test("a chat the page names is looked up: its commands are the extension's own", () => {
+  const state = demoState(NOW);
+  const host = state.hosts[0];
+  const s = host.result!.groups[0].sessions[0];
+  const ref = findChatRef(state.status, state.hosts, host.name, s.key);
+  assert.equal(ref?.openCommand ?? null, s.openCommand ?? null);
+  assert.equal(findChatRef(state.status, state.hosts, host.name, "made-up"), null, "a chat it doesn't know");
+  assert.equal(findChatRef(state.status, state.hosts, "elsewhere", s.key), null, "on a host it doesn't show");
+  assert.equal(findChatRef(state.status, state.hosts, { evil: 1 }, s.key), null);
+  const local = state.status!.groups[0].sessions[0];
+  assert.equal(findChatRef(state.status, state.hosts, undefined, local.key)?.sessionId, local.sessionId);
+});
+
+test("a host that didn't answer this time doesn't count; its clock is put right", () => {
+  const state = demoState(NOW);
+  const counted = allGroups(state.status, state.hosts).length;
+  const stale = state.hosts.map((h) => ({ ...h, error: "timed out" }));
+  assert.equal(allGroups(state.status, stale).length, counted - state.hosts.reduce((n, h) => n + (h.result?.groups.length ?? 0), 0));
+  const result = state.hosts[0].result!;
+  const shifted = toLocalClock(result, 60000);
+  assert.equal(shifted.generatedAt, result.generatedAt + 60000);
+  assert.equal(shifted.groups[0].sessions[0].since, (result.groups[0].sessions[0].since ?? 0) + 60000);
+  assert.equal(toLocalClock(result, 2000), result, "a few seconds: just the network");
 });

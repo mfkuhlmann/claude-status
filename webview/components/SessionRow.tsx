@@ -71,7 +71,7 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
               text={`agents ${agents.done}/${agents.total}`}
               active={agents.running > 0}
               pressed={showAgents}
-              title={`Subagents: ${agents.done} done, ${agents.running} running, ${agents.stopped} stopped. Click to ${showAgents ? "hide" : "show"} what each one is doing.`}
+              title={`Subagents: ${agents.done} done, ${agents.running} running, ${agents.stopped} stopped${agents.failed ? `, ${agents.failed} failed` : ""}. Click to ${showAgents ? "hide" : "show"} what each one is doing.`}
               onClick={() => toggleAgents(rowKey)}
             />
           ) : null}
@@ -104,7 +104,7 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
               {s.effort ? `${s.model} · ${s.effort}` : s.model}
             </span>
           ) : null}
-          {s.context !== null ? (
+          {s.context != null ? (
             <>
               {/* Context window fill */}
               <span

@@ -6,7 +6,8 @@ import type { UsageStats } from "../../src/shared/types";
 // the models used
 export function StatsPanel({ stats: s }: { stats: UsageStats }) {
   const peak = Math.max(1, ...s.days.map((d) => d.total));
-  const busiest = Math.max(1, ...s.projects.map((p) => p.total));
+  const projects = s.projects ?? [];
+  const busiest = Math.max(1, ...projects.map((p) => p.total));
   const last = s.days.length - 1;
   return (
     <div class="stats small" aria-label={`Last ${s.days.length} days`}>
@@ -21,9 +22,9 @@ export function StatsPanel({ stats: s }: { stats: UsageStats }) {
         ))}
       </div>
       <div class="stats-sum">{statsSummary(s)}</div>
-      {s.projects.length ? (
+      {projects.length ? (
         <ul class="stats-projects" aria-label="Busiest folders">
-          {s.projects.slice(0, 5).map((p) => (
+          {projects.slice(0, 5).map((p) => (
             <li key={p.path} class="stats-project" title={`${p.path}\n${formatTokens(p.total)} tokens (${formatTokens(p.output)} out) · ${plural(p.prompts, "%1 prompt", "%1 prompts")}`}>
               <span class="stats-project-name">{p.name}</span>
               <span class="stats-project-meter">
@@ -36,7 +37,7 @@ export function StatsPanel({ stats: s }: { stats: UsageStats }) {
           ))}
         </ul>
       ) : null}
-      {s.models.length ? <div class="stats-models muted">{modelShares(s.models)}</div> : null}
+      {s.models?.length ? <div class="stats-models muted">{modelShares(s.models)}</div> : null}
     </div>
   );
 }

@@ -764,6 +764,7 @@ export class Pet {
 
   private listen(): void {
     const g = this.grab;
+    g.addEventListener("pointerenter", () => this.describe()); // its "Working · 3m" as of now
     g.addEventListener("pointerdown", (e) => {
       if (e.button !== 0) return;
       e.preventDefault(); // no text selection or native drag

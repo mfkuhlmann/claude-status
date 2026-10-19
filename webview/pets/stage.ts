@@ -404,7 +404,7 @@ export class Stage implements PetStage, Animator {
   // (and the ones for a chat that has no pet)
   petEvent(kind: string, text: string, key: string): void {
     let pet: Pet | null = null;
-    if (this.hero) pet = !key || !(key in allPetColors()) ? (this.pets[0] ?? null) : null;
+    if (this.hero) pet = !key || !Object.hasOwn(allPetColors(), key) ? (this.pets[0] ?? null) : null;
     else if (key) pet = this.petFor(key);
     pet?.event(kind, text);
   }

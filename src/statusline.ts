@@ -19,7 +19,9 @@ import { shellQuote } from "./shared/model";
 
 export const MARK_START = "# >>> claude-widget >>>";
 const BLOCK = /^# >>> claude-widget >>>\n[\s\S]*?^# <<< claude-widget <<<\n/m;
-const INPUT_LINE = /^\s*input=\$\(cat\)[^\n]*\n/m;
+// input=$(cat), input="$(cat)", input=$(cat -): a line of its own (not one
+// that goes on with a \ or a trailing && or |)
+const INPUT_LINE = /^[ \t]*input=("?)\$\(cat(?:[ \t]+-)?\)\1[ \t]*(?:;[ \t]*)?(?:#[^\n]*)?(?:\n|$)/m;
 
 export interface Change {
   file: string;
@@ -31,6 +33,12 @@ export interface Change {
 
 export function wrapperPath(env: NodeJS.ProcessEnv = process.env): string {
   return path.join(env.XDG_DATA_HOME || path.join(os.homedir(), ".local", "share"), "claude-status", "statusline.sh");
+}
+
+// Where a wrapper may have been put: here, or where it goes without
+// XDG_DATA_HOME (set up from a VS Code started another way)
+function wrapperPaths(env: NodeJS.ProcessEnv = process.env): string[] {
+  return [...new Set([wrapperPath(env), wrapperPath({})])];
 }
 
 export function wrapperScript(snippet: string): string {
@@ -54,7 +62,8 @@ export function patchScript(text: string, snippet: string): string | null {
   const m = INPUT_LINE.exec(text);
   if (!m) return null;
   const at = m.index + m[0].length;
-  return text.slice(0, at) + snippet.trimEnd() + "\n" + text.slice(at);
+  const line = m[0].endsWith("\n") ? "" : "\n"; // the script's last line, without its newline
+  return text.slice(0, at) + line + snippet.trimEnd() + "\n" + text.slice(at);
 }
 
 export function unpatchScript(text: string): string {
@@ -62,8 +71,8 @@ export function unpatchScript(text: string): string {
 }
 
 // "WRAPPER 'previous command'" -> "previous command"; "WRAPPER" -> ""; else null
-export function unwrapCommand(command: string, wrapper: string): string | null {
-  const forms = [wrapper, shellQuote(wrapper), wrapper.replace(os.homedir(), "~")];
+export function unwrapCommand(command: string, wrapper: string | string[]): string | null {
+  const forms = (Array.isArray(wrapper) ? wrapper : [wrapper]).flatMap((w) => [w, shellQuote(w), w.replace(os.homedir(), "~")]);
   for (const w of forms) {
     if (command === w) return "";
     if (command.startsWith(w + " ")) {
@@ -78,7 +87,7 @@ export function unwrapCommand(command: string, wrapper: string): string | null {
 // The status line's own script, if its command runs one
 export function scriptOf(command: string): string | null {
   for (const word of command.split(/\s+/)) {
-    const w = expandHome(word.replace(/^["']|["']$/g, ""));
+    const w = expandHome(word.replace(/^["']|["']$/g, "").replace(/^\$\{?HOME\}?(?=\/)/, os.homedir()));
     if (w.endsWith(".sh") && fs.existsSync(w)) return fs.realpathSync(w);
   }
   return null;
@@ -133,6 +142,15 @@ export function plan(snippet: string, remove: boolean): { changes: Change[]; not
   const changes = new Map<string, Change>();
   const notes: string[] = [];
   const wrapper = wrapperPath();
+  const wrappers = wrapperPaths();
+  const wantWrapper = (): void => {
+    // the wrapper that runs: written (or brought up to date) before any
+    // status line points at it
+    if (changes.has(wrapper)) return;
+    const existing = fs.existsSync(wrapper) ? fs.readFileSync(wrapper, "utf8") : "";
+    const after = wrapperScript(snippet);
+    if (existing !== after) changes.set(wrapper, { file: wrapper, before: existing, after, why: "the wrapper script", mode: 0o755 });
+  };
   for (const dir of profileDirs()) {
     const label = dir.replace(os.homedir(), "~");
     const settingsFile = path.join(dir, "settings.json");
@@ -143,7 +161,7 @@ export function plan(snippet: string, remove: boolean): { changes: Change[]; not
     }
     const before = fs.existsSync(settingsFile) ? fs.readFileSync(settingsFile, "utf8") : "";
     const command: string = typeof settings.statusLine?.command === "string" ? settings.statusLine.command.trim() : "";
-    const previous = command ? unwrapCommand(command, wrapper) : null;
+    const previous = command ? unwrapCommand(command, wrappers) : null;
     if (remove) {
       if (previous !== null) {
         changes.set(settingsFile, {
@@ -163,7 +181,16 @@ export function plan(snippet: string, remove: boolean): { changes: Change[]; not
       continue;
     }
     if (previous !== null) {
-      notes.push(`${label}: already set up.`);
+      if (unwrapCommand(command, wrapper) === null) {
+        // set up with the wrapper somewhere else: point it at this one
+        changes.set(settingsFile, {
+          file: settingsFile,
+          before,
+          after: withStatusLine(settingsFile, before, previous ? `${shellQuote(wrapper)} ${shellQuote(previous)}` : shellQuote(wrapper)),
+          why: `${label}: its status line's wrapper moved`,
+        });
+      } else notes.push(`${label}: already set up.`);
+      wantWrapper(); // gone, or from an older snippet: written again
       continue;
     }
     const script = command ? scriptOf(command) : null;
@@ -188,13 +215,11 @@ export function plan(snippet: string, remove: boolean): { changes: Change[]; not
       after: withStatusLine(settingsFile, before, newCommand),
       why: command ? `${label}: status line wrapped (it keeps showing the same)` : `${label}: a status line that only saves the usage (shows nothing)`,
     });
-    if (!changes.has(wrapper)) {
-      const existing = fs.existsSync(wrapper) ? fs.readFileSync(wrapper, "utf8") : "";
-      const after = wrapperScript(snippet);
-      if (existing !== after) changes.set(wrapper, { file: wrapper, before: existing, after, why: "the wrapper script", mode: 0o755 });
-    }
+    wantWrapper();
   }
-  return { changes: [...changes.values()], notes };
+  // the wrapper first: a status line must never point at a script not written yet
+  const ordered = [...changes.values()].sort((a, b) => Number(b.file === wrapper) - Number(a.file === wrapper));
+  return { changes: ordered, notes };
 }
 
 function stamp(): string {
@@ -203,12 +228,25 @@ function stamp(): string {
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
 
+// Each file is written next to itself, then moved over it in one step: Claude
+// may run a status-line script (or read settings.json) at any moment
 export function apply(changes: Change[]): void {
   for (const c of changes) {
     fs.mkdirSync(path.dirname(c.file), { recursive: true });
-    if (c.before) fs.copyFileSync(c.file, `${c.file}.bak.${stamp()}`);
-    fs.writeFileSync(c.file, c.after, c.mode ? { mode: c.mode } : undefined);
-    if (c.mode) fs.chmodSync(c.file, c.mode);
+    let mode = c.mode;
+    if (c.before) {
+      fs.copyFileSync(c.file, `${c.file}.bak.${stamp()}`);
+      mode ??= fs.statSync(c.file).mode & 0o7777;
+    }
+    const tmp = path.join(path.dirname(c.file), `.${path.basename(c.file)}.${process.pid}.tmp`);
+    try {
+      fs.writeFileSync(tmp, c.after, { mode: mode ?? 0o644 });
+      if (mode !== undefined) fs.chmodSync(tmp, mode);
+      fs.renameSync(tmp, c.file);
+    } catch (e) {
+      fs.rmSync(tmp, { force: true });
+      throw e;
+    }
   }
 }
 
@@ -287,7 +325,9 @@ export async function setUpUsageBars(extensionUri: vscode.Uri, remove = false): 
     break;
   }
   try {
-    apply(changes);
+    // planned again from the files as they are now: what Claude Code (or you)
+    // changed in them while this asked is kept
+    apply(plan(snippet, remove).changes);
   } catch (e) {
     void vscode.window.showErrorMessage(`Couldn't change the files: ${(e as Error).message}`);
     return;

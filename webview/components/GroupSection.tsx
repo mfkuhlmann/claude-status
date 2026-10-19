@@ -20,7 +20,7 @@ function modelName(model: string): string {
 function tokenTitle(t: Tokens): string {
   const fmt = (b: TokenTotals) =>
     `input ${formatTokens(b.input)} · output ${formatTokens(b.output)} · cache read ${formatTokens(b.cacheRead)} · cache write ${formatTokens(b.cacheWrite)} · ${b.messages} replies`;
-  const models = t.models.map((m) => `${modelName(m.model)}: ${formatTokens(m.total)}`);
+  const models = (t.models ?? []).map((m) => `${modelName(m.model)}: ${formatTokens(m.total)}`);
   return (
     "Tokens (this machine's transcripts only)\n" +
     `Today: ${fmt(t.today)}\nLast 7 days: ${fmt(t.week)}` +
@@ -59,9 +59,9 @@ export function GroupSection({ group: g }: { group: Group }) {
   const settings = view.settings;
   const multiProfile = g.profiles.length > 1;
   const limits = g.limits;
-  const usageAge = !limits ? "" : now - limits.updatedAt < 60000 ? "just now" : `${duration(now - limits.updatedAt)} ago`;
+  const usageAge = !limits || !Number.isFinite(limits.updatedAt) ? "" : now - limits.updatedAt < 60000 ? "just now" : `${duration(now - limits.updatedAt)} ago`;
   const tokens = settings.showTokens ? g.tokens : null;
-  const topModels = tokens ? tokens.models.slice(0, 2) : [];
+  const topModels = (tokens?.models ?? []).slice(0, 2);
   const ui = useStore(uiState);
   const stats = tokens && g.stats ? g.stats : null;
   const statsOpen = !!stats && !!ui.stats[key];
@@ -85,7 +85,7 @@ export function GroupSection({ group: g }: { group: Group }) {
         />
         <span class="spacer" />
         {usageAge ? <span class="usage-age small muted">usage updated {usageAge}</span> : null}
-        {multiProfile ? <span class="small muted nowrap">{g.profiles.join(" + ")}</span> : null}
+        {multiProfile ? <span class="small muted nowrap">{(g.profiles ?? []).join(" + ")}</span> : null}
       </div>
 
       {settings.showPet ? (

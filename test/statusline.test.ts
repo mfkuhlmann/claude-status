@@ -31,7 +31,7 @@ test("the snippet goes right after input=$(cat), once, and comes out again", () 
   assert.equal(unpatchScript(patched), SCRIPT);
   assert.equal(patchScript("#!/bin/sh\necho hi\n", SNIPPET), null);
   // an older copy (bash-only, say) is replaced by the current one
-  const older = patched.replace(/^\(\n[\s\S]*?^\) 2>\/dev\/null\n/m, "(\n  echo old $'\\t'\n) 2>/dev/null\n");
+  const older = patched.replace(/^\(\n[\s\S]*?^\) 2>\/dev\/null(?: \|\| :)?\n/m, "(\n  echo old $'\\t'\n) 2>/dev/null\n");
   assert.notEqual(older, patched);
   assert.equal(patchScript(older, SNIPPET), patched);
 });
@@ -79,4 +79,32 @@ test("set up and remove on a machine with three kinds of profiles", () => {
   assert.equal(restored.statusLine.command, "echo other");
   const stock = JSON.parse(fs.readFileSync(path.join(home, ".claude", "settings.json"), "utf8"));
   assert.equal(stock.statusLine, undefined);
+});
+
+test("the wrapper is written first, and put back when it's gone or old", () => {
+  const home = fakeHome();
+  fs.mkdirSync(path.join(home, ".claude", "projects"), { recursive: true });
+  const setup = plan(SNIPPET, false);
+  assert.equal(setup.changes[0].file, wrapperPath(), "a status line never points at a script not written yet");
+  apply(setup.changes);
+  assert.equal(fs.statSync(wrapperPath()).mode & 0o777, 0o755);
+  fs.rmSync(wrapperPath());
+  const again = plan(SNIPPET, false);
+  assert.deepEqual(again.changes.map((c) => c.file), [wrapperPath()], "settings stay, the wrapper comes back");
+  apply(again.changes);
+  fs.writeFileSync(wrapperPath(), "#!/bin/sh\n# an older wrapper\n");
+  assert.deepEqual(plan(SNIPPET, false).changes.map((c) => c.file), [wrapperPath()]);
+});
+
+test("more ways to read the input, a last line without its newline, $HOME in the command", () => {
+  for (const line of ['input="$(cat)"', "input=$(cat -)", "input=$(cat) # the JSON"]) {
+    const patched = patchScript(`#!/bin/sh\n${line}`, SNIPPET)!;
+    assert.ok(patched.startsWith(`#!/bin/sh\n${line}\n${MARK_START}`), line);
+  }
+  assert.equal(patchScript("#!/bin/sh\ninput=$(cat) &&\n  echo x\n", SNIPPET), null, "a line that goes on");
+  const home = fakeHome();
+  write(path.join(home, ".claude", "statusline.sh"), SCRIPT);
+  write(path.join(home, ".claude", "settings.json"), JSON.stringify({ statusLine: { type: "command", command: "bash $HOME/.claude/statusline.sh" } }));
+  const files = plan(SNIPPET, false).changes.map((c) => path.relative(home, c.file));
+  assert.deepEqual(files, [".claude/statusline.sh"], "the script itself is patched, not wrapped");
 });

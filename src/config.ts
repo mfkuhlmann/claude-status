@@ -10,9 +10,10 @@ function cfg() {
   return vscode.workspace.getConfiguration("claudeStatus");
 }
 
+// A whole number in [min, max]: the scripts take counts like --recent 2.5 as an error
 function num(key: string, fallback: number, min: number, max: number): number {
   const v = cfg().get<number>(key, fallback);
-  return Math.min(max, Math.max(min, typeof v === "number" && isFinite(v) ? v : fallback));
+  return Math.round(Math.min(max, Math.max(min, typeof v === "number" && isFinite(v) ? v : fallback)));
 }
 
 export function expandHome(p: string): string {
@@ -73,12 +74,20 @@ export function statusArgs(): string[] {
   return args;
 }
 
+// (a "machine" setting: only the user's settings hold it)
 export async function setSshHosts(hosts: string[]): Promise<void> {
   await cfg().update("sshHosts", hosts, vscode.ConfigurationTarget.Global);
 }
 
+// Written where it's set: a workspace's own value would win over the user's
 export async function setReopenIn(where: ReopenIn): Promise<void> {
-  await cfg().update("reopenIn", where, vscode.ConfigurationTarget.Global);
+  const set = cfg().inspect<string>("reopenIn");
+  const target = set?.workspaceFolderValue !== undefined
+    ? vscode.ConfigurationTarget.WorkspaceFolder
+    : set?.workspaceValue !== undefined
+      ? vscode.ConfigurationTarget.Workspace
+      : vscode.ConfigurationTarget.Global;
+  await cfg().update("reopenIn", where, target);
 }
 
 export function cacheDir(): string {

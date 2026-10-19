@@ -1,13 +1,112 @@
 // The dashboard's derived values, shared by the extension (status bar,
 // notifications) and the webview. Ported from the widget's main.qml.
 
-import type { Agent, ChangeSummary, ChatStats, ClaudeCodeInfo, Counts, Group, HostState, LimitWindow, Overall, ReopenIn, Session, StatsDay, Status, TaskProgress, UsageStats, ViewState } from "./types";
+import type { Agent, ChangeSummary, ChatRef, ChatStats, ClaudeCodeInfo, Counts, Group, HostState, LimitWindow, Overall, RecentChat, ReopenIn, Session, SharedPointer, StatsDay, Status, TaskProgress, UsageStats, ViewState } from "./types";
 
-// This computer's accounts, then the hosts' (each marked with its host).
+// This computer's accounts and the hosts', for the counts, the badge and
+// what needs you. A host whose last check failed still shows what it said
+// before (dimmed), but that doesn't count here: you can't reach its chats.
 export function allGroups(status: Status | null, hosts: HostState[]): Group[] {
   const out: Group[] = status ? status.groups.slice() : [];
   for (const h of hosts) {
-    if (h.result) for (const g of h.result.groups) out.push({ ...g, host: h.name });
+    if (h.result && !h.error) for (const g of h.result.groups) out.push({ ...g, host: h.name });
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------- the chat a click means
+
+// What the webview says when you click a chat (the extension does the work)
+export function chatRefOf(s: Session, host?: string): ChatRef {
+  return {
+    host,
+    key: s.key,
+    sessionId: s.sessionId,
+    chatId: s.chatId,
+    profileDir: s.profileDir,
+    name: s.name,
+    entrypoint: s.entrypoint,
+    pid: s.pid,
+    cwd: s.cwd,
+    kind: s.kind,
+    state: s.state,
+    tmux: !!s.tmux,
+    jobId: s.jobId,
+    openCommand: s.openCommand ?? null,
+    stopCommand: s.stopCommand ?? null,
+    // a fork of a shared chat is a chat of its own
+    shared: !!s.shared && !s.shared.forkOf,
+  };
+}
+
+export function recentRef(c: RecentChat, host?: string): ChatRef {
+  return {
+    host,
+    key: c.key,
+    sessionId: c.sessionId,
+    chatId: c.sessionId,
+    profileDir: c.profileDir,
+    name: c.name,
+    cwd: c.cwd,
+    kind: "chat",
+    openCommand: c.openCommand ?? null,
+    shared: c.shared,
+  };
+}
+
+export function sharedRef(p: SharedPointer, host?: string): ChatRef {
+  return {
+    host,
+    key: p.key,
+    sessionId: p.sessionId,
+    chatId: p.sessionId,
+    profileDir: p.profileDir,
+    name: p.name,
+    openCommand: p.openCommand ?? null,
+    shared: true,
+  };
+}
+
+// The chat a click from the webview means, as the extension knows it now:
+// found by host and row key, so the commands it runs are its own (from the
+// status), never ones the page sent. null when it's gone (or never was).
+export function findChatRef(status: Status | null, hosts: HostState[], host: unknown, key: unknown): ChatRef | null {
+  if (typeof key !== "string" || !key || (host !== undefined && host !== null && typeof host !== "string")) return null;
+  const where = host ? hosts.find((h) => h.name === host)?.result : status;
+  for (const g of where?.groups ?? []) {
+    const h = host ? (host as string) : undefined;
+    for (const s of g.sessions ?? []) if (s.key === key) return chatRefOf(s, h);
+    for (const c of g.recent ?? []) if (c.key === key) return recentRef(c, h);
+    for (const p of g.sharedHere ?? []) if (p.key === key) return sharedRef(p, h);
+  }
+  return null;
+}
+
+// A host's answer on this computer's clock: its times ("since", "last
+// active", resets) are its own clock's, which may be off from ours
+export function toLocalClock(result: Status, offset: number): Status {
+  if (Math.abs(offset) < 5000) return result; // network delay, or close enough
+  const at = (t: unknown) => (typeof t === "number" ? t + offset : t);
+  const shift = (o: Record<string, unknown> | null | undefined, keys: string[]) => {
+    if (o) for (const k of keys) o[k] = at(o[k]);
+  };
+  const out = JSON.parse(JSON.stringify(result)) as Status;
+  out.generatedAt = at(out.generatedAt) as number;
+  for (const g of out.groups ?? []) {
+    for (const s of g.sessions ?? []) {
+      shift(s as unknown as Record<string, unknown>, ["since", "startedAt"]);
+      shift(s.peek as unknown as Record<string, unknown>, ["at"]);
+      shift(s.stats as unknown as Record<string, unknown>, ["startedAt", "lastAt"]);
+      for (const a of s.agents?.tree ?? []) shift(a as unknown as Record<string, unknown>, ["started", "updated"]);
+    }
+    for (const c of [...(g.recent ?? []), ...(g.sharedHere ?? [])]) shift(c as unknown as Record<string, unknown>, ["lastActive", "since"]);
+    if (g.limits) {
+      shift(g.limits as unknown as Record<string, unknown>, ["updatedAt"]);
+      for (const w of g.limits.windows ?? []) {
+        shift(w as unknown as Record<string, unknown>, ["resetsAt"]);
+        shift(w.forecast as unknown as Record<string, unknown>, ["fullAt"]);
+      }
+    }
   }
   return out;
 }
@@ -49,7 +148,7 @@ export function shareAccounts(status: Pick<Status, "canShare" | "groups"> | null
 // ~/.claude, through Remote-SSH)
 export function claudeCodeHere(g: Pick<Group, "host" | "vscodeHere" | "profileKeys">, info: ClaudeCodeInfo): boolean {
   if (!info.available) return false;
-  return g.host ? !!g.vscodeHere : !!info.profileKey && g.profileKeys.includes(info.profileKey);
+  return g.host ? !!g.vscodeHere : !!info.profileKey && (g.profileKeys ?? []).includes(info.profileKey);
 }
 
 // Where recent chats reopen: in a Claude Code tab when you picked that, or
@@ -72,7 +171,7 @@ export function claudeCodeReopenHint(g: Pick<Group, "host" | "vscodeHere" | "pro
       ? `Opens the chat in a Claude Code tab, in a VS Code window connected to ${g.host} (Remote-SSH) on the chat's folder.`
       : `Claude Code on ${g.host} runs on another account (the host's ~/.claude).`;
   if (!claudeCodeHere(g, info)) {
-    const on = groups.find((o) => !o.host && !!info.profileKey && o.profileKeys.includes(info.profileKey));
+    const on = groups.find((o) => !o.host && !!info.profileKey && (o.profileKeys ?? []).includes(info.profileKey));
     return `Claude Code runs on ${on ? on.title : info.profileKey || "another account"}, not ${g.title}: switch it with “Use Account for VS Code's Claude…” to reopen this account's chats there.`;
   }
   return "Opens the chat in a Claude Code tab, in the VS Code window that has the chat's folder (opened if it isn't).";
@@ -98,9 +197,10 @@ export function plural(n: number, one: string, many: string): string {
 }
 
 // The hero's headline: the most important thing on the dashboard
-export function headlineText(state: Pick<ViewState, "status" | "errorText">, counts: Counts): string {
-  if (!state.status && state.errorText) return "Status unavailable";
-  if (!state.status) return "Looking for your chats…";
+// hostsAnswered: SSH hosts' chats count while this computer's status is missing
+export function headlineText(state: Pick<ViewState, "status" | "errorText">, counts: Counts, hostsAnswered = false): string {
+  if (!state.status && !hostsAnswered && state.errorText) return "Status unavailable";
+  if (!state.status && !hostsAnswered) return "Looking for your chats…";
   if (counts.waiting) return plural(counts.waiting, "%1 chat needs you", "%1 chats need you");
   if (counts.working) return plural(counts.working, "%1 chat working", "%1 chats working");
   if (counts.idle) return plural(counts.idle, "Your turn in %1 chat", "Your turn in %1 chats");
@@ -125,8 +225,9 @@ export function agentsRunning(groups: Group[]): number {
 
 // Clawd's mood for the whole dashboard
 export function heroMood(state: Pick<ViewState, "status" | "errorText">, overall: Overall, groups: Group[]): string {
-  if (!state.status && state.errorText) return "error";
-  if (!state.status) return "loading";
+  const answered = !!state.status || groups.length > 0; // a host's chats count too
+  if (!answered && state.errorText) return "error";
+  if (!answered) return "loading";
   if (overall === "waiting") return "waving";
   if (overall === "working") return agentsRunning(groups) > 0 ? "working-juggling" : "working-typing";
   if (overall === "idle") return "idle-living";
@@ -141,7 +242,7 @@ export function panelWindow(groups: Group[]): { window: LimitWindow; group: Grou
   for (const g of groups) {
     if (!g.limits || !g.limits.windows.length) continue;
     const active = g.sessions.some((s) => s.state === "working" || s.state === "waiting");
-    const score = (active ? 1e15 : 0) + g.limits.updatedAt;
+    const score = (active ? 1e15 : 0) + (Number.isFinite(g.limits.updatedAt) ? g.limits.updatedAt : 0);
     if (score > bestScore) {
       bestScore = score;
       best = { window: g.limits.windows[0], group: g };
@@ -170,9 +271,12 @@ export function highUsageText(groups: Group[]): string {
   return parts.join(" ");
 }
 
-// A chat's pet key: its conversation, so the pet stays while the row changes
-export function petKeyOf(session: Pick<Session, "chatId" | "sessionId" | "key">, host?: string): string {
-  return (host ? `ssh:${host}|` : "") + (session.chatId || session.sessionId || session.key);
+// A chat's key: its account and conversation, so its pet, its notifications
+// and whether you've seen it stay the same while its row changes (e.g. a
+// background session's row from running to finished, …/live to …/job). A
+// chat shared with two accounts is two chats here.
+export function petKeyOf(session: Pick<Session, "chatId" | "sessionId" | "key"> & { profileDir?: string }, host?: string): string {
+  return `${host ? `ssh:${host}|` : ""}${session.profileDir ?? ""}/${session.chatId || session.sessionId || session.key}`;
 }
 
 export function firstWaiting(groups: Group[]): { session: Session; group: Group } | null {
@@ -333,9 +437,9 @@ export function forecastTitle(w: LimitWindow, now: number): string {
 
 // ---------------------------------------------------------------- the chat that needs you
 
-// A row's key as the transition tracker keeps it ("ssh:<host>|<key>" for a host's)
-export function trackKey(s: Pick<Session, "key" | "sessionId">, host?: string): string {
-  return (host ? `ssh:${host}|` : "") + (s.key || s.sessionId);
+// A chat's key as the transition tracker keeps it ("ssh:<host>|…" for a host's)
+export function trackKey(s: Pick<Session, "chatId" | "sessionId" | "key"> & { profileDir?: string }, host?: string): string {
+  return petKeyOf(s, host);
 }
 
 export interface ChatSpot {
@@ -350,9 +454,12 @@ export interface ChatSpot {
 export function chatsNeedingYou(groups: Group[], unseen: ReadonlyMap<string, number>): ChatSpot[] {
   const waiting: ChatSpot[] = [];
   const finished: { spot: ChatSpot; at: number }[] = [];
+  const seen = new Set<string>();
   for (const g of groups)
     for (const s of g.sessions) {
       const spot = { id: trackKey(s, g.host), session: s, host: g.host };
+      if (seen.has(spot.id)) continue; // the chat's most urgent row came first
+      seen.add(spot.id);
       if (s.state === "waiting") waiting.push(spot);
       else if (unseen.has(spot.id) && (s.state === "idle" || s.state === "done")) finished.push({ spot, at: unseen.get(spot.id)! });
     }
@@ -435,7 +542,7 @@ export function recapText(st: ChatStats, costUsd?: number | null): string {
   const parts = [plural(st.prompts, "%1 prompt", "%1 prompts")];
   if (st.workedMs > 0) parts.push(`worked ${duration(st.workedMs)}`);
   if (st.toolCalls) {
-    const top = st.tools.slice(0, 3).map(([name, n]) => `${name} ${n}`).join(", ");
+    const top = (st.tools ?? []).slice(0, 3).map(([name, n]) => `${name} ${n}`).join(", ");
     parts.push(plural(st.toolCalls, "%1 tool call", "%1 tool calls") + (top ? ` (${top})` : ""));
   }
   if (st.tokens.total) parts.push(`${formatTokens(st.tokens.total)} tokens (${formatTokens(st.tokens.output)} out)`);

@@ -10,6 +10,37 @@
   and **Keep only on …** work as they do here, between the host's accounts.
   Nothing is installed on the host.
 
+Fixes (from a review of the whole code):
+
+- A chat whose prompt or reply mentioned the status script's answer marker
+  made the whole view say "The status script's answer couldn't be read".
+- The extension runs a chat's open and stop commands from its own status,
+  never ones the view sends it, and checks every message from the view.
+- When Python didn't work at first and the view was opened meanwhile, SSH
+  hosts never showed once it did. A fractional number in a count setting
+  (e.g. 2.5 recent chats) broke every check; they're whole numbers now.
+- A chat's notifications follow the chat, not its row: a background session
+  whose row changes as it finishes still notifies, and one listed twice no
+  longer alerts every minute. A host that stopped answering no longer counts
+  in the badge, status bar or "go to the chat that needs you", and a host's
+  clock being off no longer skews its times.
+- Plan usage bars setup: a missing or outdated wrapper script is repaired,
+  it's written before the settings point at it, files are replaced in one
+  step, and what changed in them while the dialog was open is kept.
+  `bash $HOME/…` status lines and more ways of reading the input are found.
+- Switching VS Code's Claude to a plain `~/.claude` while VS Code itself was
+  started with `CLAUDE_CONFIG_DIR` says so instead of doing nothing.
+  `pythonPath`, `sshHosts` and `extraConfigDirs` can't be set by a workspace;
+  the Terminal | Claude Code switch writes where its value comes from.
+- A second quick click on a recent chat no longer starts it twice; a check
+  that's given up on ends its ssh too; a window started in the background
+  no longer greets you with "While you were away".
+- The view: one account that fails to draw no longer blanks the rest,
+  subagents that ended on an API error show as failed, pets fetch a pose
+  again after a failed load, and polls do less work.
+- With the widget's backend fixes (vendored): SSH answers, shared chats,
+  caches shared by several copies, and more (see the widget's changelog).
+
 ## 1.10.0
 
 - **Open a subagent:** click a subagent in a chat's agent tree to unfold it:

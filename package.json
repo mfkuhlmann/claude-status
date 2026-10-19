@@ -182,6 +182,7 @@
       "title": "Claude Status",
       "properties": {
         "claudeStatus.sshHosts": {
+          "scope": "machine",
           "type": "array",
           "items": {
             "type": "string"
@@ -197,7 +198,7 @@
           "order": 2
         },
         "claudeStatus.remotePollSeconds": {
-          "type": "number",
+          "type": "integer",
           "default": 30,
           "minimum": 10,
           "maximum": 600,
@@ -205,7 +206,7 @@
           "order": 3
         },
         "claudeStatus.pollInterval": {
-          "type": "number",
+          "type": "integer",
           "default": 2000,
           "minimum": 1000,
           "maximum": 60000,
@@ -213,6 +214,7 @@
           "order": 4
         },
         "claudeStatus.extraConfigDirs": {
+          "scope": "machine",
           "type": "array",
           "items": {
             "type": "string"
@@ -262,7 +264,7 @@
           "order": 11
         },
         "claudeStatus.notifyDoneMinSeconds": {
-          "type": "number",
+          "type": "integer",
           "default": 30,
           "minimum": 0,
           "maximum": 3600,
@@ -276,7 +278,7 @@
           "order": 13
         },
         "claudeStatus.soundVolume": {
-          "type": "number",
+          "type": "integer",
           "default": 70,
           "minimum": 0,
           "maximum": 100,
@@ -308,7 +310,7 @@
           "order": 18
         },
         "claudeStatus.awayMinutes": {
-          "type": "number",
+          "type": "integer",
           "default": 5,
           "minimum": 1,
           "maximum": 240,
@@ -322,7 +324,7 @@
           "order": 20
         },
         "claudeStatus.chatPets": {
-          "type": "number",
+          "type": "integer",
           "default": 5,
           "minimum": 0,
           "maximum": 8,
@@ -342,7 +344,7 @@
           "order": 23
         },
         "claudeStatus.recentChats": {
-          "type": "number",
+          "type": "integer",
           "default": 5,
           "minimum": 0,
           "maximum": 20,
@@ -350,7 +352,7 @@
           "order": 24
         },
         "claudeStatus.keepDoneHours": {
-          "type": "number",
+          "type": "integer",
           "default": 24,
           "minimum": 0,
           "maximum": 168,
@@ -358,6 +360,7 @@
           "order": 25
         },
         "claudeStatus.pythonPath": {
+          "scope": "machine",
           "type": "string",
           "default": "python3",
           "markdownDescription": "Python 3.7+ used to read Claude Code's files on this computer.",
