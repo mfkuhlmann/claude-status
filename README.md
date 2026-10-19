@@ -188,6 +188,8 @@ The same dashboard as a GNOME Shell extension: the ✳ in the top bar, the popup
 
 **Tested** in a headless GNOME Shell 50.1 on Ubuntu 26.04 (`tools/gnome/shell.sh`: the popup, jumping, notifications, settings, pets, install and uninstall), not yet on a physical Ubuntu desktop.
 
+**GNOME Shell 43 and 44** (e.g. Debian 12) load extensions the older way. On them `./install.sh` builds a converted copy (`gnome/build.sh --gnome43`, which runs `gnome/gnome43/port43.py`): the same code with GNOME 43's imports, and small stand-ins (`gnome/gnome43/compat43*.js`) for the newer APIs it uses. If an update to the extension uses an API the converter doesn't know yet, the build stops and says which one. Tested in a headless GNOME Shell 43.9 on Debian 12. GNOME Shell 45 to 48 aren't supported.
+
 **Troubleshooting:** messages go to GNOME's log: `journalctl --user -f -o cat /usr/bin/gnome-shell`. If clicking a session doesn't bring it up, check that the extension is enabled (`gnome-extensions info claude-status@wzaielamri.github.io`): it's the extension that raises windows.
 
 ## Usage

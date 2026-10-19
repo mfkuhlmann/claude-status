@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
 # Build the GNOME Shell extension from this repo:
-#   gnome/build.sh [OUT_DIR]   (default gnome/build)
+#   gnome/build.sh [--gnome43] [OUT_DIR]   (default gnome/build)
 # makes OUT_DIR/claude-status@wzaielamri.github.io/ (the extension folder) and
 # OUT_DIR/claude-status@wzaielamri.github.io.shell-extension.zip (for
 # `gnome-extensions install`). The Python helpers and the pets come from the
 # Plasma widget's package/contents, so both front ends share them.
+# --gnome43 converts the result for GNOME Shell 43/44 (gnome/gnome43/port43.py).
 set -euo pipefail
+gnome43=0
+if [ "${1:-}" = --gnome43 ]; then
+  gnome43=1
+  shift
+fi
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(dirname "$here")"
 uuid="claude-status@wzaielamri.github.io"
@@ -20,6 +26,9 @@ cp "$repo"/package/contents/code/*.py "$dest/code/"
 cp "$repo"/package/contents/pets/*.svg "$repo/package/contents/pets/LICENSE" "$repo/package/contents/pets/README.md" "$dest/pets/"
 cp "$repo/LICENSE" "$dest/"
 glib-compile-schemas --strict "$dest/schemas"
+if [ "$gnome43" = 1 ]; then
+  python3 -I "$here/gnome43/port43.py" "$dest"
+fi
 # zip it with Python (always there; zip may not be)
 (cd "$dest" && python3 -I - "$zip" <<'PY'
 import os, sys, zipfile
