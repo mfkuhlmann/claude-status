@@ -541,6 +541,22 @@ class PlacementTests(World):
         r = self.collect()
         self.assertEqual((self.listing(r)[0], r["dismissed"]), ({"personal": [], "work": []}, 1))
 
+    def test_a_copy_doesnt_hide_a_chat_that_never_moved_on(self):
+        # Shared chat A, finished, no `continued-in`; copied in a terminal on
+        # personal (copy B starts with A's history)
+        history = [user("A-u1", self.now - 4000, "A"), reply("A-a1", self.now - 3990, "A", parent="A-u1")]
+        self.transcript("work", "A", history, age=3000)
+        self.share("A", "work", "personal")
+        self.job("work", "A", age=3000, state="done")
+        self.transcript("personal", "B", [*history, user("B-u2", self.now - 20, "B", parent="A-a1")])
+        self.live("personal", "50", "B")
+        r = self.collect(recent=5)
+        rows, _ = self.listing(r)
+        self.assertIn(("A", "bg", "done", "A", "shared"), rows["work"])
+        b = self.row(r, "B")
+        self.assertEqual(b["shared"]["forkOf"], "A")
+        self.assertNotIn("movedHere", b["shared"])
+
     def test_not_shared_chats_never_move(self):
         self.transcript("work", "U", [user("U-u0", self.now - 9000, "U")])
         self.job("work", "U", age=7200)
@@ -578,6 +594,20 @@ class RecentChatTests(World):
         self.chat("work", "n5", 50, meta + [user("m3", self.now - 8, "x", text="real question")])
         self.assertEqual(self.recent()["work"], [("n1", "first prompt here"), ("n2", "ai title"),
                                                  ("n3", "my session"), ("n4", "renamed"), ("n5", "real question")])
+
+    def test_one_odd_line_doesnt_empty_the_list(self):
+        self.chat("work", "ok1", 10)
+        self.transcript("work", "odd", [{"type": "user", "message": "just a string"}, reply("odd-a", self.now - 20, "odd")],
+                        age=20)
+        self.assertEqual([sid for sid, _ in self.recent()["work"]], ["ok1", "odd"])
+
+    def test_a_chat_that_moved_on_to_a_listed_session_isnt_recent(self):
+        # C continued in background session J, whose transcript starts with C's history
+        history = [user("C-u", self.now - 900, "C", text="about C"), reply("C-a", self.now - 890, "C")]
+        self.transcript("work", "C", history + [{"type": "continued-in", "continuedInSessionId": "J"}], age=800)
+        self.transcript("work", "J", history + [user("J-u", self.now - 30, "J", parent="C-a")])
+        self.job("work", "J", age=30, state="blocked", tempo="blocked")
+        self.assertNotIn("C", [sid for sid, _ in self.recent()["work"]])
 
     def test_skips_empty_and_orphaned(self):
         self.chat("work", "ok1", 10)

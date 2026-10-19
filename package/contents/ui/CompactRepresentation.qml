@@ -29,6 +29,10 @@ MouseArea {
                 compact.pulses = 6   // three blinks
             compact.doneBefore = root.unseenDone
         }
+        function onExpandedChanged() {
+            if (root.expanded)
+                compact.pulses = 0   // seen: the pulses left don't go on once it closes
+        }
     }
 
     Timer {
@@ -107,6 +111,7 @@ MouseArea {
 
                 PlasmaComponents3.Label {
                     id: badgeLabel
+                    textFormat: Text.PlainText
                     anchors.centerIn: parent
                     text: compact.badgeCount
                     color: "white"
@@ -117,6 +122,7 @@ MouseArea {
         }
 
         PlasmaComponents3.Label {
+            textFormat: Text.PlainText
             visible: compact.showUsage
             Layout.fillHeight: true
             verticalAlignment: Text.AlignVCenter

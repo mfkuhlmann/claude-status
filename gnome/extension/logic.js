@@ -41,12 +41,14 @@ export function pollInterval(settingMs, idleMs, overallState, menuOpen) {
     return overallState === 'none' && !menuOpen ? Math.max(ms, idleMs) : ms;
 }
 
-// The accounts of the hosts that answered, each marked with its host
+// The accounts of the hosts that answered, each marked with its host. A
+// host whose last check failed still shows what it said before (dimmed), but
+// that doesn't count here: no badge or shortcut for a chat you can't reach.
 export function remoteGroups(shownHosts, remote) {
     const out = [];
     for (const host of shownHosts) {
         const r = remote[host];
-        if (r && r.result) {
+        if (r && r.result && !r.error) {
             for (const g of r.result.groups)
                 out.push(Object.assign({}, g, {host}));
         }
@@ -84,10 +86,12 @@ export function summaryText(c) {
     return parts.length ? parts.join(' · ') : 'No sessions running';
 }
 
-// A chat's pet key: its conversation (so the pet stays the same while the
-// chat's row changes, e.g. from a running to a finished background session)
+// A chat's key: its account and conversation, so its pet, its notifications
+// and whether you've seen it stay the same while its row changes (e.g. a
+// background session's row from running to finished, …/live to …/job). A
+// chat shared with two accounts is two chats here.
 export function petKeyOf(session, host) {
-    return (host ? `ssh:${host}|` : '') + (session.chatId || session.sessionId || session.key);
+    return `${host ? `ssh:${host}|` : ''}${session.profileDir || ''}/${session.chatId || session.sessionId || session.key}`;
 }
 
 // The 5-hour usage that goes next to the panel icon: the account with an
@@ -261,8 +265,10 @@ export function canEnd(session) {
     return session.kind === 'interactive' && session.pid !== null;
 }
 
+// (not when only a background command runs: its turn is over, Ctrl+C would land at its prompt)
 export function canInterrupt(session) {
-    return canEnd(session) && !!session.tmux && (session.state === 'working' || session.state === 'waiting');
+    return canEnd(session) && !!session.tmux && (session.state === 'working' || session.state === 'waiting')
+        && session.reason !== 'background shell';
 }
 
 // The stop button's tooltip
@@ -366,7 +372,9 @@ export class Tracker {
         };
         for (const g of groupList) {
             for (const s of g.sessions) {
-                const sid = (source ? `${source}|` : '') + (s.key || s.sessionId);
+                const sid = petKeyOf(s, host);   // starts with source + "|" for a host's
+                if (sid in next)
+                    continue;   // a chat listed twice: its most urgent row (they come first) counts
                 const prev = before[sid];
                 const active = s.state === 'working' || s.state === 'waiting';
                 next[sid] = s.state;
@@ -418,10 +426,29 @@ export class Tracker {
                 }
             }
         }
+        for (const key of Object.keys(this.lastWaitingAlert)) {
+            if (keyOfSource(key, source) && !(key in next))
+                delete this.lastWaitingAlert[key];
+        }
         this.lastStates[source] = next;
         this.turnStarts[source] = starts;
         this.primed[source] = true;
         return out;
+    }
+
+    // A source you stopped showing (an unticked host): picked again later, it starts afresh
+    forget(source) {
+        delete this.lastStates[source];
+        delete this.turnStarts[source];
+        delete this.primed[source];
+        for (const key of Object.keys(this.lastWaitingAlert)) {
+            if (keyOfSource(key, source))
+                delete this.lastWaitingAlert[key];
+        }
+        for (const key of Object.keys(this.lastWindows)) {
+            if (key.startsWith(`${source}|`))
+                delete this.lastWindows[key];
+        }
     }
 
     // A limit that dropped a lot since the last poll was reset: the pets cheer
@@ -466,9 +493,49 @@ export function statusResult(stdout, stderr) {
         const lines = (stderr || '').trim().split('\n');
         return {error: fmt('Status script failed: %1', lines[lines.length - 1] || 'no output')};
     }
+    if (!parsed || typeof parsed !== 'object')
+        return {error: fmt('Status script failed: %1', 'no answer')};
     if (!parsed.ok)
         return {error: fmt('Status unavailable: %1', parsed.error)};
-    return {status: parsed, errorText: parsed.errors.length ? parsed.errors.join('\n') : ''};
+    if (!Array.isArray(parsed.groups))
+        return {error: fmt('Status unavailable: %1', 'an answer without accounts')};
+    const errors = Array.isArray(parsed.errors) ? parsed.errors : [];
+    return {status: parsed, errorText: errors.join('\n')};
+}
+
+// A host's answer on this computer's clock: its times ("since", "last
+// active", resets) are its own clock's, which may be off from ours
+export function toLocalClock(result, offset) {
+    if (!result || Math.abs(offset) < 5000)
+        return result;   // network delay, or close enough
+    const at = t => (typeof t === 'number' ? t + offset : t);
+    const shift = (o, keys) => {
+        if (o) {
+            for (const k of keys)
+                o[k] = at(o[k]);
+        }
+    };
+    result = JSON.parse(JSON.stringify(result));
+    result.generatedAt = at(result.generatedAt);
+    for (const g of result.groups || []) {
+        for (const s of g.sessions || []) {
+            shift(s, ['since', 'startedAt']);
+            shift(s.peek, ['at']);
+            shift(s.stats, ['startedAt', 'lastAt']);
+            for (const a of (s.agents && s.agents.tree) || [])
+                shift(a, ['started', 'updated']);
+        }
+        for (const c of (g.recent || []).concat(g.sharedHere || []))
+            shift(c, ['lastActive', 'since']);
+        if (g.limits) {
+            shift(g.limits, ['updatedAt']);
+            for (const w of g.limits.windows || []) {
+                shift(w, ['resetsAt']);
+                shift(w.forecast, ['fullAt']);
+            }
+        }
+    }
+    return result;
 }
 
 // The new-chat choices of an account: its recent folders (here without the
@@ -546,7 +613,8 @@ export function firstWaitingName(groups) {
 // pids wins (pids go from the process up to its ancestors); a title with
 // caption first (only those if require), then one with prefer.
 export function pickWindow(windows, want) {
-    const pids = Array.isArray(want.pids) ? want.pids.filter(Number.isInteger).slice(0, 64) : [];
+    // pid 0: a window whose process isn't known (it would match anything's)
+    const pids = Array.isArray(want.pids) ? want.pids.filter(p => Number.isInteger(p) && p > 0).slice(0, 64) : [];
     const caption = typeof want.caption === 'string' ? want.caption : '';
     const prefer = typeof want.prefer === 'string' ? want.prefer : '';
     let best = null, bestScore = -1;
@@ -778,17 +846,20 @@ export function forecastTooltip(w, now) {
 
 // The key of a session on the dashboard, as Tracker.track names it
 export function sessionKey(s, host) {
-    return (host ? `ssh:${host}|` : '') + (s.key || s.sessionId);
+    return petKeyOf(s, host);
 }
 
 // The chats the hotkey goes to, in order: the ones waiting for you (the one
 // waiting longest first), then the ones that finished a turn you haven't
 // seen (newest first). groups: this computer's and the hosts' (with .host).
 export function chatsNeedingYou(groups, unseen = {}) {
-    const waiting = [], done = [];
+    const waiting = [], done = [], seen = new Set();
     for (const g of groups) {
         for (const s of g.sessions) {
             const key = sessionKey(s, g.host);
+            if (seen.has(key))
+                continue;   // the chat's most urgent row came first
+            seen.add(key);
             const entry = {key, session: s, host: g.host || ''};
             if (s.state === 'waiting')
                 waiting.push(entry);

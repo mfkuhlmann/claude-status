@@ -36,15 +36,26 @@ done
 host="$1"; shift
 cmd="$*"
 printf '%s\t%s\n' "$host" "$cmd" >> "$log"
+[ -n "$FAKE_SSH_PIDFILE" ] && echo $$ > "$FAKE_SSH_PIDFILE"
 case "$FAKE_SSH_MODE" in
   denied) echo "$host: Permission denied (publickey)." >&2; exit 255 ;;
   hostkey) echo "Host key verification failed." >&2; exit 255 ;;
   unreachable) echo "ssh: connect to host x port 22: Connection timed out" >&2; exit 255 ;;
   slow) sleep 5 ;;
   noisy) echo "Welcome to the cluster! Quota: 80%" ;;
+  latin1) printf 'Gr\374\337 Gott\n' ;;
+  warning)  # the host's shell warns on stderr after the command's output
+    cd "$FAKE_HOME" && env -i HOME="$FAKE_HOME" PATH="$FAKE_PATH" XDG_CACHE_HOME="$FAKE_HOME/.cache" bash -c "$cmd"
+    rc=$?; echo "bash: warning: setlocale: LC_ALL: cannot change locale (de_DE.UTF-8)" >&2; exit $rc ;;
 esac
 cd "$FAKE_HOME" && exec env -i HOME="$FAKE_HOME" PATH="$FAKE_PATH" XDG_CACHE_HOME="$FAKE_HOME/.cache" bash -c "$cmd"
 '''
+
+
+def unwrapped(command):
+    """The command inside remote.posix()'s `sh -c '…'`."""
+    words = shlex.split(command)
+    return words[2] if words[:2] == ["sh", "-c"] and len(words) == 3 else command
 
 
 class HostListTests(unittest.TestCase):
@@ -81,6 +92,21 @@ class HostListTests(unittest.TestCase):
         self.assertEqual((by["gpubox"]["hostname"], by["gpubox"]["jump"]), ("gpubox.intra", "bastion"))
         self.assertEqual(by["gpu2"]["user"], "me")
         self.assertEqual(by["pre"]["user"], "")  # a Match block doesn't apply to the host before it
+
+    def test_comments_and_includes_inside_a_host_block(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ssh = Path(tmp)
+            (ssh / "extra.conf").write_text("Host gitlab\n  User git\n")
+            (ssh / "config").write_text(textwrap.dedent(f"""\
+                Host lab # GPU box in room 3
+                  HostName 192.0.2.7 # the old one was .6
+                  Include {ssh}/extra.conf
+                  User alice
+                """))
+            by = {h["name"]: h for h in remote.ssh_hosts(ssh / "config")}
+        self.assertEqual(sorted(by), ["gitlab", "lab"])
+        self.assertEqual((by["lab"]["hostname"], by["lab"]["user"]), ("192.0.2.7", "alice"))
+        self.assertEqual(by["gitlab"]["user"], "git")
 
     def test_missing_config(self):
         self.assertEqual(remote.ssh_hosts(Path("/nonexistent/config")), [])
@@ -135,8 +161,11 @@ class FakeSSH(unittest.TestCase):
     def mode(self, name):
         os.environ["FAKE_SSH_MODE"] = name
 
-    def calls(self):
+    def raw_calls(self):
         return [line.split("\t", 1) for line in self.log.read_text().splitlines()] if self.log.exists() else []
+
+    def calls(self):
+        return [[host, unwrapped(command)] for host, command in self.raw_calls()]
 
 
 class StatusTests(FakeSSH):
@@ -264,7 +293,7 @@ class ActionTests(FakeSSH):
             jump.open_terminal = old
         (ssh_line,) = opened
         words = shlex.split(ssh_line)
-        self.assertEqual((words[0], words[-3:]), ("ssh", ["-t", "lab", command]))
+        self.assertEqual((words[0], words[-3:]), ("ssh", ["-t", "lab", remote.posix(command)]))
         self.assertNotIn("BatchMode=yes", ssh_line)  # a terminal may ask for a password
         out = subprocess.run(["bash", "-c", ssh_line], capture_output=True, text=True, env=os.environ)
         self.assertEqual(out.stdout.strip(), "done")
@@ -402,7 +431,7 @@ class SharingTests(FakeSSH):
         self.assertTrue(command.endswith(f"CLAUDE_CONFIG_DIR={self.work.resolve()} {self.claude} --resume {self.CHAT}"),
                         command)
         (ssh_line,) = opened
-        self.assertEqual(shlex.split(ssh_line)[-3:], ["-t", "lab", command])
+        self.assertEqual(shlex.split(ssh_line)[-3:], ["-t", "lab", remote.posix(command)])
 
     def test_continue_can_hand_back_the_command(self):
         out = io.StringIO()
@@ -431,6 +460,67 @@ class SharingTests(FakeSSH):
         ok, message = remote.share("lab", self.CHAT)
         self.assertFalse(ok)
         self.assertIn("refused the login", message)
+
+    def test_a_refusal_stays_one_when_the_shell_warns(self):
+        # A warning on stderr used to be taken as the answer: "done"
+        self.mode("warning")
+        self.assertEqual(remote.unshare("lab", self.CHAT, ".claude"), (False, "This chat isn't shared"))
+        self.open_in_a_session()
+        ok, message = remote.share("lab", self.CHAT)
+        self.assertFalse(ok)
+        self.assertIn("It's open in a session on default", message)
+
+
+class HostNoiseTests(FakeSSH):
+    """Whatever a host prints besides the answer can't change it."""
+
+    def test_a_chat_that_mentions_the_marker(self):
+        state = self.fake_home / ".claude/jobs/abc12345/state.json"
+        job = json.loads(state.read_text())
+        state.write_text(json.dumps({**job, "name": f"why {cs.REMOTE_MARK} breaks"}))
+        out = remote.status("lab")
+        self.assertTrue(out["ok"], out)
+        (row,) = out["result"]["groups"][0]["sessions"]
+        self.assertEqual(row["name"], f"why {cs.REMOTE_MARK} breaks")
+
+    def test_a_greeting_that_isnt_utf8(self):
+        self.mode("latin1")
+        out = remote.status("lab")
+        self.assertTrue(out["ok"], out)
+
+    def test_warnings_on_stderr(self):
+        self.mode("warning")
+        self.assertEqual(remote.dismiss("lab", "abc12345"), (True, "Removed from the list"))
+        self.assertEqual(remote.run("lab", "echo hello"), (True, "hello"))
+        ok, message = remote.end("lab", "not-there")
+        self.assertFalse(ok)
+        self.assertNotIn("setlocale", message)
+
+    def test_commands_run_in_sh_whatever_the_login_shell(self):
+        remote.run("lab", "echo hi")
+        ((host, raw),) = self.raw_calls()
+        self.assertEqual(shlex.split(raw)[:2], ["sh", "-c"])
+
+    def test_the_hosts_own_remote_command_and_forwards_are_left_out(self):
+        for opts in (remote.ssh_options(), remote.ssh_options(batch=False)):
+            self.assertIn("RemoteCommand=none", opts)
+            self.assertIn("ClearAllForwardings=yes", opts)
+
+    def test_sigterm_ends_its_ssh_too(self):
+        pidfile = Path(self.tmp.name) / "ssh.pid"
+        self.mode("slow")
+        proc = subprocess.Popen([sys.executable, "-I", str(CODE / "remote.py"), "--status", "lab"],
+                                env={**os.environ, "FAKE_SSH_PIDFILE": str(pidfile)},
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        for _ in range(100):
+            if pidfile.exists() and pidfile.read_text().strip():
+                break
+            time.sleep(0.05)
+        ssh_pid = int(pidfile.read_text())
+        proc.terminate()
+        self.assertEqual(proc.wait(timeout=10), 143)
+        with self.assertRaises(ProcessLookupError):
+            os.kill(ssh_pid, 0)
 
 if __name__ == "__main__":
     unittest.main()

@@ -29,6 +29,7 @@ import json
 import os
 import re
 import shlex
+import signal
 import stat
 import subprocess
 import sys
@@ -48,8 +49,25 @@ RUN_TIMEOUT = 60
 # ---------------------------------------------------------------- ~/.ssh/config
 
 
+def config_words(value):
+    """The words of a config value as ssh splits them: quotes kept together,
+    and a word starting with # begins a comment."""
+    try:
+        words = shlex.split(value, comments=True)
+    except ValueError:
+        words = value.split()
+    out = []
+    for word in words:
+        if word.startswith("#"):
+            break
+        out.append(word)
+    return out
+
+
 def config_lines(path, depth=0, seen=None):
-    """(keyword, value) of an ssh config file, with Include files spliced in."""
+    """(keyword, value) of an ssh config file, with Include files spliced in
+    between ("include", "begin") and ("include", "end"): an Include inside a
+    Host block doesn't end that block."""
     seen = set() if seen is None else seen
     try:
         real = path.resolve()
@@ -68,12 +86,14 @@ def config_lines(path, depth=0, seen=None):
             continue
         key, value = m.group(1).lower(), m.group(2).strip()
         if key == "include":
-            for pattern in shlex.split(value):
+            for pattern in config_words(value):
                 pattern = os.path.expanduser(pattern)
                 if not os.path.isabs(pattern):
                     pattern = str(Path.home() / ".ssh" / pattern)
                 for match in sorted(glob.glob(pattern)):
+                    yield "include", "begin"
                     yield from config_lines(Path(match), depth + 1, seen)
+                    yield "include", "end"
         else:
             yield key, value
 
@@ -82,12 +102,16 @@ def ssh_hosts(path=None):
     """Hosts with a name of their own in ~/.ssh/config (no wildcard patterns),
     in file order, with what's useful to show next to the name."""
     path = path or Path.home() / ".ssh" / "config"
-    hosts, current = {}, []
+    hosts, current, outer = {}, [], []
     for key, value in config_lines(path):
-        if key == "host":
+        if key == "include":
+            if value == "begin":
+                outer.append(current)
+            elif outer:
+                current = outer.pop()
+        elif key == "host":
             current = []
-            for name in value.split():
-                name = name.strip('"')
+            for name in config_words(value):
                 if any(c in name for c in "*?!") or not HOST_NAME.match(name):
                     continue
                 hosts.setdefault(name, {"name": name, "hostname": "", "user": "", "port": "", "jump": ""})
@@ -96,9 +120,10 @@ def ssh_hosts(path=None):
             current = []
         elif current and key in ("hostname", "user", "port", "proxyjump"):
             field = "jump" if key == "proxyjump" else key
+            words = config_words(value)
             for name in current:
-                if not hosts[name][field]:  # ssh uses the first value it sees
-                    hosts[name][field] = value
+                if not hosts[name][field] and words:  # ssh uses the first value it sees
+                    hosts[name][field] = words[0]
     return list(hosts.values())
 
 
@@ -136,13 +161,45 @@ def control_dir():
 
 def ssh_options(batch=True):
     """Options for every connection: batch mode (never ask, never hang), keep
-    one connection per host open for reuse, no X11/agent forwarding."""
+    one connection per host open for reuse, no X11/agent forwarding. A host's
+    RemoteCommand (e.g. starting tmux) and port forwards from ~/.ssh/config
+    are left out: they'd replace the widget's command, or hold your tunnels'
+    ports in the shared connection."""
     d = control_dir()
     opts = ["-o", "ControlMaster=auto", "-o", f"ControlPath={d}/%C", "-o", "ControlPersist=300"] if d else []
-    opts += ["-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=3"]
+    opts += ["-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=3",
+             "-o", "RemoteCommand=none", "-o", "ClearAllForwardings=yes"]
     if batch:
         opts += ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "ForwardX11=no", "-o", "ForwardAgent=no"]
     return opts
+
+
+def posix(command):
+    """command for the host's login shell, run by sh: the commands the
+    widget builds (`cd … 2>/dev/null; VAR=… claude …`) are POSIX shell, and
+    the login shell may be csh or fish."""
+    return "sh -c " + shlex.quote(command)
+
+
+def answer_after_mark(stdout):
+    """The JSON answer a script printed after the marker line, or None. The
+    answer is one line, and the text inside it (a chat's prompt or reply) may
+    mention the marker too: only a marker at the start of a line counts."""
+    mark = stdout.rfind("\n" + cs.REMOTE_MARK)
+    if mark < 0:
+        return None
+    try:
+        answer = json.loads(stdout[mark + 1 + len(cs.REMOTE_MARK):])
+    except ValueError:
+        return None
+    return answer if isinstance(answer, dict) else None
+
+
+def ssh(host, command, stdin=None, timeout=RUN_TIMEOUT):
+    """Run command on host (batch mode): the CompletedProcess. Output that
+    isn't UTF-8 (a login script's greeting) can't break the answer."""
+    return subprocess.run(["ssh", *ssh_options(), "-T", host, posix(command)], input=stdin, capture_output=True,
+                          text=True, errors="replace", timeout=timeout)
 
 
 def host_script(name="claude_status.py"):
@@ -193,56 +250,70 @@ def status(host, done_hours=None, recent=None, tokens=True):
         args += ["--recent", str(recent)]
     if not tokens:
         args.append("--no-tokens")
-    command = ["ssh", *ssh_options(), "-T", host, "python3 -I - " + " ".join(shlex.quote(a) for a in args)]
     started = time.time()
     try:
-        r = subprocess.run(command, input=host_script(), capture_output=True, text=True, timeout=STATUS_TIMEOUT)
+        r = ssh(host, "python3 -I - " + " ".join(shlex.quote(a) for a in args), host_script(), STATUS_TIMEOUT)
     except subprocess.TimeoutExpired:
         return {"ok": False, "host": host, "error": f"{host} didn't answer within {STATUS_TIMEOUT} s."}
     except OSError as exc:
         return {"ok": False, "host": host, "error": f"Can't run ssh: {exc}"}
     elapsed = int((time.time() - started) * 1000)
-    mark = r.stdout.rfind(cs.REMOTE_MARK)
-    if mark < 0:
+    if "\n" + cs.REMOTE_MARK not in r.stdout:
         return {"ok": False, "host": host, "error": explain(host, r.returncode, r.stderr), "elapsedMs": elapsed}
-    try:
-        result = json.loads(r.stdout[mark + len(cs.REMOTE_MARK):])
-    except ValueError:
+    result = answer_after_mark(r.stdout)
+    if result is None:
         return {"ok": False, "host": host, "error": f"{host} sent an answer the widget can't read.", "elapsedMs": elapsed}
     if not result.get("ok"):
         return {"ok": False, "host": host, "error": f"{host}: {result.get('error') or 'status failed'}", "elapsedMs": elapsed}
     return {"ok": True, "host": host, "result": result, "elapsedMs": elapsed}
 
 
+def last_line(text):
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    return lines[-1] if lines else ""
+
+
+def outcome(host, r):
+    """(ok, message) of a command run on host: its last line of output, or
+    why it failed. Only stdout says how it went: the host's shell may print
+    warnings on stderr (e.g. about a missing locale) after it."""
+    if r.returncode != 0:
+        if r.returncode == 255:
+            return False, explain(host, r.returncode, r.stderr)
+        return False, last_line(r.stderr) or last_line(r.stdout) or f"exit {r.returncode}"
+    return True, last_line(r.stdout) or "Done"
+
+
 def run(host, command, stdin=None):
     """Run a shell command on host; (ok, last line of its output)."""
     host = check_host(host)
     try:
-        r = subprocess.run(["ssh", *ssh_options(), "-T", host, command], input=stdin, capture_output=True,
-                           text=True, timeout=RUN_TIMEOUT)
+        r = ssh(host, command, stdin)
     except subprocess.TimeoutExpired:
         return False, f"{host} didn't answer within {RUN_TIMEOUT} s"
     except OSError as exc:
         return False, f"Can't run ssh: {exc}"
-    lines = [l.strip() for l in (r.stdout + "\n" + r.stderr).splitlines() if l.strip()]
-    if r.returncode != 0:
-        return False, explain(host, r.returncode, r.stderr) if r.returncode == 255 else (lines[-1] if lines else f"exit {r.returncode}")
-    return True, lines[-1] if lines else "Done"
+    return outcome(host, r)
 
 
 def host_answer(host, args, name="claude_status.py"):
     """Run a script of this folder on host with args (it goes to python3's
     stdin, as for --status): its answer, {"ok", "message", ...}."""
+    host = check_host(host)
     command = "python3 -I - --remote " + " ".join(shlex.quote(a) for a in args)
-    ok, message = run(host, command, stdin=host_script(name))
-    if ok and cs.REMOTE_MARK in message:
-        try:
-            answer = json.loads(message.split(cs.REMOTE_MARK, 1)[1])
-        except ValueError:
-            answer = None
-        if isinstance(answer, dict):
-            return {**answer, "ok": bool(answer.get("ok")), "message": answer.get("message") or ""}
-    return {"ok": ok, "message": message}
+    try:
+        r = ssh(host, command, host_script(name))
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "message": f"{host} didn't answer within {RUN_TIMEOUT} s"}
+    except OSError as exc:
+        return {"ok": False, "message": f"Can't run ssh: {exc}"}
+    answer = answer_after_mark(r.stdout)
+    if answer is not None:
+        return {**answer, "ok": bool(answer.get("ok")), "message": answer.get("message") or ""}
+    ok, message = outcome(host, r)
+    if ok:  # it ran, but didn't answer as the script does
+        return {"ok": False, "message": f"{host} sent an answer the widget can't read."}
+    return {"ok": False, "message": message}
 
 
 def run_status_script(host, args):
@@ -274,20 +345,16 @@ def agent_run(host, chat_id, agent_id, profile=None, open_it=True):
     host = check_host(host)
     import jump
     args = ["--remote", "--agent-run", agent_id, "--chat", chat_id] + (["--profile", profile] if profile else [])
-    command = ["ssh", *ssh_options(), "-T", host, "python3 -I - " + " ".join(shlex.quote(a) for a in args)]
     try:
-        r = subprocess.run(command, input=host_script(), capture_output=True, text=True, timeout=RUN_TIMEOUT)
+        r = ssh(host, "python3 -I - " + " ".join(shlex.quote(a) for a in args), host_script())
     except subprocess.TimeoutExpired:
         return False, f"{host} didn't answer within {RUN_TIMEOUT} s", None
     except OSError as exc:
         return False, f"Can't run ssh: {exc}", None
-    # The JSON is one line after the marker; the run inside it may mention the marker too
-    mark = r.stdout.rfind("\n" + cs.REMOTE_MARK)
-    if mark < 0:
+    if "\n" + cs.REMOTE_MARK not in r.stdout:
         return False, explain(host, r.returncode, r.stderr), None
-    try:
-        answer = json.loads(r.stdout[mark + 1 + len(cs.REMOTE_MARK):])
-    except ValueError:
+    answer = answer_after_mark(r.stdout)
+    if answer is None:
         return False, f"{host} sent an answer the widget can't read.", None
     if not answer.get("ok") or not isinstance(answer.get("markdown"), str):
         return False, f"{host}: {answer.get('message') or 'no such subagent'}", None
@@ -331,8 +398,8 @@ def open_remote(host, command):
     Not in batch mode: ssh may ask for a password or host key there."""
     host = check_host(host)
     import jump
-    ssh = " ".join(shlex.quote(a) for a in ["ssh", *ssh_options(batch=False), "-t", host, command])
-    if not jump.open_terminal(str(Path.home()), ssh):
+    line = " ".join(shlex.quote(a) for a in ["ssh", *ssh_options(batch=False), "-t", host, posix(command)])
+    if not jump.open_terminal(str(Path.home()), line):
         return False, "No terminal found to open the session in"
     return True, f"Opened a terminal on {host}"
 
@@ -340,10 +407,17 @@ def open_remote(host, command):
 USAGE = __doc__.split("\n\n")[1]
 
 
+def stop_on_term(signum, frame):
+    """A widget that gives up on a check (or is turned off) ends it with
+    SIGTERM: exiting through Python lets subprocess.run end its ssh too."""
+    sys.exit(128 + signum)
+
+
 def main(argv=None):
     args = sys.argv[1:] if argv is None else list(argv)
     if not args:
         sys.exit(USAGE)
+    signal.signal(signal.SIGTERM, stop_on_term)
     action, args = args[0], args[1:]
     try:
         if action == "--hosts":
@@ -393,7 +467,7 @@ def main(argv=None):
             sys.exit(USAGE)
     except (ValueError, OSError) as exc:
         out = {"ok": False, "error": str(exc), "message": str(exc)}
-    print(json.dumps(out, ensure_ascii=False))
+    print(json.dumps(out))  # ASCII: a lone surrogate in a host's text can't break it
 
 
 if __name__ == "__main__":

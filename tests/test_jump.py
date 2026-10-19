@@ -193,8 +193,10 @@ class DesktopTests(unittest.TestCase):
     def test_gnome_terminals(self):
         home = shlex.quote(str(Path.home()))
         args = self.terminal({"xdg-terminal-exec", "ptyxis", "konsole"}, gnome=True)
-        self.assertEqual(args[:3], ["/usr/bin/xdg-terminal-exec", os.environ.get("SHELL") or "/bin/bash", "-c"])
-        self.assertTrue(args[3].startswith(f"cd {home} && trap : INT; claude; exec "))
+        # sh runs the (POSIX) command whatever your shell is; then your shell
+        self.assertEqual(args[:3], ["/usr/bin/xdg-terminal-exec", "/bin/sh", "-c"])
+        yours = shlex.quote(os.environ.get("SHELL") or "/bin/bash")
+        self.assertEqual(args[3], f"cd {home} && trap : INT; claude; exec {yours}")
         self.assertEqual(self.terminal({"ptyxis", "gnome-terminal"}, gnome=True)[:3],
                          ["/usr/bin/ptyxis", "--new-window", "--"])
         self.assertEqual(self.terminal({"gnome-terminal", "kgx"}, gnome=True)[:3],
@@ -225,6 +227,23 @@ class DesktopTests(unittest.TestCase):
             self.assertEqual(jump.raise_hint(), "is the Claude Status extension enabled?")
         with Patch(on_gnome=lambda: False):
             self.assertEqual(jump.raise_hint(), "is KWin scripting available?")
+
+
+class SmallJumpTests(unittest.TestCase):
+    def test_remote_folder_address(self):
+        self.assertEqual(jump.remote_folder_uri("lab", "/home/u/C# tools?"), "vscode-remote://ssh-remote+lab/home/u/C%23%20tools%3F")
+
+    def test_tmux_on_the_chats_own_server(self):
+        ran = []
+        with Patch(run=lambda args, **kw: ran.append(args) or (0, "4242 s\n")):
+            self.assertEqual(jump.tmux_client_pids("s:@1.%3", "/tmp/tmux-1000/work"), [4242])
+        self.assertTrue(all(args[:3] == ["tmux", "-S", "/tmp/tmux-1000/work"] for args in ran), ran)
+
+    def test_a_tmux_session_no_terminal_shows(self):
+        with Patch(tmux_client_pids=lambda pane, socket=None: []):
+            ok, message = jump.jump_terminal({"pid": os.getpid(), "tmux": "s:@1.%3"})
+        self.assertEqual((ok, message), (False, "This session runs in a tmux session no terminal shows right now: "
+                                                "attach to it to see it"))
 
 
 class AttachCommandTests(unittest.TestCase):
@@ -260,6 +279,35 @@ class AttachCommandTests(unittest.TestCase):
             self.assertEqual(jump.service_config_dir(self.profile(prof, False)), expected)
             cs.write_json_atomic(prof / "daemon.status.json", {"supervisorPid": 4194304 + 7})  # dead
             self.assertIsNone(jump.service_config_dir(self.profile(prof, False)))
+
+    def test_a_service_named_after_a_switched_link(self):
+        # personal's service was started as ~/.claude; then the link moved to
+        # work. Its jobs still go through it; a new or resumed chat of
+        # personal must not open on work.
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            personal, work = home / ".claude-personal", home / ".claude-work"
+            personal.mkdir()
+            work.mkdir()
+            (home / ".claude").symlink_to(personal)
+            env = {"PATH": os.environ["PATH"], "HOME": str(home), "CLAUDE_CONFIG_DIR": str(home / ".claude")}
+            service = subprocess.Popen(["sleep", "60"], env=env)
+            self.addCleanup(service.wait)
+            self.addCleanup(service.kill)
+            for _ in range(500):
+                if cs.process_config_dir(service.pid):
+                    break
+                time.sleep(0.01)
+            cs.write_json_atomic(personal / "daemon.status.json", {
+                "supervisorPid": service.pid, "supervisorProcStart": cs.proc_start_time(service.pid)})
+            prof = self.profile(personal, False)
+            self.assertEqual(jump.resume_command(prof, "c1", home), f"CLAUDE_CONFIG_DIR={home / '.claude'} claude --resume c1")
+            (home / ".claude").unlink()
+            (home / ".claude").symlink_to(work)
+            self.assertEqual(jump.attach_command(prof, "j1", home), f"CLAUDE_CONFIG_DIR={home / '.claude'} claude attach j1")
+            self.assertEqual(jump.resume_command(prof, "c1", home), f"CLAUDE_CONFIG_DIR={personal} claude --resume c1")
+            self.assertEqual(cs.new_chat_command(prof, home),
+                             f"CLAUDE_CODE_DISABLE_AGENT_VIEW=1 CLAUDE_CONFIG_DIR={personal} claude")
 
     def test_uses_the_name_the_job_was_started_with(self):
         # No service running: start it under the job's own name, not the link
@@ -467,6 +515,8 @@ class ChatStopTests(Fixture):
         self.assertIn("doesn't run in tmux", cs.interrupt_chat_by_id(self.home, [], "plain")[1])
         self.chat("done-now", tmux="t:@1.%1")
         self.assertIn("nothing to interrupt", cs.interrupt_chat_by_id(self.home, [], "done-now")[1])
+        self.chat("shell-left", tmux="t:@1.%2", status="shell")  # turn over, a background command runs
+        self.assertIn("would land at its prompt", cs.interrupt_chat_by_id(self.home, [], "shell-left")[1])
 
     def test_command_line(self):
         proc = self.chat("cli-chat", status="busy")
@@ -760,8 +810,9 @@ class LinkedProfileTests(unittest.TestCase):
             write(cache / "statusline/.claude-personal/s1.json", {"context_window": {"used_percentage": 12},
                                                                   "rate_limits": {"five_hour": {"used_percentage": 7}}})
             profiles = cs.discover_profiles(home)
-            self.assertEqual([(p.label, p.snapshot_dirs) for p in profiles],
+            self.assertEqual([(p.label, sorted(p.snapshot_dirs)) for p in profiles],
                              [("personal", [".claude", ".claude-personal"])])
+            self.assertEqual(profiles[0].path, home / ".claude-personal")  # named after itself, not the link
             r = cs.collect(home, cache, with_tokens=False)
             (group,) = r["groups"]
             self.assertEqual([s["sessionId"] for s in group["sessions"]], ["s1"])  # not listed twice
@@ -994,6 +1045,37 @@ class SharedChatActionTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("is already there", msg)
         self.assertFalse(self.part(".claude", "folder").is_symlink())
+        self.assertFalse((self.store / f"{self.CHAT}.jsonl").exists())  # refused before changing anything
+
+    def test_a_linked_projects_folder_is_one_copy_not_two(self):
+        """~/.claude-work/projects linked to ~/.claude/projects: both see the
+        same file. Keeping it on one account must never delete it."""
+        (self.home / ".claude-work/projects").symlink_to(self.home / ".claude/projects")
+        (ok, msg), _ = self.run_action(jump.unshare, ".claude")
+        self.assertEqual((ok, msg), (False, "This chat isn't shared"))
+        self.assertTrue(self.part(".claude", "chat").is_file())
+        self.run_action(jump.share)
+        for keep in (".claude", ".claude-work"):
+            (ok, msg), _ = self.run_action(jump.unshare, keep)
+            self.assertTrue(self.part(".claude", "chat").is_file(), (keep, ok, msg))
+            self.assertEqual((self.part(".claude", "folder") / "subagents/agent-1.jsonl").read_text(), "{}\n")
+            self.run_action(jump.share)
+
+    def test_keep_only_takes_back_what_the_others_left_in_the_store(self):
+        """Shared before by another tool (one file, but a folder of each
+        account's own): the store's folder isn't left behind."""
+        self.part(".claude-work", "chat").parent.mkdir(parents=True)
+        os.link(self.part(".claude", "chat"), self.part(".claude-work", "chat"))
+        write(self.part(".claude-work", "folder") / "subagents/agent-2.jsonl", "{}\n")
+        (ok, msg), _ = self.run_action(jump.share)
+        self.assertTrue(ok, msg)
+        (ok, msg), _ = self.run_action(jump.unshare, ".claude-work")
+        self.assertTrue(ok, msg)
+        folder = self.part(".claude-work", "folder")
+        self.assertEqual(sorted(p.name for p in (folder / "subagents").iterdir()), ["agent-1.jsonl", "agent-2.jsonl"])
+        self.assertFalse(self.store.exists())
+        (ok, msg), _ = self.run_action(jump.share)
+        self.assertEqual((ok, msg), (True, "Chat shared: it's now on default, work."))
 
     def test_chat_shared_into_another_store(self):
         """Shared the same way by another tool, into its own store: handled where it is."""

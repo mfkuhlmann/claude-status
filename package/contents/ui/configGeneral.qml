@@ -4,9 +4,18 @@ import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 import org.kde.kcmutils as KCM
 import org.kde.plasma.plasma5support as P5Support
+import org.kde.plasma.plasmoid
 
 KCM.SimpleKCM {
     id: page
+
+    // Plasma writes back every cfg_ property on Apply. These two are set in
+    // the popup, not here: take what they are now, so applying this page
+    // doesn't put back what they were when it opened.
+    function saveConfig() {
+        cfg_newChatInVscode = Plasmoid.configuration.newChatInVscode
+        cfg_sshHosts = Plasmoid.configuration.sshHosts
+    }
 
     property alias cfg_pollInterval: pollInterval.value
     property alias cfg_idlePollInterval: idlePollInterval.value
@@ -172,7 +181,7 @@ KCM.SimpleKCM {
         QQC2.SpinBox {
             id: awayMinutes
             Kirigami.FormData.label: i18n("…once the screen was locked for (min):")
-            enabled: awayDigest.checked
+            enabled: awayDigest.checked || phoneWhileAway.checked   // the phone waits as long too
             from: 1
             to: 240
             QQC2.ToolTip.visible: hovered
@@ -204,7 +213,9 @@ KCM.SimpleKCM {
                     page.phones.map(d => ({ text: d.name + (d.reachable ? "" : " " + i18n("(not reachable now)")), value: d.id })),
                     page.cfg_phoneDevice && !page.phones.some(d => d.id === page.cfg_phoneDevice)
                         ? [{ text: i18n("A phone no longer paired"), value: page.cfg_phoneDevice }] : [])
-                currentIndex: Math.max(0, indexOfValue(page.cfg_phoneDevice))
+                // again once the phones are listed (the list comes after the page)
+                currentIndex: { model; return Math.max(0, indexOfValue(page.cfg_phoneDevice)) }
+                onModelChanged: Qt.callLater(() => currentIndex = Math.max(0, indexOfValue(page.cfg_phoneDevice)))
                 onActivated: page.cfg_phoneDevice = currentValue
                 Layout.preferredWidth: Kirigami.Units.gridUnit * 14
             }
@@ -244,6 +255,7 @@ KCM.SimpleKCM {
                 from: 0
                 to: 100
                 stepSize: 5
+                snapMode: QQC2.Slider.SnapAlways   // whole steps, not 47.82%
                 Layout.preferredWidth: Kirigami.Units.gridUnit * 10
             }
             QQC2.Label {

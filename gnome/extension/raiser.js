@@ -30,6 +30,8 @@ export class Raiser {
     // window matched)
     RaiseWindow(json) {
         let want;
+        if (typeof json !== 'string' || json.length > 65536)
+            return false;   // jump.py's is a few hundred bytes
         try {
             want = JSON.parse(json);
         } catch {

@@ -27,6 +27,7 @@ ColumnLayout {
         spacing: Kirigami.Units.smallSpacing
 
         PlasmaComponents3.Label {
+            textFormat: Text.PlainText
             text: bar.label
             Layout.preferredWidth: Kirigami.Units.gridUnit * 3.5
             elide: Text.ElideRight
@@ -67,6 +68,7 @@ ColumnLayout {
             }
 
             PlasmaCore.ToolTipArea {
+                textFormat: Text.PlainText
                 anchors.fill: parent
                 active: bar.forecast !== null
                 mainText: i18nc("usage window, percent used", "%1: %2% used", bar.label, Math.round(bar.pct))
@@ -75,12 +77,14 @@ ColumnLayout {
         }
 
         PlasmaComponents3.Label {
+            textFormat: Text.PlainText
             text: Math.round(bar.pct) + "%"
             Layout.preferredWidth: Kirigami.Units.gridUnit * 2.2
             horizontalAlignment: Text.AlignRight
         }
 
         PlasmaComponents3.Label {
+            textFormat: Text.PlainText
             text: bar.detail
             Layout.preferredWidth: Kirigami.Units.gridUnit * 6.5
             opacity: 0.7
@@ -90,6 +94,7 @@ ColumnLayout {
     }
 
     PlasmaComponents3.Label {
+        textFormat: Text.PlainText
         visible: bar.runsOut
         Layout.fillWidth: true
         Layout.leftMargin: Kirigami.Units.gridUnit * 3.5 + Kirigami.Units.smallSpacing

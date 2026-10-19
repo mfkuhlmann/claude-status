@@ -344,6 +344,19 @@ class TokenTests(Fixture):
     def transcript(self):
         return self.home / ".claude-work/projects/-tmp-proj/abc.jsonl"
 
+    def test_odd_lines_dont_cost_the_totals(self):
+        odd = [
+            '["not", "an", "object", "usage"]',
+            json.dumps({"type": "assistant", "timestamp": 1e20, "message": {"id": "far", "usage": {"output_tokens": 5}}}),
+            json.dumps({"type": "assistant", "timestamp": iso(self.now), "message": {
+                "id": {"odd": 1}, "model": ["x"], "usage": {"output_tokens": 5}}}),
+            '{"type": "assistant", "timestamp": "%s", "message": {"id": "nan", "usage": {"output_tokens": NaN}}}' % iso(self.now),
+        ]
+        write(self.transcript(), "\n".join(odd + [assistant("m1", self.now - 60, 16)]) + "\n")
+        r = self.collect(now=self.now)
+        self.assertEqual(r["errors"], [])
+        self.assertEqual(self.group(r, "work")["tokens"]["today"]["output"], 16)
+
     def test_dedupe_partial_line_and_rescan(self):
         now = self.now
         lines = [
@@ -457,11 +470,11 @@ class SnippetTests(unittest.TestCase):
 class AgentTests(Fixture):
     """Subagents: status and current step from each agent's transcript, nested as a tree."""
 
-    def agent(self, sid, agent_id, lines, depth=1, tool_use_id="toolu_x", description="", shape="sync"):
+    def agent(self, sid, agent_id, lines, depth=1, tool_use_id="toolu_x", description="", shape="sync", **meta):
         d = self.home / ".claude-work/projects/-w-proj" / sid / "subagents"
         write(d / f"agent-{agent_id}.meta.json", {"agentType": "Explore", "description": description,
                                                   "spawnDepth": depth, "toolUseId": tool_use_id,
-                                                  "requestShape": shape})
+                                                  "requestShape": shape, **meta})
         write(d / f"agent-{agent_id}.jsonl", "\n".join(json.dumps(l) for l in lines) + "\n")
         return d
 
@@ -509,6 +522,49 @@ class AgentTests(Fixture):
         self.assertEqual((a4["status"], a4["activity"]), ("done", "Summary"))
         self.assertEqual(cs.report_line("| Lines | File |\n|--|"), "Lines | File |")
 
+    def agents_of_busy(self):
+        a = next(s for s in self.group(self.collect(with_tokens=False), "work")["sessions"] if s["sessionId"] == "busy")["agents"]
+        return a, {t["id"]: (t["status"], t["activity"]) for t in a["tree"]}
+
+    def test_how_an_agent_can_end(self):
+        error = self.line("assistant", [{"type": "text", "text": "You've hit your session limit · resets 2:40pm"}], "stop_sequence")
+        error["isApiErrorMessage"] = True
+        self.agent("busy", "e1", [self.line("user", "look"), error], description="Died", finished=True)
+        self.agent("busy", "e2", [self.line("user", "look"), self.line("user", "[Request interrupted by user]")],
+                   description="Interrupted")
+        long = self.line("assistant", [{"type": "text", "text": "Half an ans"}], "max_tokens")
+        self.agent("busy", "e3", [self.line("user", "look"), long], description="Cut short", finished=True)
+        a, rows = self.agents_of_busy()
+        self.assertEqual(rows["e1"], ("failed", "You've hit your session limit · resets 2:40pm"))
+        self.assertEqual(rows["e2"], ("stopped", "interrupted"))
+        self.assertEqual(rows["e3"], ("done", "finished"))
+        self.assertEqual((a["failed"], a["stopped"], a["done"], a["running"]), (1, 1, 2, 2))
+
+    def test_a_running_agent_read_again_once_claude_says_it_finished(self):
+        lines = [self.line("user", "look"), self.line("assistant", [{"type": "text", "text": "Half an ans"}], "max_tokens")]
+        d = self.agent("busy", "e4", lines, description="Cut short")
+        self.assertEqual(self.agents_of_busy()[1]["e4"], ("running", "writing…"))
+        meta = d / "agent-e4.meta.json"
+        meta.write_text(json.dumps({**json.loads(meta.read_text()), "finished": True}))  # the transcript is unchanged
+        self.assertEqual(self.agents_of_busy()[1]["e4"], ("done", "finished"))
+
+    def test_a_message_from_its_chat_wakes_a_finished_agent(self):
+        message = self.line("user", "Also check the docs")
+        message.update(isMeta=True, origin={"kind": "coordinator"})
+        self.agent("busy", "e5", [self.line("user", "look"),
+                                  self.line("assistant", [{"type": "text", "text": "Done"}], "end_turn"), message])
+        self.assertEqual(self.agents_of_busy()[1]["e5"], ("running", "reading a message from its chat…"))
+
+    def test_a_parent_not_found_isnt_looked_for_on_every_check(self):
+        self.agent("busy", "n1", [self.line("user", "nested")], depth=2, tool_use_id="toolu_nowhere")
+        self.collect(with_tokens=False)
+        reads = []
+        real = Path.read_bytes
+        with mock.patch.object(cs.Path, "read_bytes", lambda p: reads.append(p.name) or real(p)):
+            self.collect(with_tokens=False)
+        self.assertEqual(reads, [])
+        self.assertIn("n1", json.loads((self.cache / "agents.json").read_text())["misses"])
+
     def test_agents_of_an_ended_session_are_stopped(self):
         cache = cs.AgentCache(self.cache / "agents.json")
         profile = next(p for p in cs.discover_profiles(self.home) if p.label == "work")
@@ -519,7 +575,7 @@ class AgentTests(Fixture):
         self.collect(with_tokens=False)
         calls = []
         real = cs.agent_progress
-        cs.agent_progress = lambda path: calls.append(path) or real(path)
+        cs.agent_progress = lambda path, *more: calls.append(path) or real(path, *more)
         try:
             self.collect(with_tokens=False)
             self.assertEqual(calls, [])
@@ -578,6 +634,19 @@ class AgentTests(Fixture):
                                                      {"type": "text", "text": rules}])])
         self.assertEqual(self.tree_of()["a7"]["task"], "Port the stats to GNOME.")
 
+    def test_a_forks_copy_of_the_call_isnt_its_work(self):
+        call = self.line("assistant", [{"type": "tool_use", "id": "toolu_p", "name": "Agent", "input": {"description": "x"}}],
+                         "tool_use")
+        call["message"].update(id="msg-parent", usage={"input_tokens": 5, "output_tokens": 5000})
+        rules = "<fork-boilerplate>\nrules\n</fork-boilerplate>\n\nYour directive: Go."
+        own = self.line("assistant", [{"type": "text", "text": "Gone."}], "end_turn")
+        own["message"].update(id="msg-own", usage={"input_tokens": 1, "output_tokens": 9})
+        self.agent("busy", "a9", [call, self.line("user", [{"type": "tool_result", "tool_use_id": "toolu_p", "content": None},
+                                                          {"type": "text", "text": rules}]), own])
+        write(self.home / ".claude-work/projects/-w-proj/busy.jsonl", "")  # the chat itself
+        a9 = self.tree_of()["a9"]
+        self.assertEqual((a9["status"], a9["steps"], a9["toolCalls"], a9["tokens"]), ("done", [], 0, 10))
+
     def test_big_results_at_the_end(self):
         # The end of a transcript can be one huge tool result: read further back
         big = "x" * (cs.AGENT_TAIL_BYTES + 1000)
@@ -592,11 +661,13 @@ class AgentTests(Fixture):
         # Older copies of the script (a VS Code extension not updated yet)
         # rewrite agents.json as they know it: the details aren't in it
         self.collect(with_tokens=False)
-        self.assertEqual(set(json.loads((self.cache / "agents.json").read_text())), {"version", "files", "parents"})
+        agents = json.loads((self.cache / "agents.json").read_text())
+        self.assertTrue({"version", "files", "parents"} <= set(agents))
+        self.assertTrue(all(len(rec) == 7 for rec in agents["files"].values()))  # no details in there
         (self.cache / "agent-details.json").unlink()
         calls = []
         real = cs.agent_progress
-        cs.agent_progress = lambda path: calls.append(path.name) or real(path)
+        cs.agent_progress = lambda path, *more: calls.append(path.name) or real(path, *more)
         try:
             tree = self.tree_of()  # read again once
             self.assertEqual(sorted(calls), ["agent-a1.jsonl", "agent-a2.jsonl", "agent-a3.jsonl"])
@@ -691,6 +762,12 @@ class AgentRunTests(Fixture):
         self.assertIn("## Task\n\nPort it.\n\n## Steps\n\n*None yet.*", md)  # not the call that started it
         self.assertIn("· 0 tool calls", md)
 
+    def test_markdown_stays_markdown(self):
+        self.assertEqual(cs.closed_fences("see:\n```py\nx = 1"), "see:\n```py\nx = 1\n```")
+        self.assertEqual(cs.closed_fences("```\na\n```\nok"), "```\na\n```\nok")
+        self.assertEqual(cs.closed_fences("````\n```\nstill code"), "````\n```\nstill code\n````")
+        self.assertEqual((cs.code_span("a`b"), cs.code_span("`x"), cs.code_span("p")), ("``a`b``", "`` `x ``", "`p`"))
+
     def test_unknown_or_unsafe_ids(self):
         self.assertEqual(cs.agent_run(self.home, [], "chat1", "nope"), (False, "Can't find that subagent's transcript", None, None))
         for chat, agent in (("chat1", "../x"), ("*", "ag1"), ("chat1", "a*")):
@@ -706,6 +783,141 @@ class AgentRunTests(Fixture):
         self.assertTrue(answer["markdown"].startswith("# Find parse\n"))
         with self.assertRaises(SystemExit):
             cs.main(["--agent-run", "ag1"])  # which chat's?
+
+
+class SharedCacheFileTests(unittest.TestCase):
+    """Copies of the script that list different chats share the cache files."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name)
+        self.lines = [json.dumps({"type": "user", "message": {"content": f"prompt {n}"}}) for n in range(3)]
+
+    def transcript(self, name, lines):
+        path = self.dir / f"{name}.jsonl"
+        path.write_text("".join(l + "\n" for l in lines))
+        return path
+
+    def test_one_copy_keeps_the_others_entries(self):
+        a, b = self.transcript("a", self.lines), self.transcript("b", self.lines)
+        for path in (a, b):  # e.g. the panel lists a, the VS Code extension b
+            cache = cs.ChatCache(self.dir / "chats.json")
+            cache.edits(path)
+            cache.save()
+        cache = cs.ChatCache(self.dir / "chats.json")
+        reads = []
+        real = cs.scan_edits
+        with mock.patch.object(cs, "scan_edits", lambda path, *rest: reads.append(path.name) or real(path, *rest)):
+            self.assertEqual(cache.edits(a)["stats"]["prompts"], 3)
+        self.assertEqual(reads, [])
+
+    def test_entries_no_copy_used_for_long_go(self):
+        a = self.transcript("a", self.lines)
+        cache = cs.ChatCache(self.dir / "chats.json")
+        cache.edits(a)
+        with mock.patch.object(cs.time, "time", return_value=time.time() - cs.CACHE_KEEP_S - 60):
+            cache.save()
+        later = cs.ChatCache(self.dir / "chats.json")
+        later.save()
+        self.assertEqual(json.loads((self.dir / "chats.json").read_text())["edits"], {})
+
+    def test_counts_what_an_older_copy_read_without_counting(self):
+        path = self.transcript("a", self.lines[:1])
+        cache = cs.ChatCache(self.dir / "chats.json")
+        cache.edits(path)
+        cache.save()
+        # 1.8 read on to the end and kept "stats" as it was
+        path.write_text("".join(l + "\n" for l in self.lines))
+        data = json.loads((self.dir / "chats.json").read_text())
+        (entry,) = data["edits"].values()
+        entry["size"] = path.stat().st_size
+        cs.write_json_atomic(self.dir / "chats.json", {**data, "edits": {cs.file_key(path.stat()): entry}})
+        self.assertEqual(cs.ChatCache(self.dir / "chats.json").edits(path)["stats"]["prompts"], 3)
+
+
+class OneAccountTwoProfilesTests(unittest.TestCase):
+    def test_a_chat_shared_between_them_counts_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home, cache, now = Path(tmp) / "home", Path(tmp) / "cache", time.time()
+            for name in (".claude-a", ".claude-b"):
+                write(home / name / ".claude.json", {"oauthAccount": {"accountUuid": "same"}})
+            chat = home / ".claude-a/projects/p/chat.jsonl"
+            write(chat, assistant("m1", now - 5, 1000) + "\n")
+            (home / ".claude-b/projects/p").mkdir(parents=True)
+            os.link(chat, home / ".claude-b/projects/p/chat.jsonl")  # what "Share with all accounts" does
+            (g,) = cs.collect(home, cache, now=now)["groups"]
+        self.assertEqual((g["tokens"]["today"]["output"], g["tokens"]["today"]["messages"]), (1000, 1))
+        self.assertEqual(g["stats"]["days"][-1]["messages"], 1)
+
+
+class ProfileNameTests(unittest.TestCase):
+    def test_a_linked_profile_keeps_its_own_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            for name in (".claude-personal", ".claude-work"):
+                (home / name / "sessions").mkdir(parents=True)
+            (home / ".claude").symlink_to(home / ".claude-personal")
+            labels = sorted(p.label for p in cs.discover_profiles(home))
+            (home / ".claude").unlink()
+            (home / ".claude").symlink_to(home / ".claude-work")  # switched: the names stay
+            self.assertEqual(labels, sorted(p.label for p in cs.discover_profiles(home)))
+            self.assertEqual(labels, ["personal", "work"])
+
+    def test_two_folders_of_the_same_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            (home / ".claude/sessions").mkdir(parents=True)
+            other = Path(tmp) / "data/.claude"
+            (other / "sessions").mkdir(parents=True)
+            profiles = cs.discover_profiles(home, [str(other)])
+            self.assertEqual(len({p.key for p in profiles}), 2)
+            self.assertIs(next(p for p in profiles if cs.matches_profile(p, str(other))).real, profiles[1].real)
+
+
+class TokenCachePruneTests(Fixture):
+    def test_another_copys_profiles_keep_their_caches(self):
+        profiles = cs.discover_profiles(self.home)
+        self.cache.mkdir(parents=True, exist_ok=True)
+        mine = cs.token_cache_path(self.cache, profiles[0])
+        theirs = self.cache / "tokens-.claude-extra-0123abcd.json"  # a profile only another copy knows
+        gone = self.cache / "tokens-.claude-old-89abcdef.json"
+        for f in (mine, theirs, gone):
+            f.write_text("{}")
+        old = time.time() - cs.TOKEN_CACHE_KEEP_S - 60
+        os.utime(gone, (old, old))
+        cs.prune_token_caches(self.cache, profiles)
+        self.assertEqual(sorted(f.name for f in self.cache.glob("tokens-*.json")), sorted([mine.name, theirs.name]))
+
+
+class TokenScanTimeTests(Fixture):
+    def test_a_scan_from_the_future_is_due(self):
+        profile = cs.discover_profiles(self.home)[0]
+        self.cache.mkdir(parents=True, exist_ok=True)
+        cs.write_json_atomic(cs.token_cache_path(self.cache, profile),
+                             {**cs.empty_token_cache(), "scannedAt": self.now + 6 * 3600})  # the clock was set back
+        scans = []
+        with mock.patch.object(cs, "scan_transcripts", lambda p, cache, now: scans.append(now) or cache):
+            cs.load_token_cache(self.cache, profile, self.now, True)
+        self.assertEqual(scans, [self.now])
+
+
+class OutputTests(Fixture):
+    def test_half_an_emoji_in_a_title_cant_break_the_output(self):
+        # JavaScript can cut an emoji in half; JSON.stringify writes that as \ud83d
+        title = '{"type":"ai-title","aiTitle":"Fix the \\ud83d"}\n'
+        prompt = json.dumps({"type": "user", "cwd": "/tmp/x", "message": {"content": "go"}}) + "\n"
+        reply = json.dumps({"type": "assistant", "cwd": "/tmp/x", "message": {"content": [{"type": "text", "text": "ok"}]}})
+        write(self.home / ".claude-work/projects/-tmp-x/half-emoji.jsonl", title + prompt + reply + "\n")
+        env = {**os.environ, "HOME": str(self.home), "XDG_CACHE_HOME": str(self.cache)}
+        for args in ([], ["--remote"]):
+            out = subprocess.run([sys.executable, "-I", str(ROOT / "package/contents/code/claude_status.py"), "--no-tokens", *args],
+                                 capture_output=True, text=True, env=env)
+            self.assertEqual(out.returncode, 0, out.stderr)
+            self.assertTrue(out.stdout.isascii())
+            answer = json.loads(out.stdout.rsplit("@@claude-status@@", 1)[-1])
+            names = [c["name"] for g in answer["groups"] for c in g["recent"]]
+            self.assertIn("Fix the \ud83d", names)
 
 
 class RecentProjectTests(Fixture):
@@ -727,13 +939,30 @@ class RecentProjectTests(Fixture):
 class DismissTests(Fixture):
     def test_hidden_while_done_back_when_active(self):
         cs.private_dir(self.cache)
-        cs.save_dismissed(self.cache, {"bgdone": 1, "busy": 2, "gone": 3})
+        now = int(self.now * 1000)
+        cs.save_dismissed(self.cache, {"bgdone": now, "busy": now, "gone": now, "long-gone": now - cs.DISMISSED_KEEP_MS - 1})
         r = self.collect(with_tokens=False)
         shown = {s["sessionId"] for g in r["groups"] for s in g["sessions"]}
         self.assertNotIn("bgdone", shown)              # finished: hidden
         self.assertIn("busy", shown)                   # working: never hidden
         self.assertEqual((r["dismissed"], r["counts"]["done"]), (1, 0))
-        # sessions that are gone or active again are forgotten
+        # one that's active again is forgotten; one not listed now may be by
+        # another copy of the script (other settings): forgotten after a while
+        self.assertEqual(set(cs.load_dismissed(self.cache)), {"bgdone", "gone"})
+
+    def test_removing_while_a_check_runs(self):
+        cs.private_dir(self.cache)
+        cs.save_dismissed(self.cache, {"busy": int(self.now * 1000)})
+        real, landed = cs.load_dismissed, []
+        def load_then_remove(root):  # jump.py --dismiss lands right after the check read the file
+            sessions = real(root)
+            if not landed:
+                landed.append(True)
+                with mock.patch.object(cs, "load_dismissed", real):
+                    cs.change_dismissed(root, add="bgdone")
+            return sessions
+        with mock.patch.object(cs, "load_dismissed", load_then_remove):
+            self.collect(with_tokens=False)
         self.assertEqual(set(cs.load_dismissed(self.cache)), {"bgdone"})
 
 
@@ -1245,8 +1474,14 @@ class ForecastTests(unittest.TestCase):
         points = [[self.now - 2 * self.H, 20], [self.now - self.H - 1, 30], [self.now - 600_000, 55]]
         f = cs.usage_forecast(w, points, self.now)
         self.assertEqual((f["basis"], f["rate"]), ("hour", 30.0))
-        self.assertEqual(f["fullAt"], self.now + int(40 / 30 * self.H))
+        self.assertAlmostEqual(f["fullAt"], self.now + int(40 / 30 * self.H), delta=10)
         self.assertEqual(f["atReset"], 120.0)
+
+    def test_hour_pace_over_the_real_gap(self):
+        # the newest point from an hour ago or more is 2.5 h old: 30 % since then is 12 %/h
+        w = self.window(40, 2)
+        f = cs.usage_forecast(w, [[self.now - int(2.5 * self.H), 10]], self.now)
+        self.assertEqual((f["basis"], f["rate"]), ("hour", 12.0))
 
     def test_quiet_hour_means_no_more_use(self):
         w = self.window(50, 2)
@@ -1300,7 +1535,16 @@ class UsageHistoryTests(Fixture):
             "resetsAt": resets, "points": [[now_ms - 7200_000, 10], [now_ms - 3700_000, 20]]}}}})
         self.snapshot(50, 0)
         (five,) = self.group(self.collect(with_tokens=False), "work")["limits"]["windows"]
-        self.assertEqual((five["forecast"]["basis"], five["forecast"]["rate"]), ("hour", 30.0))
+        self.assertEqual((five["forecast"]["basis"], five["forecast"]["rate"]), ("hour", round(30 / (3700 / 3600), 2)))
+
+    def test_a_clock_set_back(self):
+        gid = self.group(self.collect(with_tokens=False), "work")["id"]
+        now_ms = int(self.now * 1000)
+        write(self.cache / "usage.json", {"version": 1, "groups": {gid: {"five_hour": {
+            "resetsAt": now_ms + 3600_000, "points": [[now_ms + 7200_000, 10]]}}}})  # noted while the clock ran ahead
+        self.snapshot(20, 0)
+        self.collect(with_tokens=False)
+        self.assertEqual(self.history(), [20])
 
 
 class TaskProgressTests(Fixture):
@@ -1406,7 +1650,8 @@ class ChatRecapTests(Fixture):
             usage_line("m3", t + 620, 2, "/w", tool="Bash"),
         ]
         write(main, "\n".join(json.dumps(l) for l in lines) + "\n")
-        write(main.parent / "busy/subagents/agent-a.jsonl", json.dumps(usage_line("s1", t + 15, 6, "/w", tool="Grep")) + "\n")
+        write(main.parent / "busy/subagents/agent-a.jsonl",
+              json.dumps(chat_line("user", "find it", ts=t + 14)) + "\n" + json.dumps(usage_line("s1", t + 15, 6, "/w", tool="Grep")) + "\n")
         work = self.group(self.collect(with_tokens=False), "work")
         st = next(s for s in work["sessions"] if s["sessionId"] == "busy")["stats"]
         self.assertEqual((st["prompts"], st["toolCalls"]), (2, 4))

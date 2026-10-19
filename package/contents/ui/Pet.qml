@@ -71,6 +71,7 @@ Item {
     property int sleepyClicks: 0
     property string lastMood: ""
     property bool heldLong: false
+    property bool restarting: false  // moveTo turning a walk around: not an arrival
 
     // What he does while Claude works, waits for you, or runs subagents:
     // switched now and then so he isn't stuck in one pose.
@@ -97,6 +98,7 @@ Item {
     anchors.fill: parent
 
     Component.onCompleted: {
+        lastMood = mood
         if (lone && !strip.firstShown) {
             px = homeX   // the first time the popup opens he's just there
             return
@@ -115,7 +117,11 @@ Item {
         }
         if (!leaving && !held && !offstage)
             moveTo(homeX, true)
+        else if (offstage && !leaving && !held && moving)
+            moveTo(homeX, true, true)   // still walking in: to where its spot is now
     }
+    // The strip got narrower: back inside it
+    onMaxXChanged: if (!offstage && !held && px > maxX) moveTo(maxX, true)
     onLeavingChanged: {
         if (leaving) {
             leaveTimer.interval = Math.max(300, reactionUntil - Date.now() + 300)
@@ -123,7 +129,8 @@ Item {
         } else {
             leaveTimer.stop()
             offstage = false
-            moveTo(homeX, true)
+            if (!held)
+                moveTo(homeX, true)
         }
     }
     onLiveChanged: {
@@ -165,7 +172,10 @@ Item {
         stride.to = x
         stride.duration = Math.abs(x - px) / (gu * (fast ? 6 : 2)) * 1000
         moving = true
+        // restart() stops a walk under way first, and that fires onStopped
+        restarting = true
         stride.restart()
+        restarting = false
     }
 
     function stopMoving() {
@@ -195,7 +205,8 @@ Item {
     }
 
     function burst(symbol, color, count) {
-        strip.burst(pet, symbol, color, count)
+        if (live)   // with the popup closed they'd pile up until it opens
+            strip.burst(pet, symbol, color, count)
     }
 
     // A random element of list, not the same as last if there's a choice
@@ -284,12 +295,13 @@ Item {
     }
 
     function pickUp() {
+        held = true   // first: a walk that stops now isn't an arrival or a departure
+        fall.stop()   // grabbed again while falling
         stopMoving()
         reaction = ""
         action = ""
         hopAnimation.stop()
         landing.stop()
-        held = true
         heldLong = false
         heldTimer.restart()
         say(i18n("Whoa!"))
@@ -309,6 +321,8 @@ Item {
         else if (fromHeight > gu * 1.5)
             react("dizzy", i18n("Ouch… the room is spinning."), 2200)
         heldLong = false
+        if (leaving)
+            leaveTimer.restart()   // its chat left while you held it: now it goes
     }
 
     function petLine() {
@@ -460,6 +474,8 @@ Item {
     Timer {
         id: leaveTimer
         onTriggered: {
+            if (pet.held)
+                return   // dropped, it goes on (landed)
             pet.reaction = ""
             pet.offstage = true
             pet.moveTo(pet.px < pet.strip.width / 2 ? -pet.imageSize / 2 : pet.strip.width + pet.imageSize / 2, true, true)
@@ -595,9 +611,11 @@ Item {
         property: "px"
         easing.type: Easing.InOutSine
         onStopped: {
+            if (pet.restarting)
+                return
             pet.moving = false
             pet.running = false
-            if (pet.leaving && pet.offstage)
+            if (pet.leaving && pet.offstage && !pet.held)
                 pet.gone()
             else
                 pet.offstage = false
@@ -709,6 +727,7 @@ Item {
 
         PlasmaComponents3.Label {
             id: tagText
+            textFormat: Text.PlainText
             anchors.centerIn: parent
             width: Math.min(implicitWidth, pet.strip.tagWidth - Kirigami.Units.smallSpacing * 2)
             text: pet.label
@@ -770,6 +789,7 @@ Item {
         }
 
         PlasmaCore.ToolTipArea {
+            textFormat: Text.PlainText
             anchors.fill: parent
             active: !pet.lone && !pet.held && pet.lastChat !== null
             mainText: pet.lastChat ? (pet.host ? pet.host + ": " : "") + pet.lastChat.name : ""

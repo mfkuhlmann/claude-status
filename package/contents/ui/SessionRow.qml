@@ -21,7 +21,9 @@ RowLayout {
     // interrupted instead: Ctrl+C in its pane, like VS Code's stop button.
     readonly property bool canEnd: session.kind === "interactive" && session.pid !== null
     readonly property bool inVscode: session.entrypoint === "claude-vscode"
+    // (not when only a background command runs: its turn is over, Ctrl+C would land at its prompt)
     readonly property bool canInterrupt: canEnd && !!session.tmux && (session.state === "working" || session.state === "waiting")
+                                         && session.reason !== "background shell"
     readonly property bool canStop: canEnd || (session.kind === "bg" && session.pid !== null && (!remoteHost || !!session.stopCommand))
     readonly property string stopTitle: row.canInterrupt ? i18n("Interrupt or stop this chat")
                                         : row.canEnd ? i18n("Stop this chat") : i18n("Stop this background session")
@@ -119,6 +121,7 @@ RowLayout {
 
             PlasmaComponents3.Label {
                 id: nameLabel
+                textFormat: Text.PlainText
                 text: row.session.name
                 font.bold: true
                 font.underline: nameMouse.containsMouse
@@ -127,6 +130,7 @@ RowLayout {
 
                 // Click the name to jump to the session
                 PlasmaCore.ToolTipArea {
+                    textFormat: Text.PlainText
                     width: nameLabel.contentWidth
                     height: parent.height
                     mainText: row.openHint
@@ -179,7 +183,7 @@ RowLayout {
                 tooltipTitle: i18n("Subagents")
                 tooltip: !row.agents ? ""
                          : i18n("%1 done, %2 running, %3 stopped. Click to %4 what each one is doing.",
-                                row.agents.done, row.agents.running, row.agents.stopped,
+                                row.agents.done, row.agents.running, row.agents.stopped + (row.agents.failed || 0),
                                 row.showAgents ? i18n("hide") : i18n("show"))
             }
             Tag {
@@ -196,6 +200,7 @@ RowLayout {
                                       : i18n("Click to compare them in VS Code: what they were before the chat, and now."))
             }
             PlasmaComponents3.Label {
+                textFormat: Text.PlainText
                 text: root.stateText(row.session)
                 color: row.session.state === "waiting" ? Kirigami.Theme.neutralTextColor : Kirigami.Theme.textColor
                 font.bold: row.session.state === "waiting"
@@ -217,6 +222,7 @@ RowLayout {
                 }, row.rowKey)
 
                 PlasmaCore.ToolTipArea {
+                    textFormat: Text.PlainText
                     anchors.fill: parent
                     mainText: i18n("Continue on another account")
                     subText: root.shareHint(row.remoteHost)
@@ -235,6 +241,7 @@ RowLayout {
                                           : root.dismissSession(row.session.sessionId)
 
                 PlasmaCore.ToolTipArea {
+                    textFormat: Text.PlainText
                     anchors.fill: parent
                     mainText: i18n("Remove from the list")
                     subText: i18n("Only hides it here; nothing is deleted. It comes back if the session runs again, or via right-click → Show removed sessions again.")
@@ -254,6 +261,7 @@ RowLayout {
                 }
 
                 PlasmaCore.ToolTipArea {
+                    textFormat: Text.PlainText
                     anchors.fill: parent
                     mainText: row.stopTitle
                     subText: row.stopTip
@@ -266,6 +274,7 @@ RowLayout {
             spacing: Kirigami.Units.smallSpacing
 
             PlasmaComponents3.Label {
+                textFormat: Text.PlainText
                 text: row.session.cwdShort
                 opacity: 0.7
                 font: Kirigami.Theme.smallFont
@@ -273,6 +282,7 @@ RowLayout {
                 Layout.fillWidth: true
             }
             PlasmaComponents3.Label {
+                textFormat: Text.PlainText
                 visible: !!row.session.model
                 // the model, and how hard it thinks (Claude's /effort)
                 text: (row.session.model || "") + (row.session.effort ? " · " + row.session.effort : "")
@@ -280,6 +290,7 @@ RowLayout {
                 font: Kirigami.Theme.smallFont
 
                 PlasmaCore.ToolTipArea {
+                    textFormat: Text.PlainText
                     anchors.fill: parent
                     active: !!row.session.effort
                     mainText: row.session.model || ""
@@ -302,6 +313,7 @@ RowLayout {
                 }
             }
             PlasmaComponents3.Label {
+                textFormat: Text.PlainText
                 visible: row.session.context !== null
                 text: i18nc("context window fill", "ctx %1%", Math.round(row.session.context || 0))
                 opacity: 0.7
@@ -336,6 +348,7 @@ RowLayout {
                     }
                 }
                 PlasmaComponents3.Label {
+                    textFormat: Text.PlainText
                     visible: row.tasks !== null
                     text: row.tasks ? i18nc("tasks done/total", "%1/%2", row.tasks.done, row.tasks.total) : ""
                     opacity: 0.7
@@ -362,6 +375,7 @@ RowLayout {
             }
 
             PlasmaCore.ToolTipArea {
+                textFormat: Text.PlainText
                 anchors.fill: parent
                 active: stepLabel.truncated || row.hasPeek
                 mainText: row.session.state === "waiting" ? i18n("What it needs")
@@ -443,6 +457,7 @@ RowLayout {
 
                 // The chat in numbers
                 PlasmaComponents3.Label {
+                    textFormat: Text.PlainText
                     Layout.fillWidth: true
                     visible: row.recap !== null
                     text: root.recapText(row.recap, row.session.costUsd)
@@ -451,6 +466,7 @@ RowLayout {
                     font: Kirigami.Theme.smallFont
 
                     PlasmaCore.ToolTipArea {
+                        textFormat: Text.PlainText
                         anchors.fill: parent
                         active: row.recap !== null
                         mainText: i18n("This chat in numbers")
@@ -476,6 +492,7 @@ RowLayout {
                         onClicked: root.showChanges(row.session.chatId, row.session.profileDir, false)
 
                         PlasmaCore.ToolTipArea {
+                            textFormat: Text.PlainText
                             anchors.fill: parent
                             mainText: i18n("Everything this chat changed")
                             subText: root.vscodeInstalled
@@ -489,6 +506,7 @@ RowLayout {
                         onClicked: root.showChanges(row.session.chatId, row.session.profileDir, true)
 
                         PlasmaCore.ToolTipArea {
+                            textFormat: Text.PlainText
                             anchors.fill: parent
                             mainText: i18n("What its last turn changed")
                             subText: i18n("The files as they were when you sent your last prompt, and as they are now.")
@@ -518,6 +536,7 @@ RowLayout {
                     spacing: Kirigami.Units.smallSpacing
 
                     PlasmaComponents3.Label {
+                        textFormat: Text.PlainText
                         Layout.alignment: Qt.AlignTop
                         text: "└"
                         opacity: 0.4
@@ -548,22 +567,28 @@ RowLayout {
                                 RowLayout {
                                     Layout.fillWidth: true
                                     PlasmaComponents3.Label {
+                                        textFormat: Text.PlainText
                                         Layout.fillWidth: true
                                         text: agentRow.modelData.description || agentRow.modelData.type
                                         elide: Text.ElideRight
                                         font: Kirigami.Theme.smallFont
                                     }
                                     PlasmaComponents3.Label {
+                                        textFormat: Text.PlainText
                                         // its kind, and the model it runs on
                                         text: agentRow.modelData.type + (agentRow.modelData.model ? " · " + agentRow.modelData.model : "")
                                         opacity: 0.6
                                         font: Kirigami.Theme.smallFont
                                     }
                                     PlasmaComponents3.Label {
+                                        textFormat: Text.PlainText
+                                        // failed: it ended on an API error (e.g. a usage limit)
                                         text: agentRow.modelData.status === "running"
                                               ? i18n("running · %1", root.duration(root.now - (agentRow.modelData.started || root.now)))
-                                              : agentRow.modelData.status === "done" ? i18n("done") : i18n("stopped")
-                                        opacity: 0.7
+                                              : agentRow.modelData.status === "done" ? i18n("done")
+                                              : agentRow.modelData.status === "failed" ? i18n("failed") : i18n("stopped")
+                                        color: agentRow.modelData.status === "failed" ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.textColor
+                                        opacity: agentRow.modelData.status === "failed" ? 1 : 0.7
                                         font: Kirigami.Theme.smallFont
                                     }
                                     Kirigami.Icon {
@@ -575,6 +600,7 @@ RowLayout {
                                 }
                                 PlasmaComponents3.Label {
                                     id: activityLabel
+                                    textFormat: Text.PlainText
                                     Layout.fillWidth: true
                                     visible: text !== ""
                                     text: agentRow.modelData.activity
@@ -585,6 +611,7 @@ RowLayout {
                             }
 
                             PlasmaCore.ToolTipArea {
+                                textFormat: Text.PlainText
                                 anchors.fill: parent
                                 mainText: agentRow.modelData.description || agentRow.modelData.type
                                 subText: (activityLabel.truncated ? agentRow.modelData.activity + "\n\n" : "")
@@ -629,6 +656,7 @@ RowLayout {
                                     font: Kirigami.Theme.smallFont
 
                                     PlasmaCore.ToolTipArea {
+                                        textFormat: Text.PlainText
                                         anchors.fill: parent
                                         active: taskLabel.truncated
                                         mainText: i18n("Its task")
@@ -636,6 +664,7 @@ RowLayout {
                                     }
                                 }
                                 PlasmaComponents3.Label {
+                                    textFormat: Text.PlainText
                                     Layout.fillWidth: true
                                     visible: text !== ""
                                     text: root.agentNumbers(agentRow.modelData)
@@ -672,6 +701,7 @@ RowLayout {
                                     onClicked: root.openAgentRun(row.session, agentRow.modelData.id, row.remoteHost)
 
                                     PlasmaCore.ToolTipArea {
+                                        textFormat: Text.PlainText
                                         anchors.fill: parent
                                         mainText: i18n("Everything it did")
                                         subText: i18n("Its task, every step with the start of each result, and its report, as a Markdown file in your app for those. Claude Code itself can't open a subagent from outside.")
@@ -694,25 +724,26 @@ RowLayout {
             Layout.fillWidth: true
             visible: row.confirmingStop && row.canStop
             type: Kirigami.MessageType.Warning
-            text: row.canInterrupt
-                  ? i18n("Interrupt “%1”? Like Ctrl+C in its tmux pane, or the stop button in VS Code: the current step and its subagents stop, and the chat stays open there. Or stop it: Claude quits and its terminal stays open.", row.session.name)
+            // rich text (an InlineMessage always guesses), so the name is escaped
+            text: "<span>" + (row.canInterrupt
+                  ? i18n("Interrupt “%1”? Like Ctrl+C in its tmux pane, or the stop button in VS Code: the current step and its subagents stop, and the chat stays open there. Or stop it: Claude quits and its terminal stays open.", root.escapeHtml(row.session.name))
                   : row.canEnd && row.inVscode && row.session.state === "working"
-                  ? i18n("Stop “%1”? It's working right now: the current step is interrupted, as with VS Code's stop button, and anything it was running stops. Its tab keeps the chat and goes on with your next message.", row.session.name)
+                  ? i18n("Stop “%1”? It's working right now: the current step is interrupted, as with VS Code's stop button, and anything it was running stops. Its tab keeps the chat and goes on with your next message.", root.escapeHtml(row.session.name))
                   : row.canEnd && row.inVscode && row.session.state === "waiting"
-                  ? i18n("Stop “%1”? It's waiting for you: what it asks is refused, as with VS Code's stop button. Its tab keeps the chat and goes on with your next message.", row.session.name)
+                  ? i18n("Stop “%1”? It's waiting for you: what it asks is refused, as with VS Code's stop button. Its tab keeps the chat and goes on with your next message.", root.escapeHtml(row.session.name))
                   : row.canEnd && row.inVscode
-                  ? i18n("Stop “%1”? It's idle, so nothing is interrupted: its Claude process in VS Code quits. Its tab keeps the chat and goes on with your next message.", row.session.name)
+                  ? i18n("Stop “%1”? It's idle, so nothing is interrupted: its Claude process in VS Code quits. Its tab keeps the chat and goes on with your next message.", root.escapeHtml(row.session.name))
                   : row.canEnd && row.session.state === "working"
-                  ? i18n("Stop “%1”? It's working right now: the current step is cut off and anything it was running stops. Claude quits and its terminal stays open; the chat is kept (Recent chats reopens it).", row.session.name)
+                  ? i18n("Stop “%1”? It's working right now: the current step is cut off and anything it was running stops. Claude quits and its terminal stays open; the chat is kept (Recent chats reopens it).", root.escapeHtml(row.session.name))
                   : row.canEnd && row.session.state === "waiting"
-                  ? i18n("Stop “%1”? It's waiting for you: Claude quits without your answer and its terminal stays open. The chat is kept (Recent chats reopens it).", row.session.name)
+                  ? i18n("Stop “%1”? It's waiting for you: Claude quits without your answer and its terminal stays open. The chat is kept (Recent chats reopens it).", root.escapeHtml(row.session.name))
                   : row.canEnd
-                  ? i18n("Stop “%1”? It's idle, so nothing is interrupted: Claude quits and its terminal stays open. The chat is kept; reopen it from Recent chats.", row.session.name)
+                  ? i18n("Stop “%1”? It's idle, so nothing is interrupted: Claude quits and its terminal stays open. The chat is kept; reopen it from Recent chats.", root.escapeHtml(row.session.name))
                   : row.session.state === "working"
-                  ? i18n("Stop “%1”? It's working right now: the current step is interrupted and anything it started in the background stops too. The conversation is kept; claude attach resumes it.", row.session.name)
+                  ? i18n("Stop “%1”? It's working right now: the current step is interrupted and anything it started in the background stops too. The conversation is kept; claude attach resumes it.", root.escapeHtml(row.session.name))
                   : row.session.state === "waiting"
-                  ? i18n("Stop “%1”? It's waiting for you. The conversation is kept; claude attach resumes it.", row.session.name)
-                  : i18n("Stop “%1”? It's finished, so this only shuts down its idle process. The conversation is kept.", row.session.name)
+                  ? i18n("Stop “%1”? It's waiting for you. The conversation is kept; claude attach resumes it.", root.escapeHtml(row.session.name))
+                  : i18n("Stop “%1”? It's finished, so this only shuts down its idle process. The conversation is kept.", root.escapeHtml(row.session.name))) + "</span>"
             actions: [
                 Kirigami.Action {
                     text: i18n("Interrupt")

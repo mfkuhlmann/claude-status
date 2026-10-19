@@ -78,7 +78,7 @@ Item {
     onShownChatsChanged: sync()
     onWidthChanged: sync()
     Component.onCompleted: sync()
-    Component.onDestruction: root.setPetColors(stageKey, {})
+    Component.onDestruction: if (root) root.dropPetColors(stageKey)   // (root may be gone at shutdown)
 
     // Shown and laid out: from now on the hero walks where he goes
     Timer {
@@ -129,12 +129,23 @@ Item {
         return h % petPalette.length
     }
 
+    // What the pets showed at the last sync: most checks change nothing for
+    // them (the same chats in the same states), and then there's nothing to do
+    property string syncedAs: ""
+
     function sync() {
         if (hero) {
             if (indexOfPet("") < 0)
                 petModel.append({ petKey: "", colorIndex: -1, leaving: false, label: "", host: "" })
             return
         }
+        const seen = JSON.stringify([width, shownChats.map(c => {
+            const s = c.session   // what a pet shows of its chat (Pet.qml)
+            return [c.key, s.state, s.reason, s.name, s.since, s.context, s.agents ? s.agents.running : 0, c.host || ""]
+        })])
+        if (seen === syncedAs)
+            return
+        syncedAs = seen
         const byKey = {}
         for (const c of shownChats)
             byKey[c.key] = c
@@ -288,6 +299,7 @@ Item {
 
         PlasmaComponents3.Label {
             id: headline
+            textFormat: Text.PlainText
             Layout.fillWidth: true
             text: root.headlineText()
             font.pixelSize: Math.round(strip.gu * 1.0)
@@ -299,7 +311,9 @@ Item {
             // "1 chat needs you": click to go there
             MouseArea {
                 id: headlineMouse
-                anchors.fill: parent
+                // the words only: Clawd may stand under the rest of the line, and he's grabbed there
+                width: Math.min(parent.width, parent.paintedWidth)
+                height: parent.height
                 enabled: strip.callingChat !== null
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
@@ -311,6 +325,7 @@ Item {
                         root.jumpTo(c.session.sessionId, c.session.profileDir)
                 }
                 PlasmaCore.ToolTipArea {
+                    textFormat: Text.PlainText
                     anchors.fill: parent
                     active: strip.callingChat !== null
                     mainText: strip.callingChat ? i18n("Open %1", strip.callingChat.session.name) : ""
@@ -343,6 +358,7 @@ Item {
                         color: root.stateColor(modelData.state)
                     }
                     PlasmaComponents3.Label {
+                        textFormat: Text.PlainText
                         text: modelData.text
                         font: Kirigami.Theme.smallFont
                         opacity: 0.85
@@ -351,6 +367,7 @@ Item {
             }
 
             PlasmaComponents3.Label {
+                textFormat: Text.PlainText
                 visible: root.counts.waiting + root.counts.working + root.counts.idle + root.counts.done === 0
                 text: i18n("No sessions running")
                 font: Kirigami.Theme.smallFont
@@ -383,6 +400,7 @@ Item {
 
     // More chats than pets: say how many
     PlasmaComponents3.Label {
+        textFormat: Text.PlainText
         visible: strip.hiddenChats > 0
         anchors.right: parent.right
         anchors.top: parent.top
@@ -393,6 +411,7 @@ Item {
         z: 2
 
         PlasmaCore.ToolTipArea {
+            textFormat: Text.PlainText
             anchors.fill: parent
             mainText: i18np("%1 more chat", "%1 more chats", strip.hiddenChats)
             subText: i18n("Up to %1 pets per account, the chats that need you or work first; the list shows them all.", strip.maxPets)

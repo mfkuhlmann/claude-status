@@ -213,7 +213,11 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
             // popup on old data (on Plasma one froze it at a limit reset)
             this._errorText = result.errorText;
             this._status = result.status;
-            this._track('', result.status.groups, result.status.generatedAt, '');
+            try {
+                this._track('', result.status.groups, result.status.generatedAt, '');
+            } catch (e) {
+                console.error(`Claude Status: following the chats failed: ${e.message}\n${e.stack}`);
+            }
         }
         this._render();
         this._adjustPollTimer();
@@ -342,7 +346,8 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         if (!this._settings.get_boolean('notify-waiting') && !this._settings.get_boolean('notify-done'))
             return;
         const first = digest.first;
-        this._notifier.notify({key: 'away-digest', kind: first ? 'waiting' : 'done', title: digest.title,
+        // its own kind: closeMissing() closes 'waiting' notifications of chats that are gone
+        this._notifier.notify({key: 'away-digest', kind: 'digest', waiting: !!first, title: digest.title,
             body: digest.body, icon: first ? 'dialog-warning-symbolic' : 'emblem-ok-symbolic', session: null,
             action: first ? 'Open the chat that needs you' : 'Show chats'},
         this._settings.get_boolean('show-pet'), () => (first ? this._openChat(first) : this.menu.open()));
@@ -425,6 +430,8 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         const profile = profileDir ? ['--profile', profileDir] : [];
         const result = await this._helper('jump.py',
             ['--stop', sessionId, ...profile, ...busy ? ['--busy'] : [], ...this._configDirArgs]);
+        if (this._destroyed)
+            return;   // turned off meanwhile (e.g. the screen locked)
         if (!result.ok)
             this._showError(L.fmt("Couldn't stop the session: %1", result.message));
         this.refresh();
@@ -434,6 +441,8 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
     async interruptSession(sessionId, profileDir) {
         const profile = profileDir ? ['--profile', profileDir] : [];
         const result = await this._helper('jump.py', ['--interrupt', sessionId, ...profile, ...this._configDirArgs]);
+        if (this._destroyed)
+            return;
         if (!result.ok)
             this._showError(L.fmt("Couldn't interrupt the session: %1", result.message));
         this.refresh();
@@ -442,6 +451,8 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
     // Small helper actions whose only effect is on the widget's own list
     async runHelper(args) {
         const result = await this._helper('jump.py', [...args, ...this._configDirArgs]);
+        if (this._destroyed)
+            return;
         if (!result.ok)
             this._showError(result.message);
         this.refresh();
@@ -629,6 +640,10 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
 
     _onHostsChanged() {
         const next = {};
+        for (const host of Object.keys(this.remote)) {
+            if (!this.shownHosts.includes(host))
+                this._forgetSource(`ssh:${host}`);   // shown again later, it starts afresh
+        }
         for (const host of this.shownHosts) {
             if (host in this.remote)
                 next[host] = this.remote[host];
@@ -654,11 +669,27 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
             return;   // unpicked while its check was running
         const answer = L.helperResult(out.stdout, out.stderr);
         if (answer.ok && answer.result) {
-            this._setRemote(host, {loading: false, ok: true, error: '', result: answer.result, updatedAt: Date.now()});
-            this._track(`ssh:${host}`, answer.result.groups, answer.result.generatedAt, host);
+            // on this computer's clock: the host's may be off
+            const result = L.toLocalClock(answer.result, Date.now() - (answer.result.generatedAt || Date.now()));
+            this._setRemote(host, {loading: false, ok: true, error: '', result, updatedAt: Date.now()});
+            try {
+                this._track(`ssh:${host}`, result.groups, result.generatedAt, host);
+            } catch (e) {
+                console.error(`Claude Status: following ${host}'s chats failed: ${e.message}\n${e.stack}`);
+            }
         } else {
             // keep the last answer to show (dimmed) with the error
             this._setRemote(host, {loading: false, ok: false, error: answer.error || answer.message || 'no answer'});
+        }
+    }
+
+    // What a source's chats were (and their notifications): gone with the source
+    _forgetSource(source) {
+        this._tracker.forget(source);
+        this._notifier.closeSource(source);
+        for (const key of Object.keys(this._unseen)) {
+            if (L.keyOfSource(key, source))
+                delete this._unseen[key];
         }
     }
 
@@ -682,6 +713,11 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
             this._showError(kind === 'open' ? L.fmt("Couldn't open the session: %1", result.message)
                 : kind === 'stop' ? L.fmt("Couldn't stop the session: %1", result.message) : result.message);
             this._oops();
+            if (!this.menu.isOpen) {   // e.g. from a notification or the hotkey: say so
+                this._notifier.notify({key: 'remote-error', kind: 'error', title: L.fmt("That didn't work on %1", host),
+                    body: this._actionError, icon: 'dialog-error-symbolic', session: null},
+                this._settings.get_boolean('show-pet'), null);
+            }
         }
         if (kind !== 'open')
             this.pollHost(host);

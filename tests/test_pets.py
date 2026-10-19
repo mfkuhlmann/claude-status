@@ -109,3 +109,38 @@ class PetEventTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PlainTextTests(unittest.TestCase):
+    """Chat names, agent activity and other text from transcripts are shown
+    as plain text: as rich text, "Fix <div> centering" lost its tag and an
+    <img src=…> in an agent's activity made plasmashell fetch the URL."""
+
+    def test_every_label_and_tooltip_is_plain_text(self):
+        missing = []
+        for path in sorted((ROOT / "ui").glob("*.qml")):
+            if path.name == "configGeneral.qml":  # fixed texts only
+                continue
+            lines = path.read_text().split("\n")
+            for i, line in enumerate(lines):
+                m = re.match(r"(\s*)(PlasmaComponents3\.Label|Text|Kirigami\.Heading|PlasmaCore\.ToolTipArea)\s*\{\s*$", line)
+                if not m:
+                    continue
+                own, depth = [], 0
+                for j in range(i, len(lines)):
+                    depth += lines[j].count("{") - lines[j].count("}")
+                    if j > i and re.match(m.group(1) + r"    \S", lines[j]):
+                        own.append(lines[j])
+                    if depth <= 0 and j > i:
+                        break
+                if any(re.match(r"\s*(text|mainText|subText):", l) for l in own) and not any("textFormat" in l for l in own):
+                    missing.append(f"{path.name}:{i + 1}")
+        self.assertEqual(missing, [])
+
+    def test_inline_messages_escape_what_they_quote(self):
+        for name in ("SessionRow.qml", "KeepOnlyMessage.qml"):
+            text = (ROOT / "ui" / name).read_text()
+            block = text[text.index("Kirigami.InlineMessage {"):]
+            block = block[:block.index("actions:")]
+            self.assertIn('"<span>"', block, name)
+            self.assertNotRegex(block, r"[^(]row\.session\.name\)|shareConfirm\.name,", name)

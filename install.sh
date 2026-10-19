@@ -73,18 +73,34 @@ find_statuslines() {
 import json, os, shlex, sys
 from pathlib import Path
 home = Path(sys.argv[1])
+os.environ["HOME"] = str(home)
+
+
+def shell_script(path):
+    """A script for sh, bash or zsh: a .sh file, or one whose #! line says so."""
+    if path.suffix == ".sh":
+        return True
+    try:
+        with open(path, "rb") as f:
+            first = f.readline(200)
+    except OSError:
+        return False
+    return first.startswith(b"#!") and any(sh in first for sh in (b"sh\n", b"bash", b"zsh", b"dash", b"ksh", b"sh "))
+
+
 found = []
 for cfg in [home / ".claude", *sorted(home.glob(".claude-*"))]:
     try:
         command = json.loads((cfg / "settings.json").read_text())["statusLine"]["command"]
         words = shlex.split(command)
-    except (OSError, ValueError, KeyError, TypeError):
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
         continue
     for word in words:
-        path = Path(os.path.expanduser(word))
-        if path.suffix == ".sh" and path.is_file() and str(path.resolve()) not in found:
+        path = Path(os.path.expanduser(os.path.expandvars(word)))  # ~/…, $HOME/… and ${HOME}/…
+        if path.is_absolute() and path.is_file() and shell_script(path) and str(path.resolve()) not in found:
             found.append(str(path.resolve()))
-print("\n".join(found))
+for path in found:
+    print(path)
 EOF
 }
 
@@ -99,8 +115,13 @@ text = block.sub("", text)
 if mode == "add":
     snippet = open(snippet_path, encoding="utf-8").read()
     lines = text.splitlines(keepends=True)
+    # input=$(cat), input="$(cat)", input=$(cat -): a line of its own (not
+    # one that goes on with && or a \ at its end)
+    reads = re.compile(r"""\s*input=("?)\$\(cat(\s+-)?\)\1\s*(;\s*)?(#.*)?$""")
     for i, line in enumerate(lines):
-        if re.match(r"\s*input=\$\(cat\)", line):
+        if reads.match(line.rstrip("\n")):
+            if not line.endswith("\n"):
+                lines[i] = line + "\n"
             lines.insert(i + 1, snippet)
             break
     else:
@@ -124,8 +145,19 @@ apply_statusline() {
   fi
   diff -u "$statusline" "$tmp" || true
   if confirm "Apply this change to $statusline?"; then
-    cp -p "$statusline" "$statusline.bak.$(date +%Y%m%d%H%M%S)"
-    cat "$tmp" > "$statusline"
+    # Written next to it, then moved over it in one step: Claude may run the
+    # script at any moment, and must never find it half-written
+    local target new
+    target="$(realpath -e -- "$statusline")"
+    if ! cp -p "$target" "$target.bak.$(date +%Y%m%d%H%M%S)" 2>/dev/null \
+        || ! new="$(mktemp "$(dirname "$target")/.$(basename "$target").XXXXXX" 2>/dev/null)"; then
+      echo "Can't write in $(dirname "$target"); add the snippet to $statusline by hand (statusline-snippet.sh)."
+      rm -f "$tmp"
+      return 0
+    fi
+    cat "$tmp" > "$new"
+    chmod --reference="$target" "$new" 2>/dev/null || chmod 755 "$new"
+    mv -f "$new" "$target"
     echo "Patched $statusline (backup next to it)."
   elif grep -qF "$marker_start" "$statusline"; then
     echo "Skipped $statusline; its widget snippet stays as it was."
@@ -142,6 +174,10 @@ install_gnome() {
   local zip="$here/gnome/build/$uuid.shell-extension.zip" major
   # GNOME Shell 43/44 load extensions the older way: build a converted copy
   major="$(gnome-shell --version 2>/dev/null | sed -nE 's/^GNOME Shell ([0-9]+).*/\1/p')"
+  if [ -n "$major" ] && [ "$major" -ge 45 ] && [ "$major" -le 48 ]; then
+    echo "GNOME Shell $major isn't supported: Claude Status runs on GNOME Shell 43/44 and 49 or newer." >&2
+    exit 1
+  fi
   if [ -n "$major" ] && [ "$major" -lt 45 ]; then
     if [ "$major" -lt 43 ]; then
       echo "GNOME Shell $major is too old: Claude Status needs GNOME Shell 43 or newer." >&2
@@ -187,9 +223,18 @@ if [ "$uninstall" = 1 ]; then
   else
     kpackagetool6 -t Plasma/Applet -r "$id" || true
   fi
-  for statusline in "${statuslines[@]}"; do
-    [ -f "$statusline" ] && grep -qF "$marker_start" "$statusline" && apply_statusline remove
-  done
+  # The snippet stays while something else still reads what it saves
+  others=()
+  [ "$target" != plasma ] && [ -d "$HOME/.local/share/plasma/plasmoids/$id" ] && others+=("the Plasma widget")
+  [ "$target" != gnome ] && [ -d "$HOME/.local/share/gnome-shell/extensions/$uuid" ] && others+=("the GNOME extension")
+  compgen -G "$HOME/.vscode*/extensions/wzaielamri.claude-status-*" >/dev/null && others+=("the VS Code extension")
+  if [ "${#others[@]}" -gt 0 ]; then
+    echo "Kept the status-line snippet: ${others[*]} still uses it."
+  else
+    for statusline in "${statuslines[@]}"; do
+      [ -f "$statusline" ] && grep -qF "$marker_start" "$statusline" && apply_statusline remove
+    done
+  fi
   echo "Uninstalled. Cached data is in ${XDG_CACHE_HOME:-$HOME/.cache}/claude-widget (safe to delete)."
   exit 0
 fi

@@ -62,12 +62,15 @@ PlasmoidItem {
     property var sshHosts: []
     readonly property var shownHosts: Plasmoid.configuration.sshHosts.split(",").map(h => h.trim()).filter(h => h.length)
     property var remote: ({})
-    // The accounts of the hosts that answered, each marked with its host
+    // The accounts of the hosts that answered, each marked with its host. A
+    // host whose last check failed still shows what it said before (dimmed,
+    // HostSection.qml), but that doesn't count here: no badge or shortcut
+    // for a chat you can't reach.
     readonly property var remoteGroups: {
         const out = []
         for (const host of shownHosts) {
             const r = remote[host]
-            if (r && r.result)
+            if (r && r.result && !r.error)
                 for (const g of r.result.groups)
                     out.push(Object.assign({}, g, { host: host }))
         }
@@ -112,6 +115,14 @@ PlasmoidItem {
         return all
     }
 
+    function dropPetColors(stage) {   // a stage that's gone (its account isn't listed any more)
+        if (!(stage in petColorsByStage))
+            return
+        const next = Object.assign({}, petColorsByStage)
+        delete next[stage]
+        petColorsByStage = next
+    }
+
     function setPetColors(stage, colors) {
         if (JSON.stringify(petColorsByStage[stage] || {}) === JSON.stringify(colors))
             return   // unchanged: don't make every row look again
@@ -135,10 +146,13 @@ PlasmoidItem {
         return i18n("All quiet")
     }
 
-    // A chat's pet key: its conversation (so the pet stays the same while the
-    // chat's row changes, e.g. from a running to a finished background session)
+    // A chat's key: its account and conversation, so its pet, its
+    // notifications and whether you've seen it stay the same while its row
+    // changes (e.g. a background session's row from running to finished,
+    // …/live to …/job). A chat shared with two accounts is two chats here.
     function petKeyOf(session, host) {
-        return (host ? "ssh:" + host + "|" : "") + (session.chatId || session.sessionId || session.key)
+        return (host ? "ssh:" + host + "|" : "") + (session.profileDir || "") + "/"
+               + (session.chatId || session.sessionId || session.key)
     }
     property var lastWindows: ({})
     readonly property string petsDir: decodeURIComponent(Qt.resolvedUrl("../pets/").toString().replace(/^file:\/\//, ""))
@@ -327,10 +341,13 @@ PlasmoidItem {
     // Keys as in trackTransitions.
     function chatsNeedingYou() {
         const waiting = [], finished = []
+        const seen = {}
         for (const g of allGroups) {
-            const prefix = g.host ? "ssh:" + g.host + "|" : ""
             for (const s of g.sessions) {
-                const key = prefix + (s.key || s.sessionId)
+                const key = petKeyOf(s, g.host)
+                if (key in seen)
+                    continue   // the chat's most urgent row came first
+                seen[key] = true
                 if (s.state === "waiting")
                     waiting.push({ key: key, session: s, host: g.host || "" })
                 else if (unseen[key] === "done")
@@ -726,9 +743,10 @@ PlasmoidItem {
         return g.host ? i18nc("ssh host: account", "%1: %2", g.host, g.name) : g.name
     }
 
-    // Rows are tracked by s.key, not the chat id: a chat shared across profiles
-    // is listed once per profile with the same id, and keying by id made the
-    // two rows flip each other's state on every poll (a notification each time).
+    // Rows are tracked by account and chat (petKeyOf), not the chat id alone:
+    // a chat shared across profiles is listed once per profile with the same
+    // id, and keying by id made the two rows flip each other's state on every
+    // poll (a notification each time).
     property var lastWaitingAlert: ({})
 
     // One sound per poll at most (several sessions can change at once): the
@@ -775,7 +793,9 @@ PlasmoidItem {
         const where = host ? " · " + host : ""
         for (const g of groupList) {
             for (const s of g.sessions) {
-                const sid = (source ? source + "|" : "") + (s.key || s.sessionId)
+                const sid = petKeyOf(s, host)   // starts with source + "|" for a host's
+                if (sid in next)
+                    continue   // a chat listed twice: its most urgent row (they come first) counts
                 const prev = before[sid]
                 const active = s.state === "working" || s.state === "waiting"
                 next[sid] = s.state
@@ -846,6 +866,11 @@ PlasmoidItem {
             if (mine && !(sid in next))
                 forgetUnseen(sid, "")
         }
+        for (const sid in lastWaitingAlert) {
+            const mine = source ? sid.startsWith(prefix) : sid.indexOf("|") < 0
+            if (mine && !(sid in next))
+                delete lastWaitingAlert[sid]
+        }
         lastStates = Object.assign({}, lastStates, { [source]: next })
         turnStarts = Object.assign({}, turnStarts, { [source]: starts })
         primedSources = Object.assign({}, primedSources, { [source]: true })
@@ -864,7 +889,7 @@ PlasmoidItem {
             sessionId: session ? session.sessionId : "", profileDir: session ? session.profileDir || "" : "",
             host: host || "", openCommand: session && session.openCommand ? session.openCommand : "",
             session: host && session ? session : null,
-            kind: kind, title: title, text: body.trim(),
+            kind: kind, title: title, text: escapeHtml(body.trim()),   // Plasma shows markup in the text
             iconName: Plasmoid.configuration.showPet && pose ? petsDir + "notify-" + pose + ".svg" : icon
         })
         if (!n)
@@ -889,8 +914,8 @@ PlasmoidItem {
     }
 
     function openFromNotification(n) {
-        if (n.kind === "digest" && !n.sessionId && !n.host)
-            root.expanded = true   // nothing waits for you: show what happened
+        if ((n.kind === "digest" || n.kind === "error") && !n.sessionId && !n.host)
+            root.expanded = true   // nothing waits for you, or what went wrong: show the popup
         else if (n.host && n.session)
             remoteShow(n.host, n.session)
         else if (n.host)
@@ -1162,9 +1187,72 @@ PlasmoidItem {
             if (host in remote)
                 next[host] = remote[host]
             else
-                Qt.callLater(pollHost, host)  // just picked: load it now
+                hostsToPoll[host] = true  // just picked: load it now
         }
+        for (const host in remote)
+            if (!(host in next))
+                forgetSource("ssh:" + host)  // shown again later, it starts afresh
         remote = next
+        Qt.callLater(pollNewHosts)
+    }
+
+    // Hosts just picked, polled at once (Qt.callLater runs a function once
+    // with its last arguments: all of them in one go)
+    property var hostsToPoll: ({})
+
+    function pollNewHosts() {
+        const hosts = Object.keys(hostsToPoll)
+        hostsToPoll = ({})
+        for (const host of hosts)
+            pollHost(host)
+    }
+
+    // What a source's chats were (and their notifications): gone with the source
+    function forgetSource(source) {
+        const prefix = source + "|"
+        for (const key in notifications)
+            if (key.startsWith(prefix))
+                closeNotification(key, notifications[key].kind)
+        for (const key in unseen)
+            if (key.startsWith(prefix))
+                forgetUnseen(key, "")
+        for (const key in lastWaitingAlert)
+            if (key.startsWith(prefix))
+                delete lastWaitingAlert[key]
+        const drop = map => { const out = Object.assign({}, map); delete out[source]; return out }
+        lastStates = drop(lastStates)
+        turnStarts = drop(turnStarts)
+        primedSources = drop(primedSources)
+    }
+
+    // A host's answer on this computer's clock: its times ("since", "last
+    // active", resets) are its own clock's, which may be off from ours
+    function toLocalClock(result, offset) {
+        if (Math.abs(offset) < 5000)
+            return result   // network delay, or close enough
+        const at = t => typeof t === "number" ? t + offset : t
+        const shift = (o, keys) => { if (o) for (const k of keys) o[k] = at(o[k]) }
+        result = JSON.parse(JSON.stringify(result))
+        result.generatedAt = at(result.generatedAt)
+        for (const g of result.groups || []) {
+            for (const s of g.sessions || []) {
+                shift(s, ["since", "startedAt"])
+                shift(s.peek, ["at"])
+                shift(s.stats, ["startedAt", "lastAt"])
+                for (const a of (s.agents && s.agents.tree) || [])
+                    shift(a, ["started", "updated"])
+            }
+            for (const c of (g.recent || []).concat(g.sharedHere || []))
+                shift(c, ["lastActive", "since"])
+            if (g.limits) {
+                shift(g.limits, ["updatedAt"])
+                for (const w of g.limits.windows || []) {
+                    shift(w, ["resetsAt"])
+                    shift(w.forecast, ["fullAt"])
+                }
+            }
+        }
+        return result
     }
 
     function pollHost(host) {
@@ -1192,7 +1280,7 @@ PlasmoidItem {
             return  // unticked while its check was running
         const answer = helperResult(data)
         if (answer.ok && answer.result) {
-            const result = answer.result
+            const result = toLocalClock(answer.result, Date.now() - (answer.result.generatedAt || Date.now()))
             trackTransitions("ssh:" + host, result.groups, result.generatedAt, host)
             celebrateResets("ssh:" + host, result.groups)
             setRemote(host, { loading: false, ok: true, error: "", result: result, updatedAt: Date.now() })
@@ -1232,7 +1320,7 @@ PlasmoidItem {
         hostsMenu.clearMenuItems()
         const items = [hostItem.createObject(hostsMenu, { section: true, text: i18n("Show Claude on SSH hosts") })]
         for (const h of sshHosts) {
-            const target = (h.user ? h.user + "@" : "") + (h.hostname || h.name) + (h.jump ? " via " + h.jump : "")
+            const target = (h.user ? h.user + "@" : "") + (h.hostname || h.name) + (h.jump ? " " + i18nc("ssh through a jump host", "via %1", h.jump) : "")
             items.push(hostItem.createObject(hostsMenu, {
                 text: target !== h.name ? h.name + "  (" + target + ")" : h.name,
                 icon: "network-server", checkable: true, checked: shownHosts.indexOf(h.name) >= 0, host: h.name
@@ -1264,6 +1352,9 @@ PlasmoidItem {
             disconnectSource(source)
             const result = root.helperResult(data)
             const what = root.remoteActionKinds[source] || ""
+            const host = root.remoteActionHosts[source]
+            delete root.remoteActionKinds[source]   // (each command is new: these would only grow)
+            delete root.remoteActionHosts[source]
             if (result.ok) {
                 root.actionError = ""
                 if (what === "open" || what === "run" || what === "continue")
@@ -1279,8 +1370,10 @@ PlasmoidItem {
                                  : result.message
                 actionErrorTimer.restart()
                 root.petEvent("oops", i18n("Hmm, that didn't work."), "")
+                if (!root.expanded)   // e.g. from a notification or the shortcut: say so
+                    root.notify("remote-error", null, "error", i18n("That didn't work on %1", host || i18n("the host")),
+                                root.actionError, "dialog-error")
             }
-            const host = root.remoteActionHosts[source]
             if (what !== "open" && what !== "run" && host)
                 root.pollHost(host)
         }
@@ -1443,6 +1536,7 @@ PlasmoidItem {
             disconnectSource(source)
             const result = root.helperResult(data)
             const kind = root.shareKinds[source] || ""
+            delete root.shareKinds[source]
             if (!result.ok) {
                 root.actionError = result.message
                 actionErrorTimer.restart()
@@ -1619,11 +1713,11 @@ PlasmoidItem {
         if (counts.waiting)
             parts.push(i18np("%1 needs input", "%1 need input", counts.waiting))
         if (counts.working)
-            parts.push(i18n("%1 working", counts.working))
+            parts.push(i18np("%1 working", "%1 working", counts.working))   // plural forms differ in other languages
         if (counts.idle)
-            parts.push(i18n("%1 idle", counts.idle))
+            parts.push(i18np("%1 idle", "%1 idle", counts.idle))
         if (counts.done)
-            parts.push(i18n("%1 done", counts.done))
+            parts.push(i18np("%1 done", "%1 done", counts.done))
         return parts.length ? parts.join(" · ") : i18n("No sessions running")
     }
 

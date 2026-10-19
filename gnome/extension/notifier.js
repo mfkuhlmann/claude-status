@@ -37,8 +37,9 @@ export class Notifier {
         if (old)
             this.close(n.key, old.kind);
         const source = this._getSource();
-        const poseFile = n.kind === 'done' && n.session && n.session.reason === 'failed' ? 'notify-sad.svg'
-            : {waiting: 'notify-oncall.svg', done: 'notify-trophy.svg', error: 'notify-error.svg'}[n.kind];
+        const kind = n.kind === 'digest' ? (n.waiting ? 'waiting' : 'done') : n.kind;
+        const poseFile = kind === 'done' && n.session && n.session.reason === 'failed' ? 'notify-sad.svg'
+            : {waiting: 'notify-oncall.svg', done: 'notify-trophy.svg', error: 'notify-error.svg'}[kind];
         const notification = new MessageTray.Notification({
             source,
             title: n.title,
@@ -67,6 +68,14 @@ export class Notifier {
             return;
         this._shown.delete(key);
         shown.notification.destroy();
+    }
+
+    // Every notification of a source you stopped showing (an unticked host)
+    closeSource(source) {
+        for (const [key, shown] of [...this._shown.entries()]) {
+            if (keyOfSource(key, source))
+                this.close(key, shown.kind);
+        }
     }
 
     // Sessions of this source that exited no longer need anything

@@ -34,6 +34,7 @@ ColumnLayout {
 
         Kirigami.Heading {
             id: heading
+            textFormat: Text.PlainText
             level: 4
             text: section.group.title
             elide: Text.ElideRight
@@ -50,6 +51,7 @@ ColumnLayout {
             onClicked: root.toggleNewChat(section.groupKey)
 
             PlasmaCore.ToolTipArea {
+                textFormat: Text.PlainText
                 anchors.fill: parent
                 mainText: i18n("New chat on %1", section.group.title)
                 subText: section.remoteHost
@@ -61,6 +63,7 @@ ColumnLayout {
             Layout.fillWidth: true
         }
         PlasmaComponents3.Label {
+            textFormat: Text.PlainText
             visible: section.multiProfile
             text: section.group.profiles.join(" + ")
             opacity: 0.6
@@ -96,6 +99,7 @@ ColumnLayout {
             spacing: 0
 
             PlasmaComponents3.Label {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 Layout.leftMargin: Kirigami.Units.smallSpacing
                 text: i18n("New chat on %1 in…", section.remoteHost
@@ -194,19 +198,24 @@ ColumnLayout {
         spacing: Kirigami.Units.smallSpacing / 2
 
         Repeater {
-            model: section.group.limits ? section.group.limits.windows : []
+            // a count, not the array: a new array every poll would make the
+            // bars anew (and close the forecast's tooltip under the mouse)
+            model: section.group.limits ? section.group.limits.windows.length : 0
             delegate: UsageBar {
-                required property var modelData
+                required property int index
+                readonly property var window: (section.group.limits ? section.group.limits.windows[index] : null)
+                                              || ({ label: "", pct: 0, forecast: null, resetsAt: 0 })
                 Layout.fillWidth: true
-                label: modelData.label
-                pct: modelData.pct
-                detail: root.resetText(modelData)
-                forecast: modelData.forecast || null
-                resetsAt: modelData.resetsAt || 0
+                label: window.label
+                pct: window.pct
+                detail: root.resetText(window)
+                forecast: window.forecast || null
+                resetsAt: window.resetsAt || 0
             }
         }
 
         PlasmaComponents3.Label {
+            textFormat: Text.PlainText
             Layout.fillWidth: true
             elide: Text.ElideRight
             opacity: 0.6
@@ -216,6 +225,7 @@ ColumnLayout {
                   : i18n("Plan usage as of %1 ago", root.duration(root.now - section.group.limits.updatedAt))
 
             PlasmaCore.ToolTipArea {
+                textFormat: Text.PlainText
                 anchors.fill: parent
                 active: !section.group.limits
                 mainText: i18n("No plan usage yet")
@@ -234,6 +244,7 @@ ColumnLayout {
 
         PlasmaComponents3.Label {
             id: tokenLabel
+            textFormat: Text.PlainText
             Layout.fillWidth: true
             elide: Text.ElideRight
             text: section.hasTokens
@@ -243,6 +254,7 @@ ColumnLayout {
                   : ""
 
             PlasmaCore.ToolTipArea {
+                textFormat: Text.PlainText
                 anchors.fill: parent
                 active: section.hasTokens
                 mainText: i18n("Tokens (this machine's transcripts only)")
@@ -307,6 +319,7 @@ ColumnLayout {
     }
 
     PlasmaComponents3.Label {
+        textFormat: Text.PlainText
         visible: section.group.sessions.length === 0
         Layout.fillWidth: true
         Layout.leftMargin: Kirigami.Units.smallSpacing
@@ -332,11 +345,13 @@ ColumnLayout {
             spacing: Kirigami.Units.smallSpacing
 
             PlasmaComponents3.Label {
+                textFormat: Text.PlainText
                 text: "⇄"
                 color: root.stateColor(sharedLine.chat.state)
             }
             PlasmaComponents3.Label {
                 id: sharedName
+                textFormat: Text.PlainText
                 text: sharedLine.chat.name
                 opacity: 0.8
                 font.underline: sharedMouse.containsMouse
@@ -344,6 +359,7 @@ ColumnLayout {
                 Layout.fillWidth: true
 
                 PlasmaCore.ToolTipArea {
+                    textFormat: Text.PlainText
                     width: sharedName.contentWidth
                     height: parent.height
                     mainText: sharedLine.chat.copy ? i18n("Shared chat, continued on %1 as a copy", sharedLine.chat.profile)
@@ -365,6 +381,7 @@ ColumnLayout {
                 }
             }
             PlasmaComponents3.Label {
+                textFormat: Text.PlainText
                 text: sharedLine.chat.copy
                       ? i18nc("shared chat continued in a copy: where, its state", "copy on %1 · %2", sharedLine.chat.profile, root.stateText(sharedLine.chat))
                       : i18nc("shared chat: where it is, its state", "on %1 · %2", sharedLine.chat.profile, root.stateText(sharedLine.chat))
@@ -387,6 +404,7 @@ ColumnLayout {
         onClicked: root.toggleRecent(section.groupKey, section.recentOpen)
 
         PlasmaCore.ToolTipArea {
+            textFormat: Text.PlainText
             anchors.fill: parent
             mainText: i18n("Recent chats")
             subText: i18n("This account's latest chats that aren't listed above. Click one to reopen it, in a terminal or in VS Code (the switch at the top of the list).")
@@ -444,6 +462,7 @@ ColumnLayout {
 
                 PlasmaComponents3.Label {
                     id: recentName
+                    textFormat: Text.PlainText
                     text: recentLine.chat.name
                     font.underline: recentMouse.containsMouse
                     opacity: recentLine.canOpen ? 1 : 0.6
@@ -451,6 +470,7 @@ ColumnLayout {
                     Layout.fillWidth: true
 
                     PlasmaCore.ToolTipArea {
+                        textFormat: Text.PlainText
                         width: recentName.contentWidth
                         height: parent.height
                         mainText: recentLine.chat.name
@@ -470,11 +490,13 @@ ColumnLayout {
                     }
                 }
                 PlasmaComponents3.Label {
+                    textFormat: Text.PlainText
                     visible: recentLine.chat.shared
                     text: "⇄"
                     opacity: 0.6
                 }
                 PlasmaComponents3.Label {
+                    textFormat: Text.PlainText
                     text: i18nc("recent chat: folder, how long ago", "%1 · %2 ago", recentLine.chat.cwdShort || "~",
                                 root.duration(root.now - recentLine.chat.lastActive))
                     opacity: 0.6
@@ -497,6 +519,7 @@ ColumnLayout {
                     }, recentLine.rowKey)
 
                     PlasmaCore.ToolTipArea {
+                        textFormat: Text.PlainText
                         anchors.fill: parent
                         mainText: i18n("Continue on another account")
                         subText: root.shareHint(section.remoteHost)

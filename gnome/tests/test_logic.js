@@ -85,12 +85,12 @@ test('first poll primes, later changes notify', () => {
     let out = t.track('', [group([session('a', 'working', {since: T})])], T + 1000, '', settings);
     eq(out.notify.length, 0, 'primed');
     out = t.track('', [group([session('a', 'waiting')])], T + 2000, '', settings);
-    eq(out.notify.map(n => [n.key, n.kind]), [['a', 'waiting']]);
+    eq(out.notify.map(n => [n.key, n.kind]), [['/a', 'waiting']]);
     eq(out.sound, 'waiting');
     eq(out.pets.map(p => p.kind), ['waiting']);
     // answered: the stale "needs input" goes; a long turn that ends notifies
     out = t.track('', [group([session('a', 'working')])], T + 3000, '', settings);
-    eq(out.close, [{key: 'a', kind: 'waiting'}]);
+    eq(out.close, [{key: '/a', kind: 'waiting'}]);
     out = t.track('', [group([session('a', 'idle', {since: T + 100000})])], T + 100000, '', settings);
     eq(out.notify.map(n => [n.kind, n.title]), [['done', 'chat a finished']]);
     eq(out.sound, 'done');
@@ -117,7 +117,7 @@ test('the most urgent sound wins, sources keep their own memory', () => {
     eq(out.sound, 'failed');
     const remote = t.track('ssh:lab', [group([session('a', 'waiting')])], T + 60000, 'lab', settings);
     eq(remote.notify.length, 0, 'a new source primes first');
-    eq([...remote.present], ['ssh:lab|a']);
+    eq([...remote.present], ['ssh:lab|/a']);
     eq([L.keyOfSource('ssh:lab|a', 'ssh:lab'), L.keyOfSource('a', ''), L.keyOfSource('ssh:lab|a', '')],
         [true, true, false]);
 });
@@ -187,8 +187,9 @@ test('stopping: background sessions, and chats with a process; interrupting in t
 
 test('pets: stage order and keys', () => {
     const g = group([session('a', 'done'), session('b', 'waiting'), session('c', 'working', {chatId: 'C'})]);
-    eq(L.stageChats(g, '').map(c => c.key), ['b', 'C', 'a']);
-    eq(L.petKeyOf(session('x', 'idle'), 'lab'), 'ssh:lab|x');
+    eq(L.stageChats(g, '').map(c => c.key), ['/b', '/C', '/a']);
+    eq(L.petKeyOf(session('x', 'idle'), 'lab'), 'ssh:lab|/x');
+    eq(L.petKeyOf(session('x', 'idle', {profileDir: '.claude-work'}), ''), '.claude-work/x');
 });
 
 test('raising: nearest ancestor, caption, prefer, require', () => {
@@ -254,14 +255,14 @@ test('hotkey: waiting longest first, then unseen finished turns, then the next',
     const groups = [group([session('a', 'waiting', {since: 300}), session('b', 'idle', {since: 500}),
         session('c', 'waiting', {since: 100}), session('d', 'done', {since: 900}), session('e', 'working')]),
     group([session('r', 'waiting', {since: 200})], {host: 'lab'})];
-    const unseen = {b: 'done', d: 'done', e: 'done'};
+    const unseen = {'/b': 'done', '/d': 'done', '/e': 'done'};
     const list = L.chatsNeedingYou(groups, unseen);
-    eq(list.map(c => c.key), ['c', 'ssh:lab|r', 'a', 'd', 'b'], 'working e is no longer unseen');
+    eq(list.map(c => c.key), ['/c', 'ssh:lab|/r', '/a', '/d', '/b'], 'working e is no longer unseen');
     eq(list[1].host, 'lab');
     eq(L.nextChatIndex(list, null, T), 0);
-    eq(L.nextChatIndex(list, {key: 'ssh:lab|r', at: T - 5000}, T), 2, 'pressed again: the next');
-    eq(L.nextChatIndex(list, {key: 'b', at: T - 5000}, T), 0, 'wraps around');
-    eq(L.nextChatIndex(list, {key: 'ssh:lab|r', at: T - 60000}, T), 0, 'later: from the top');
+    eq(L.nextChatIndex(list, {key: 'ssh:lab|/r', at: T - 5000}, T), 2, 'pressed again: the next');
+    eq(L.nextChatIndex(list, {key: '/b', at: T - 5000}, T), 0, 'wraps around');
+    eq(L.nextChatIndex(list, {key: 'ssh:lab|/r', at: T - 60000}, T), 0, 'later: from the top');
     eq(L.nextChatIndex(list, {key: 'gone', at: T}, T), 0);
     eq(L.nextChatIndex([], null, T), -1);
 });
@@ -270,8 +271,8 @@ test('hotkey: unseen finished turns come from the tracker', () => {
     const tracker = new L.Tracker();
     tracker.track('', [group([session('a', 'working', {since: T - 120000})])], T, '', settings);
     const out = tracker.track('', [group([session('a', 'idle', {since: T})])], T + 2000, '', settings);
-    eq(out.finished, [{key: 'a', took: 120000}]);
-    eq(out.states, {a: 'idle'});
+    eq(out.finished, [{key: '/a', took: 120000}]);
+    eq(out.states, {'/a': 'idle'});
 });
 
 test('while you were away', () => {
@@ -291,7 +292,7 @@ test('while you were away', () => {
     eq(d.title, 'While you were away (1h 12m)');
     eq(d.body.split('\n'), ['Needs you: chat b (waiting 22m)', 'Finished: chat a, chat n, chat r (lab)', 'Failed: chat f',
         '5h limit reset (work)']);
-    eq(d.first.key, 'b');
+    eq(d.first.key, '/b');
     eq(L.awayDigest(away, after, T + 4 * M, 5), null, 'not away long enough');
     eq(L.awayDigest(away, before, now, 5), null, 'nothing happened');
     const many = group(['w1', 'w2', 'w3', 'w4', 'w5'].map((k, i) => session(k, 'waiting', {since: now - (10 - i) * M})));
@@ -352,6 +353,59 @@ test('subagent details', () => {
     eq(L.agentRunCommand(s, a, 'lab'), {script: 'remote.py', args: ['--agent-run', 'lab', 'c1', 'a1', '.claude-work']});
     eq(L.agentRunCommand({sessionId: 's2', chatId: '', profileDir: ''}, a),
         {script: 'jump.py', args: ['--agent-run', 'a1', '--chat', 's2']}, 'no chat id: the session id');
+});
+
+
+test('one chat, one key: a row going from running to finished, a chat listed twice', () => {
+    const t = new L.Tracker();
+    const bg = (state, suffix, extra = {}) => session('j', state, {key: `.claude-work/j/${suffix}`, profileDir: '.claude-work', ...extra});
+    t.track('', [group([bg('working', 'live', {since: T - 120000})])], T, '', settings);
+    const out = t.track('', [group([bg('done', 'job', {since: T})])], T + 2000, '', settings);
+    eq(out.notify.map(n => n.kind), ['done'], 'its process ended as it finished: still a finished turn');
+    const twice = [group([bg('waiting', 'live'), bg('idle', 'job')])];
+    t.track('', twice, T + 4000, '', settings);
+    eq(t.track('', twice, T + 70000, '', settings).notify, [], 'no alert every minute');
+    eq(L.chatsNeedingYou(twice).length, 1);
+});
+
+test("a host that didn't answer this time doesn't count", () => {
+    const result = {groups: [group([session('a', 'waiting')])]};
+    eq(L.remoteGroups(['lab'], {lab: {result, error: ''}}).length, 1);
+    eq(L.remoteGroups(['lab'], {lab: {result, error: 'timed out'}}).length, 0);
+});
+
+test("unticked host: its memory goes", () => {
+    const t = new L.Tracker();
+    t.track('ssh:lab', [group([session('a', 'working')])], T, 'lab', settings);
+    t.forget('ssh:lab');
+    const out = t.track('ssh:lab', [group([session('a', 'idle')])], T + 1000, 'lab', settings);
+    eq(out.notify, [], 'shown again: it starts afresh (no "finished" from hours ago)');
+});
+
+test("a host's clock", () => {
+    const result = {generatedAt: 1000, groups: [group([session('a', 'working', {since: 500})], {
+        limits: {updatedAt: 900, windows: [{key: 'five_hour', resetsAt: 5000, forecast: {fullAt: 4000}}]}})]};
+    const local = L.toLocalClock(result, 60000);
+    eq([local.generatedAt, local.groups[0].sessions[0].since, local.groups[0].limits.windows[0].forecast.fullAt],
+        [61000, 60500, 64000]);
+    eq(result.groups[0].sessions[0].since, 500, 'the answer itself is left as it was');
+    eq(L.toLocalClock(result, 2000), result, 'a few seconds: just the network');
+});
+
+test('odd answers from the status script', () => {
+    eq(L.statusResult('null', '').error, 'Status script failed: no answer');
+    eq(L.statusResult('{"ok": true}', '').error, 'Status unavailable: an answer without accounts');
+    eq(L.statusResult('{"ok": true, "groups": []}', '').errorText, '');
+});
+
+test('raising: a window with no known process (pid 0) is never picked', () => {
+    eq(L.pickWindow([{pid: 0, title: 'x'}], {pids: [0]}), null);
+});
+
+test("no interrupt once a chat's turn is over", () => {
+    const s = session('a', 'working', {tmux: 't:@1.%1', reason: 'background shell'});
+    eq(L.canInterrupt(s), false);
+    eq(L.canInterrupt({...s, reason: ''}), true);
 });
 
 print(`${count - failures}/${count} passed`);

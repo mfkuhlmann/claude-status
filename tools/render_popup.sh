@@ -12,7 +12,7 @@
 #                    that calls root.petEvent("done", "…") to see a reaction)
 # Colors and fonts are your KDE theme's (QT_QPA_PLATFORMTHEME=kde).
 # QML warnings go to OUT.log. The widget runs under a test id with its own
-# config, data and state folders, so nothing of your desktop is touched.
+# config, data, state and cache folders, so nothing of your desktop is touched.
 set -euo pipefail
 umask 077  # the PNG and log show your real chats: keep them private
 out=$(realpath -m "$1"); secs=${2:-7}
@@ -57,14 +57,24 @@ grab = """
 s = s.replace("PlasmoidItem {\n    id: root\n", "PlasmoidItem {\n    id: root\n" + grab, 1)
 open(main, "w").write(s)
 PY
-mkdir -p "$work/data" "$work/config" "$work/state"
+mkdir -p "$work/data" "$work/config" "$work/state" "$work/cache/claude-widget"
 for f in kdeglobals plasmarc; do [ -f "$HOME/.config/$f" ] && cp "$HOME/.config/$f" "$work/config/"; done
+# A copy of the widget's cache (the status-line snapshots for plan usage, and
+# the token and transcript caches so the first check is quick), not the
+# cache itself: the render mustn't sign up as another copy of the widget
+# (instances.json) or hand its settings to the real ones (settings.json)
+real_cache="${XDG_CACHE_HOME:-$HOME/.cache}/claude-widget"
+if [ -d "$real_cache" ]; then
+  [ -d "$real_cache/statusline" ] && cp -a "$real_cache/statusline" "$work/cache/claude-widget/"
+  find "$real_cache" -maxdepth 1 -name '*.json' ! -name instances.json ! -name settings.json \
+    -exec cp -p {} "$work/cache/claude-widget/" \;
+fi
 {
   printf '[Applets][1]\nimmutability=1\nplugin=org.wzaielamri.claudestatus.rendertest\n\n'
   printf '[Applets][1][Configuration]\ngeometry=0,0,%s,%s\n' "${WIN_W:-520}" "${WIN_H:-560}"
   [ -n "${SSH_HOSTS:-}" ] && printf '\n[Applets][1][Configuration][General]\nsshHosts=%s\nremotePollSeconds=10\n' "$SSH_HOSTS"
 } > "$work/config/plasmawindowedrc"
-export XDG_CONFIG_HOME="$work/config" XDG_STATE_HOME="$work/state" XDG_DATA_HOME="$work/data"
+export XDG_CONFIG_HOME="$work/config" XDG_STATE_HOME="$work/state" XDG_DATA_HOME="$work/data" XDG_CACHE_HOME="$work/cache"
 kpackagetool6 -t Plasma/Applet -i "$work/pkg" >/dev/null
 QT_FORCE_STDERR_LOGGING=1 QT_QPA_PLATFORMTHEME=kde QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
   timeout $((secs + 20)) plasmawindowed org.wzaielamri.claudestatus.rendertest > "${out%.png}.log" 2>&1 || true

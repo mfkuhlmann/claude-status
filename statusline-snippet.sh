@@ -1,7 +1,8 @@
 # >>> claude-widget >>>
 # Snapshot for the Claude Status widget (plan limits + context window).
-# Needs $input to hold the status-line JSON; silent and atomic, so it can't
-# break the status line. Plain POSIX sh, so it works in sh (dash), bash and
+# Needs $input to hold the status-line JSON; silent and atomic, and it never
+# fails (not even under set -e), so it can't break the status line. Plain
+# POSIX sh, so it works in sh (dash), bash and
 # zsh scripts. The profile dir comes from the transcript path
 # (<cfg>/projects/<project>/<session>.jsonl), else CLAUDE_CONFIG_DIR, links resolved.
 # Runs in a subshell so the private umask and variables stay local.
@@ -21,5 +22,5 @@
       printf '%s' "$input" > "$cw_dir/.$cw_sid.tmp" &&
       mv -f "$cw_dir/.$cw_sid.tmp" "$cw_dir/$cw_sid.json"
   ;; esac
-) 2>/dev/null
+) 2>/dev/null || :
 # <<< claude-widget <<<

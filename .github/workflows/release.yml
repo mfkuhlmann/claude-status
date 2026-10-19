@@ -19,9 +19,12 @@ jobs:
       - name: The tag matches the versions
         run: |
           v="${GITHUB_REF_NAME#v}"
-          grep -q "\"Version\": \"$v\"" package/metadata.json || { echo "package/metadata.json isn't $v"; exit 1; }
-          grep -q "\"version-name\": \"$v\"" gnome/extension/metadata.json || { echo "gnome/extension/metadata.json isn't $v"; exit 1; }
-          grep -q "^## $v " CHANGELOG.md || { echo "CHANGELOG.md has no $v entry"; exit 1; }
+          [[ "$v" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || { echo "Not a version tag: $GITHUB_REF_NAME"; exit 1; }
+          # fixed strings: in a pattern, the dots of 1.10 would match any character
+          grep -qF "\"Version\": \"$v\"" package/metadata.json || { echo "package/metadata.json isn't $v"; exit 1; }
+          grep -qF "\"version-name\": \"$v\"" gnome/extension/metadata.json || { echo "gnome/extension/metadata.json isn't $v"; exit 1; }
+          awk -v head="## $v" '$0 == head || index($0, head " ") == 1 { found = 1 } END { exit !found }' CHANGELOG.md \
+            || { echo "CHANGELOG.md has no $v entry"; exit 1; }
       - name: Tests
         run: python3 -m unittest discover -s tests
       - name: Build
@@ -34,8 +37,9 @@ jobs:
       - name: Notes
         run: |
           v="${GITHUB_REF_NAME#v}"
-          awk -v head="## $v " 'index($0, head) == 1 { on = 1; next } /^## / && on { exit } on' CHANGELOG.md > notes.md
-          cat >> notes.md <<NOTES
+          awk -v head="## $v" '($0 == head || index($0, head " ") == 1) && !on { on = 1; next } /^## / && on { exit } on' CHANGELOG.md > notes.md
+          # (only this text is indented for the workflow file: the CHANGELOG's own indents stay)
+          sed 's/^          //' >> notes.md <<NOTES
 
           ## Install
 
@@ -47,8 +51,7 @@ jobs:
 
           This way plan usage stays empty until you add \`statusline-snippet.sh\` to your status line (see the README).
           NOTES
-          sed -i 's/^          //' notes.md
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --title "Claude Status ${GITHUB_REF_NAME#v}" --notes-file notes.md
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "Claude Status ${GITHUB_REF_NAME#v}" --notes-file notes.md --verify-tag

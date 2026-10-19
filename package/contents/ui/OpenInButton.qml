@@ -31,6 +31,7 @@ Item {
     }
 
     PlasmaCore.ToolTipArea {
+        textFormat: Text.PlainText
         anchors.fill: parent
         mainText: openInButton.tipTitle
         subText: openInButton.tip

@@ -19,20 +19,31 @@ import {Raiser} from './raiser.js';
 
 export default class ClaudeStatusExtension extends Extension {
     enable() {
-        this._raiser = new Raiser();
-        const away = this._lockedAt ? {lockedAt: this._lockedAt, snapshot: this._lockedSnapshot} : null;
-        this._lockedAt = null;
-        this._lockedSnapshot = null;
-        this._indicator = new Indicator(this, away);
-        Main.panel.addToStatusArea(this.uuid, this._indicator);
-        this._settings = this.getSettings();
-        Main.wm.addKeybinding('next-chat-shortcut', this._settings, Meta.KeyBindingFlags.NONE,
-            Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW | Shell.ActionMode.POPUP,
-            () => this._indicator?.goToNextChat());
+        try {
+            this._raiser = new Raiser();
+            const away = this._lockedAt ? {lockedAt: this._lockedAt, snapshot: this._lockedSnapshot} : null;
+            this._lockedAt = null;
+            this._lockedSnapshot = null;
+            this._indicator = new Indicator(this, away);
+            Main.panel.addToStatusArea(this.uuid, this._indicator);
+            this._settings = this.getSettings();
+            Main.wm.addKeybinding('next-chat-shortcut', this._settings, Meta.KeyBindingFlags.NONE,
+                Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW | Shell.ActionMode.POPUP,
+                () => this._indicator?.goToNextChat());
+            this._keybinding = true;
+        } catch (e) {
+            // GNOME doesn't call disable() after a failed enable(): undo what
+            // was set up (else the D-Bus object stays exported, and the next
+            // enable() fails at once)
+            this.disable();
+            throw e;
+        }
     }
 
     disable() {
-        Main.wm.removeKeybinding('next-chat-shortcut');
+        if (this._keybinding)
+            Main.wm.removeKeybinding('next-chat-shortcut');
+        this._keybinding = false;
         this._settings = null;
         if (Main.sessionMode.isLocked && this._indicator?._status) {
             try {

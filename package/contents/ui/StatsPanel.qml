@@ -48,6 +48,7 @@ ColumnLayout {
                     }
 
                     PlasmaCore.ToolTipArea {
+                        textFormat: Text.PlainText
                         anchors.fill: parent
                         mainText: root.dayName(dayColumn.day.day, true)
                         subText: i18n("%1 tokens (%2 out)", root.formatTokens(dayColumn.day.total), root.formatTokens(dayColumn.day.output))
@@ -56,6 +57,7 @@ ColumnLayout {
                     }
                 }
                 PlasmaComponents3.Label {
+                    textFormat: Text.PlainText
                     Layout.fillWidth: true
                     horizontalAlignment: Text.AlignHCenter
                     text: root.dayName(dayColumn.day.day, false)
@@ -68,6 +70,7 @@ ColumnLayout {
     }
 
     PlasmaComponents3.Label {
+        textFormat: Text.PlainText
         Layout.fillWidth: true
         visible: panel.stats !== null
         wrapMode: Text.Wrap
@@ -92,12 +95,14 @@ ColumnLayout {
             spacing: Kirigami.Units.smallSpacing
 
             PlasmaComponents3.Label {
+                textFormat: Text.PlainText
                 Layout.preferredWidth: Kirigami.Units.gridUnit * 7
                 text: projectRow.project.name
                 elide: Text.ElideMiddle
                 font: Kirigami.Theme.smallFont
 
                 PlasmaCore.ToolTipArea {
+                    textFormat: Text.PlainText
                     anchors.fill: parent
                     mainText: projectRow.project.path
                     subText: i18n("%1 tokens (%2 out) · %3", root.formatTokens(projectRow.project.total),
@@ -117,6 +122,7 @@ ColumnLayout {
                 }
             }
             PlasmaComponents3.Label {
+                textFormat: Text.PlainText
                 text: root.formatTokens(projectRow.project.total)
                       + (projectRow.project.prompts ? " · " + i18np("%1 prompt", "%1 prompts", projectRow.project.prompts) : "")
                 font: Kirigami.Theme.smallFont
@@ -126,6 +132,7 @@ ColumnLayout {
     }
 
     PlasmaComponents3.Label {
+        textFormat: Text.PlainText
         Layout.fillWidth: true
         visible: !!panel.stats && panel.stats.models.length > 0
         elide: Text.ElideRight

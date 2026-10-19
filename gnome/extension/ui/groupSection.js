@@ -271,7 +271,7 @@ function buildSharedLine(ctx, chat, remoteHost) {
 
 // A recent chat: click to reopen it where the switch above says
 function buildRecentLine(ctx, group, chat, remoteHost) {
-    const rowKey = (remoteHost ? `${remoteHost}|` : '') + chat.key;
+    const rowKey = (remoteHost ? `${remoteHost}|` : '') + (chat.key || chat.sessionId);
     const inVscode = ctx.openInVscode(group, remoteHost);
     const terminalHere = ctx.cliHere(remoteHost);
     const canOpen = inVscode || (terminalHere && (!remoteHost || !!chat.openCommand));

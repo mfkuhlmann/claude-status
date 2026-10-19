@@ -30,6 +30,7 @@ Rectangle {
     }
 
     PlasmaCore.ToolTipArea {
+        textFormat: Text.PlainText
         anchors.fill: parent
         active: tag.tooltip !== ""
         mainText: tag.tooltipTitle

@@ -28,6 +28,7 @@ ColumnLayout {
         spacing: Kirigami.Units.smallSpacing
 
         PlasmaComponents3.Label {
+            textFormat: Text.PlainText
             text: i18n("Open in:")
             opacity: 0.7
         }
@@ -58,6 +59,7 @@ ColumnLayout {
     }
 
     PlasmaComponents3.Label {
+        textFormat: Text.PlainText
         visible: !openIn.terminalHere && !openIn.vscodeHere
         Layout.fillWidth: true
         text: root.terminalHint(openIn.remoteHost, openIn.resuming) + " "

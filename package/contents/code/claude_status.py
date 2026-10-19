@@ -23,6 +23,7 @@ Data sources (per Claude config dir, e.g. ~/.claude, ~/.claude-work):
 import fcntl
 import hashlib
 import json
+import math
 import mmap
 import os
 import re
@@ -90,7 +91,7 @@ def read_text(path):
     try:
         with open(path, encoding="utf-8") as f:
             return f.read()
-    except OSError:
+    except (OSError, ValueError):  # ValueError: not UTF-8
         return None
 
 
@@ -119,7 +120,7 @@ def to_ms(value):
     if isinstance(value, bool) or value is None:
         return None
     if isinstance(value, (int, float)):
-        return int(value if value > 1e12 else value * 1000)
+        return int(value if value > 1e12 else value * 1000) if math.isfinite(value) else None
     if isinstance(value, str):
         try:
             return int(datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp() * 1000)
@@ -133,7 +134,10 @@ def local_day(timestamp):
     ms = to_ms(timestamp)
     if ms is None:
         return None
-    return datetime.fromtimestamp(ms / 1000).date().isoformat()
+    try:
+        return datetime.fromtimestamp(ms / 1000).date().isoformat()
+    except (OverflowError, OSError, ValueError):  # a date out of range
+        return None
 
 
 def short_path(path, home):
@@ -155,7 +159,7 @@ def strip_prefix(text, prefix):  # str.removeprefix needs Python 3.9; remote hos
 
 
 def number(value):
-    return value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+    return value if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) else None
 
 
 # ---------------------------------------------------------------- profiles
@@ -212,16 +216,24 @@ def discover_profiles(home, extra_dirs=()):
     candidates = [home / ".claude", *sorted(home.glob(".claude-*"))]
     found = []
     for d in candidates:
-        if d.is_dir() and ((d / "sessions").is_dir() or (d / "projects").is_dir()):
+        if is_dir(d) and (is_dir(d / "sessions") or is_dir(d / "projects")):
             found.append(d)
     for e in extra_dirs:
         d = Path(e).expanduser()
-        if d.is_dir():
+        if is_dir(d):
             found.append(d)
     by_real = {}
     for d in found:
         by_real.setdefault(d.resolve(), []).append(d)
-    profiles = [Profile(dirs[0], home, dirs[1:]) for real, dirs in by_real.items()]
+    # A folder found as itself and through a link (~/.claude) is named after
+    # itself: the link can be switched to another profile at any time
+    profiles = [Profile(dirs[0], home, dirs[1:])
+                for dirs in (sorted(ds, key=lambda d: d.is_symlink()) for ds in by_real.values())]
+    keys = set()
+    for p in profiles:  # two folders of the same name (e.g. --config-dir /data/.claude): told apart
+        if p.key in keys:
+            p.key = f"{p.key}-{short_id(str(p.real))[:6]}"
+        keys.add(p.key)
     # A lone ~/.claude isn't the "default" of anything: name it the way Claude
     # knows you (the account's display name), unless .profile-name says otherwise.
     if len(profiles) == 1 and profiles[0].is_default and not profiles[0].custom_name:
@@ -236,6 +248,15 @@ def matches_profile(profile, name):
     try:
         return Path(name).expanduser().resolve() == profile.real
     except (OSError, RuntimeError):
+        return False
+
+
+def is_dir(path):
+    """Path.is_dir, also on Python 3.7-3.11 (an SSH host's), where a folder
+    you may not read raises instead of saying no."""
+    try:
+        return path.is_dir()
+    except OSError:
         return False
 
 
@@ -375,12 +396,13 @@ def attach_snapshot(session, snapshot_root, profile, ids=None):
     for _, path in snapshot_paths(snapshot_root, profile, ids):
         snap = read_json(path)
         if isinstance(snap, dict):
-            ctx = snap.get("context_window") or {}
-            session["context"] = number(ctx.get("used_percentage"))
-            session["model"] = (snap.get("model") or {}).get("display_name")
-            effort = (snap.get("effort") or {}).get("level") if isinstance(snap.get("effort"), dict) else None
+            part = lambda key: snap.get(key) if isinstance(snap.get(key), dict) else {}
+            session["context"] = number(part("context_window").get("used_percentage"))
+            model = part("model").get("display_name")
+            session["model"] = model if isinstance(model, str) and model else None
+            effort = part("effort").get("level")
             session["effort"] = effort if isinstance(effort, str) and effort else None
-            session["costUsd"] = number((snap.get("cost") or {}).get("total_cost_usd"))
+            session["costUsd"] = number(part("cost").get("total_cost_usd"))
             return
 
 
@@ -530,37 +552,67 @@ def live_row(entry, profile, holder, home, ctx):
     return finish_row(row, job, job_id, profile, ctx, alive=True)
 
 
-def parked_rows(profile, home, live_jobs, ctx):
+def job_dirs(profile):
+    try:
+        return sorted(d for d in (profile.path / "jobs").iterdir() if d.is_dir())
+    except OSError:
+        return []
+
+
+def newest_job_records(profiles):
+    """{job id: real folder of the profile with the job's newest record}. A
+    job written through a switched link leaves a copy of its record in the
+    other profile; only the newest one counts, even when it's too old to be
+    listed (else the stale copy, e.g. still "blocked", would be)."""
+    newest = {}
+    for p in profiles:
+        for d in job_dirs(p):
+            job = read_json(d / "state.json")
+            if isinstance(job, dict):
+                t = to_ms(job.get("updatedAt")) or 0
+                if d.name not in newest or t > newest[d.name][0]:
+                    newest[d.name] = (t, p.real)
+    return {job_id: real for job_id, (_, real) in newest.items()}
+
+
+def parked_rows(profile, home, live_jobs, ctx, newest=None):
     """Background jobs with no session process: blocked on you, or recently finished."""
     status = read_json(profile.path / "daemon.status.json")
     roster = status.get("workers") if isinstance(status, dict) else None
     roster = roster if isinstance(roster, dict) else {}
-    try:
-        dirs = sorted(d for d in (profile.path / "jobs").iterdir() if d.is_dir())
-    except OSError:
-        return []
     rows = []
-    for d in dirs:
-        if d.name in live_jobs:
+    for d in job_dirs(profile):
+        if d.name in live_jobs or (newest is not None and newest.get(d.name, profile.real) != profile.real):
             continue
         job = read_json(d / "state.json")
         if not isinstance(job, dict):
             continue
-        worker = roster.get(d.name)
-        parked = parked_job_state(job, isinstance(worker, dict) and is_alive(worker), ctx.now_ms, ctx.keep_done_ms)
-        if parked is None:
+        try:
+            row = parked_row(profile, home, ctx, d, job, roster)
+        except Exception as exc:  # one odd record mustn't hide the others
+            getattr(ctx, "errors", []).append(f"{profile.label}: job {d.name}: {type(exc).__name__}: {exc}")
             continue
-        state, reason = parked
-        name = next((job[k] for k in ("name", "displayIntent", "intent")
-                     if isinstance(job.get(k), str) and job[k].strip()), "")
-        row = make_session(
-            profile, home, sid=job["sessionId"] if valid_id(job.get("sessionId")) else d.name,
-            pid=None, name=clean_text(name, 80), cwd=job.get("cwd") if isinstance(job.get("cwd"), str) else "",
-            kind="bg", entrypoint="", state=state, reason=reason, waiting_for="",
-            detail=clean_text(job.get("needs") if state == "waiting" else job.get("detail") if state == "done" else ""),
-            since=to_ms(job.get("updatedAt")), started_at=to_ms(job.get("createdAt")))
-        rows.append(finish_row(row, job, d.name, profile, ctx, alive=False))
+        if row is not None:
+            rows.append(row)
     return rows
+
+
+def parked_row(profile, home, ctx, d, job, roster):
+    """The row of one background job with no session process, or None."""
+    worker = roster.get(d.name)
+    parked = parked_job_state(job, isinstance(worker, dict) and is_alive(worker), ctx.now_ms, ctx.keep_done_ms)
+    if parked is None:
+        return None
+    state, reason = parked
+    name = next((job[k] for k in ("name", "displayIntent", "intent")
+                 if isinstance(job.get(k), str) and job[k].strip()), "")
+    row = make_session(
+        profile, home, sid=job["sessionId"] if valid_id(job.get("sessionId")) else d.name,
+        pid=None, name=clean_text(name, 80), cwd=job.get("cwd") if isinstance(job.get("cwd"), str) else "",
+        kind="bg", entrypoint="", state=state, reason=reason, waiting_for="",
+        detail=clean_text(job.get("needs") if state == "waiting" else job.get("detail") if state == "done" else ""),
+        since=to_ms(job.get("updatedAt")), started_at=to_ms(job.get("createdAt")))
+    return finish_row(row, job, d.name, profile, ctx, alive=False)
 
 
 def finish_row(row, job, job_id, profile, ctx, alive):
@@ -658,43 +710,69 @@ def transcript_model(entries):
     return None
 
 
-def agent_progress(path):
+def agent_progress(path, finished=False):
     """(status, activity, last timestamp ms, model, {"steps", "report"}) from
     the end of a subagent transcript.
 
     Done = it handed its report back (a SubagentHandback call) or its last entry
-    is a final answer (end_turn); otherwise it's still working: on a tool call
-    (shown) or thinking about tool results. Steps are its last tool calls
+    is a final answer (end_turn); failed = it ended on an API error (e.g. a
+    usage limit); stopped = interrupted. Otherwise it's still working: on a
+    tool call (shown) or thinking about tool results, unless Claude says it
+    finished (finished: its meta.json). Steps are its last tool calls
     ("Bash: npm test"), oldest first; the report is what it handed back, as
     plain text ("" until it's done).
     """
-    status, activity, ts, recent, report = agent_status(path)
+    status, activity, ts, recent, report = agent_status(path, finished)
     detail = {"steps": agent_steps(recent), "report": tidy_text(plain_text(report), AGENT_REPORT_CHARS)}
     return status, activity, ts, transcript_model(recent), detail
 
 
-def agent_status(path):
+def agent_status(path, finished=False):
     """agent_progress without the model and steps, plus the entries it
     looked at (newest first) and the report in full."""
+    status, activity, ts, recent, report = agent_end(path)
+    if status == "running" and finished:  # an end it doesn't know (e.g. out of output tokens)
+        return "done", report_line(report) if report else "finished", ts, recent, report
+    return status, activity, ts, recent, report
+
+
+def agent_end(path):
+    """agent_status, without what Claude says about it."""
     try:
         size = path.stat().st_size
     except OSError:
         return "running", "", None, [], ""
     nbytes = AGENT_TAIL_BYTES
     while True:  # more of it while big tool results fill the end
-        recent = [e for e in tail_entries(path, size, nbytes) if e["type"] != "last-prompt"][:AGENT_TAIL_ENTRIES]
+        entries = [e for e in tail_entries(path, size, nbytes) if e["type"] != "last-prompt"]
+        recent = entries[:AGENT_TAIL_ENTRIES]
         if len(recent) >= AGENT_TAIL_MIN or nbytes >= size or nbytes >= PEEK_TAIL_MAX:
             break
         nbytes *= 4
+    if nbytes >= size and len(entries) <= AGENT_TAIL_ENTRIES:
+        # the whole run: what came before its first user entry is a fork's
+        # copy of the call that started it, not something it did
+        users = [i for i, e in enumerate(recent) if e["type"] == "user"]
+        recent = recent[:users[-1] + 1] if users else []
     if not recent:
         return "running", "starting…", None, recent, ""
     ts = to_ms(recent[0].get("timestamp"))
+    newest = recent[0]
+    if newest["type"] == "user":
+        text = message_text(newest.get("message")).strip()
+        if text.startswith("[Request interrupted"):
+            return "stopped", "interrupted", ts, recent, ""
+        origin = newest.get("origin") if isinstance(newest.get("origin"), dict) else {}
+        if origin.get("kind") == "coordinator" and text:  # the main chat sent it more to do
+            return "running", "reading a message from its chat…", ts, recent, ""
     for e in recent:
         msg, content = blocks_of(e)
         if e["type"] == "user":
             if e is recent[0]:
                 continue  # tool results just came back; look at what it ran
             return "running", "thinking…", ts, recent, ""
+        if e.get("isApiErrorMessage") is True:
+            return "failed", short_text(message_text(msg) or "API error", 90), ts, recent, ""
         uses = [c for c in content if c.get("type") == "tool_use"]
         if uses and uses[-1].get("name") == "SubagentHandback":
             report = (uses[-1].get("input") or {}).get("message")
@@ -780,25 +858,33 @@ class AgentCache:
     """Remembers each subagent transcript's progress by (size, mtime) between polls,
     so only transcripts that changed are read again."""
 
+    PARENT_RETRY_S = 60  # how soon to look again for a nested agent's parent that wasn't found
+
     def __init__(self, path):
         self.path = path
         data = read_json(path)
         ok = isinstance(data, dict) and data.get("version") == AGENT_CACHE_VERSION
+        self.old = data if ok else {}
         self.old_files = data.get("files", {}) if ok else {}
         self.old_parents = data.get("parents", {}) if ok else {}
         self.files, self.parents, self.changed = {}, {}, not ok
+        # Parents looked for in vain (agent id: when), so their siblings'
+        # transcripts aren't all read again on every check
+        misses = data.get("misses") if ok else None
+        self.misses = {k: t for k, t in misses.items() if isinstance(t, (int, float))} if isinstance(misses, dict) else {}
         # What an unfolded agent shows (its task, last steps and report) is
         # kept in a file of its own: older copies of this script (a VS Code
         # extension not updated yet) rewrite agents.json without it.
         self.details_path = path.with_name("agent-details.json")
         details = read_json(self.details_path)
         ok = isinstance(details, dict) and details.get("version") == 1
+        self.old_details_data = details if ok else {}
         self.old_details = details.get("files", {}) if ok else {}
         self.details, self.details_changed = {}, not ok
 
-    def progress(self, transcript):
+    def progress(self, transcript, finished=False):
         """(status, activity, last ts, started ts, model, {"task", "steps",
-        "report"}) of a subagent transcript."""
+        "report"}) of a subagent transcript (finished: Claude says it is)."""
         try:
             st = transcript.stat()
         except OSError:
@@ -806,15 +892,20 @@ class AgentCache:
         key = str(transcript)
         old, old_detail = self.old_files.get(key), self.old_details.get(key)
         fresh = lambda rec, n: isinstance(rec, list) and len(rec) == n and rec[0] == st.st_size and rec[1] == st.st_mtime_ns
-        if fresh(old, 7) and fresh(old_detail, 3):
+        # "running" from before it finished (or from an older copy of this
+        # script, which took an agent that died on an API error for one at
+        # work) is read again once
+        if fresh(old, 7) and fresh(old_detail, 3) and not (finished and old[2] == "running"):
             self.files[key], self.details[key] = old, old_detail
             return (*old[2:], old_detail[2])
-        status, activity, ts, model, detail = agent_progress(transcript)
+        status, activity, ts, model, detail = agent_progress(transcript, finished)
         if model is None and old and len(old) == 7:
             model = old[6]  # its newest entries are tool results; the model came earlier
         started = old[5] if old and len(old) == 7 and old[5] is not None else agent_started(transcript)
         known = old_detail[2] if isinstance(old_detail, list) and len(old_detail) == 3 and isinstance(old_detail[2], dict) else {}
-        task = known["task"] if isinstance(known.get("task"), str) else tidy_text(plain_text(agent_task(transcript)), AGENT_TASK_CHARS)
+        # read again while empty: the first look may come before its first prompt is written
+        task = known["task"] if isinstance(known.get("task"), str) and known["task"] else \
+            tidy_text(plain_text(agent_task(transcript)), AGENT_TASK_CHARS)
         detail = {"task": task, **detail}
         entry = [st.st_size, st.st_mtime_ns, status, activity, ts, started, model]
         self.changed = self.changed or entry != old
@@ -827,6 +918,9 @@ class AgentCache:
         if agent_id in self.old_parents:
             self.parents[agent_id] = self.old_parents[agent_id]
             return self.parents[agent_id]
+        now = time.time()
+        if 0 <= now - self.misses.get(agent_id, 0) < self.PARENT_RETRY_S:
+            return None
         needle = f'"{tool_use_id}"'.encode()
         for other in agent_dir.glob("agent-*.jsonl"):
             other_id = other.name[len("agent-"):-len(".jsonl")]
@@ -835,10 +929,13 @@ class AgentCache:
             try:
                 if needle in other.read_bytes():
                     self.parents[agent_id] = other_id
+                    self.misses.pop(agent_id, None)
                     self.changed = True
                     return other_id
             except OSError:
                 continue
+        self.misses[agent_id] = int(now)
+        self.changed = True
         return None
 
     def session_agents(self, profile, session_id, alive):
@@ -852,7 +949,8 @@ class AgentCache:
                 if not isinstance(meta, dict):
                     continue
                 agent_id = meta_path.name[len("agent-"):-len(".meta.json")]
-                status, activity, ts, started, model, detail = self.progress(agent_dir / f"agent-{agent_id}.jsonl")
+                status, activity, ts, started, model, detail = self.progress(agent_dir / f"agent-{agent_id}.jsonl",
+                                                                              meta.get("finished") is True)
                 if status == "running" and not alive:
                     status = "stopped"  # its session ended before it finished
                 depth = meta.get("spawnDepth") if isinstance(meta.get("spawnDepth"), int) else 1
@@ -883,7 +981,7 @@ class AgentCache:
                 })
         if not agents:
             return None
-        counts = {k: sum(a["status"] == k for a in agents) for k in ("running", "done", "stopped")}
+        counts = {k: sum(a["status"] == k for a in agents) for k in ("running", "done", "stopped", "failed")}
         # Display order: depth-first from the session's own agents, oldest first.
         children = {}
         ids = {a["id"] for a in agents}
@@ -906,14 +1004,20 @@ class AgentCache:
         return {**counts, "total": len(agents), "tree": tree}
 
     def save(self):
-        if self.changed or set(self.files) != set(self.old_files):
+        now = time.time()
+        data = {"version": AGENT_CACHE_VERSION, "files": self.files, "parents": self.parents,
+                "misses": {k: t for k, t in self.misses.items() if 0 <= now - t < CACHE_KEEP_S}}
+        kept = keep_unused(self.old, data, ("files", "parents"), now)
+        if self.changed or kept or set(self.files) != set(self.old_files):
             try:
-                write_json_atomic(self.path, {"version": AGENT_CACHE_VERSION, "files": self.files, "parents": self.parents})
+                write_json_atomic(self.path, data)
             except OSError:
                 pass
-        if self.details_changed or set(self.details) != set(self.old_details):
+        details = {"version": 1, "files": self.details}
+        kept = keep_unused(self.old_details_data, details, ("files",), now)
+        if self.details_changed or kept or set(self.details) != set(self.old_details):
             try:
-                write_json_atomic(self.details_path, {"version": 1, "files": self.details})
+                write_json_atomic(self.details_path, details)
             except OSError:
                 pass
 
@@ -940,6 +1044,33 @@ def fenced(text, lang=""):
     longest = max([len(m) for m in re.findall(r"`{3,}", text)] + [2])
     mark = "`" * (longest + 1)
     return f"{mark}{lang}\n{text.rstrip()}\n{mark}"
+
+
+def code_span(text):
+    """text as inline code, with more backticks around it than in it."""
+    text = str(text)
+    ticks = "`" * (max([len(m) for m in re.findall(r"`+", text)] + [0]) + 1)
+    pad = " " if text.startswith("`") or text.endswith("`") else ""
+    return f"{ticks}{pad}{text}{pad}{ticks}"
+
+
+FENCE_LINE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+
+
+def closed_fences(markdown):
+    """Claude's Markdown with a code block it left open closed at its end (a
+    reply cut off mid-block), so the rest of the page stays Markdown."""
+    open_fence = None
+    for line in markdown.splitlines():
+        m = FENCE_LINE.match(line)
+        if not m:
+            continue
+        mark = m.group(1)
+        if open_fence is None:
+            open_fence = mark
+        elif mark[0] == open_fence[0] and len(mark) >= len(open_fence) and not line.strip()[len(mark):].strip():
+            open_fence = None
+    return markdown if open_fence is None else f"{markdown}\n{open_fence}"
 
 
 def clipped(text, lines, chars):
@@ -998,18 +1129,18 @@ def tool_call_md(block):
             "\n".join(["- " + l for l in str(e.get("old_string", "")).splitlines()]
                       + ["+ " + l for l in str(e.get("new_string", "")).splitlines()])
             for e in edits if isinstance(e, dict))
-        return f"{head} `{path}`\n\n" + clipped_block(diff, RUN_INPUT_LINES, RUN_INPUT_CHARS, "diff")
+        return f"{head} {code_span(path)}\n\n" + clipped_block(diff, RUN_INPUT_LINES, RUN_INPUT_CHARS, "diff")
     if name == "Write" and path:
-        return f"{head} `{path}`\n\n" + clipped_block(str(inp.get("content", "")), RUN_INPUT_LINES, RUN_INPUT_CHARS)
+        return f"{head} {code_span(path)}\n\n" + clipped_block(str(inp.get("content", "")), RUN_INPUT_LINES, RUN_INPUT_CHARS)
     if name == "Agent":
         what = " · ".join(str(inp[k]) for k in ("subagent_type", "description") if isinstance(inp.get(k), str))
         prompt = clipped(str(inp.get("prompt", "")), RUN_INPUT_LINES, RUN_INPUT_CHARS)
         return f"{head}{' · ' + what if what else ''}\n\n" + quoted(prompt[0] + (f"\n\n*{prompt[1]}*" if prompt[1] else ""))
     if path:
-        return f"{head} `{path}`"
+        return f"{head} {code_span(path)}"
     simple = {k: v for k, v in inp.items() if isinstance(v, (str, int, float, bool))}
     if len(simple) == len(inp) and len(inp) <= 3 and all(len(str(v)) <= 120 and "\n" not in str(v) for v in inp.values()):
-        return head + "".join(f" · {k}: `{v}`" for k, v in inp.items())
+        return head + "".join(f" · {k}: {code_span(v)}" for k, v in inp.items())
     return f"{head}\n\n" + clipped_block(json.dumps(inp, indent=2, ensure_ascii=False), RUN_INPUT_LINES, RUN_INPUT_CHARS, "json")
 
 
@@ -1033,7 +1164,7 @@ def tool_result_md(block):
 
 def agent_run_markdown(path, meta, parent_name="", cwd="", home=None):
     """(title, Markdown) of a subagent's whole run, from its transcript."""
-    status, activity, last_ts, recent, report = agent_status(path)
+    status, activity, last_ts, recent, report = agent_status(path, meta.get("finished") is True)
     title = short_text(meta.get("description") or meta.get("agentType") or "Subagent", 80)
     steps, task, tools, started, model = [], None, 0, None, transcript_model(recent)
     tokens = new_stats()
@@ -1074,7 +1205,7 @@ def agent_run_markdown(path, meta, parent_name="", cwd="", home=None):
             for c in blocks:
                 kind = c.get("type")
                 if kind == "text" and isinstance(c.get("text"), str) and c["text"].strip():
-                    steps.append(f"**{clock(ts)} · Claude**\n\n{c['text'].strip()}")
+                    steps.append(f"**{clock(ts)} · Claude**\n\n{closed_fences(c['text'].strip())}")
                 elif kind == "thinking" and isinstance(c.get("thinking"), str) and c["thinking"].strip():
                     thought, note = clipped(c["thinking"], 10 ** 6, RUN_THINKING_CHARS)
                     steps.append(quoted(f"*Thinking:* {thought}" + (f" *{note}*" if note else "")))
@@ -1089,6 +1220,10 @@ def agent_run_markdown(path, meta, parent_name="", cwd="", home=None):
         facts.append("in the background")
     if status == "done":
         facts.append(f"done after {spoken_duration((last_ts or 0) - (started or 0))}" if started and last_ts else "done")
+    elif status == "failed":
+        facts.append(f"failed: {activity}")
+    elif status == "stopped":
+        facts.append("stopped")
     else:
         facts.append(f"not finished · last step: {activity}" if activity else "not finished")
     facts.append(f"{tools} tool call{'s' if tools != 1 else ''}")
@@ -1104,11 +1239,13 @@ def agent_run_markdown(path, meta, parent_name="", cwd="", home=None):
     out += steps or ["*None yet.*"]
     out.append("## Report")
     if status == "done":
-        out.append(report.strip() or "*It finished without a report.*")
+        out.append(closed_fences(report.strip()) or "*It finished without a report.*")
+    elif status in ("failed", "stopped"):
+        out.append("*None: it " + ("ended on an error" if status == "failed" else "was interrupted") + " before it had one.*")
     else:
         out.append(f"*None yet: it hadn't finished at {clock(int(time.time() * 1000))} (or its chat stopped it). "
                    "Open it again for what it has done since.*")
-    out.append(f"---\n*Transcript: `{path}`*")
+    out.append(f"---\n*Transcript: {code_span(path)}*")
     return title, "\n\n".join(part for part in out if part) + "\n"
 
 
@@ -1338,11 +1475,17 @@ def new_stats():
     worked: each turn from your prompt to its last step (busyMs, plus the turn
     open now: turnStart … turnLast)."""
     return {"prompts": 0, "tools": {}, "tokens": [0, 0, 0, 0], "cur": None, "first": None, "last": None,
-            "busyMs": 0, "turnStart": None, "turnLast": None}
+            "busyMs": 0, "turnStart": None, "turnLast": None, "started": False}
 
 
 def fold_stats(st, e):
-    """Fold one transcript entry into a chat's numbers (new_stats)."""
+    """Fold one transcript entry into a chat's numbers (new_stats). What
+    comes before its first user entry isn't its own: a fork starts with a
+    copy of the call that started it (the parent's reply, usage and all)."""
+    if not st.get("started", True):  # (numbers kept from before this rule: started)
+        if e.get("type") != "user":
+            return
+        st["started"] = True
     ts = to_ms(e.get("timestamp"))
     if ts is not None:
         st["first"] = ts if st["first"] is None else min(st["first"], ts)
@@ -1477,6 +1620,8 @@ def scan_edits(path, rec, start=0, sessions=None):
                         sessions.add(m.group(1).decode())
                 edits = b'"file-history-' in line or EDIT_LINE.search(line)
                 talk = ASSISTANT_LINE.search(line) or (USER_LINE.search(line) and b'"tool_result"' not in line)
+                if not talk and not rec["stats"].get("started", True) and USER_LINE.search(line):
+                    rec["stats"]["started"] = True  # a fork's first entry: tool results, then its directive
                 if edits or talk:
                     try:
                         e = json.loads(line)
@@ -1590,6 +1735,46 @@ def own_folders(profiles):
     return sorted(skip)
 
 
+CACHE_KEEP_S = 2 * 86400  # a cache entry no copy of this script used for this long is dropped
+SEEN_EVERY_S = 3600  # how often an entry's last use is written down
+
+
+def keep_unused(old, new, sections, now):
+    """Put the entries of the cache old that this copy didn't use into new.
+
+    Other copies of this script share the cache file but may list other
+    chats (a widget with other settings, the VS Code extension, a poll from
+    another computer): when each saved only the entries it used, they kept
+    reading each other's transcripts from the start. new["seen"] notes when
+    each entry was last used (in whole hours or so); one that no copy used
+    for CACHE_KEEP_S is dropped. Whether that changed anything to save."""
+    seen_old = old.get("seen") if isinstance(old.get("seen"), dict) else {}
+    seen, changed = {}, False
+    for section in sections:
+        old_entries = old.get(section) if isinstance(old.get(section), dict) else {}
+        was = seen_old.get(section) if isinstance(seen_old.get(section), dict) else {}
+        noted = seen[section] = {}
+        for key in new[section]:
+            t = was.get(key)
+            if isinstance(t, (int, float)) and 0 <= now - t < SEEN_EVERY_S:
+                noted[key] = t
+            else:
+                noted[key] = int(now)
+                changed = True
+        for key, value in old_entries.items():
+            if key in new[section]:
+                continue
+            t = was.get(key)
+            t = t if isinstance(t, (int, float)) else now  # from a copy that doesn't note it
+            if now - t < CACHE_KEEP_S:
+                new[section][key] = value
+                noted[key] = int(t)
+            else:
+                changed = True
+    new["seen"] = seen
+    return changed
+
+
 class ChatCache:
     """What the widget read from the listed chats' transcripts, kept between
     polls in chats.json: each one's peek (read again when the file changed)
@@ -1632,11 +1817,18 @@ class ChatCache:
         if isinstance(old, dict) and isinstance(old.get("size"), int) and old["size"] <= st.st_size \
                 and isinstance(old.get("rec"), dict) and isinstance(old["rec"].get("stats"), dict):
             size, rec = old["size"], old["rec"]
+            # An older copy of this script (1.8 and before) reads on without
+            # counting what "stats" counts, but keeps the key: count from
+            # where it was counted last (reading the edits again is harmless)
+            counted = rec.get("statsAt")
+            if isinstance(counted, int) and 0 <= counted < size:
+                size = counted
         else:
             size, rec = 0, new_edits()
         if size < st.st_size:
             rec = json.loads(json.dumps(rec))  # a copy: the old one may be kept as is
             size = scan_edits(path, rec, size)
+            rec["statsAt"] = size
             self.changed = True
         self.data["edits"][key] = {"size": size, "rec": rec}
         return rec
@@ -1663,7 +1855,9 @@ class ChatCache:
         return {"count": len(paths), "files": labels[:CHANGES_LISTED]}
 
     def save(self):
-        if self.changed or any(set(self.data[s]) != set(self.old.get(s, {})) for s in ("peeks", "edits")):
+        sections = ("peeks", "edits")
+        kept = keep_unused(self.old, self.data, sections, time.time())
+        if self.changed or kept or any(set(self.data[s]) != set(self.old.get(s, {})) for s in sections):
             try:
                 write_json_atomic(self.path, self.data)
             except OSError:
@@ -1690,24 +1884,32 @@ def transcript_path(profile, session_id):
 
 
 def chat_folder(path):
-    """The folder a chat last ran in (the last "cwd" in its transcript)."""
+    """The folder a chat last ran in (the last "cwd" in its transcript),
+    read from the end (further back while the last lines are huge ones)."""
     try:
         size = path.stat().st_size
-        with open(path, "rb") as f:
-            f.seek(max(0, size - 262144))
-            lines = f.read().splitlines()
     except OSError:
         return None
-    for line in reversed(lines):
-        if b'"cwd"' not in line:
-            continue
+    nbytes = PEEK_TAIL_BYTES
+    while True:
         try:
-            cwd = json.loads(line).get("cwd")
-        except (ValueError, AttributeError):
-            continue
-        if isinstance(cwd, str) and cwd.startswith("/"):
-            return cwd
-    return None
+            with open(path, "rb") as f:
+                f.seek(max(0, size - nbytes))
+                lines = f.read(min(size, nbytes)).splitlines()
+        except OSError:
+            return None
+        for line in reversed(lines[1:] if size > nbytes else lines):  # the first may be cut
+            if b'"cwd"' not in line:
+                continue
+            try:
+                cwd = json.loads(line).get("cwd")
+            except (ValueError, AttributeError):
+                continue
+            if isinstance(cwd, str) and cwd.startswith("/"):
+                return cwd
+        if nbytes >= size or nbytes >= PEEK_TAIL_MAX:
+            return None
+        nbytes *= 4
 
 
 def shared_info(session_id, profile, all_profiles):
@@ -1883,7 +2085,9 @@ class LinkCache:
         return name, cwd, messages
 
     def save(self):
-        if self.changed or any(set(self.data[s]) != set(self.old.get(s, {})) for s in ("transcripts", "firstUuid", "holds", "chats")):
+        sections = ("transcripts", "firstUuid", "holds", "chats")
+        kept = keep_unused(self.old, self.data, sections, time.time())
+        if self.changed or kept or any(set(self.data[s]) != set(self.old.get(s, {})) for s in sections):
             try:
                 write_json_atomic(self.path, self.data)
             except OSError:
@@ -2082,6 +2286,8 @@ def place_chats(groups, ctx):
         if not any(s["shared"] and not s["shared"].get("forkOf") for _, s in entries) or chat not in forks:
             continue
         target = moved_to(chat, ctx)
+        if target is None:  # it didn't move on (a fork's jobSessionId is often None too)
+            continue
         copy = next((f for f in forks[chat] if target in (f["sessionId"], f.get("jobSessionId"))), None)
         if copy is None:
             continue
@@ -2143,6 +2349,7 @@ def place_chats(groups, ctx):
             "state": "done", "reason": "", "waitingFor": "", "detail": "", "since": seen[home],
             "startedAt": None, "jobId": None, "jobSessionId": None,
             "context": None, "model": None, "costUsd": None,
+            "formerIds": [i for _, s in entries for i in (s["sessionId"], s.get("jobSessionId")) if i],
         })
         attach_snapshot(moved, ctx.snapshot_root, home, [chat, *(i for _, s in entries for i in (s["sessionId"], s.get("jobSessionId")))])
         drop(entries)
@@ -2285,7 +2492,7 @@ def read_chat_info(path, size):
             if isinstance(e.get("cwd"), str) and e["cwd"].startswith("/"):
                 cwd = e["cwd"]
             if kind == "user" and not first_prompt and not e.get("isMeta"):
-                content = (e.get("message") or {}).get("content")
+                content = e["message"].get("content") if isinstance(e.get("message"), dict) else None
                 if isinstance(content, list):
                     content = next((c.get("text") for c in content if isinstance(c, dict) and c.get("type") == "text"), "")
                 if isinstance(content, str) and content.strip() and not content.lstrip().startswith("<"):
@@ -2326,6 +2533,15 @@ def recent_chats(groups, ctx, limit=RECENT_CHATS):
     if limit <= 0:
         return
     seen, firsts = set(), set()
+    # A listed chat's older copies (they start with the same entry) are that
+    # chat, e.g. one that moved on to a background session listed now
+    for g in groups:
+        for s in g["sessions"]:
+            p = by_key.get(s.get("profileDir"))
+            path = transcript_path(p, chat_id(s)) if p is not None else None
+            first = ctx.links.first_uuid(path) if path is not None else ""
+            if first:
+                firsts.add(first)
     for t, p, f, st in candidates:
         if all(len(g["recent"]) >= limit for g in groups):
             break
@@ -2408,7 +2624,15 @@ def job_config_dir(profile, job):
         return None
 
 
-def config_dir_value(profile, home=None, job=None):
+def names_profile(value, profile):
+    """Does the config dir name value lead to this profile's folder now?"""
+    try:
+        return Path(value).expanduser().resolve() == profile.path.resolve()
+    except (OSError, RuntimeError):
+        return False
+
+
+def config_dir_value(profile, home=None, job=None, for_job=False):
     """CLAUDE_CONFIG_DIR to run claude with for this profile, or None to unset it.
 
     Always named explicitly (a terminal's shell may export another one): the
@@ -2419,11 +2643,20 @@ def config_dir_value(profile, home=None, job=None):
     profile's folder. Only a plain (unlinked) ~/.claude runs without the
     variable: its account file is ~/.claude.json, which Claude reads only
     when CLAUDE_CONFIG_DIR is unset.
+
+    A service started as ~/.claude keeps that name after you switch the link
+    to another profile. Attaching to or stopping one of its jobs (for_job)
+    still goes through it; a new or resumed chat is this profile's, so it
+    gets a name that still leads here (else it would open on the account the
+    link points to now).
     """
     default = (home or Path.home()) / ".claude"
     if profile.is_default and not profile.path.is_symlink():
         return None
-    path = service_config_dir(profile) or job_config_dir(profile, job)
+    service = service_config_dir(profile)
+    if service is not None and not for_job and not names_profile(service, profile):
+        service = None
+    path = service or job_config_dir(profile, job)
     if path is None:
         linked_here = default.is_symlink() and default.resolve() == profile.path.resolve()
         path = str(default if linked_here else profile.path.resolve())
@@ -2443,9 +2676,9 @@ def folder_trusted(profile, folder, home=None):
     return isinstance(entry, dict) and entry.get("hasTrustDialogAccepted") is True
 
 
-def config_env(profile, home=None, job=None):
+def config_env(profile, home=None, job=None, for_job=False):
     """Shell words that set (or unset) CLAUDE_CONFIG_DIR for this profile."""
-    value = config_dir_value(profile, home, job)
+    value = config_dir_value(profile, home, job, for_job)
     return "env -u CLAUDE_CONFIG_DIR" if value is None else f"CLAUDE_CONFIG_DIR={shlex.quote(value)}"
 
 
@@ -2459,9 +2692,10 @@ def claude_words(claude):
     return shlex.quote(claude)
 
 
-def claude_command(profile, args, home=None, job=None, folder=None, claude="claude"):
+def claude_command(profile, args, home=None, job=None, folder=None, claude="claude", for_job=False):
     """Shell command running claude with args on this profile, in folder."""
-    command = f"{config_env(profile, home, job)} {claude_words(claude)} {' '.join(shlex.quote(a) for a in args)}"
+    command = (f"{config_env(profile, home, job, for_job)} {claude_words(claude)} "
+               f"{' '.join(shlex.quote(a) for a in args)}")
     if isinstance(folder, str) and folder and not folder_trusted(profile, folder, home):
         # The question that comes up has "No, exit" preselected: say what it is
         note = (f"Claude will ask whether you trust {short_folder(folder, home)} before it reopens this session. "
@@ -2472,7 +2706,7 @@ def claude_command(profile, args, home=None, job=None, folder=None, claude="clau
 
 def attach_command(profile, job_id, home=None, job=None, claude="claude"):
     """Shell command that attaches to a background job of this profile."""
-    return claude_command(profile, ["attach", job_id], home, job, (job or {}).get("cwd"), claude)
+    return claude_command(profile, ["attach", job_id], home, job, (job or {}).get("cwd"), claude, for_job=True)
 
 
 def resume_command(profile, session_id, home=None, folder=None, claude="claude"):
@@ -2489,7 +2723,7 @@ def new_chat_command(profile, home=None, claude="claude"):
 
 def stop_command(profile, job_id, home=None, job=None, claude="claude"):
     """Shell command stopping a background job (its conversation is kept)."""
-    return f"{config_env(profile, home, job)} {claude_words(claude)} stop {shlex.quote(job_id)}"
+    return f"{config_env(profile, home, job, for_job=True)} {claude_words(claude)} stop {shlex.quote(job_id)}"
 
 
 def short_folder(folder, home=None):
@@ -2643,6 +2877,8 @@ def interrupt_chat(entry):
     state = session_state(entry)
     if state not in ("working", "waiting"):
         return False, "It isn't working any more, so there's nothing to interrupt"
+    if entry.get("status") == "shell":  # its turn is over: Claude is at its prompt
+        return False, "Its turn is over (only a background command still runs), so a Ctrl+C would land at its prompt"
     tmux = shutil.which("tmux", path=os.pathsep.join([os.environ.get("PATH", ""), "/usr/bin", "/usr/local/bin", "/bin"]))
     if tmux is None:
         return False, "tmux isn't installed here"
@@ -2940,6 +3176,8 @@ class UsageHistory:
                     or not isinstance(rec.get("points"), list):
                 rec = {"resetsAt": w["resetsAt"], "points": []}
             points = rec["points"]
+            if points and t < points[-1][0] - 60_000:  # the clock was set back: those points are "from the future"
+                points[:] = [p for p in points if p[0] <= t]
             last = points[-1] if points else None
             if last is None or (t > last[0] and (w["pct"] != last[1] or t - last[0] >= USAGE_POINT_EVERY_MS)):
                 points.append([t, w["pct"]])
@@ -2979,8 +3217,8 @@ def usage_forecast(window, points, now_ms):
     look = PACE_LOOKBACK_MS.get(window["key"])
     if look and now_ms - look > start:
         before = [p for p in points if p[0] <= now_ms - look]
-        if before:
-            rate, basis = max(0.0, (pct - before[-1][1]) / (look / 3600_000)), "hour"
+        if before and now_ms > before[-1][0]:  # its pace since then (the point may be older than an hour)
+            rate, basis = max(0.0, (pct - before[-1][1]) / ((now_ms - before[-1][0]) / 3600_000)), "hour"
     full_at = None
     if pct >= 100:
         at_reset = pct
@@ -3033,15 +3271,24 @@ def token_cache_path(cache_root, profile):
     return cache_root / f"tokens-{profile.key}-{short_id(str(profile.real))[:8]}.json"
 
 
-def prune_token_caches(cache_root, profiles):
-    """Delete token caches of profiles that are gone (or of an older format)."""
+TOKEN_CACHE_KEEP_S = 7 * 86400  # another profile's token cache, not updated for this long, goes
+TOKEN_CACHE_NAME = re.compile(r"^tokens-.+-[0-9a-f]{8}\.json$")  # token_cache_path's names
+
+
+def prune_token_caches(cache_root, profiles, now=None):
+    """Delete token caches of profiles that are gone (or of an older format).
+    Another copy of this script may watch other profiles (its own extra
+    config dirs), so a cache this copy doesn't know is only deleted once no
+    copy has updated it for a while."""
     keep = {token_cache_path(cache_root, p).name for p in profiles}
+    now = time.time() if now is None else now
     try:
         files = list(cache_root.glob("tokens-*.json"))
     except OSError:
         return
     for f in files:
-        if f.name not in keep:
+        older_format = not TOKEN_CACHE_NAME.match(f.name)
+        if f.name not in keep and (older_format or now - (mtime(f) or now) > TOKEN_CACHE_KEEP_S):
             try:
                 f.unlink()
             except OSError:
@@ -3078,9 +3325,9 @@ def scan_transcripts(profile, cache, now):
             e = json.loads(line)
         except ValueError:
             return
-        m = e.get("message") if isinstance(e, dict) else None
-        if e.get("type") != "assistant" or not isinstance(m, dict):
+        if not isinstance(e, dict) or e.get("type") != "assistant" or not isinstance(e.get("message"), dict):
             return
+        m = e["message"]
         u = m.get("usage")
         if not isinstance(u, dict):
             return
@@ -3092,7 +3339,7 @@ def scan_transcripts(profile, cache, now):
         if not any(vals):
             return
         key = m.get("id") or e.get("requestId") or e.get("uuid")
-        if not key:
+        if not isinstance(key, str) or not key:
             return
         prev = messages.get(key)
         cwd = e.get("cwd") if isinstance(e.get("cwd"), str) else ""
@@ -3103,7 +3350,8 @@ def scan_transcripts(profile, cache, now):
             day = prev[0]
             shared = shared or bool(prev[6])
             cwd = cwd or (prev[7] if len(prev) > 7 else "")
-        messages[key] = [day, m.get("model") or "unknown", *vals, int(shared), cwd, chat]
+        model = m.get("model") if isinstance(m.get("model"), str) and m.get("model") else "unknown"
+        messages[key] = [day, model, *vals, int(shared), cwd, chat]
 
     for path, linked in transcript_files(profile):
         try:
@@ -3117,18 +3365,17 @@ def scan_transcripts(profile, cache, now):
         if offset == 0 and st.st_mtime < cutoff_mtime:
             offset = st.st_size  # untouched for longer than we keep data
         elif offset < st.st_size:
+            chat = path.stem if path.parent.name != "subagents" else path.parent.parent.name
             try:
-                with open(path, "rb") as f:
+                with open(path, "rb") as f:  # line by line: a first scan can be 50 MB
                     f.seek(offset)
-                    chunk = f.read()
+                    for line in f:
+                        if not line.endswith(b"\n"):
+                            break  # never consume a half-written last line
+                        add(line, st.st_nlink > 1 or linked, chat)
+                        offset += len(line)
             except OSError:
-                chunk = b""
-            end = chunk.rfind(b"\n")  # never consume a half-written last line
-            if end >= 0:
-                chat = path.stem if path.parent.name != "subagents" else path.parent.parent.name
-                for line in chunk[:end].splitlines():
-                    add(line, st.st_nlink > 1 or linked, chat)
-                offset += end + 1
+                pass
         files[str(path)] = {"offset": offset, "ino": st.st_ino}
 
     stats_from = (date.fromtimestamp(now) - timedelta(days=STATS_DAYS - 1)).isoformat()
@@ -3215,8 +3462,12 @@ def token_stats(caches, now, home, shown=STATS_SHOWN_DAYS):
     first = names[0]
     days = {d: {"day": d, "total": 0, "output": 0, "messages": 0, "chats": set(), "prompts": 0} for d in names}
     projects, models = {}, {}
-    for cache in caches:
-        for day, h in (cache.get("history") or {}).items():
+    histories = [cache.get("history") or {} for cache in caches]
+    if len(caches) > 1:  # the days the caches still have messages of: each message once
+        recent = day_history(merged_messages(caches))
+        histories = [{d: h for d, h in history.items() if d not in recent} for history in histories] + [recent]
+    for history in histories:
+        for day, h in history.items():
             if day < first or day not in days or not isinstance(h, dict):
                 continue
             d = days[day]
@@ -3232,6 +3483,7 @@ def token_stats(caches, now, home, shown=STATS_SHOWN_DAYS):
                     p["total"] += sums[0]
                     p["output"] += sums[1]
             d["chats"].update(h.get("chats") or [])
+    for cache in caches:  # each profile's own prompts (its history.jsonl)
         for day, by_folder in ((cache.get("prompts") or {}).get("days") or {}).items():
             if day in days and isinstance(by_folder, dict):
                 for folder, n in by_folder.items():
@@ -3277,13 +3529,26 @@ def load_token_cache(cache_root, profile, now, lock_held):
     cache = read_json(path)
     if not isinstance(cache, dict) or cache.get("version") != CACHE_VERSION:
         cache = empty_token_cache()
-    if lock_held and now - cache.get("scannedAt", 0) >= TOKEN_SCAN_INTERVAL:
+    since = now - (number(cache.get("scannedAt")) or 0)
+    # a scan "from the future" (the clock was set back since) is due too
+    if lock_held and (since >= TOKEN_SCAN_INTERVAL or since < -TOKEN_SCAN_INTERVAL):
         cache = scan_transcripts(profile, cache, now)
         try:
             write_json_atomic(path, cache)
         except OSError:
             pass
     return cache
+
+
+def merged_messages(caches):
+    """The messages of several profiles' caches, each once: profiles logged
+    into one account can hold the same message (a chat shared between them,
+    or a copy of one)."""
+    merged = {}
+    for cache in caches:
+        for key, value in (cache.get("messages") or {}).items():
+            merged.setdefault(key, value)
+    return merged
 
 
 def token_totals(caches, now):
@@ -3296,11 +3561,17 @@ def token_totals(caches, now):
 
     totals = {"today": zero(), "week": zero()}
     models = {}
-    for cache in caches:
-        days = cache.get("days")
-        if not isinstance(days, dict) or cache.get("daysAt") != cache.get("scannedAt"):
-            # saved before the sums were kept, or rescanned by an older version
-            days = day_totals(cache["messages"])
+    if len(caches) > 1:
+        sums = [day_totals(merged_messages(caches))]
+    else:
+        sums = []
+        for cache in caches:
+            days = cache.get("days")
+            if not isinstance(days, dict) or cache.get("daysAt") != cache.get("scannedAt"):
+                # saved before the sums were kept, or rescanned by an older version
+                days = day_totals(cache["messages"])
+            sums.append(days)
+    for days in sums:
         for day, by_model in days.items():
             if day < week_start or not isinstance(by_model, dict):
                 continue
@@ -3359,6 +3630,29 @@ def save_dismissed(cache_root, sessions):
     write_json_atomic(cache_root / "dismissed.json", {"sessions": sessions})
 
 
+DISMISSED_KEEP_MS = 30 * 86400_000  # a removed session not seen again for this long is forgotten
+
+
+def change_dismissed(cache_root, add=None, forget=(), clear=False, now_ms=None):
+    """Change dismissed.json (add a session id, forget some, or clear it)
+    under a lock: every copy of this script and jump.py write it. The
+    sessions removed now."""
+    private_dir(cache_root)
+    with open(cache_root / "dismissed.lock", "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        sessions = load_dismissed(cache_root)
+        before = dict(sessions)
+        if clear:
+            sessions = {}
+        for i in forget:
+            sessions.pop(i, None)
+        if add is not None:
+            sessions[add] = int(time.time() * 1000) if now_ms is None else now_ms
+        if sessions != before or not (cache_root / "dismissed.json").exists():
+            save_dismissed(cache_root, sessions)
+        return sessions
+
+
 # ---------------------------------------------------------------- main
 
 
@@ -3389,12 +3683,15 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
         agents=AgentCache(cache_root / "agents.json"), links=LinkCache(cache_root / "links.json"),
         chats=ChatCache(cache_root / "chats.json"), own_folders=own_folders(profiles),
         prompts={real: last_prompts(entries) for real, entries in histories.items()},
+        errors=errors,
     )
-    usage = UsageHistory(cache_root / "usage.json")
     with ScanLock(cache_root / "tokens.lock") as lock:
-        if lock.held and with_tokens:
+        # read with the lock: the check holding it is the one that writes it
+        usage = UsageHistory(cache_root / "usage.json")
+        if lock.held:
             prune_snapshots(snapshot_root, now)
-            prune_token_caches(cache_root, profiles)
+            if with_tokens:
+                prune_token_caches(cache_root, profiles, now)
 
         # Every live session process, under the profile it runs on now
         rows = {p.real: [] for p in profiles}
@@ -3417,9 +3714,10 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
         # Background jobs with no process; a job held by two profiles (written
         # through a switched link) is listed once, from its newest record
         newest_job = {}
+        newest = newest_job_records(profiles)
         for p in profiles:
             try:
-                for row in parked_rows(p, home, live_jobs, ctx):
+                for row in parked_rows(p, home, live_jobs, ctx, newest):
                     prev = newest_job.get(row["jobId"])
                     if prev is None or (row["since"] or 0) > (prev[1]["since"] or 0):
                         newest_job[row["jobId"]] = (p, row)
@@ -3474,18 +3772,23 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
     # Removed from the list by the user: hidden while finished; one that runs
     # again comes back (and is forgotten).
     dismissed = load_dismissed(cache_root)
-    still_dismissed, hidden = {}, 0
+    forget, hidden = set(), 0
     for g in groups:
         shown = []
         for s in g["sessions"]:
-            ids = [i for i in (s["sessionId"], s.get("chatId")) if i in dismissed]
+            # a record moved to the account the chat was used on last keeps
+            # the ids it had where it was removed
+            former = s.pop("formerIds", None) or []
+            ids = [i for i in (s["sessionId"], s.get("chatId"), *former) if i in dismissed]
             if ids and s["state"] == "done":
-                for i in ids:
-                    still_dismissed[i] = dismissed[i]
                 hidden += 1
             else:
+                forget.update(ids)  # it runs again: it comes back (and is forgotten)
                 shown.append(s)
         g["sessions"] = sorted(shown, key=lambda s: (STATE_ORDER[s["state"]], -(s["since"] or 0)))
+    # Only another copy of this script (with other settings) may list a
+    # removed session now: forget it only after a long while
+    forget.update(i for i, t in dismissed.items() if not isinstance(t, (int, float)) or now_ms - t > DISMISSED_KEEP_MS)
     link_shared_elsewhere(groups)
     try:
         # a finished session you removed from the list is still one of your
@@ -3501,9 +3804,9 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
     ctx.agents.save()
     ctx.links.save()
     ctx.chats.save()
-    if still_dismissed != dismissed:
+    if forget:
         try:
-            save_dismissed(cache_root, still_dismissed)  # drop sessions that are gone or active again
+            change_dismissed(cache_root, forget=forget)
         except OSError:
             pass
     if counts["waiting"]:
@@ -3901,11 +4204,7 @@ def main(argv=None):
         result = {"ok": ok, "message": message}
     elif dismiss is not None or undismiss:
         try:
-            private_dir(cache_root)
-            sessions = {} if undismiss else load_dismissed(cache_root)
-            if dismiss is not None:
-                sessions[dismiss] = int(time.time() * 1000)
-            save_dismissed(cache_root, sessions)
+            change_dismissed(cache_root, add=dismiss, clear=undismiss)
             result = {"ok": True, "message": "Removed from the list" if dismiss is not None else "Shown again"}
         except OSError as exc:
             result = {"ok": False, "message": str(exc)}
@@ -3936,11 +4235,16 @@ def main(argv=None):
                 add_remote_commands(result, home, config_dirs, claude)
         except Exception as exc:  # the widget must always get parseable output
             result = {"ok": False, "error": f"{type(exc).__name__}: {exc}", "generatedAt": int(time.time() * 1000)}
+    # ASCII only: a lone surrogate (half an emoji cut off in a title) can't be
+    # written as UTF-8, and a host's locale may not be UTF-8 at all
+    try:
+        text = json.dumps(result, indent=2 if pretty and not remote else None)
+    except (TypeError, ValueError) as exc:
+        text = json.dumps({"ok": False, "error": f"{type(exc).__name__}: {exc}", "generatedAt": int(time.time() * 1000)})
     if remote:
         # Login scripts on the host may print things first: the JSON follows a marker
         sys.stdout.write("\n" + REMOTE_MARK + " ")
-    json.dump(result, sys.stdout, indent=2 if pretty and not remote else None, ensure_ascii=False)
-    sys.stdout.write("\n")
+    sys.stdout.write(text + "\n")
 
 
 if __name__ == "__main__":

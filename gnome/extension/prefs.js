@@ -102,8 +102,9 @@ export default class ClaudeStatusPreferences extends ExtensionPreferences {
         const row = new Adw.EntryRow({title, show_apply_button: true, text: settings.get_strv(key)[0] || ''});
         row.connect('apply', () => {
             const text = row.text.trim();
-            const [ok, keyval] = text ? Gtk.accelerator_parse(text) : [true, 0];
-            if (text && (!ok || !keyval)) {
+            const [ok, keyval, mods] = text ? Gtk.accelerator_parse(text) : [true, 0, 0];
+            // a key with no modifier (plain "c") would take that key from every app
+            if (text && (!ok || !keyval || !mods)) {
                 row.add_css_class('error');
                 return;
             }
@@ -124,7 +125,7 @@ export default class ClaudeStatusPreferences extends ExtensionPreferences {
             const value = settings.get_string(key);
             const preset = SOUNDS.findIndex(([, v]) => v === value);
             row.selected = preset >= 0 ? preset : SOUNDS.length;
-            row.subtitle = preset >= 0 ? '' : GLib.path_get_basename(value);
+            row.subtitle = preset >= 0 ? '' : GLib.markup_escape_text(GLib.path_get_basename(value), -1);   // shown as markup
             syncing = false;
         };
         row.connect('notify::selected', () => {

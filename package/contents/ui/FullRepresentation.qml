@@ -30,11 +30,13 @@ PlasmaExtras.Representation {
                 spinning: root.overall === "working" && root.expanded
             }
             Kirigami.Heading {
+                textFormat: Text.PlainText
                 visible: !root.inTray
                 level: 3
                 text: i18n("Claude Code")
             }
             PlasmaComponents3.Label {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 horizontalAlignment: Text.AlignRight
                 text: hero.visible ? "" : root.summaryText()   // the big Clawd's headline says it
@@ -50,6 +52,7 @@ PlasmaExtras.Representation {
                 onClicked: root.openHostsMenu(hostsButton)
 
                 PlasmaCore.ToolTipArea {
+                    textFormat: Text.PlainText
                     anchors.fill: parent
                     mainText: i18n("SSH hosts")
                     subText: root.shownHosts.length > 0
@@ -66,6 +69,7 @@ PlasmaExtras.Representation {
                 }
 
                 PlasmaCore.ToolTipArea {
+                    textFormat: Text.PlainText
                     anchors.fill: parent
                     mainText: i18n("Refresh")
                 }
@@ -106,6 +110,7 @@ PlasmaExtras.Representation {
                 spacing: Kirigami.Units.largeSpacing
 
                 PlasmaComponents3.Label {
+                    textFormat: Text.PlainText
                     Layout.fillWidth: true
                     Layout.margins: Kirigami.Units.smallSpacing
                     visible: root.actionError !== ""
@@ -115,6 +120,7 @@ PlasmaExtras.Representation {
                 }
 
                 PlasmaComponents3.Label {
+                    textFormat: Text.PlainText
                     Layout.fillWidth: true
                     Layout.margins: Kirigami.Units.smallSpacing
                     visible: root.actionInfo !== ""
@@ -142,6 +148,7 @@ PlasmaExtras.Representation {
                 }
 
                 PlasmaComponents3.Label {
+                    textFormat: Text.PlainText
                     Layout.fillWidth: true
                     Layout.margins: Kirigami.Units.smallSpacing
                     visible: root.errorText !== ""

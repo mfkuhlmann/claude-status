@@ -14,13 +14,13 @@ import {box, column, dot, iconButton, label, link, meter, paragraph, tag, textBu
 export function buildSessionRow(ctx, session, {showProfile = false, remoteHost = ''} = {}) {
     const s = session;
     const tips = ctx.tips;
-    const rowKey = (remoteHost ? `${remoteHost}|` : '') + s.key;
+    const rowKey = (remoteHost ? `${remoteHost}|` : '') + (s.key || s.sessionId);
     // A background session (claude stop), or a chat with a process of its own
     // (its claude quits; one in tmux can be interrupted instead: logic.js canEnd)
     const canEnd = L.canEnd(s);
     const canInterrupt = L.canInterrupt(s);
     const canStop = canEnd || (s.kind === 'bg' && s.pid !== null && (!remoteHost || !!s.stopCommand));
-    const confirmingStop = s.key !== '' && ctx.ui.stopConfirm === rowKey;
+    const confirmingStop = !!(s.key || s.sessionId) && ctx.ui.stopConfirm === rowKey;
     const canShare = ctx.canShareChats && !remoteHost && s.pid === null && s.state === 'done' &&
         !!s.chatId && ctx.shareAccounts.length >= 2;
     const petColor = ctx.petColors[L.petKeyOf(s, remoteHost)] || '';
@@ -70,7 +70,7 @@ export function buildSessionRow(ctx, session, {showProfile = false, remoteHost =
             return Clutter.EVENT_STOP;
         });
         line1.add_child(tips.add(t, () => ['Subagents', L.fmt('%1 done, %2 running, %3 stopped. Click to %4 what each one is doing.',
-            agents.done, agents.running, agents.stopped, showAgents ? 'hide' : 'show')]));
+            agents.done, agents.running, agents.stopped + (agents.failed || 0), showAgents ? 'hide' : 'show')]));
     }
     if (tasks) {
         // its task list (TaskCreate), done/total; outlined while it's on one
@@ -288,7 +288,8 @@ function buildAgentsTree(ctx, s, agents, rowKey, remoteHost) {
         const indent = Math.round(a.depth * 14);
         const line = box('claude-agent', {x_expand: true});
         line.add_child(label('└', 'claude-dim'));
-        const d = dot(a.status === 'running' ? 'working' : a.status === 'done' ? 'ok' : 'none', 'claude-dot claude-dot-small');
+        const d = dot(a.status === 'running' ? 'working' : a.status === 'done' ? 'ok' : a.status === 'failed' ? 'bad' : 'none',
+            'claude-dot claude-dot-small');
         d.y_align = Clutter.ActorAlign.START;
         line.add_child(d);
         const col = column('', {x_expand: true});
@@ -297,7 +298,8 @@ function buildAgentsTree(ctx, s, agents, rowKey, remoteHost) {
         top.add_child(label(a.model ? `${a.type} · ${a.model}` : a.type, 'claude-small claude-dim'));
         top.add_child(label(a.status === 'running'
             ? L.fmt('running · %1', L.duration(ctx.now - (a.started || ctx.now)))
-            : a.status === 'done' ? 'done' : 'stopped', 'claude-small claude-dim'));
+            : a.status === 'done' ? 'done' : a.status === 'failed' ? 'failed' : 'stopped',
+            a.status === 'failed' ? 'claude-small claude-fg-bad' : 'claude-small claude-dim'));
         top.add_child(new St.Icon({icon_name: open ? 'pan-down-symbolic' : 'pan-end-symbolic',
             style_class: 'claude-agent-chevron', y_align: Clutter.ActorAlign.CENTER}));
         col.add_child(top);

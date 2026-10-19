@@ -34,12 +34,14 @@ ColumnLayout {
             Layout.preferredHeight: Kirigami.Units.iconSizes.small
         }
         Kirigami.Heading {
+            textFormat: Text.PlainText
             level: 3
             text: hostSection.host
             elide: Text.ElideRight
             Layout.maximumWidth: hostSection.width / 2
         }
         PlasmaComponents3.Label {
+            textFormat: Text.PlainText
             // the machine's own name, when the ssh alias differs
             visible: text !== ""
             text: hostSection.info.result && hostSection.info.result.host
@@ -59,6 +61,7 @@ ColumnLayout {
             Layout.preferredHeight: Kirigami.Units.iconSizes.small
         }
         PlasmaComponents3.Label {
+            textFormat: Text.PlainText
             text: hostSection.info.loading && !hostSection.info.result ? i18n("connecting…")
                   : !hostSection.info.updatedAt ? ""
                   : root.now - hostSection.info.updatedAt < 60000 ? i18n("updated just now")
@@ -73,6 +76,7 @@ ColumnLayout {
             text: i18n("Show removed sessions again")
             onClicked: root.remoteUndismissAll(hostSection.host)
             PlasmaCore.ToolTipArea {
+                textFormat: Text.PlainText
                 anchors.fill: parent
                 mainText: i18n("Show removed sessions again (%1)", hostSection.info.result ? hostSection.info.result.dismissed : 0)
             }
@@ -83,6 +87,7 @@ ColumnLayout {
             text: i18n("Refresh %1", hostSection.host)
             onClicked: root.pollHost(hostSection.host)
             PlasmaCore.ToolTipArea {
+                textFormat: Text.PlainText
                 anchors.fill: parent
                 mainText: i18n("Refresh %1", hostSection.host)
                 subText: i18n("Checked every %1 seconds while it's shown.", Math.max(10, Plasmoid.configuration.remotePollSeconds))
@@ -94,6 +99,7 @@ ColumnLayout {
             text: i18n("Hide %1", hostSection.host)
             onClicked: root.toggleHost(hostSection.host)
             PlasmaCore.ToolTipArea {
+                textFormat: Text.PlainText
                 anchors.fill: parent
                 mainText: i18n("Stop showing %1", hostSection.host)
                 subText: i18n("Pick it again from the hosts menu at the top.")
@@ -102,6 +108,7 @@ ColumnLayout {
     }
 
     PlasmaComponents3.Label {
+        textFormat: Text.PlainText
         visible: !!hostSection.info.error
         Layout.fillWidth: true
         Layout.leftMargin: Kirigami.Units.smallSpacing
@@ -126,6 +133,7 @@ ColumnLayout {
     }
 
     PlasmaComponents3.Label {
+        textFormat: Text.PlainText
         visible: hostSection.info.ok && hostSection.hostGroups.length === 0
         Layout.fillWidth: true
         Layout.leftMargin: Kirigami.Units.smallSpacing
