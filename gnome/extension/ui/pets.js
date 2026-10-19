@@ -265,10 +265,12 @@ class Pet {
             if (!this.offstage)
                 this.stopMoving();
             this.action = '';
-            if (this.lastMood === 'sleeping' && mood !== 'sleeping' && mood !== 'waving')
-                this.doAction('yawning', 1800);   // woken up by work
+            const woken = this.lastMood === 'sleeping' && mood !== 'sleeping' && mood !== 'waving';
+            // noted before doAction(), whose sync() would otherwise see the same change again
             this.lastMood = mood;
             this._breathe();
+            if (woken)
+                this.doAction('yawning', 1800);   // woken up by work
         }
     }
 
@@ -907,7 +909,7 @@ class Stage {
     // Places what isn't animated: the floor, stars, headline, standing pets
     layout() {
         const w = this.width, h = this.actor.height, s = this.size;
-        if (w <= 0 || this.gone)
+        if (w <= 0 || this.gone || !this.actor.get_stage())   // detached while the list is rebuilt
             return;
         const ground = this.hero ? h - s.gu * 0.55 : h - s.tag - 4;
         const tagWidth = Math.max(s.gu * 3.5, this.spacing - 8);
