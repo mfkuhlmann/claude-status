@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.10.0
 
 - **Open a subagent:** click a subagent in a chat's agent tree to unfold it:
   the task it was given, its tool calls and tokens so far, its last steps
