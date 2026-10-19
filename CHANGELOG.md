@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.10.1 (2026-10-19)
 
 - **Share chats on SSH hosts:** a host with two or more Claude accounts gets the share button too, on its finished and recent chats: **Continue on work** shares the chat with that account there and reopens it in a terminal over ssh, **Share with all accounts** and **Keep only on …** work as they do here, between the host's own accounts. Nothing is installed on the host: the sharing script goes over the ssh connection like the status script, and the shared chats' folders are in the host's `~/.local/share/claude-status`.
 - The GNOME extension has no share button, and the VS Code extension gets the same.
