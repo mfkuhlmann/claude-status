@@ -1,10 +1,10 @@
 # Changelog
 
-## Unreleased
+## 1.10.0 (2026-10-19)
 
 - **What each subagent did:** click an agent in a chat's agent tree for its task, its tool calls and tokens so far, its last steps and, once it's done, the report it handed back. **Open the whole run** shows everything it did as a Markdown file in your app for those: each step with its tool calls and the start of their results, messages the chat sent it, and its report (fetched over ssh for an SSH host). Claude Code can't open a subagent itself, so this is read-only.
 - An agent whose transcript ends with a very big tool result no longer shows as *starting…*: the widget reads further back until it knows what the agent did.
-- The GNOME extension has it too.
+- The GNOME extension has it too, and the VS Code extension is 1.10.0 with the same.
 
 ## 1.9.1 (2026-10-18)
 
