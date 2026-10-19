@@ -44,11 +44,11 @@ fi
 
 if [ "$target" = plasma ] && ! command -v kpackagetool6 >/dev/null; then
   echo "kpackagetool6 not found: Claude Status needs KDE Plasma 6 (Plasma 5 isn't supported)," >&2
-  echo "or GNOME Shell 49 or newer (./install.sh --gnome)." >&2
+  echo "or GNOME Shell 43/44 or 49 or newer (./install.sh --gnome)." >&2
   exit 1
 fi
 if [ "$target" = gnome ] && ! command -v gnome-extensions >/dev/null; then
-  echo "gnome-extensions not found: the GNOME version needs GNOME Shell 49 or newer." >&2
+  echo "gnome-extensions not found: the GNOME version needs GNOME Shell 43/44 or 49 or newer." >&2
   exit 1
 fi
 command -v python3 >/dev/null || echo "warning: python3 not found; the widget needs it to read Claude's files" >&2
@@ -139,8 +139,18 @@ apply_statusline() {
 # and turned on. A running GNOME Shell only loads new extension code at the
 # next login.
 install_gnome() {
-  local zip="$here/gnome/build/$uuid.shell-extension.zip"
-  "$here/gnome/build.sh" >/dev/null
+  local zip="$here/gnome/build/$uuid.shell-extension.zip" major
+  # GNOME Shell 43/44 load extensions the older way: build a converted copy
+  major="$(gnome-shell --version 2>/dev/null | sed -nE 's/^GNOME Shell ([0-9]+).*/\1/p')"
+  if [ -n "$major" ] && [ "$major" -lt 45 ]; then
+    if [ "$major" -lt 43 ]; then
+      echo "GNOME Shell $major is too old: Claude Status needs GNOME Shell 43 or newer." >&2
+      exit 1
+    fi
+    "$here/gnome/build.sh" --gnome43 >/dev/null
+  else
+    "$here/gnome/build.sh" >/dev/null
+  fi
   if [ -d "$HOME/.local/share/gnome-shell/extensions/$uuid" ]; then upgraded=1; else upgraded=0; fi
   gnome-extensions install --force "$zip"
   if gnome-extensions enable "$uuid" 2>/dev/null; then
