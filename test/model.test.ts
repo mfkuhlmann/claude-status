@@ -11,10 +11,12 @@ import {
   formatTokens,
   headlineText,
   heroMood,
+  machineStatus,
   overallState,
   panelWindow,
   petKeyOf,
   resetText,
+  shareAccounts,
   shellQuote,
   stateText,
   summaryText,
@@ -42,6 +44,24 @@ test("counts, overall state, headline and mood follow the most urgent chat", () 
   assert.equal(summaryText(counts), "1 needs input · 2 working · 1 done");
   assert.equal(heroMood({ status: null, errorText: "" }, "none", []), "loading");
   assert.equal(heroMood({ status: null, errorText: "broken" }, "none", []), "error");
+});
+
+test("a chat moves between the accounts of its own machine: this computer's or its SSH host's", () => {
+  const s = demoState(NOW);
+  const host = s.hosts[0];
+  assert.equal(machineStatus(s), s.status);
+  assert.equal(machineStatus(s, host.name), host.result);
+  assert.equal(machineStatus(s, "nowhere"), undefined);
+  const two = (status: typeof s.status) => ({
+    ...status!,
+    canShare: true,
+    groups: [{ ...status!.groups[0], shareProfile: ".claude" }, { ...status!.groups[0], id: "w", shareProfile: ".claude-work" }],
+  });
+  const shared = { ...s, hosts: [{ ...host, result: two(host.result) }] };
+  assert.deepEqual(shareAccounts(machineStatus(shared, host.name)).map((g) => g.shareProfile), [".claude", ".claude-work"]);
+  assert.deepEqual(shareAccounts(machineStatus(shared)), []); // the demo's own computer can't share
+  assert.deepEqual(shareAccounts({ ...two(host.result), canShare: false }), []);
+  assert.deepEqual(shareAccounts(null), []);
 });
 
 test("finished jobs without a process don't count as running", () => {

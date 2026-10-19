@@ -229,6 +229,16 @@ def discover_profiles(home, extra_dirs=()):
     return profiles
 
 
+def matches_profile(profile, name):
+    """Is name (a folder name like .claude-work, or a path) this profile?"""
+    if name in (profile.dirname, profile.key, *profile.snapshot_dirs):
+        return True
+    try:
+        return Path(name).expanduser().resolve() == profile.real
+    except (OSError, RuntimeError):
+        return False
+
+
 def group_profiles(profiles):
     """Profiles logged into the same account share plan limits -> one group."""
     groups = {}
@@ -1677,6 +1687,27 @@ def transcript_path(profile, session_id):
     if not valid_id(session_id):
         return None
     return next(iter(profile.path.glob(f"projects/*/{session_id}.jsonl")), None)
+
+
+def chat_folder(path):
+    """The folder a chat last ran in (the last "cwd" in its transcript)."""
+    try:
+        size = path.stat().st_size
+        with open(path, "rb") as f:
+            f.seek(max(0, size - 262144))
+            lines = f.read().splitlines()
+    except OSError:
+        return None
+    for line in reversed(lines):
+        if b'"cwd"' not in line:
+            continue
+        try:
+            cwd = json.loads(line).get("cwd")
+        except (ValueError, AttributeError):
+            continue
+        if isinstance(cwd, str) and cwd.startswith("/"):
+            return cwd
+    return None
 
 
 def shared_info(session_id, profile, all_profiles):

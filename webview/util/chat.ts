@@ -2,7 +2,7 @@
 // extension does the work (open, stop, share, menus); the webview only says
 // which chat, as a ChatRef.
 
-import { canEndChat, petKeyOf } from "../../src/shared/model";
+import { canEndChat, petKeyOf, shareAccounts } from "../../src/shared/model";
 import type { ChatRef, Group, RecentChat, Session, SharedPointer, Status } from "../../src/shared/types";
 import type { StageChat } from "../pets/api";
 
@@ -97,21 +97,19 @@ export function contextFullText(groups: Group[], petColor: (key: string) => stri
   return "";
 }
 
-// A finished chat on this computer can be shared, continued on another
-// account or kept on one; not while a session has it open.
-export function canShare(s: Session, host: string | undefined, status: Status | null): boolean {
-  return (
-    !!status?.canShare &&
-    !host &&
-    s.pid === null &&
-    s.state === "done" &&
-    !!s.chatId &&
-    status.groups.filter((g) => !!g.shareProfile).length >= 2
-  );
+// A finished chat can be shared, continued on another account or kept on
+// one, between the accounts of its own machine (this computer, or its SSH
+// host: status is that machine's); not while a session has it open.
+export function canShare(s: Session, status: Status | null | undefined): boolean {
+  return s.pid === null && s.state === "done" && !!s.chatId && shareAccounts(status).length >= 2;
 }
 
-export function canShareRecent(host: string | undefined, status: Status | null): boolean {
-  return !!status?.canShare && !host && status.groups.filter((g) => !!g.shareProfile).length >= 2;
+export function canShareRecent(status: Status | null | undefined): boolean {
+  return shareAccounts(status).length >= 2;
+}
+
+export function shareTitle(host?: string): string {
+  return `Continue on another account: share this chat with your other accounts${host ? ` on ${host}` : ""} and pick it up there, or keep it on one account only.`;
 }
 
 // Removing only hides a finished row; a running one would come right back

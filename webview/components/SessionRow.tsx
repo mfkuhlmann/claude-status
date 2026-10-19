@@ -1,8 +1,8 @@
-import { canEndChat, changesTitle, hasPeek, hasTurn, peekLine, petKeyOf, plural, stateText, tasksTitle, usageLevel } from "../../src/shared/model";
+import { canEndChat, changesTitle, hasPeek, hasTurn, machineStatus, peekLine, petKeyOf, plural, stateText, tasksTitle, usageLevel } from "../../src/shared/model";
 import type { Session } from "../../src/shared/types";
 import { post } from "../env";
 import { pets } from "../pets";
-import { canRemove, canShare, canStop, chatRefOf, isBackground, openHint, rowKeyOf, sharedTagTitle } from "../util/chat";
+import { canRemove, canShare, canStop, chatRefOf, isBackground, openHint, rowKeyOf, sharedTagTitle, shareTitle } from "../util/chat";
 import { useStore } from "../util/store";
 import { toggleAgents, togglePeek, uiState } from "../util/ui";
 import { AgentTree } from "./AgentTree";
@@ -40,7 +40,7 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
   const tasks = s.tasks;
   const changes = s.changes;
 
-  const share = canShare(s, host, view.status);
+  const share = canShare(s, machineStatus(view, host));
   const remove = canRemove(s);
   const stop = canStop(s, host);
 
@@ -153,7 +153,7 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
             <IconButton
               icon="share"
               label="Continue on another account…"
-              title="Continue on another account: share this chat with your other accounts and pick it up there, or keep it on one account only."
+              title={shareTitle(host)}
               onClick={() => post({ type: "share", chat })}
             />
           ) : null}

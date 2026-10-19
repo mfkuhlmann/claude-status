@@ -67,10 +67,10 @@ As an editor tab (**Claude Status: Open in Editor Tab**):
 - **Clawd**: one pet for the whole dashboard, one per chat, each acting out
   its chat. Click a pet to open its chat, drag one around, double-click the
   big one.
-- **Shared chats**: with two or more Claude accounts on this computer, a
-  finished chat's share button continues it on another account (say, when
-  one hits its limit), shares it with all of them, or keeps it on one again
-  (see "Good to know" for adding a second account).
+- **Shared chats**: with two or more Claude accounts on this computer (or
+  on an SSH host), a finished chat's share button continues it on another
+  account (say, when one hits its limit), shares it with all of them, or
+  keeps it on one again (see "Good to know" for adding a second account).
 
 ## Your side, also over Remote-SSH
 
@@ -244,8 +244,11 @@ ask for it, the status-line change above and the links of the chats you share
   close it on one account before you resume it on another. Everything in the
   chat goes to the account that continues it. **Keep only on …** undoes it.
   **Continue on …** opens the chat like any other: in VS Code's terminal, or
-  your desktop's with `claudeStatus.openIn` = `system`. Chats on SSH hosts
-  aren't shared from here.
+  your desktop's with `claudeStatus.openIn` = `system`. On an SSH host
+  (Remote-SSH's or a picked one) with two or more accounts it works the same,
+  between that host's accounts; the sharing script goes over ssh like the
+  status script, so nothing is installed there. A chat can't move between
+  this computer and a host.
 - **Switching VS Code's Claude** (click **Claude: …** in the status bar, or
   run **Claude Status: Use Account for VS Code's Claude…**) sets
   `CLAUDE_CONFIG_DIR` in VS Code's `claudeCode.environmentVariables` and

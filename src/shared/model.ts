@@ -32,6 +32,18 @@ export function cliInstalled(status: Pick<Status, "cli"> | null | undefined): bo
   return status?.cli?.installed !== false;
 }
 
+// The status of the machine a chat is on: this computer's, or an SSH host's
+// last good answer
+export function machineStatus(state: Pick<ViewState, "status" | "hosts">, host?: string): Status | null | undefined {
+  return host ? state.hosts.find((h) => h.name === host)?.result : state.status;
+}
+
+// The accounts a chat can move between: those of its own machine (this
+// computer, or the SSH host it's on), when that machine can share
+export function shareAccounts(status: Pick<Status, "canShare" | "groups"> | null | undefined): Group[] {
+  return status?.canShare ? status.groups.filter((g) => !!g.shareProfile) : [];
+}
+
 // The Claude Code extension can reopen this account's chats: it's in this
 // window, on the account its settings give it (an SSH host's: the host's
 // ~/.claude, through Remote-SSH)

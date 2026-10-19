@@ -3,12 +3,13 @@ import {
   claudeCodeHere,
   claudeCodeReopenHint,
   cliInstalled,
+  machineStatus,
   reopensInClaudeCode,
   terminalReopenHint,
 } from "../../src/shared/model";
 import type { Group, ReopenIn } from "../../src/shared/types";
 import { post } from "../env";
-import { canShareRecent, groupKeyOf, recentRef } from "../util/chat";
+import { canShareRecent, groupKeyOf, recentRef, shareTitle } from "../util/chat";
 import { Icon } from "../util/icons";
 import { useStore } from "../util/store";
 import { toggleRecent, uiState } from "../util/ui";
@@ -28,8 +29,9 @@ export function RecentChats({ group }: { group: Group }) {
   const items = (group.recent ?? []).slice(0, Math.max(0, view.settings.recentChats));
   if (!items.length) return null;
   const open = !!ui.recent[key];
-  const share = canShareRecent(group.host, view.status);
-  const cliHere = cliInstalled(group.host ? view.hosts.find((h) => h.name === group.host)?.result : view.status);
+  const status = machineStatus(view, group.host);
+  const share = canShareRecent(status);
+  const cliHere = cliInstalled(status);
   const codeHere = claudeCodeHere(group, view.claudeCode);
   const inCode = reopensInClaudeCode(view.settings.reopenIn, cliHere, codeHere);
   const groups = view.status?.groups ?? [];
@@ -97,7 +99,7 @@ export function RecentChats({ group }: { group: Group }) {
                       <IconButton
                         icon="share"
                         label="Continue on another account…"
-                        title="Continue on another account: share this chat with your other accounts and pick it up there, or keep it on one account only."
+                        title={shareTitle(group.host)}
                         onClick={() => post({ type: "share", chat })}
                       />
                     </div>

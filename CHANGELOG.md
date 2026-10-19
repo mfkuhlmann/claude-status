@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **Share chats on SSH hosts:** a host with two or more Claude accounts
+  (the one this window is connected to with Remote-SSH, or any host you
+  picked) gets the share button too: **Continue on …** shares the chat with
+  that account there and opens it in VS Code's terminal (through ssh, or the
+  window's own terminal on its Remote-SSH host), **Share with all accounts**
+  and **Keep only on …** work as they do here, between the host's accounts.
+  Nothing is installed on the host.
+
 ## 1.10.0
 
 - **Open a subagent:** click a subagent in a chat's agent tree to unfold it:

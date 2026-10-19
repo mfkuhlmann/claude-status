@@ -14,7 +14,7 @@ import { claudePanelAvailable, localPanelProfileKey, openPanelChat } from "./cla
 import type { Dashboard } from "./dashboard";
 import { canRaiseWindows, isGnome } from "./desktop";
 import { chatRef } from "./notify";
-import { allGroups, canEndChat, cliInstalled, groupLabel, hasTurn, nextChatIndex, shellQuote } from "./shared/model";
+import { allGroups, canEndChat, cliInstalled, groupLabel, hasTurn, machineStatus, nextChatIndex, shareAccounts, shellQuote } from "./shared/model";
 import type { ChatRef, Group } from "./shared/types";
 import { localAncestors, type Place, type Terminals } from "./terminals";
 
@@ -275,28 +275,30 @@ export class Actions {
   // ---------------------------------------------------------------- shared chats
 
   // Share a chat with your other accounts, continue it on one, or keep it on
-  // one only (jump.py does it, through the widget's sharing.py; the view
-  // offers this with two or more accounts on this computer).
+  // one only, between the accounts of the chat's machine: this computer's
+  // (jump.py does it, through the widget's sharing.py) or its SSH host's
+  // (remote.py runs sharing.py there). The view offers this with two or more
+  // accounts there.
   async share(chat: ChatRef): Promise<void> {
     if (this.demoOnly()) return;
-    const groups = this.dash.state().status?.groups ?? [];
-    const shareAccounts = groups.filter((g) => !!g.shareProfile);
-    const here = groups.find((g) => g.profileKeys.includes(chat.profileDir));
+    const host = chat.host;
+    const accounts = shareAccounts(machineStatus(this.dash.state(), host));
+    const here = accounts.find((g) => g.profileKeys.includes(chat.profileDir));
     type Item = vscode.QuickPickItem & { kind2?: "continue" | "share" | "keeponly"; group?: Group };
     const items: Item[] = [];
-    for (const g of shareAccounts) {
+    for (const g of accounts) {
       if (g === here) continue;
       items.push({ label: chat.shared ? `Continue on ${g.title}` : `Share and continue on ${g.title}`, kind2: "continue", group: g });
     }
     if (!chat.shared) items.push({ label: "Share with all accounts", kind2: "share" });
     else {
       items.push({ label: "", kind: vscode.QuickPickItemKind.Separator });
-      for (const g of shareAccounts) items.push({ label: `Keep only on ${g.title}…`, kind2: "keeponly", group: g });
+      for (const g of accounts) items.push({ label: `Keep only on ${g.title}…`, kind2: "keeponly", group: g });
     }
-    const pick = await vscode.window.showQuickPick(items, { placeHolder: chat.name });
+    const pick = await vscode.window.showQuickPick(items, { placeHolder: host ? `${chat.name} on ${host}` : chat.name });
     if (!pick?.kind2) return;
     if (pick.kind2 === "keeponly") {
-      const others = shareAccounts.filter((g) => g !== pick.group).map((g) => g.title).join(", ");
+      const others = accounts.filter((g) => g !== pick.group).map((g) => g.title).join(", ");
       const ok = await vscode.window.showWarningMessage(
         `Keep “${chat.name}” only on ${pick.group!.title}?`,
         { modal: true, detail: `It's removed from ${others || "the other accounts"}.` },
@@ -306,18 +308,20 @@ export class Actions {
     }
     const flag = { continue: "--continue", share: "--share", keeponly: "--unshare" }[pick.kind2];
     // the account it goes to; for "all accounts", the one whose copy is shared
-    const profile = pick.group?.shareProfile ? ["--profile", pick.group.shareProfile]
-      : chat.profileDir ? ["--profile", chat.profileDir] : [];
+    const profile = pick.group?.shareProfile || chat.profileDir || "";
     const id = chat.chatId || chat.sessionId;
-    // Continuing it opens it like any chat: in VS Code's terminal, unless
-    // openIn says the desktop's (then jump.py opens that itself)
-    const vscodeTerminal = pick.kind2 === "continue" && settings.openIn() !== "system";
-    const answer = await this.backend.action("jump.py", [flag, id, ...profile, ...(vscodeTerminal ? ["--print-command"] : []), ...configDirArgs()]);
+    // Continuing it opens it like any chat: in VS Code's terminal (a host's
+    // through ssh), unless openIn says the desktop's (then jump.py or
+    // remote.py opens that itself)
+    const print = pick.kind2 === "continue" && settings.openIn() !== "system" ? ["--print-command"] : [];
+    const answer = host
+      ? await this.backend.action("remote.py", [flag, host, id, ...(profile ? [profile] : []), ...print])
+      : await this.backend.action("jump.py", [flag, id, ...(profile ? ["--profile", profile] : []), ...print, ...configDirArgs()]);
     if (this.report(answer, "Couldn't share it")) {
-      if (answer.command) await this.terminals.run(`|${id}|${pick.group?.shareProfile ?? ""}`, chat.name, answer.command, { kind: "local" });
+      if (answer.command) await this.terminals.run(`${host ?? ""}|${id}|${pick.group?.shareProfile ?? ""}`, chat.name, answer.command, this.place(host));
       else if (pick.kind2 !== "continue") this.dash.setActionInfo(answer.message);
     }
-    void this.dash.refresh();
+    this.refresh(host);
   }
 
   // ---------------------------------------------------------------- new chat
