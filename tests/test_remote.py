@@ -1,6 +1,8 @@
 """SSH hosts: the host list, and status/open/run through a stand-in ssh that
 runs the command locally in a fake remote home."""
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import shlex
@@ -267,6 +269,40 @@ class ActionTests(FakeSSH):
         out = subprocess.run(["bash", "-c", ssh_line], capture_output=True, text=True, env=os.environ)
         self.assertEqual(out.stdout.strip(), "done")
         self.assertEqual(self.calls()[-1], ["lab", command])
+
+    def test_a_subagents_run_comes_here(self):
+        d = self.fake_home / ".claude/projects/-p/abc12345/subagents"
+        d.mkdir(parents=True)
+        (d / "agent-ag1.meta.json").write_text(json.dumps({"agentType": "Explore", "description": "Check the host"}))
+        report = {"type": "tool_use", "id": "h", "name": "SubagentHandback",
+                  "input": {"message": "The widget's answer starts after \n" + cs.REMOTE_MARK + " {\"ok\": false}"}}
+        (d / "agent-ag1.jsonl").write_text("".join(json.dumps(l) + "\n" for l in (
+            {"type": "user", "isSidechain": True, "message": {"content": "Look around"}},
+            {"type": "assistant", "isSidechain": True, "message": {"content": [report]}})))
+        self.mode("noisy")  # a login banner first
+        import jump
+        opened, old = [], jump.open_file
+        jump.open_file = lambda path: opened.append(path) or True
+        try:
+            ok, message, path = remote.agent_run("lab", "abc12345", "ag1")
+            self.assertEqual(self.calls()[-1], ["lab", "python3 -I - --remote --agent-run ag1 --chat abc12345"])
+            self.assertEqual(remote.agent_run("lab", "abc12345", "nope", ".claude", open_it=False),
+                             (False, "lab: Can't find that subagent's transcript", None))
+            self.assertEqual(self.calls()[-1], ["lab", "python3 -I - --remote --agent-run nope --chat abc12345 --profile .claude"])
+        finally:
+            jump.open_file = old
+        self.assertEqual((ok, message), (True, "The run of “Check the host” on lab"))
+        self.assertEqual(Path(path).parent, Path(self.env["XDG_CACHE_HOME"]) / "claude-widget/agent-runs")  # saved here
+        self.assertIn(cs.REMOTE_MARK + ' {"ok": false}', Path(path).read_text())  # the marker in the run is just text
+        self.assertEqual(opened, [Path(path)])
+        self.mode("unreachable")
+        self.assertFalse(remote.agent_run("lab", "abc12345", "ag1")[0])
+
+    def test_agent_run_command_line(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            remote.main(["--agent-run", "lab", "abc12345", "missing", "--no-open"])
+        self.assertEqual(json.loads(out.getvalue()), {"ok": False, "message": "lab: Can't find that subagent's transcript"})
 
     def test_control_socket_folder_is_short_and_only_yours(self):
         saved = (os.environ.get("XDG_RUNTIME_DIR"), remote.SOCKET_TMP)

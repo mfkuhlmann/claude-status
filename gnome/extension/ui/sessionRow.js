@@ -175,7 +175,7 @@ export function buildSessionRow(ctx, session, {showProfile = false, remoteHost =
         body.add_child(buildPeek(ctx, s, remoteHost));
 
     if (showAgents && agents)
-        body.add_child(buildAgentsTree(ctx, agents));
+        body.add_child(buildAgentsTree(ctx, s, agents, rowKey, remoteHost));
 
     if (ctx.ui.openMenu?.type === 'share' && ctx.ui.openMenu.key === rowKey)
         body.add_child(buildShareMenu(ctx, ctx.ui.openMenu.chat, rowKey));
@@ -278,11 +278,15 @@ function buildPeek(ctx, s, remoteHost) {
     return box_;
 }
 
-// Subagents as a tree: what each one is doing
-function buildAgentsTree(ctx, agents) {
+// Subagents as a tree: what each one is doing; click one for its task, its
+// last steps and its report, and to open its whole run
+function buildAgentsTree(ctx, s, agents, rowKey, remoteHost) {
     const tree = column('claude-agents', {x_expand: true});
     for (const a of agents.tree) {
-        const line = box('claude-agent', {x_expand: true, style: `margin-left: ${Math.round(a.depth * 14)}px;`});
+        const key = L.agentKey(rowKey, a);
+        const open = ctx.ui.expandedAgent[key] === true;
+        const indent = Math.round(a.depth * 14);
+        const line = box('claude-agent', {x_expand: true});
         line.add_child(label('└', 'claude-dim'));
         const d = dot(a.status === 'running' ? 'working' : a.status === 'done' ? 'ok' : 'none', 'claude-dot claude-dot-small');
         d.y_align = Clutter.ActorAlign.START;
@@ -294,16 +298,46 @@ function buildAgentsTree(ctx, agents) {
         top.add_child(label(a.status === 'running'
             ? L.fmt('running · %1', L.duration(ctx.now - (a.started || ctx.now)))
             : a.status === 'done' ? 'done' : 'stopped', 'claude-small claude-dim'));
+        top.add_child(new St.Icon({icon_name: open ? 'pan-down-symbolic' : 'pan-end-symbolic',
+            style_class: 'claude-agent-chevron', y_align: Clutter.ActorAlign.CENTER}));
         col.add_child(top);
-        if (a.activity) {
-            const activity = label(a.activity, 'claude-small claude-dim', {x_expand: true});
-            ctx.tips.add(activity, [a.description || a.type, a.activity]);
-            col.add_child(activity);
-        }
+        if (a.activity)
+            col.add_child(label(a.activity, 'claude-small claude-dim', {x_expand: true}));
         line.add_child(col);
-        tree.add_child(line);
+        const button = new St.Button({style_class: 'claude-agent-button', can_focus: true, child: line,
+            x_expand: true, x_align: Clutter.ActorAlign.FILL, style: `margin-left: ${indent}px;`});
+        button.connect('clicked', () => ctx.toggleAgent(key));
+        ctx.tips.add(button, () => L.agentTooltip(a, open));
+        tree.add_child(button);
+        if (open)
+            tree.add_child(buildAgentDetail(ctx, s, a, remoteHost, indent));
     }
     return tree;
+}
+
+// An unfolded subagent: the task it was given, how far it got, its last
+// steps (the newest in bold while it runs), its report, and its whole run
+function buildAgentDetail(ctx, s, a, remoteHost, indent) {
+    const detail = column('claude-peek claude-agent-detail', {x_expand: true, style: `margin-left: ${indent + 22}px;`});
+    if (a.task)
+        detail.add_child(paragraph(L.fmt('Task: %1', L.clampText(a.task, 4, 400)), 'claude-small claude-dim'));
+    const summary = L.agentSummaryText(a);
+    if (summary)
+        detail.add_child(label(summary, 'claude-small claude-dim'));
+    const steps = L.agentStepLines(a);
+    if (steps.length) {
+        const list = column('claude-tasks', {x_expand: true});
+        for (const step of steps)
+            list.add_child(label(step.text, `claude-small${step.current ? ' claude-strong' : ''}`, {x_expand: true}));
+        detail.add_child(list);
+    }
+    if (a.status === 'done' && a.report)
+        detail.add_child(paragraph(L.fmt('Report: %1', L.clampText(a.report, 12, 1500)), 'claude-small'));
+    const run = textButton('Open the whole run', () => ctx.openAgentRun(s, a, remoteHost),
+        'claude-text-button claude-confirm-button', 'text-x-generic-symbolic');
+    ctx.tips.add(run, L.agentRunTooltip(remoteHost));
+    detail.add_child(run);
+    return detail;
 }
 
 // A question with buttons, e.g. "Stop “fix parser”? …" [Stop] [Cancel]

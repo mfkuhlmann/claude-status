@@ -26,6 +26,7 @@ PlasmoidItem {
 
     // Popup state kept by row key (rows get new data every poll)
     property var expandedAgents: ({})
+    property var expandedAgentRuns: ({}) // subagents showing their task, last steps and report (row key|agent id)
     property var expandedPeek: ({})     // rows showing your last prompt, Claude's reply and the tasks
     property var expandedStats: ({})    // accounts showing their last days
     property var expandedRecent: ({})
@@ -43,7 +44,8 @@ PlasmoidItem {
     readonly property var emptyDay: ({ day: "", total: 0, output: 0, messages: 0, chats: 0, prompts: 0 })
     readonly property var emptyProject: ({ name: "", path: "", total: 0, output: 0, prompts: 0 })
     readonly property var emptyAgent: ({ id: "", parent: null, depth: 0, type: "", description: "",
-                                         status: "done", activity: "", started: null, updated: null, model: null })
+                                         status: "done", activity: "", started: null, updated: null, model: null,
+                                         task: "", steps: [], report: "", toolCalls: null, tokens: null })
     readonly property string waitingName: {
         for (const g of allGroups)
             for (const s of g.sessions)
@@ -903,6 +905,50 @@ PlasmoidItem {
         expandedAgents = next
     }
 
+    function toggleAgentRun(key) {
+        expandedAgentRuns = Object.assign({}, expandedAgentRuns, { [key]: !expandedAgentRuns[key] })
+    }
+
+    // "12 tool calls · 45.2k tokens" of a subagent, as far as it's known
+    function agentNumbers(agent) {
+        const parts = []
+        if (agent.toolCalls !== null && agent.toolCalls !== undefined)
+            parts.push(i18np("%1 tool call", "%1 tool calls", agent.toolCalls))
+        if (agent.tokens)
+            parts.push(i18n("%1 tokens", formatTokens(agent.tokens)))
+        return parts.join(" · ")
+    }
+
+    // A subagent's whole run as a Markdown file, opened in your app for those
+    // (jump.py --agent-run; remote.py fetches it from an SSH host): Claude
+    // Code itself can't open a subagent from outside.
+    P5Support.DataSource {
+        id: runOpener
+        engine: "executable"
+        connectedSources: []
+        onNewData: (source, data) => {
+            disconnectSource(source)
+            const result = root.helperResult(data)
+            if (result.ok) {
+                root.actionError = ""
+                root.expanded = false
+            } else {
+                root.actionError = i18n("Couldn't open the subagent's run: %1", result.message)
+                actionErrorTimer.restart()
+            }
+        }
+    }
+
+    function openAgentRun(session, agentId, host) {
+        if (host)
+            remoteAction("run", host, "--agent-run " + shellQuote(host) + " " + shellQuote(session.chatId) + " "
+                                      + shellQuote(agentId) + (session.profileDir ? " " + shellQuote(session.profileDir) : ""))
+        else
+            runOpener.connectSource("python3 -I " + shellQuote(codeDir + "jump.py") + " --agent-run " + shellQuote(agentId)
+                                    + " --chat " + shellQuote(session.chatId) + profileArg(session.profileDir)
+                                    + configDirArgs + " # " + Date.now())
+    }
+
     function toggleRecent(groupKey, wasOpen) {
         expandedRecent = Object.assign({}, expandedRecent, { [groupKey]: !wasOpen })
     }
@@ -1220,17 +1266,18 @@ PlasmoidItem {
             const what = root.remoteActionKinds[source] || ""
             if (result.ok) {
                 root.actionError = ""
-                if (what === "open")
+                if (what === "open" || what === "run")
                     root.expanded = false
             } else {
                 root.actionError = what === "open" ? i18n("Couldn't open the session: %1", result.message)
                                  : what === "stop" ? i18n("Couldn't stop the session: %1", result.message)
+                                 : what === "run" ? i18n("Couldn't open the subagent's run: %1", result.message)
                                  : result.message
                 actionErrorTimer.restart()
                 root.petEvent("oops", i18n("Hmm, that didn't work."), "")
             }
             const host = root.remoteActionHosts[source]
-            if (what !== "open" && host)
+            if (what !== "open" && what !== "run" && host)
                 root.pollHost(host)
         }
     }

@@ -49,8 +49,8 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         this._polling = false;
         this._timers = {};
         // Popup state kept by row key (rows are rebuilt with new data)
-        this.ui = {expandedAgents: {}, expandedRecent: {}, expandedPeek: {}, expandedStats: {}, stopConfirm: '', stopConfirmBusy: false,
-            shareConfirm: null, openMenu: null};
+        this.ui = {expandedAgents: {}, expandedAgent: {}, expandedRecent: {}, expandedPeek: {}, expandedStats: {}, stopConfirm: '',
+            stopConfirmBusy: false, shareConfirm: null, openMenu: null};
         // Turns that ended while the menu was closed (row key -> "done"), for
         // the hotkey; forgotten when the menu opens
         this._unseen = {};
@@ -552,6 +552,28 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
     toggleAgents(rowKey) {
         this.ui.expandedAgents[rowKey] = !this.ui.expandedAgents[rowKey];
         this.rerender();
+    }
+
+    // One subagent unfolded: its task, last steps and report (key: L.agentKey)
+    toggleAgent(key) {
+        this.ui.expandedAgent[key] = !this.ui.expandedAgent[key];
+        this.rerender();
+    }
+
+    // A subagent's whole run, saved as Markdown and opened in your app for
+    // those (jump.py --agent-run; remote.py fetches it from an SSH host)
+    async openAgentRun(session, agent, remoteHost = '') {
+        const {script, args} = L.agentRunCommand(session, agent, remoteHost);
+        const result = await this._helper(script, remoteHost ? args : [...args, ...this._configDirArgs]);
+        if (this._destroyed)
+            return;
+        if (result.ok) {
+            this._actionError = '';
+            this.menu.close();
+        } else {
+            this._showError(L.fmt("Couldn't open the subagent's run: %1", result.message));
+            this._oops();
+        }
     }
 
     toggleStats(groupKey) {

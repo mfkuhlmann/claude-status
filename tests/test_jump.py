@@ -11,6 +11,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 from urllib.parse import parse_qs, urlsplit
 
 sys.dont_write_bytecode = True  # keep __pycache__ out of the plasmoid package
@@ -1322,3 +1323,63 @@ esac
         with Patch(shutil=type("W", (), {"which": staticmethod(lambda name: None)})):
             self.assertFalse(jump.send_to_phone("hi")[0])
             self.assertEqual(jump.phone_devices()[1], "KDE Connect isn't installed (kdeconnect-cli)")
+
+
+class AgentRunFileTests(Fixture):
+    """jump.py --agent-run: a subagent's run saved as Markdown and opened."""
+
+    def setUp(self):
+        super().setUp()
+        d = self.home / ".claude-work/projects/-w-proj/chat1/subagents"
+        write(d / "agent-ab12cd34ef.meta.json", {"agentType": "Explore", "description": "Find / the parser: now!"})
+        write(d / "agent-ab12cd34ef.jsonl", json.dumps({"type": "user", "isSidechain": True, "message": {"content": "Find it"}}) + "\n")
+        self.saved = os.environ.get("XDG_CACHE_HOME")
+        os.environ["XDG_CACHE_HOME"] = str(self.cache)
+
+    def tearDown(self):
+        if self.saved is None:
+            os.environ.pop("XDG_CACHE_HOME", None)
+        else:
+            os.environ["XDG_CACHE_HOME"] = self.saved
+        super().tearDown()
+
+    def test_saved_and_opened(self):
+        opened = []
+        with Patch(open_file=lambda path: opened.append(path) or True):
+            ok, message, path = jump.show_agent_run(self.home, [], "chat1", "ab12cd34ef", ".claude-work")
+        self.assertEqual((ok, message), (True, "The run of “Find / the parser: now!”"))
+        self.assertEqual(Path(path), self.cache / "claude-widget/agent-runs/Find the parser now! (ab12cd34).md")
+        self.assertTrue(Path(path).read_text().startswith("# Find / the parser: now!\n"))
+        self.assertEqual(opened, [Path(path)])
+
+    def test_old_runs_are_removed(self):
+        old = self.cache / "claude-widget/agent-runs/old (x).md"
+        write(old, "x")
+        os.utime(old, (time.time() - 2 * 86400,) * 2)
+        with Patch(open_file=lambda path: True):
+            jump.show_agent_run(self.home, [], "chat1", "ab12cd34ef")
+        self.assertFalse(old.exists())
+
+    def test_not_found(self):
+        self.assertEqual(jump.show_agent_run(self.home, [], "chat1", "nope"),
+                         (False, "Can't find that subagent's transcript", None))
+
+    def test_opened_with_xdg_open(self):
+        started = []
+        with Patch(start_app=lambda args: started.append(args)):
+            opened = jump.open_file(Path("/x/run.md"))
+        if shutil.which("xdg-open"):
+            self.assertEqual((opened, started), (True, [[shutil.which("xdg-open"), "/x/run.md"]]))
+        else:
+            self.assertEqual((opened, started), (False, []))
+
+    def test_command_line(self):
+        out = io.StringIO()
+        with mock.patch.object(jump.Path, "home", return_value=self.home), contextlib.redirect_stdout(out):
+            jump.main(["--agent-run", "ab12cd34ef", "--chat", "chat1", "--profile", ".claude-work", "--no-open"])
+        answer = json.loads(out.getvalue())
+        self.assertTrue(answer["ok"], answer)
+        self.assertTrue(answer["file"].endswith("agent-runs/Find the parser now! (ab12cd34).md"))
+        for bad in (["--agent-run", "ab12cd34ef"], ["--no-open", "chat1"]):
+            with self.assertRaises(SystemExit):
+                jump.main(bad)

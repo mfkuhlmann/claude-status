@@ -140,18 +140,53 @@ deploy = session(".claude-work", "9a1c7e2b-0000-4000-8000-000000000008", "deploy
 write(home / ".claude-work/jobs/job-deploy/state.json", {"state": "working", "sessionId": deploy,
                                                          "cwd": str(home / "repos/site")})
 agents = home / ".claude-work/projects" / str(home / "repos/site").replace("/", "-") / deploy / "subagents"
-step = lambda kind, content, stop=None: {"type": kind, "timestamp": day, "isSidechain": True,
-                                         "message": {"role": kind, "content": content, "stop_reason": stop}}
-tool = lambda name, inp: [{"type": "tool_use", "id": "toolu_" + name, "name": name, "input": inp}]
-for agent_id, description, lines in [
-        ("a1", "Check the links", [step("user", "check links"),
-                                   step("assistant", [{"type": "text", "text": "All 214 links work."}], "end_turn")]),
-        ("a2", "Build the site", [step("user", "build"), step("assistant", tool("Bash", {"command": "npm run build"}),
-                                                              "tool_use")])]:
-    write(agents / f"agent-{agent_id}.meta.json", {"agentType": "general-purpose", "description": description,
-                                                    "spawnDepth": 1, "toolUseId": "toolu_" + agent_id})
-    write(agents / f"agent-{agent_id}.jsonl", "\n".join(json.dumps(line) for line in lines) + "\n")
 iso = lambda t: time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(t)) + ".000Z"
+
+
+def step(kind, content, minutes_ago, stop=None):
+    """One entry of a subagent's transcript; its replies carry a model and usage."""
+    message = {"role": kind, "content": content, "stop_reason": stop}
+    if kind == "assistant":
+        message.update(model="claude-haiku-5-5", id=f"msg-{minutes_ago}",
+                       usage={"input_tokens": 300, "output_tokens": 400, "cache_read_input_tokens": 9000,
+                              "cache_creation_input_tokens": 200})
+    return {"type": kind, "timestamp": iso(now - minutes_ago * 60), "isSidechain": True, "message": message}
+
+
+def call(n, name, inp, minutes_ago):
+    return step("assistant", [{"type": "tool_use", "id": f"toolu_{n}", "name": name, "input": inp}], minutes_ago, "tool_use")
+
+
+def result(n, text, minutes_ago):
+    return step("user", [{"type": "tool_result", "tool_use_id": f"toolu_{n}", "content": text}], minutes_ago)
+
+
+for agent_id, kind, description, lines in [
+        ("a1", "Explore", "Check the links", [
+            step("user", "Check every link in the built docs (build/): internal ones must point to a page that "
+                         "exists, external ones must answer. Report the broken ones with the page they're on.", 9),
+            call(1, "Bash", {"command": "npx linkinator ./build --recurse --format json > /tmp/links.json",
+                             "description": "Crawl the built site"}, 9),
+            result(1, "214 links scanned", 7),
+            call(2, "Read", {"file_path": str(home / "repos/site/docs/install.md")}, 7),
+            result(2, "# Install\n...", 7),
+            call(3, "Grep", {"pattern": "](/guide/", "path": str(home / "repos/site/docs")}, 6),
+            result(3, "docs/index.md:12", 6),
+            call(4, "SubagentHandback", {"message": "All 214 links work.\n\n- 198 internal links point to pages "
+                                                    "that exist\n- 16 external links answered 200\n\nNothing to fix."}, 5),
+            result(4, "ok", 5)]),
+        ("a2", "general-purpose", "Build the site", [
+            step("user", "Build the docs site for production (npm ci, then npm run build) and tell me about any "
+                         "warning the build prints.", 4),
+            call(5, "Bash", {"command": "npm ci", "description": "Install the dependencies"}, 4),
+            result(5, "added 412 packages in 9s", 3),
+            call(6, "Read", {"file_path": str(home / "repos/site/package.json")}, 3),
+            result(6, "{ \"name\": \"site\" }", 3),
+            call(7, "Bash", {"command": "npm run build", "description": "Build the site"}, 2)])]:
+    write(agents / f"agent-{agent_id}.meta.json", {"agentType": kind, "description": description,
+                                                    "spawnDepth": 1, "toolUseId": "toolu_" + agent_id,
+                                                    "requestShape": "background"})
+    write(agents / f"agent-{agent_id}.jsonl", "\n".join(json.dumps(line) for line in lines) + "\n")
 write(home / ".claude-work/jobs/job-lint/state.json", {
     "state": "failed", "tempo": "idle", "name": "lint everything", "cwd": str(home / "repos/api"),
     "sessionId": "9a1c7e2b-0000-4000-8000-000000000009", "detail": "eslint: 3 errors in src/routes.ts",

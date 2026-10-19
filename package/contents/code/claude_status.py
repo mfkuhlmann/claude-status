@@ -569,14 +569,28 @@ def finish_row(row, job, job_id, profile, ctx, alive):
         row["changes"] = chats.changes(path, row["cwd"], ctx.home, ctx.own_folders)
         row["tasks"] = task_progress(ctx.profiles, [row["sessionId"], row["chatId"], row.get("jobSessionId")])
         row["stats"] = chats.stats(path)
+        if row["agents"] and path is not None:
+            subs = {sub.name[len("agent-"):-len(".jsonl")]: sub for sub in subagent_transcripts(path)}
+            for agent in row["agents"]["tree"]:
+                st = chats.edits(subs[agent["id"]])["stats"] if agent["id"] in subs else None
+                summary = stats_summary(st) if st else None
+                if summary:
+                    agent["toolCalls"] = sum(n for name, n in st["tools"].items() if name != "SubagentHandback")
+                    agent["tokens"] = summary["tokens"]["total"]
     return row
 
 
 # ---------------------------------------------------------------- subagents
 
 AGENT_TAIL_BYTES = 65536
+AGENT_TAIL_ENTRIES = 40  # conversation entries read from the end (its status needs the last few, its steps more)
+AGENT_TAIL_MIN = 8  # read further back (up to PEEK_TAIL_MAX) until this many are found
 AGENT_CACHE_VERSION = 3  # bump when agent_progress() reads transcripts differently (3: the model)
 AGENT_TREE_LIMIT = 30
+AGENT_STEPS = 6  # its last tool calls a row shows
+AGENT_TASK_CHARS = 600
+AGENT_REPORT_CHARS = 1500
+FORK_BOILERPLATE_END = "</fork-boilerplate>"  # a fork's first prompt: Claude's rules for forks, then its directive
 
 
 def short_text(value, limit=70):
@@ -635,61 +649,105 @@ def transcript_model(entries):
 
 
 def agent_progress(path):
-    """(status, activity, last timestamp ms, model) from the end of a subagent
-    transcript.
+    """(status, activity, last timestamp ms, model, {"steps", "report"}) from
+    the end of a subagent transcript.
 
     Done = it handed its report back (a SubagentHandback call) or its last entry
     is a final answer (end_turn); otherwise it's still working: on a tool call
-    (shown) or thinking about tool results.
+    (shown) or thinking about tool results. Steps are its last tool calls
+    ("Bash: npm test"), oldest first; the report is what it handed back, as
+    plain text ("" until it's done).
     """
-    status, activity, ts, recent = agent_status(path)
-    return status, activity, ts, transcript_model(recent)
+    status, activity, ts, recent, report = agent_status(path)
+    detail = {"steps": agent_steps(recent), "report": tidy_text(plain_text(report), AGENT_REPORT_CHARS)}
+    return status, activity, ts, transcript_model(recent), detail
 
 
 def agent_status(path):
-    """agent_progress without the model, plus the entries it looked at."""
+    """agent_progress without the model and steps, plus the entries it
+    looked at (newest first) and the report in full."""
     try:
         size = path.stat().st_size
-        with open(path, "rb") as f:
-            f.seek(max(0, size - AGENT_TAIL_BYTES))
-            lines = f.read().splitlines()
     except OSError:
-        return "running", "", None, []
-    if size > AGENT_TAIL_BYTES:
-        lines = lines[1:]  # probably cut in the middle
-    recent = []
-    for line in reversed(lines):
-        try:
-            e = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(e, dict) and e.get("type") in ("assistant", "user"):
-            recent.append(e)
-            if len(recent) >= 8:
-                break
+        return "running", "", None, [], ""
+    nbytes = AGENT_TAIL_BYTES
+    while True:  # more of it while big tool results fill the end
+        recent = [e for e in tail_entries(path, size, nbytes) if e["type"] != "last-prompt"][:AGENT_TAIL_ENTRIES]
+        if len(recent) >= AGENT_TAIL_MIN or nbytes >= size or nbytes >= PEEK_TAIL_MAX:
+            break
+        nbytes *= 4
     if not recent:
-        return "running", "starting…", None, recent
+        return "running", "starting…", None, recent, ""
     ts = to_ms(recent[0].get("timestamp"))
     for e in recent:
-        msg = e.get("message") if isinstance(e.get("message"), dict) else {}
-        content = [c for c in msg.get("content") or [] if isinstance(c, dict)] \
-            if isinstance(msg.get("content"), list) else []
+        msg, content = blocks_of(e)
         if e["type"] == "user":
             if e is recent[0]:
                 continue  # tool results just came back; look at what it ran
-            return "running", "thinking…", ts, recent
+            return "running", "thinking…", ts, recent, ""
         uses = [c for c in content if c.get("type") == "tool_use"]
         if uses and uses[-1].get("name") == "SubagentHandback":
             report = (uses[-1].get("input") or {}).get("message")
-            return "done", report_line(report if isinstance(report, str) else ""), ts, recent
+            report = report if isinstance(report, str) else ""
+            return "done", report_line(report), ts, recent, report
         if uses:
             label = describe_tool(uses[-1])
-            return "running", (label if e is recent[0] else f"{label} (thinking about the result)"), ts, recent
+            return "running", (label if e is recent[0] else f"{label} (thinking about the result)"), ts, recent, ""
         if msg.get("stop_reason") == "end_turn":
-            text = next((c.get("text") for c in content if c.get("type") == "text" and c.get("text")), "")
-            return "done", report_line(text), ts, recent
-        return "running", "writing…", ts, recent
-    return "running", "thinking…", ts, recent
+            report = final_answer(recent, e)
+            return "done", report_line(report), ts, recent, report
+        return "running", "writing…", ts, recent, ""
+    return "running", "thinking…", ts, recent, ""
+
+
+def final_answer(recent, last):
+    """The text of an agent's final answer: every text block of the reply
+    that ends with entry last (each block is an entry of its own)."""
+    msg_id = (last.get("message") or {}).get("id")
+    parts = []
+    for e in recent[next(i for i, e in enumerate(recent) if e is last):]:
+        msg, blocks = blocks_of(e)
+        if e["type"] != "assistant" or (e is not last and (msg_id is None or msg.get("id") != msg_id)):
+            break
+        parts[:0] = [c["text"] for c in blocks if c.get("type") == "text" and isinstance(c.get("text"), str)]
+    return "\n\n".join(p for p in parts if p.strip())
+
+
+def agent_steps(recent):
+    """The last AGENT_STEPS tool calls among recent (newest first), oldest first."""
+    steps = []
+    for e in recent:
+        if e["type"] == "assistant":
+            steps += [describe_tool(c) for c in reversed(blocks_of(e)[1])
+                      if c.get("type") == "tool_use" and c.get("name") != "SubagentHandback"]
+            if len(steps) >= AGENT_STEPS:
+                break
+    return steps[:AGENT_STEPS][::-1]
+
+
+def agent_task(path):
+    """The task an agent was given: its transcript's first prompt (for a
+    fork, the directive after Claude's rules for forks), or ""."""
+    try:
+        with open(path, "rb") as f:
+            for n, line in enumerate(f):
+                if n >= 50:
+                    break
+                if not USER_LINE.search(line):
+                    continue
+                try:
+                    e = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(e, dict) or e.get("type") != "user":
+                    continue
+                text = message_text(e.get("message"))
+                if FORK_BOILERPLATE_END in text:
+                    text = re.sub(r"^\s*Your directive:\s*", "", text.split(FORK_BOILERPLATE_END, 1)[1])
+                return text.strip()
+    except OSError:
+        pass
+    return ""
 
 
 def agent_started(path):
@@ -719,25 +777,40 @@ class AgentCache:
         self.old_files = data.get("files", {}) if ok else {}
         self.old_parents = data.get("parents", {}) if ok else {}
         self.files, self.parents, self.changed = {}, {}, not ok
+        # What an unfolded agent shows (its task, last steps and report) is
+        # kept in a file of its own: older copies of this script (a VS Code
+        # extension not updated yet) rewrite agents.json without it.
+        self.details_path = path.with_name("agent-details.json")
+        details = read_json(self.details_path)
+        ok = isinstance(details, dict) and details.get("version") == 1
+        self.old_details = details.get("files", {}) if ok else {}
+        self.details, self.details_changed = {}, not ok
 
     def progress(self, transcript):
-        """(status, activity, last ts, started ts, model) of a subagent transcript."""
+        """(status, activity, last ts, started ts, model, {"task", "steps",
+        "report"}) of a subagent transcript."""
         try:
             st = transcript.stat()
         except OSError:
-            return "running", "starting…", None, None, None
+            return "running", "starting…", None, None, None, {"task": "", "steps": [], "report": ""}
         key = str(transcript)
-        old = self.old_files.get(key)
-        if old and len(old) == 7 and old[0] == st.st_size and old[1] == st.st_mtime_ns:
-            self.files[key] = old
-            return old[2], old[3], old[4], old[5], old[6]
-        status, activity, ts, model = agent_progress(transcript)
+        old, old_detail = self.old_files.get(key), self.old_details.get(key)
+        fresh = lambda rec, n: isinstance(rec, list) and len(rec) == n and rec[0] == st.st_size and rec[1] == st.st_mtime_ns
+        if fresh(old, 7) and fresh(old_detail, 3):
+            self.files[key], self.details[key] = old, old_detail
+            return (*old[2:], old_detail[2])
+        status, activity, ts, model, detail = agent_progress(transcript)
         if model is None and old and len(old) == 7:
             model = old[6]  # its newest entries are tool results; the model came earlier
         started = old[5] if old and len(old) == 7 and old[5] is not None else agent_started(transcript)
-        self.files[key] = [st.st_size, st.st_mtime_ns, status, activity, ts, started, model]
-        self.changed = True
-        return status, activity, ts, started, model
+        known = old_detail[2] if isinstance(old_detail, list) and len(old_detail) == 3 and isinstance(old_detail[2], dict) else {}
+        task = known["task"] if isinstance(known.get("task"), str) else tidy_text(plain_text(agent_task(transcript)), AGENT_TASK_CHARS)
+        detail = {"task": task, **detail}
+        entry = [st.st_size, st.st_mtime_ns, status, activity, ts, started, model]
+        self.changed = self.changed or entry != old
+        self.files[key], self.details[key] = entry, [st.st_size, st.st_mtime_ns, detail]
+        self.details_changed = True
+        return status, activity, ts, started, model, detail
 
     def parent(self, agent_dir, agent_id, tool_use_id):
         """Which other agent of the session started this one (nested agents), if any."""
@@ -769,7 +842,7 @@ class AgentCache:
                 if not isinstance(meta, dict):
                     continue
                 agent_id = meta_path.name[len("agent-"):-len(".meta.json")]
-                status, activity, ts, started, model = self.progress(agent_dir / f"agent-{agent_id}.jsonl")
+                status, activity, ts, started, model, detail = self.progress(agent_dir / f"agent-{agent_id}.jsonl")
                 if status == "running" and not alive:
                     status = "stopped"  # its session ended before it finished
                 depth = meta.get("spawnDepth") if isinstance(meta.get("spawnDepth"), int) else 1
@@ -792,6 +865,11 @@ class AgentCache:
                     "started": started,
                     "updated": ts,
                     "model": model,  # e.g. "Haiku 4.5", from its replies
+                    "task": detail["task"],  # what it was asked to do
+                    "steps": detail["steps"],  # its last tool calls, oldest first
+                    "report": detail["report"] if status == "done" else "",  # what it handed back
+                    "toolCalls": None,  # how many tool calls and tokens so far (finish_row)
+                    "tokens": None,
                 })
         if not agents:
             return None
@@ -823,6 +901,231 @@ class AgentCache:
                 write_json_atomic(self.path, {"version": AGENT_CACHE_VERSION, "files": self.files, "parents": self.parents})
             except OSError:
                 pass
+        if self.details_changed or set(self.details) != set(self.old_details):
+            try:
+                write_json_atomic(self.details_path, {"version": 1, "files": self.details})
+            except OSError:
+                pass
+
+
+# ---------------------------------------------------------------- a subagent's whole run, to read
+#
+# Claude Code has no way to open a subagent from outside (its terminal shows
+# an agent's run when you pick it with the keys, VS Code's link only opens
+# chats), and a subagent isn't a chat you can resume. So the widget renders
+# its transcript as Markdown: the task, every step (its text, each tool call
+# with its input and the start of its result, messages the main chat sent it)
+# and its report.
+
+AGENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,100}$")
+RUN_RESULT_LINES = 25
+RUN_RESULT_CHARS = 2500
+RUN_INPUT_LINES = 40
+RUN_INPUT_CHARS = 4000
+RUN_THINKING_CHARS = 2000
+
+
+def fenced(text, lang=""):
+    """text as a fenced code block, with a fence longer than any run of backticks in it."""
+    longest = max([len(m) for m in re.findall(r"`{3,}", text)] + [2])
+    mark = "`" * (longest + 1)
+    return f"{mark}{lang}\n{text.rstrip()}\n{mark}"
+
+
+def clipped(text, lines, chars):
+    """(the start of text: at most lines lines and chars characters, a note
+    on what was left out or "")."""
+    text = text.rstrip()
+    all_lines = text.splitlines()
+    kept = "\n".join(all_lines[:lines])[:chars].rstrip()
+    if len(kept) >= len(text):
+        return text, ""
+    rest = len(all_lines) - len(kept.splitlines())
+    return kept, (f"… {rest} more line{'s' if rest != 1 else ''}" if rest > 0 else "… cut short")
+
+
+def clipped_block(text, lines, chars, lang=""):
+    kept, note = clipped(text, lines, chars)
+    return fenced(kept, lang) + (f"\n*{note}*" if note else "")
+
+
+def quoted(text):
+    return "\n".join("> " + line if line.strip() else ">" for line in text.strip().splitlines())
+
+
+def clock(ms, with_day=False):
+    if ms is None:
+        return ""
+    return datetime.fromtimestamp(ms / 1000).strftime("%Y-%m-%d %H:%M" if with_day else "%H:%M:%S")
+
+
+def spoken_duration(ms):
+    """2h 5m, 3m 12s, 40s"""
+    s = max(0, int(ms // 1000))
+    if s >= 3600:
+        return f"{s // 3600}h {s % 3600 // 60}m"
+    return f"{s // 60}m {s % 60}s" if s >= 60 else f"{s}s"
+
+
+def token_count(n):
+    """45.2k, 1.3M"""
+    return f"{n / 1e6:.1f}M" if n >= 1e6 else f"{n / 1e3:.1f}k" if n >= 1e3 else str(n)
+
+
+def tool_call_md(block):
+    """A tool call: its name and what it was asked, in Markdown."""
+    name = block.get("name") or "tool"
+    inp = block.get("input") if isinstance(block.get("input"), dict) else {}
+    shown = name.split("__", 2)[-1] if name.startswith("mcp__") else name
+    head = f"**▸ {shown}**"
+    if name == "Bash":
+        desc = f" · {inp['description']}" if isinstance(inp.get("description"), str) else ""
+        return f"{head}{desc}\n\n" + clipped_block(str(inp.get("command", "")), RUN_INPUT_LINES, RUN_INPUT_CHARS, "bash")
+    path = next((inp[k] for k in ("file_path", "notebook_path") if isinstance(inp.get(k), str)), None)
+    if name in ("Edit", "MultiEdit") and path:
+        edits = inp.get("edits") if isinstance(inp.get("edits"), list) else [inp]
+        diff = "\n\n".join(
+            "\n".join(["- " + l for l in str(e.get("old_string", "")).splitlines()]
+                      + ["+ " + l for l in str(e.get("new_string", "")).splitlines()])
+            for e in edits if isinstance(e, dict))
+        return f"{head} `{path}`\n\n" + clipped_block(diff, RUN_INPUT_LINES, RUN_INPUT_CHARS, "diff")
+    if name == "Write" and path:
+        return f"{head} `{path}`\n\n" + clipped_block(str(inp.get("content", "")), RUN_INPUT_LINES, RUN_INPUT_CHARS)
+    if name == "Agent":
+        what = " · ".join(str(inp[k]) for k in ("subagent_type", "description") if isinstance(inp.get(k), str))
+        prompt = clipped(str(inp.get("prompt", "")), RUN_INPUT_LINES, RUN_INPUT_CHARS)
+        return f"{head}{' · ' + what if what else ''}\n\n" + quoted(prompt[0] + (f"\n\n*{prompt[1]}*" if prompt[1] else ""))
+    if path:
+        return f"{head} `{path}`"
+    simple = {k: v for k, v in inp.items() if isinstance(v, (str, int, float, bool))}
+    if len(simple) == len(inp) and len(inp) <= 3 and all(len(str(v)) <= 120 and "\n" not in str(v) for v in inp.values()):
+        return head + "".join(f" · {k}: `{v}`" for k, v in inp.items())
+    return f"{head}\n\n" + clipped_block(json.dumps(inp, indent=2, ensure_ascii=False), RUN_INPUT_LINES, RUN_INPUT_CHARS, "json")
+
+
+def tool_result_md(block):
+    """A tool's result (the start of it), in Markdown."""
+    content = block.get("content")
+    if isinstance(content, list):
+        parts = []
+        for c in content:
+            if isinstance(c, dict) and c.get("type") == "text" and isinstance(c.get("text"), str):
+                parts.append(c["text"])
+            elif isinstance(c, dict) and c.get("type") == "image":
+                parts.append("(an image)")
+        content = "\n".join(parts)
+    text = content if isinstance(content, str) else ""
+    label = "Error" if block.get("is_error") else "Result"
+    if not text.strip():
+        return f"*{label}: nothing*"
+    return f"*{label}:*\n\n" + clipped_block(text, RUN_RESULT_LINES, RUN_RESULT_CHARS)
+
+
+def agent_run_markdown(path, meta, parent_name="", cwd="", home=None):
+    """(title, Markdown) of a subagent's whole run, from its transcript."""
+    status, activity, last_ts, recent, report = agent_status(path)
+    title = short_text(meta.get("description") or meta.get("agentType") or "Subagent", 80)
+    steps, task, tools, started, model = [], None, 0, None, transcript_model(recent)
+    tokens = new_stats()
+    try:
+        f = open(path, "rb")
+    except OSError:
+        return title, f"# {title}\n\nIts transcript can't be read."
+    with f:
+        for line in f:
+            if not (USER_LINE.search(line) or ASSISTANT_LINE.search(line)):
+                continue
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(e, dict) or e.get("type") not in ("user", "assistant"):
+                continue
+            if task is None and e["type"] == "assistant":
+                continue  # a fork's copy of the call that started it
+            fold_stats(tokens, e)
+            ts = to_ms(e.get("timestamp"))
+            started = started if started is not None else ts
+            msg, blocks = blocks_of(e)
+            if e["type"] == "user":
+                if task is None:  # its first prompt: the task
+                    task = message_text(msg)
+                    if FORK_BOILERPLATE_END in task:
+                        task = re.sub(r"^\s*Your directive:\s*", "", task.split(FORK_BOILERPLATE_END, 1)[1])
+                    continue
+                for c in blocks:
+                    if c.get("type") == "tool_result":
+                        steps.append(tool_result_md(c))
+                text = message_text(msg).strip()
+                origin = e.get("origin") if isinstance(e.get("origin"), dict) else {}
+                if text and (origin.get("kind") == "coordinator" or not (e.get("isMeta") or text.startswith("<"))):
+                    steps.append(f"**{clock(ts)} · Message from the main chat**\n\n" + quoted(text))
+                continue
+            for c in blocks:
+                kind = c.get("type")
+                if kind == "text" and isinstance(c.get("text"), str) and c["text"].strip():
+                    steps.append(f"**{clock(ts)} · Claude**\n\n{c['text'].strip()}")
+                elif kind == "thinking" and isinstance(c.get("thinking"), str) and c["thinking"].strip():
+                    thought, note = clipped(c["thinking"], 10 ** 6, RUN_THINKING_CHARS)
+                    steps.append(quoted(f"*Thinking:* {thought}" + (f" *{note}*" if note else "")))
+                elif kind == "tool_use" and c.get("name") != "SubagentHandback":
+                    tools += 1
+                    steps.append(f"{clock(ts)} " + tool_call_md(c))
+    summary = stats_summary(tokens)
+    facts = [f"{meta.get('agentType') or 'agent'} agent"]
+    if model:
+        facts.append(model)
+    if meta.get("requestShape") == "background":
+        facts.append("in the background")
+    if status == "done":
+        facts.append(f"done after {spoken_duration((last_ts or 0) - (started or 0))}" if started and last_ts else "done")
+    else:
+        facts.append(f"not finished · last step: {activity}" if activity else "not finished")
+    facts.append(f"{tools} tool call{'s' if tools != 1 else ''}")
+    if summary and summary["tokens"]["total"]:
+        facts.append(f"{token_count(summary['tokens']['total'])} tokens")
+    where = [f"A subagent of “{parent_name}”" if parent_name else "A subagent"]
+    if cwd:
+        where.append(f"in {short_path(cwd, home) if home else cwd}")
+    if started:
+        where.append(f"started {clock(started, with_day=True)}")
+    out = [f"# {title}", " · ".join(facts), " · ".join(where),
+           "## Task", (task or "").strip() or "*(none recorded)*", "## Steps"]
+    out += steps or ["*None yet.*"]
+    out.append("## Report")
+    if status == "done":
+        out.append(report.strip() or "*It finished without a report.*")
+    else:
+        out.append(f"*None yet: it hadn't finished at {clock(int(time.time() * 1000))} (or its chat stopped it). "
+                   "Open it again for what it has done since.*")
+    out.append(f"---\n*Transcript: `{path}`*")
+    return title, "\n\n".join(part for part in out if part) + "\n"
+
+
+def find_agent_transcript(profiles, chat_id, agent_id, profile_key=None):
+    """(profile, transcript) of a chat's subagent, or (None, None)."""
+    if not (isinstance(chat_id, str) and AGENT_ID.match(chat_id) and isinstance(agent_id, str) and AGENT_ID.match(agent_id)):
+        return None, None
+    for p in sorted(profiles, key=lambda p: p.key != profile_key):
+        for path in p.path.glob(f"projects/*/{chat_id}/subagents/agent-{agent_id}.jsonl"):
+            return p, path
+    return None, None
+
+
+def agent_run(home, extra_dirs, chat_id, agent_id, profile_key=None):
+    """(ok, message, title, Markdown) of a chat's subagent (agent_run_markdown)."""
+    profiles = discover_profiles(home, extra_dirs)
+    profile, path = find_agent_transcript(profiles, chat_id, agent_id, profile_key)
+    if path is None:
+        return False, "Can't find that subagent's transcript", None, None
+    meta = read_json(path.with_name(f"agent-{agent_id}.meta.json"))
+    parent = path.parent.parent.parent / f"{chat_id}.jsonl"
+    try:
+        name, cwd, _ = read_chat_info(parent, parent.stat().st_size)
+    except OSError:
+        name, cwd = "", ""
+    title, markdown = agent_run_markdown(path, meta if isinstance(meta, dict) else {}, name, cwd, home)
+    return True, f"The run of “{title}”", title, markdown
 
 
 # ---------------------------------------------------------------- what a chat is doing, and what it changed
@@ -3475,6 +3778,7 @@ USAGE = """usage: claude_status.py [--config-dir DIR]... [--done-hours H] [--rec
        claude_status.py --dismiss SESSION_ID | --undismiss-all
        claude_status.py --end SESSION_ID [--profile PROFILE] [--busy] [--config-dir DIR]...
        claude_status.py --interrupt SESSION_ID [--profile PROFILE] [--config-dir DIR]...
+       claude_status.py --agent-run AGENT_ID --chat CHAT_ID [--profile PROFILE] [--config-dir DIR]...
   --config-dir DIR  extra Claude config dir (repeatable)
   --done-hours H    keep finished background jobs listed for H hours (default 24, 0 = never)
   --recent N        list each account's N latest other chats (default 5, 0 = none)
@@ -3486,6 +3790,7 @@ USAGE = """usage: claude_status.py [--config-dir DIR]... [--done-hours H] [--rec
   --end ID          stop a chat in a terminal or VS Code (it's kept); only an idle one
                     unless --busy (you were told it's working or waiting)
   --interrupt ID    interrupt a working chat in tmux (Ctrl+C in its pane)
+  --agent-run ID    a subagent's whole run (of the chat --chat), as Markdown in the JSON
   --instance ID     this copy of the widget (with --interval-ms N, how often it checks):
                     says whether it sends the notifications, and the shared settings"""
 
@@ -3497,6 +3802,7 @@ def main(argv=None):
     config_dirs, with_tokens, pretty, done_hours = [], True, False, KEEP_DONE_HOURS
     recent, remote, dismiss, undismiss = RECENT_CHATS, False, None, False
     end, interrupt, profile_key, busy, instance, interval_ms = None, None, None, False, None, 2000
+    agent_run_id, chat_id = None, None
     while args:
         arg = args.pop(0)
         if arg == "--config-dir" and args:
@@ -3505,6 +3811,10 @@ def main(argv=None):
             end = args.pop(0)
         elif arg == "--interrupt" and args:
             interrupt = args.pop(0)
+        elif arg == "--agent-run" and args:
+            agent_run_id = args.pop(0)
+        elif arg == "--chat" and args:
+            chat_id = args.pop(0)
         elif arg == "--busy":
             busy = True
         elif arg == "--profile" and args:
@@ -3543,7 +3853,15 @@ def main(argv=None):
     os.umask(0o077)  # cache files are private to the user
     home = Path.home()
     cache_root = cache_dir(home)
-    if end is not None or interrupt is not None:
+    if (agent_run_id is None) != (chat_id is None):
+        sys.exit(USAGE)
+    if agent_run_id is not None:
+        try:
+            ok, message, title, markdown = agent_run(home, config_dirs, chat_id, agent_run_id, profile_key)
+        except Exception as exc:
+            ok, message, title, markdown = False, f"{type(exc).__name__}: {exc}", None, None
+        result = {"ok": ok, "message": message, "title": title, "markdown": markdown}
+    elif end is not None or interrupt is not None:
         try:
             ok, message = (stop_chat_by_id(home, config_dirs, end, profile_key, busy) if end is not None
                            else interrupt_chat_by_id(home, config_dirs, interrupt, profile_key))

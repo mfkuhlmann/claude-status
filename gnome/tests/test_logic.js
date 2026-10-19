@@ -333,6 +333,27 @@ test('chat recap', () => {
     eq(L.canPeek(session('x', 'idle', {stats: {prompts: 0, toolCalls: 0, tools: [], tokens: {total: 0}, workedMs: 0}}), ''), false);
 });
 
+test('subagent details', () => {
+    const a = {id: 'a1', type: 'Explore', description: 'Find the parser', status: 'running', activity: 'Grep: def parse',
+        task: 'Find it', steps: ['Read: a.py', 'Grep: def parse'], report: '', toolCalls: 12, tokens: 45210};
+    eq(L.agentKey('lab|.claude-work/s1/live', a), 'lab|.claude-work/s1/live|a1');
+    eq(L.agentSummaryText(a), '12 tool calls · 45.2k tokens');
+    eq(L.agentSummaryText({toolCalls: 1, tokens: null}), '1 tool call');
+    eq(L.agentSummaryText({toolCalls: null, tokens: 0}), '', 'nothing known');
+    eq(L.agentStepLines(a), [{text: '▸ Read: a.py', current: false}, {text: '▸ Grep: def parse', current: true}]);
+    eq(L.agentStepLines({...a, status: 'done'}).map(l => l.current), [false, false], 'a finished one is on none');
+    eq(L.agentStepLines({status: 'running'}), [], 'no steps yet');
+    eq(L.agentTooltip(a, false), ['Find the parser', 'Grep: def parse\n\nClick to show its task, its last steps and its report.']);
+    eq(L.agentTooltip({type: 'Explore', activity: ''}, true), ['Explore', 'Click to hide its task, its last steps and its report.']);
+    eq(L.agentRunTooltip('')[1].endsWith("Claude Code itself can't open a subagent from outside."), true);
+    eq(L.agentRunTooltip('lab')[1].endsWith('\nFetched from lab over ssh.'), true);
+    const s = session('s1', 'working', {chatId: 'c1', profileDir: '.claude-work'});
+    eq(L.agentRunCommand(s, a), {script: 'jump.py', args: ['--agent-run', 'a1', '--chat', 'c1', '--profile', '.claude-work']});
+    eq(L.agentRunCommand(s, a, 'lab'), {script: 'remote.py', args: ['--agent-run', 'lab', 'c1', 'a1', '.claude-work']});
+    eq(L.agentRunCommand({sessionId: 's2', chatId: '', profileDir: ''}, a),
+        {script: 'jump.py', args: ['--agent-run', 'a1', '--chat', 's2']}, 'no chat id: the session id');
+});
+
 print(`${count - failures}/${count} passed`);
 if (failures)
     System.exit(1);

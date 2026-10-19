@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **What each subagent did:** click an agent in a chat's agent tree for its task, its tool calls and tokens so far, its last steps and, once it's done, the report it handed back. **Open the whole run** shows everything it did as a Markdown file in your app for those: each step with its tool calls and the start of their results, messages the chat sent it, and its report (fetched over ssh for an SSH host). Claude Code can't open a subagent itself, so this is read-only.
+- An agent whose transcript ends with a very big tool result no longer shows as *starting…*: the widget reads further back until it knows what the agent did.
+- The GNOME extension has it too.
+
 ## 1.9.1 (2026-10-18)
 
 - **Chats that need you, on your phone (Plasma):** while you're away (the screen locked for the minutes set under *While you're away*), a chat that needs you is sent to your phone with KDE Connect, and if you like a chat that finishes a turn too. Settings → *Phone*: pick the phone (or every reachable one) and *Send a test*. Off until you turn it on. Back at your desk, the summary comes as before.

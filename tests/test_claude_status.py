@@ -1,4 +1,6 @@
+import contextlib
 import importlib.util
+import io
 import json
 import ast
 import os
@@ -10,6 +12,7 @@ import time
 import unittest
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
 sys.dont_write_bytecode = True  # keep __pycache__ out of the plasmoid package
 ROOT = Path(__file__).resolve().parent.parent
@@ -544,6 +547,67 @@ class AgentTests(Fixture):
         a = next(s for s in self.group(self.collect(with_tokens=False), "work")["sessions"] if s["sessionId"] == "busy")["agents"]
         self.assertEqual(next(t for t in a["tree"] if t["id"] == "a5")["model"], "Haiku 4.5")
 
+    def tree_of(self, sid="busy", result=None):
+        work = self.group(result or self.collect(with_tokens=False), "work")
+        return {t["id"]: t for t in next(s for s in work["sessions"] if s["sessionId"] == sid)["agents"]["tree"]}
+
+    def test_task_steps_and_report(self):
+        tool = lambda i, name, inp: {"type": "tool_use", "id": i, "name": name, "input": inp}
+        lines = [self.line("user", "Find where `parse` is defined.\nLook in src/.")]
+        for n in range(8):
+            lines += [self.line("assistant", [tool(f"toolu_{n}", "Read", {"file_path": f"/w/proj/f{n}.py"})], "tool_use"),
+                      self.line("user", [{"type": "tool_result", "tool_use_id": f"toolu_{n}", "content": "x"}])]
+        lines += [self.line("assistant", [tool("toolu_h", "SubagentHandback", {"message": "## Found\n**parser.py** has it"})]),
+                  self.line("user", [{"type": "tool_result", "tool_use_id": "toolu_h", "content": "ok"}])]
+        self.agent("busy", "a6", lines, description="Find parse")
+        write(self.home / ".claude-work/projects/-w-proj/busy.jsonl", "")  # the chat itself
+        tree = self.tree_of()
+        a6 = tree["a6"]
+        self.assertEqual(a6["task"], "Find where parse is defined.\nLook in src/.")
+        self.assertEqual(a6["steps"], [f"Read: f{n}.py" for n in range(2, 8)])  # the last six, oldest first
+        self.assertEqual(a6["report"], "Found\nparser.py has it")
+        self.assertEqual((a6["toolCalls"], a6["tokens"]), (8, 0))  # the handback isn't a step
+        self.assertEqual(tree["a1"]["report"], "Found it in parser.py\nmore")  # a final answer
+        self.assertEqual((tree["a2"]["report"], tree["a2"]["steps"]), ("", ["Agent: check flaky test", "Bash: pytest -x tests/ echo"]))
+
+    def test_a_forks_task_is_its_directive(self):
+        tool = {"type": "tool_use", "id": "toolu_p", "name": "Agent", "input": {"description": "GNOME port"}}
+        rules = "<fork-boilerplate>\nYou are a worker fork.\n</fork-boilerplate>\n\nYour directive: Port the stats to GNOME."
+        self.agent("busy", "a7", [self.line("assistant", [tool], "tool_use"),  # a copy of the call that started it
+                                  self.line("user", [{"type": "tool_result", "tool_use_id": "toolu_p", "content": None},
+                                                     {"type": "text", "text": rules}])])
+        self.assertEqual(self.tree_of()["a7"]["task"], "Port the stats to GNOME.")
+
+    def test_big_results_at_the_end(self):
+        # The end of a transcript can be one huge tool result: read further back
+        big = "x" * (cs.AGENT_TAIL_BYTES + 1000)
+        tool = {"type": "tool_use", "id": "toolu_b", "name": "Bash", "input": {"command": "seq 60"}}
+        self.agent("busy", "a8", [self.line("user", "count"), self.line("assistant", [tool], "tool_use"),
+                                  self.line("user", [{"type": "tool_result", "tool_use_id": "toolu_b", "content": big}]),
+                                  {"type": "attachment", "isSidechain": True, "attachment": {"blob": big}}])
+        a8 = self.tree_of()["a8"]
+        self.assertEqual((a8["activity"], a8["steps"]), ("Bash: seq 60 (thinking about the result)", ["Bash: seq 60"]))
+
+    def test_details_have_a_cache_file_of_their_own(self):
+        # Older copies of the script (a VS Code extension not updated yet)
+        # rewrite agents.json as they know it: the details aren't in it
+        self.collect(with_tokens=False)
+        self.assertEqual(set(json.loads((self.cache / "agents.json").read_text())), {"version", "files", "parents"})
+        (self.cache / "agent-details.json").unlink()
+        calls = []
+        real = cs.agent_progress
+        cs.agent_progress = lambda path: calls.append(path.name) or real(path)
+        try:
+            tree = self.tree_of()  # read again once
+            self.assertEqual(sorted(calls), ["agent-a1.jsonl", "agent-a2.jsonl", "agent-a3.jsonl"])
+            self.assertEqual(tree["a1"]["task"], "find the parser")
+            calls.clear()
+            self.assertEqual(self.tree_of()["a3"]["task"], "look at flaky test")
+            self.assertEqual(calls, [])
+        finally:
+            cs.agent_progress = real
+
+
     def test_model_label(self):
         for model, label in (("claude-opus-5-5", "Opus 5.5"), ("claude-opus-5-5[1m]", "Opus 5.5"),
                              ("claude-haiku-4-5-20251001", "Haiku 4.5"), ("claude-3-5-sonnet-20241022", "Sonnet 3.5"),
@@ -554,6 +618,94 @@ class AgentTests(Fixture):
         self.assertEqual(cs.describe_tool({"name": "Edit", "input": {"file_path": "/a/b/parser.py"}}), "Edit: parser.py")
         self.assertEqual(cs.describe_tool({"name": "mcp__github__create_issue", "input": {}}), "github: create_issue")
         self.assertEqual(cs.describe_tool({"name": "TodoWrite", "input": {"todos": []}}), "TodoWrite")
+
+
+class AgentRunTests(Fixture):
+    """A subagent's whole run as Markdown (agent_run: what the widget opens)."""
+
+    def setUp(self):
+        super().setUp()
+        d = self.home / ".claude-work/projects/-w-proj"
+        write(d / "chat1.jsonl", json.dumps({"type": "user", "cwd": str(self.home / "repos/app"), "sessionId": "chat1",
+                                             "timestamp": iso(self.now - 100), "message": {"content": "Fix the parser"}}) + "\n")
+        self.dir = d / "chat1/subagents"
+        write(self.dir / "agent-ag1.meta.json", {"agentType": "Explore", "description": "Find parse", "requestShape": "background"})
+
+    def line(self, kind, content, ts, **kw):
+        return {"type": kind, "timestamp": iso(self.now - 60 + ts), "isSidechain": True,
+                "message": {"role": kind, "content": content, "model": "claude-haiku-5-5"}, **kw}
+
+    def run_of(self, lines, agent="ag1", chat="chat1"):
+        write(self.dir / f"agent-{agent}.jsonl", "".join(json.dumps(l) + "\n" for l in lines))
+        return cs.agent_run(self.home, [], chat, agent, ".claude-work")
+
+    def test_the_whole_run(self):
+        tool = lambda i, name, inp: {"type": "tool_use", "id": i, "name": name, "input": inp}
+        result = lambda i, content, **kw: {"type": "tool_result", "tool_use_id": i, "content": content, **kw}
+        listing = "\n".join(["```"] + [f"line {n}" for n in range(99)])
+        ok, message, title, md = self.run_of([
+            self.line("user", "Find `parse` in src/", 0),
+            self.line("user", "<system-reminder>\nReport through SubagentHandback.", 0, isMeta=True),
+            self.line("assistant", [{"type": "thinking", "thinking": "", "signature": "x"}], 1),
+            self.line("assistant", [{"type": "thinking", "thinking": "Let me grep."}], 1),
+            self.line("assistant", [{"type": "text", "text": "Looking."}], 2),
+            self.line("assistant", [tool("t1", "Bash", {"command": "grep -rn parse src", "description": "Search"})], 3),
+            self.line("user", [result("t1", "src/a.py:1:def parse")], 4),
+            self.line("user", "The coordinator sent a message:\nAlso check tests/", 5, isMeta=True, origin={"kind": "coordinator"}),
+            self.line("assistant", [tool("t2", "Edit", {"file_path": "/w/a.py", "old_string": "a", "new_string": "b"})], 6),
+            self.line("user", [result("t2", [{"type": "text", "text": "File not found"}], is_error=True)], 7),
+            self.line("assistant", [tool("t3", "Read", {"file_path": "/w/b.py"})], 8),
+            self.line("user", [result("t3", listing)], 9),
+            self.line("assistant", [tool("t4", "SubagentHandback", {"message": "## Done\nIt's in `src/a.py`"})], 70),
+            self.line("user", [result("t4", "ok")], 71),
+        ])
+        self.assertEqual((ok, message, title), (True, "The run of “Find parse”", "Find parse"))
+        head = md.split("## Task")[0]
+        self.assertIn("# Find parse\n\nExplore agent · Haiku 5.5 · in the background · done after 1m 11s · 3 tool calls\n", head)
+        self.assertIn("A subagent of “Fix the parser” · in ~/repos/app · started ", head)
+        self.assertIn("## Task\n\nFind `parse` in src/\n\n## Steps", md)
+        self.assertNotIn("system-reminder", md)
+        self.assertIn("> *Thinking:* Let me grep.", md)
+        self.assertIn("· Claude**\n\nLooking.", md)
+        self.assertIn("**▸ Bash** · Search\n\n```bash\ngrep -rn parse src\n```\n\n*Result:*\n\n```\nsrc/a.py:1:def parse\n```", md)
+        self.assertIn("· Message from the main chat**\n\n> The coordinator sent a message:\n> Also check tests/", md)
+        self.assertIn("**▸ Edit** `/w/a.py`\n\n```diff\n- a\n+ b\n```\n\n*Error:*\n\n```\nFile not found\n```", md)
+        # a long result is cut short, in a fence its own backticks can't close
+        self.assertIn("````\n```\nline 0\n", md)
+        self.assertIn(f"line {cs.RUN_RESULT_LINES - 2}\n````\n*… {100 - cs.RUN_RESULT_LINES} more lines*", md)
+        self.assertTrue(md.split("## Report\n\n")[1].startswith("## Done\nIt's in `src/a.py`\n\n---\n*Transcript: `"))
+
+    def test_still_running(self):
+        ok, _, _, md = self.run_of([self.line("user", "Count", 0),
+                                    self.line("assistant", [{"type": "tool_use", "id": "t", "name": "Bash",
+                                                             "input": {"command": "seq 9"}}], 1)])
+        self.assertTrue(ok)
+        self.assertIn("· not finished · last step: Bash: seq 9 · 1 tool call", md)
+        self.assertIn("## Report\n\n*None yet: it hadn't finished at ", md)
+
+    def test_a_fork(self):
+        rules = "<fork-boilerplate>\nYou are a worker fork.\n</fork-boilerplate>\n\nYour directive: Port it."
+        _, _, _, md = self.run_of([
+            self.line("assistant", [{"type": "tool_use", "id": "p", "name": "Agent", "input": {"prompt": "Port it."}}], 0),
+            self.line("user", [{"type": "tool_result", "tool_use_id": "p", "content": None}, {"type": "text", "text": rules}], 1)])
+        self.assertIn("## Task\n\nPort it.\n\n## Steps\n\n*None yet.*", md)  # not the call that started it
+        self.assertIn("· 0 tool calls", md)
+
+    def test_unknown_or_unsafe_ids(self):
+        self.assertEqual(cs.agent_run(self.home, [], "chat1", "nope"), (False, "Can't find that subagent's transcript", None, None))
+        for chat, agent in (("chat1", "../x"), ("*", "ag1"), ("chat1", "a*")):
+            self.assertFalse(cs.agent_run(self.home, [], chat, agent)[0], (chat, agent))
+
+    def test_command_line(self):
+        self.run_of([self.line("user", "Count", 0)])
+        out = io.StringIO()
+        with mock.patch.object(cs.Path, "home", return_value=self.home), contextlib.redirect_stdout(out):
+            cs.main(["--agent-run", "ag1", "--chat", "chat1", "--profile", ".claude-work"])
+        answer = json.loads(out.getvalue())
+        self.assertEqual((answer["ok"], answer["title"]), (True, "Find parse"))
+        self.assertTrue(answer["markdown"].startswith("# Find parse\n"))
+        with self.assertRaises(SystemExit):
+            cs.main(["--agent-run", "ag1"])  # which chat's?
 
 
 class RecentProjectTests(Fixture):

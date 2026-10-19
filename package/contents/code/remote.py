@@ -9,6 +9,7 @@
     python3 -I remote.py --interrupt HOST SESSION_ID [PROFILE]      interrupt a working chat in tmux there
     python3 -I remote.py --dismiss HOST SESSION_ID  hide a finished session of HOST
     python3 -I remote.py --undismiss-all HOST
+    python3 -I remote.py --agent-run HOST CHAT_ID AGENT_ID [PROFILE] [--no-open]   a subagent's run there, as a Markdown file here
 
 --status runs claude_status.py on HOST: the script goes to `python3 -I -` on
 the host's stdin, so nothing is installed there (it keeps its caches in the
@@ -242,6 +243,37 @@ def interrupt(host, session_id, profile=None):
     return run_status_script(host, ["--interrupt", session_id] + (["--profile", profile] if profile else []))
 
 
+def agent_run(host, chat_id, agent_id, profile=None, open_it=True):
+    """A chat's subagent on host: its run (claude_status.agent_run there),
+    saved here as Markdown and opened, as jump.show_agent_run does for one
+    here: (ok, message, file)."""
+    host = check_host(host)
+    import jump
+    args = ["--remote", "--agent-run", agent_id, "--chat", chat_id] + (["--profile", profile] if profile else [])
+    script = (HERE / "claude_status.py").read_text(encoding="utf-8")
+    command = ["ssh", *ssh_options(), "-T", host, "python3 -I - " + " ".join(shlex.quote(a) for a in args)]
+    try:
+        r = subprocess.run(command, input=script, capture_output=True, text=True, timeout=RUN_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return False, f"{host} didn't answer within {RUN_TIMEOUT} s", None
+    except OSError as exc:
+        return False, f"Can't run ssh: {exc}", None
+    # The JSON is one line after the marker; the run inside it may mention the marker too
+    mark = r.stdout.rfind("\n" + cs.REMOTE_MARK)
+    if mark < 0:
+        return False, explain(host, r.returncode, r.stderr), None
+    try:
+        answer = json.loads(r.stdout[mark + 1 + len(cs.REMOTE_MARK):])
+    except ValueError:
+        return False, f"{host} sent an answer the widget can't read.", None
+    if not answer.get("ok") or not isinstance(answer.get("markdown"), str):
+        return False, f"{host}: {answer.get('message') or 'no such subagent'}", None
+    path = jump.save_run(Path.home(), answer.get("title"), agent_id, answer["markdown"])
+    if open_it and not jump.open_file(path):
+        return False, f"Saved it as {path}, but there's no xdg-open to open it with", str(path)
+    return True, f"{answer.get('message')} on {host}", str(path)
+
+
 def open_remote(host, command):
     """A local terminal running command on host (ssh -t: Claude needs a terminal).
     Not in batch mode: ssh may ask for a password or host key there."""
@@ -289,6 +321,9 @@ def main(argv=None):
         elif action == "--interrupt" and len(args) in (2, 3):
             ok, message = interrupt(*args)
             out = {"ok": ok, "message": message}
+        elif action == "--agent-run" and len([a for a in args if a != "--no-open"]) in (3, 4):
+            ok, message, path = agent_run(*[a for a in args if a != "--no-open"], open_it="--no-open" not in args)
+            out = {"ok": ok, "message": message, **({"file": path} if path else {})}
         elif action == "--undismiss-all" and len(args) == 1:
             ok, message = dismiss(args[0])
             out = {"ok": ok, "message": message}

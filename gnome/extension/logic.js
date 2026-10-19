@@ -699,6 +699,49 @@ export function changesTooltip(changes, remoteHost) {
     return ['Files this chat changed', lines.join('\n')];
 }
 
+// ---------------------------------------------------------------- subagents
+
+// Popup state of one subagent (unfolded or not): by its row's key and its id
+export function agentKey(rowKey, agent) {
+    return `${rowKey}|${agent.id}`;
+}
+
+// "12 tool calls · 45.2k tokens": what's known of it so far
+export function agentSummaryText(a) {
+    const parts = [];
+    if (a.toolCalls !== null && a.toolCalls !== undefined)
+        parts.push(plural(a.toolCalls, '%1 tool call', '%1 tool calls'));
+    if (a.tokens)
+        parts.push(fmt('%1 tokens', formatTokens(a.tokens)));
+    return parts.join(' · ');
+}
+
+// Its last steps, oldest first ({text, current}); a running one is on the newest
+export function agentStepLines(a) {
+    const steps = a.steps || [];
+    return steps.map((step, i) => ({text: `▸ ${step}`, current: a.status === 'running' && i === steps.length - 1}));
+}
+
+// The tooltip of its line, which unfolds it
+export function agentTooltip(a, open) {
+    const what = a.activity ? `${a.activity}\n\n` : '';
+    return [a.description || a.type, what + fmt('Click to %1 its task, its last steps and its report.', open ? 'hide' : 'show')];
+}
+
+export function agentRunTooltip(remoteHost) {
+    const text = "Its task, every step with the start of each result, and its report, as a Markdown file in your app for those. Claude Code itself can't open a subagent from outside.";
+    return ['Open the whole run', remoteHost ? `${text}\n${fmt('Fetched from %1 over ssh.', remoteHost)}` : text];
+}
+
+// The helper that saves a subagent's whole run as Markdown and opens it
+// ({script, args}): jump.py here, remote.py for a chat on an SSH host
+export function agentRunCommand(s, a, remoteHost = '') {
+    const chat = s.chatId || s.sessionId;
+    if (remoteHost)
+        return {script: 'remote.py', args: ['--agent-run', remoteHost, chat, a.id, ...s.profileDir ? [s.profileDir] : []]};
+    return {script: 'jump.py', args: ['--agent-run', a.id, '--chat', chat, ...s.profileDir ? ['--profile', s.profileDir] : []]};
+}
+
 // ---------------------------------------------------------------- usage forecast
 
 // Where the bar's lighter part ends: the usage when the window resets, at your pace
