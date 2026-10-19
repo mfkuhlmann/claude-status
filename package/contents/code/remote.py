@@ -10,13 +10,18 @@
     python3 -I remote.py --dismiss HOST SESSION_ID  hide a finished session of HOST
     python3 -I remote.py --undismiss-all HOST
     python3 -I remote.py --agent-run HOST CHAT_ID AGENT_ID [PROFILE] [--no-open]   a subagent's run there, as a Markdown file here
+    python3 -I remote.py --share HOST CHAT_ID [PROFILE]    share a chat with every account there (from PROFILE's copy)
+    python3 -I remote.py --continue HOST CHAT_ID PROFILE [--print-command]   share it with PROFILE there if needed,
+                                                    and reopen it there in a terminal (or print the command)
+    python3 -I remote.py --unshare HOST CHAT_ID PROFILE    keep a shared chat only on PROFILE there
 
 --status runs claude_status.py on HOST: the script goes to `python3 -I -` on
 the host's stdin, so nothing is installed there (it keeps its caches in the
-host's ~/.cache/claude-widget, like here). SSH runs in batch mode, so it never
-asks for a password or a host key: log in once in a terminal for that. One
-connection per host is kept open for a few minutes (ControlMaster), so polls
-are quick even through a jump host. Prints one JSON line.
+host's ~/.cache/claude-widget, like here). Sharing sends sharing.py the same
+way, with claude_status.py in front (host_script). SSH runs in batch mode, so
+it never asks for a password or a host key: log in once in a terminal for
+that. One connection per host is kept open for a few minutes (ControlMaster),
+so polls are quick even through a jump host. Prints one JSON line.
 """
 
 import glob
@@ -140,6 +145,19 @@ def ssh_options(batch=True):
     return opts
 
 
+def host_script(name="claude_status.py"):
+    """What runs on a host, on python3's stdin: claude_status.py, or another
+    script of this folder that imports it (sharing.py), after claude_status.py
+    loaded as that module."""
+    status = (HERE / "claude_status.py").read_text(encoding="utf-8")
+    if name == "claude_status.py":
+        return status
+    return ("import sys, types\n"
+            "module = sys.modules['claude_status'] = types.ModuleType('claude_status')\n"
+            f"exec(compile({status!r}, 'claude_status.py', 'exec'), module.__dict__)\n"
+            + (HERE / name).read_text(encoding="utf-8"))
+
+
 def check_host(host):
     if not isinstance(host, str) or not HOST_NAME.match(host):
         raise ValueError(f"not a host name: {host!r}")
@@ -175,11 +193,10 @@ def status(host, done_hours=None, recent=None, tokens=True):
         args += ["--recent", str(recent)]
     if not tokens:
         args.append("--no-tokens")
-    script = (HERE / "claude_status.py").read_text(encoding="utf-8")
     command = ["ssh", *ssh_options(), "-T", host, "python3 -I - " + " ".join(shlex.quote(a) for a in args)]
     started = time.time()
     try:
-        r = subprocess.run(command, input=script, capture_output=True, text=True, timeout=STATUS_TIMEOUT)
+        r = subprocess.run(command, input=host_script(), capture_output=True, text=True, timeout=STATUS_TIMEOUT)
     except subprocess.TimeoutExpired:
         return {"ok": False, "host": host, "error": f"{host} didn't answer within {STATUS_TIMEOUT} s."}
     except OSError as exc:
@@ -213,18 +230,25 @@ def run(host, command, stdin=None):
     return True, lines[-1] if lines else "Done"
 
 
-def run_status_script(host, args):
-    """Run claude_status.py on host with args (it goes to python3's stdin, as
-    for --status): (ok, its message)."""
-    script = (HERE / "claude_status.py").read_text(encoding="utf-8")
-    ok, message = run(host, "python3 -I - --remote " + " ".join(shlex.quote(a) for a in args), stdin=script)
+def host_answer(host, args, name="claude_status.py"):
+    """Run a script of this folder on host with args (it goes to python3's
+    stdin, as for --status): its answer, {"ok", "message", ...}."""
+    command = "python3 -I - --remote " + " ".join(shlex.quote(a) for a in args)
+    ok, message = run(host, command, stdin=host_script(name))
     if ok and cs.REMOTE_MARK in message:
         try:
             answer = json.loads(message.split(cs.REMOTE_MARK, 1)[1])
-            return bool(answer.get("ok")), answer.get("message") or ""
         except ValueError:
-            pass
-    return ok, message
+            answer = None
+        if isinstance(answer, dict):
+            return {**answer, "ok": bool(answer.get("ok")), "message": answer.get("message") or ""}
+    return {"ok": ok, "message": message}
+
+
+def run_status_script(host, args):
+    """Run claude_status.py on host with args: (ok, its message)."""
+    answer = host_answer(host, args)
+    return answer["ok"], answer["message"]
 
 
 def dismiss(host, session_id=None):
@@ -250,10 +274,9 @@ def agent_run(host, chat_id, agent_id, profile=None, open_it=True):
     host = check_host(host)
     import jump
     args = ["--remote", "--agent-run", agent_id, "--chat", chat_id] + (["--profile", profile] if profile else [])
-    script = (HERE / "claude_status.py").read_text(encoding="utf-8")
     command = ["ssh", *ssh_options(), "-T", host, "python3 -I - " + " ".join(shlex.quote(a) for a in args)]
     try:
-        r = subprocess.run(command, input=script, capture_output=True, text=True, timeout=RUN_TIMEOUT)
+        r = subprocess.run(command, input=host_script(), capture_output=True, text=True, timeout=RUN_TIMEOUT)
     except subprocess.TimeoutExpired:
         return False, f"{host} didn't answer within {RUN_TIMEOUT} s", None
     except OSError as exc:
@@ -272,6 +295,35 @@ def agent_run(host, chat_id, agent_id, profile=None, open_it=True):
     if open_it and not jump.open_file(path):
         return False, f"Saved it as {path}, but there's no xdg-open to open it with", str(path)
     return True, f"{answer.get('message')} on {host}", str(path)
+
+
+def share(host, chat_id, profile=None):
+    """Share a chat with every account on host (sharing.py there), from
+    profile's copy if given."""
+    answer = host_answer(host, ["--share", chat_id] + (["--profile", profile] if profile else []), "sharing.py")
+    return answer["ok"], answer["message"]
+
+
+def unshare(host, chat_id, profile):
+    """Keep a shared chat of host only on profile; the host's other accounts lose it."""
+    answer = host_answer(host, ["--unshare", chat_id, "--profile", profile], "sharing.py")
+    return answer["ok"], answer["message"]
+
+
+def continue_on(host, chat_id, profile, open_it=True):
+    """Continue a chat of host on another account there: shared with it if
+    needed, then reopened in a local terminal (ssh -t), or, without open_it,
+    the command that reopens it there: (ok, message, command)."""
+    answer = host_answer(host, ["--continue", chat_id, "--profile", profile], "sharing.py")
+    if not answer["ok"]:
+        return False, answer["message"], None
+    command = answer.get("command")
+    if not isinstance(command, str) or not command:
+        return False, f"{host} didn't say how to reopen it", None
+    if not open_it:
+        return True, answer["message"], command
+    ok, message = open_remote(host, command)
+    return ok, message, command
 
 
 def open_remote(host, command):
@@ -324,6 +376,16 @@ def main(argv=None):
         elif action == "--agent-run" and len([a for a in args if a != "--no-open"]) in (3, 4):
             ok, message, path = agent_run(*[a for a in args if a != "--no-open"], open_it="--no-open" not in args)
             out = {"ok": ok, "message": message, **({"file": path} if path else {})}
+        elif action == "--share" and len(args) in (2, 3):
+            ok, message = share(*args)
+            out = {"ok": ok, "message": message}
+        elif action == "--unshare" and len(args) == 3:
+            ok, message = unshare(*args)
+            out = {"ok": ok, "message": message}
+        elif action == "--continue" and len([a for a in args if a != "--print-command"]) == 3:
+            printing = "--print-command" in args
+            ok, message, command = continue_on(*[a for a in args if a != "--print-command"], open_it=not printing)
+            out = {"ok": ok, "message": message, **({"command": command} if command and printing else {})}
         elif action == "--undismiss-all" and len(args) == 1:
             ok, message = dismiss(args[0])
             out = {"ok": ok, "message": message}

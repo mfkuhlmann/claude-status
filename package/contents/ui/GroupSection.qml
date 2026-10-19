@@ -484,7 +484,7 @@ ColumnLayout {
                 }
                 PlasmaComponents3.ToolButton {
                     id: recentShare
-                    visible: root.canShareChats && !section.remoteHost && root.shareAccounts.length >= 2
+                    visible: root.shareAccountsOf(section.remoteHost).length >= 2
                     opacity: recentHover.hovered ? 1 : 0
                     icon.name: "document-share"
                     display: PlasmaComponents3.AbstractButton.IconOnly
@@ -493,13 +493,13 @@ ColumnLayout {
                     Layout.preferredWidth: Layout.preferredHeight
                     onClicked: root.openShareMenu(recentShare, {
                         chatId: recentLine.chat.sessionId, name: recentLine.chat.name,
-                        profileDir: recentLine.chat.profileDir, shared: recentLine.chat.shared
+                        profileDir: recentLine.chat.profileDir, shared: recentLine.chat.shared, host: section.remoteHost
                     }, recentLine.rowKey)
 
                     PlasmaCore.ToolTipArea {
                         anchors.fill: parent
                         mainText: i18n("Continue on another account")
-                        subText: i18n("Share this chat with your other accounts and pick it up there, or keep it on one account only.")
+                        subText: root.shareHint(section.remoteHost)
                     }
                 }
             }

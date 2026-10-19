@@ -334,5 +334,103 @@ class ActionTests(FakeSSH):
             self.assertIsNone(remote.control_dir())
 
 
+class SharingTests(FakeSSH):
+    """Sharing a chat between the host's accounts: sharing.py runs there, sent
+    with claude_status.py like the status script."""
+
+    CHAT = "9a8b7c6d-0000-4000-8000-000000000002"
+
+    def setUp(self):
+        super().setUp()
+        self.work = self.fake_home / ".claude-work"
+        (self.work / "sessions").mkdir(parents=True)
+        (self.work / ".claude.json").write_text(json.dumps({"oauthAccount": {"accountUuid": "w"}}))
+        self.chat = self.fake_home / ".claude/projects/-srv-x" / f"{self.CHAT}.jsonl"
+        self.chat.parent.mkdir(parents=True)
+        self.chat.write_text(json.dumps({"type": "user", "cwd": "/srv/x", "sessionId": self.CHAT}) + "\n")
+        self.there = self.work / "projects/-srv-x" / f"{self.CHAT}.jsonl"
+        self.store = self.fake_home / ".local/share/claude-status/shared-chats/-srv-x"
+        self.claude = self.fake_home / ".local/bin/claude"
+        self.claude.parent.mkdir(parents=True)
+        self.claude.write_text("#!/bin/sh\n")
+        self.claude.chmod(0o755)
+
+    def open_in_a_session(self):
+        proc = subprocess.Popen([sys.executable, "-c", "print('ready', flush=True); import time; time.sleep(60)"],
+                                stdout=subprocess.PIPE, text=True)
+        self.addCleanup(proc.stdout.close)
+        self.addCleanup(lambda: (proc.kill(), proc.wait()) if proc.poll() is None else None)
+        self.assertEqual(proc.stdout.readline().strip(), "ready")
+        (self.fake_home / f".claude/sessions/{proc.pid}.json").write_text(json.dumps(
+            {"pid": proc.pid, "procStart": cs.proc_start_time(proc.pid), "sessionId": self.CHAT,
+             "cwd": "/srv/x", "kind": "interactive", "status": "idle"}))
+
+    def continue_there(self, *args, **kw):
+        import jump
+        opened, old = [], jump.open_terminal
+        jump.open_terminal = lambda cwd, cmd: opened.append(cmd) or True
+        try:
+            return remote.continue_on("lab", self.CHAT, *args, **kw), opened
+        finally:
+            jump.open_terminal = old
+
+    def test_the_hosts_accounts_can_share(self):
+        result = remote.status("lab", tokens=False)["result"]
+        self.assertTrue(result["canShare"])
+        self.assertEqual(sorted(g["shareProfile"] for g in result["groups"]), [".claude", ".claude-work"])
+
+    def test_share_then_keep_only_on_one_account(self):
+        self.assertEqual(remote.share("lab", self.CHAT), (True, "Chat shared: it's now on default, work."))
+        self.assertEqual(self.calls()[-1], ["lab", f"python3 -I - --remote --share {self.CHAT}"])
+        self.assertTrue(os.path.samefile(self.there, self.chat))
+        self.assertTrue(os.path.samefile(self.store / f"{self.CHAT}.jsonl", self.chat))
+        shared = [c for g in remote.status("lab", tokens=False)["result"]["groups"] for c in g["recent"]]
+        self.assertTrue(shared and all(c["shared"] for c in shared))
+        self.assertEqual(remote.unshare("lab", self.CHAT, ".claude"),
+                         (True, "This chat is now a normal chat of default again. Removed from work."))
+        self.assertEqual(self.calls()[-1], ["lab", f"python3 -I - --remote --unshare {self.CHAT} --profile .claude"])
+        self.assertFalse(os.path.lexists(self.there))
+        self.assertFalse(self.store.exists())
+        self.assertEqual(os.stat(self.chat).st_nlink, 1)
+
+    def test_continue_on_another_account_there(self):
+        (ok, message, command), opened = self.continue_there(".claude-work")
+        self.assertEqual((ok, message), (True, "Opened a terminal on lab"))
+        self.assertEqual(self.calls()[0], ["lab", f"python3 -I - --remote --continue {self.CHAT} --profile .claude-work"])
+        self.assertTrue(os.path.samefile(self.there, self.chat))  # shared with work only
+        self.assertTrue(command.startswith("cd /srv/x 2>/dev/null; "), command)
+        self.assertTrue(command.endswith(f"CLAUDE_CONFIG_DIR={self.work.resolve()} {self.claude} --resume {self.CHAT}"),
+                        command)
+        (ssh_line,) = opened
+        self.assertEqual(shlex.split(ssh_line)[-3:], ["-t", "lab", command])
+
+    def test_continue_can_hand_back_the_command(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            remote.main(["--continue", "lab", self.CHAT, ".claude-work", "--print-command"])
+        answer = json.loads(out.getvalue())
+        self.assertEqual((answer["ok"], answer["message"]), (True, "Continuing it on work"))
+        self.assertTrue(answer["command"].endswith(f"--resume {self.CHAT}"))
+        self.assertTrue(os.path.samefile(self.there, self.chat))
+
+    def test_refused_while_a_session_has_it_open(self):
+        self.open_in_a_session()
+        ok, message = remote.share("lab", self.CHAT)
+        self.assertFalse(ok)
+        self.assertIn("It's open in a session on default", message)
+        (ok, message, command), opened = self.continue_there(".claude-work")
+        self.assertEqual((ok, command, opened), (False, None, []))
+        self.assertIn("It's open in a session on default", message)
+        self.assertFalse(os.path.lexists(self.there))
+        self.assertFalse(self.store.exists())
+
+    def test_errors_come_back(self):
+        self.assertEqual(remote.unshare("lab", self.CHAT, ".claude-nope"), (False, "No Claude profile called .claude-nope"))
+        self.assertEqual(remote.unshare("lab", self.CHAT, ".claude"), (False, "This chat isn't shared"))
+        self.mode("denied")
+        ok, message = remote.share("lab", self.CHAT)
+        self.assertFalse(ok)
+        self.assertIn("refused the login", message)
+
 if __name__ == "__main__":
     unittest.main()

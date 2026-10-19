@@ -1266,8 +1266,12 @@ PlasmoidItem {
             const what = root.remoteActionKinds[source] || ""
             if (result.ok) {
                 root.actionError = ""
-                if (what === "open" || what === "run")
+                if (what === "open" || what === "run" || what === "continue")
                     root.expanded = false
+                else if (what === "share") {
+                    root.actionInfo = result.message
+                    actionInfoTimer.restart()
+                }
             } else {
                 root.actionError = what === "open" ? i18n("Couldn't open the session: %1", result.message)
                                  : what === "stop" ? i18n("Couldn't stop the session: %1", result.message)
@@ -1342,12 +1346,23 @@ PlasmoidItem {
 
     // ---------------------------------------------------------------- shared chats
     // Share a chat with your other accounts, continue it on one of them, or
-    // keep it on one only: jump.py does it (sharing.py).
+    // keep it on one only: jump.py does it (sharing.py); on an SSH host,
+    // between that host's accounts, remote.py does it there.
 
-    readonly property bool canShareChats: status !== null && status.canShare === true
-    readonly property var shareAccounts: groups.filter(g => !!g.shareProfile)
-    // "Keep only on …" waits for a yes: {key, chatId, name, profileKey, account, others}
-    property var shareConfirm: ({ key: "", chatId: "", name: "", profileKey: "", account: "", others: "" })
+    // The accounts a chat of this computer (host "") or of an SSH host can go to
+    function shareAccountsOf(host) {
+        const result = host ? (remote[host] || {}).result : status
+        return result && result.canShare === true ? result.groups.filter(g => !!g.shareProfile) : []
+    }
+
+    function shareHint(host) {
+        return host ? i18n("Share this chat with your other accounts on %1 and pick it up there (in a terminal, over ssh), or keep it on one account only.", host)
+                    : i18n("Share this chat with your other accounts and pick it up there, or keep it on one account only.")
+    }
+
+    readonly property var noShareConfirm: ({ key: "", chatId: "", name: "", profileKey: "", account: "", others: "", host: "" })
+    // "Keep only on …" waits for a yes: {key, chatId, name, profileKey, account, others, host}
+    property var shareConfirm: noShareConfirm
 
     PlasmaExtras.Menu {
         id: shareMenu
@@ -1360,40 +1375,43 @@ PlasmoidItem {
             property string chatId
             property string chatName
             property string rowKey
+            property string host
             property var account: null
             onClicked: {
                 if (kind === "keeponly")
-                    root.askKeepOnly(rowKey, chatId, chatName, account)
+                    root.askKeepOnly(rowKey, chatId, chatName, account, host)
                 else
-                    root.shareAction(kind, chatId, account ? account.shareProfile : "")
+                    root.shareAction(kind, chatId, account ? account.shareProfile : "", host)
             }
         }
     }
 
     property var shareItems: []
 
-    // chat: {chatId, name, shared, profileDir}; rowKey: where to ask "keep only on …?"
+    // chat: {chatId, name, shared, profileDir, host}; rowKey: where to ask "keep only on …?"
     function openShareMenu(button, chat, rowKey) {
         shareMenu.clearMenuItems()
-        const here = groups.find(g => g.profileKeys.indexOf(chat.profileDir) >= 0) || null
-        const items = [shareItem.createObject(shareMenu, { section: true, text: chat.name })]
-        for (const g of shareAccounts) {
+        const host = chat.host || ""
+        const accounts = shareAccountsOf(host)
+        const here = accounts.find(g => g.profileKeys.indexOf(chat.profileDir) >= 0) || null
+        const items = [shareItem.createObject(shareMenu, { section: true, text: host ? i18nc("chat name on host", "%1 on %2", chat.name, host) : chat.name })]
+        for (const g of accounts) {
             if (g === here)
                 continue
             items.push(shareItem.createObject(shareMenu, {
                 text: chat.shared ? i18n("Continue on %1", g.title) : i18n("Share and continue on %1", g.title),
-                icon: "system-switch-user", kind: "continue", chatId: chat.chatId, account: g
+                icon: "system-switch-user", kind: "continue", chatId: chat.chatId, account: g, host: host
             }))
         }
         if (!chat.shared)
             items.push(shareItem.createObject(shareMenu, { text: i18n("Share with all accounts"), icon: "document-share",
-                                                           kind: "share", chatId: chat.chatId }))
+                                                           kind: "share", chatId: chat.chatId, host: host }))
         else {
             items.push(shareItem.createObject(shareMenu, { separator: true }))
-            for (const g of shareAccounts)
+            for (const g of accounts)
                 items.push(shareItem.createObject(shareMenu, {
                     text: i18n("Keep only on %1…", g.title), icon: "list-remove", kind: "keeponly",
-                    chatId: chat.chatId, chatName: chat.name, rowKey: rowKey, account: g
+                    chatId: chat.chatId, chatName: chat.name, rowKey: rowKey, account: g, host: host
                 }))
         }
         for (const item of items)
@@ -1403,17 +1421,18 @@ PlasmoidItem {
         shareMenu.openRelative()
     }
 
-    function askKeepOnly(rowKey, chatId, name, account) {
+    function askKeepOnly(rowKey, chatId, name, account, host) {
         shareConfirm = {
             key: rowKey, chatId: chatId, name: name, profileKey: account.shareProfile, account: account.title,
-            others: shareAccounts.filter(g => g !== account).map(g => g.title).join(", ")
+            others: shareAccountsOf(host).filter(g => g.shareProfile !== account.shareProfile).map(g => g.title).join(", "),
+            host: host
         }
     }
 
     function confirmKeepOnly() {
         const c = shareConfirm
-        shareConfirm = { key: "", chatId: "", name: "", profileKey: "", account: "", others: "" }
-        shareAction("keeponly", c.chatId, c.profileKey)
+        shareConfirm = noShareConfirm
+        shareAction("keeponly", c.chatId, c.profileKey, c.host)
     }
 
     P5Support.DataSource {
@@ -1442,8 +1461,14 @@ PlasmoidItem {
 
     property var shareKinds: ({})
 
-    function shareAction(kind, chatId, profileKey) {
+    function shareAction(kind, chatId, profileKey, host) {
         const flag = { continue: "--continue", share: "--share", keeponly: "--unshare" }[kind]
+        if (host) {
+            // remote.py --share|--continue|--unshare HOST CHAT_ID [PROFILE]
+            remoteAction(kind === "continue" ? "continue" : "share", host, flag + " " + shellQuote(host) + " "
+                         + shellQuote(chatId) + (profileKey ? " " + shellQuote(profileKey) : ""))
+            return
+        }
         const cmd = "python3 -I " + shellQuote(codeDir + "jump.py") + " " + flag + " " + shellQuote(chatId)
                     + (profileKey ? " --profile " + shellQuote(profileKey) : "") + configDirArgs + " # " + Date.now()
         shareKinds = Object.assign({}, shareKinds, { [cmd]: kind })

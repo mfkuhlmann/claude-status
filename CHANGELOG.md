@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **Share chats on SSH hosts:** a host with two or more Claude accounts gets the share button too, on its finished and recent chats: **Continue on work** shares the chat with that account there and reopens it in a terminal over ssh, **Share with all accounts** and **Keep only on …** work as they do here, between the host's own accounts. Nothing is installed on the host: the sharing script goes over the ssh connection like the status script, and the shared chats' folders are in the host's `~/.local/share/claude-status`.
+- The GNOME extension has no share button, and the VS Code extension gets the same.
+
 ## 1.10.0 (2026-10-19)
 
 - **What each subagent did:** click an agent in a chat's agent tree for its task, its tool calls and tokens so far, its last steps and, once it's done, the report it handed back. **Open the whole run** shows everything it did as a Markdown file in your app for those: each step with its tool calls and the start of their results, messages the chat sent it, and its report (fetched over ssh for an SSH host). Claude Code can't open a subagent itself, so this is read-only.

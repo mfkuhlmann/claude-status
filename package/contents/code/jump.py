@@ -210,11 +210,11 @@ def find_session(home, extra_dirs, session_id, profile_dir=None):
     profile_dir (e.g. ".claude-work") limits the search to one profile: a chat
     shared across profiles has the same id in each."""
     every = cs.discover_profiles(home, extra_dirs)
-    profiles = [p for p in every if not profile_dir or matches(p, profile_dir)]
+    profiles = [p for p in every if not profile_dir or cs.matches_profile(p, profile_dir)]
     # A live session is looked up in every profile: after ~/.claude was
     # switched, its file can still be in the profile it started on.
     for entry, runs_on, holder in cs.live_entries_all(every):
-        if profile_dir and not (matches(runs_on, profile_dir) or matches(holder, profile_dir)):
+        if profile_dir and not (cs.matches_profile(runs_on, profile_dir) or cs.matches_profile(holder, profile_dir)):
             continue
         if session_id in (entry.get("sessionId"), entry.get("jobId")) and entry.get("kind") in cs.SESSION_KINDS \
                 and not entry.get("spare") and not entry.get("parkedJobId"):
@@ -232,47 +232,16 @@ def find_session(home, extra_dirs, session_id, profile_dir=None):
     return None, None, None, None
 
 
-def matches(profile, name):
-    """Is name (a folder name like .claude-work, or a path) this profile?"""
-    if name in (profile.dirname, profile.key, *profile.snapshot_dirs):
-        return True
-    try:
-        return Path(name).expanduser().resolve() == profile.real
-    except (OSError, RuntimeError):
-        return False
-
-
 def find_chat(home, extra_dirs, session_id, profile_dir=None):
     """(profile, transcript) of a chat with no session or job: the first
     profile (or the one named) that has its transcript."""
     for profile in cs.discover_profiles(home, extra_dirs):
-        if profile_dir and not matches(profile, profile_dir):
+        if profile_dir and not cs.matches_profile(profile, profile_dir):
             continue
         path = cs.transcript_path(profile, session_id)
         if path is not None:
             return profile, path
     return None, None
-
-
-def chat_folder(path):
-    """The folder a chat last ran in (the last "cwd" in its transcript)."""
-    try:
-        size = path.stat().st_size
-        with open(path, "rb") as f:
-            f.seek(max(0, size - 262144))
-            lines = f.read().splitlines()
-    except OSError:
-        return None
-    for line in reversed(lines):
-        if b'"cwd"' not in line:
-            continue
-        try:
-            cwd = json.loads(line).get("cwd")
-        except (ValueError, AttributeError):
-            continue
-        if isinstance(cwd, str) and cwd.startswith("/"):
-            return cwd
-    return None
 
 
 def live_entries(profile):
@@ -712,7 +681,7 @@ def resume_chat(profile, path, session_id, home):
     claude = claude_in_terminal(home)
     if claude is None:
         return False, NO_CLAUDE
-    folder = chat_folder(path)
+    folder = cs.chat_folder(path)
     if not open_terminal(folder, resume_command(profile, session_id, home, folder, claude)):
         return False, "No terminal found to reopen the chat in"
     return True, "Reopened the chat in a terminal"
@@ -792,7 +761,7 @@ def save_settings(home, values_json, by, unless_default=False):
 
 def new_chat(home, extra_dirs, dirname, folder=None):
     """Open a terminal with a new interactive chat on one profile (e.g. .claude-work)."""
-    profile = next((p for p in cs.discover_profiles(home, extra_dirs) if matches(p, dirname)), None)
+    profile = next((p for p in cs.discover_profiles(home, extra_dirs) if cs.matches_profile(p, dirname)), None)
     if profile is None:
         return False, f"No Claude profile called {dirname}"
     claude = claude_in_terminal(home)
@@ -824,7 +793,7 @@ def new_chat_choosing_folder(home, extra_dirs, dirname, vscode=False):
     """Ask for a folder (the dialog opens in your home folder), then open a new
     chat on the profile there, in a terminal or in VS Code. Cancelling the
     dialog does nothing."""
-    profile = next((p for p in cs.discover_profiles(home, extra_dirs) if matches(p, dirname)), None)
+    profile = next((p for p in cs.discover_profiles(home, extra_dirs) if cs.matches_profile(p, dirname)), None)
     if profile is None:
         return False, f"No Claude profile called {dirname}"
     if not vscode and claude_in_terminal(home) is None:
@@ -889,7 +858,7 @@ def vscode_for(home, extra_dirs, dirname):
     (claude_status.vscode_profile), so other profiles are refused. Else
     (None, why not)."""
     profiles = cs.discover_profiles(home, extra_dirs)
-    profile = next((p for p in profiles if matches(p, dirname)), None)
+    profile = next((p for p in profiles if cs.matches_profile(p, dirname)), None)
     if profile is None:
         return None, f"No Claude profile called {dirname}"
     code, _ = cs.vscode_app()
@@ -932,7 +901,7 @@ def resume_vscode(home, extra_dirs, session_id, profile_dir):
     path = cs.transcript_path(profile, session_id)
     if path is None:
         return False, f"That chat isn't on {profile.label}"
-    folder = chat_folder(path)
+    folder = cs.chat_folder(path)
     if not folder or not os.path.isdir(folder):
         return False, f"The chat's folder {folder or '(unknown)'} isn't there any more; reopen it in a terminal"
     start_vscode_chat(code, folder, vscode_chat_link(session_id))
@@ -1108,7 +1077,7 @@ def chat_comparison(home, extra_dirs, session_id, profile_dir=None, turn=False):
     original is a copy of the file before the chat (before its last turn),
     created means it didn't exist then and deleted that it's gone now."""
     profiles = cs.discover_profiles(home, extra_dirs)
-    ordered = sorted(profiles, key=lambda p: not (profile_dir and matches(p, profile_dir)))
+    ordered = sorted(profiles, key=lambda p: not (profile_dir and cs.matches_profile(p, profile_dir)))
     path = next((t for t in (cs.transcript_path(p, session_id) for p in ordered) if t is not None), None)
     if path is None:
         return False, "Can't find that chat's transcript", None
@@ -1117,7 +1086,7 @@ def chat_comparison(home, extra_dirs, session_id, profile_dir=None, turn=False):
         name, _, _ = cs.read_chat_info(path, path.stat().st_size)
     except OSError:
         name = ""
-    cwd = chat_folder(path) or ""
+    cwd = cs.chat_folder(path) or ""
     skip = cs.own_folders(profiles)
     if turn:
         if rec["snap"] is None:
@@ -1279,19 +1248,6 @@ def show_agent_run(home, extra_dirs, chat_id, agent_id, profile_dir=None, open_i
 # ---------------------------------------------------------------- shared chats
 
 
-def open_somewhere(home, extra_dirs, session_id):
-    """Label of the profile where a running session has this chat open, or None."""
-    profiles = cs.discover_profiles(home, extra_dirs)
-    for entry, runs_on, _holder in cs.live_entries_all(profiles):
-        if entry.get("sessionId") == session_id and entry.get("kind") in cs.SESSION_KINDS and not entry.get("spare"):
-            return runs_on.label
-    return cs.shared_holder(session_id, profiles)
-
-
-def profile_named(home, extra_dirs, profile_dir):
-    return next((p for p in cs.discover_profiles(home, extra_dirs) if profile_dir and matches(p, profile_dir)), None)
-
-
 def resume(home, extra_dirs, session_id, profile_dir=None):
     """Reopen a chat on a profile in a new terminal (claude --resume)."""
     profile, path = find_chat(home, extra_dirs, session_id, profile_dir)
@@ -1300,36 +1256,11 @@ def resume(home, extra_dirs, session_id, profile_dir=None):
     return resume_chat(profile, path, session_id, home)
 
 
-def give_to(home, extra_dirs, session_id, profile_dir):
-    """Give another account a chat, shared if it doesn't have it yet:
-    (its profile, its transcript of the chat), or (None, why not)."""
-    target = profile_named(home, extra_dirs, profile_dir)
-    if target is None:
-        return None, f"No Claude profile called {profile_dir}"
-    busy = open_somewhere(home, extra_dirs, session_id)
-    if busy:
-        return None, f"It's open in a session on {busy}. A chat can be open in one session at a time: exit that one first."
-    profiles = cs.discover_profiles(home, extra_dirs)
-    copies = [path for p in profiles for path in [cs.transcript_path(p, session_id)] if path]
-    if not copies:
-        return None, "That chat has no transcript on this computer"
-    there = cs.transcript_path(target, session_id)
-    if there is None:
-        ok, message = sharing.share(profiles, session_id, [target], sharing.store_root(home))
-        if not ok:
-            return None, message
-        there = cs.transcript_path(target, session_id)
-        if there is None:
-            return None, f"It wasn't added to {target.label}: {message}"
-    elif any(not os.path.samefile(there, other) for other in copies):
-        return None, f"{target.label} has a different chat with the same id; left everything as it is"
-    return target, there
-
-
 def continue_on(home, extra_dirs, session_id, profile_dir):
     """Continue a chat on another account: share it with that account if it
     doesn't have it yet, then reopen it there in a terminal."""
-    target, there = give_to(home, extra_dirs, session_id, profile_dir)
+    target, there = sharing.give_to(cs.discover_profiles(home, extra_dirs), session_id, profile_dir,
+                                    sharing.store_root(home))
     if target is None:
         return False, there
     return resume_chat(target, there, session_id, home)
@@ -1339,36 +1270,23 @@ def continue_command(home, extra_dirs, session_id, profile_dir):
     """The same, but hand back the command that reopens it there instead of
     opening a terminal (the VS Code extension runs it in one of its own):
     (ok, message, command or None)."""
-    target, there = give_to(home, extra_dirs, session_id, profile_dir)
-    if target is None:
-        return False, there, None
     claude = claude_in_terminal(home)
     if claude is None:
         return False, NO_CLAUDE, None
-    folder = chat_folder(there)
-    command = cs.in_folder(folder, resume_command(target, session_id, home, folder, claude))
-    return True, f"Continuing it on {target.label}", command
+    return sharing.continue_command(cs.discover_profiles(home, extra_dirs), session_id, profile_dir,
+                                    sharing.store_root(home), home, claude)
 
 
 def share(home, extra_dirs, session_id, profile_dir=None):
     """Share a chat with every profile (from profile_dir's copy, if given)."""
-    busy = open_somewhere(home, extra_dirs, session_id)
-    if busy:
-        return False, f"It's open in a session on {busy}. Exit that session first."
-    profiles = cs.discover_profiles(home, extra_dirs)
-    return sharing.share(profiles, session_id, profiles, sharing.store_root(home),
-                         profile_named(home, extra_dirs, profile_dir))
+    return sharing.share_with_all(cs.discover_profiles(home, extra_dirs), session_id, sharing.store_root(home),
+                                  profile_dir)
 
 
 def unshare(home, extra_dirs, session_id, profile_dir):
     """Make a shared chat a normal chat of one profile again; the others lose it."""
-    keep = profile_named(home, extra_dirs, profile_dir)
-    if keep is None:
-        return False, f"No Claude profile called {profile_dir}"
-    busy = open_somewhere(home, extra_dirs, session_id)
-    if busy:
-        return False, f"It's open in a session on {busy}. Exit that session first."
-    return sharing.keep_only(cs.discover_profiles(home, extra_dirs), session_id, keep, sharing.store_root(home))
+    return sharing.keep_only_on(cs.discover_profiles(home, extra_dirs), session_id, profile_dir,
+                                sharing.store_root(home))
 
 
 def dismiss(home, extra_dirs, session_id):

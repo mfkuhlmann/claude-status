@@ -20,13 +20,24 @@ through the profiles' links and handled where it is. claude_status.py tells
 shared chats apart by the transcript's inode, whoever shared them.
 
 A chat can be open in only one Claude session at a time (two would write the
-same file): jump.py doesn't share or unshare a chat a session has open.
+same file): a chat a session has open isn't shared or unshared.
 Nothing here starts Claude or sends anything anywhere.
+
+On an SSH host, remote.py runs this file's main() (python3 -I - with
+claude_status.py loaded first, remote.host_script), for the host's own
+profiles:
+
+    --share CHAT_ID [--profile PROFILE]   share it with every profile (from PROFILE's copy)
+    --continue CHAT_ID --profile PROFILE  share it with PROFILE if needed; the command reopening it there
+    --unshare CHAT_ID --profile PROFILE   keep it only on PROFILE
+    [--config-dir DIR]... [--remote]      extra Claude config dirs; the JSON after a marker line
 """
 
+import json
 import os
 import re
 import shutil
+import sys
 from pathlib import Path
 
 import claude_status as cs
@@ -319,3 +330,123 @@ def keep_only(profiles, chat_id, keep, root):
     if removed:
         message += f" Removed from {', '.join(removed)}."
     return True, message
+
+
+# ---------------------------------------------------------------- what the buttons do
+
+
+def open_in(profiles, chat_id):
+    """Label of the profile where a running session has this chat open, or None."""
+    for entry, runs_on, _holder in cs.live_entries_all(profiles):
+        if entry.get("sessionId") == chat_id and entry.get("kind") in cs.SESSION_KINDS and not entry.get("spare"):
+            return runs_on.label
+    return cs.shared_holder(chat_id, profiles)
+
+
+def named(profiles, name):
+    """The profile called name (a folder name like .claude-work, or a path), or None."""
+    return next((p for p in profiles if name and cs.matches_profile(p, name)), None)
+
+
+def give_to(profiles, chat_id, name, root):
+    """Give the profile `name` a chat, shared if it doesn't have it yet:
+    (its profile, its transcript of the chat), or (None, why not)."""
+    target = named(profiles, name)
+    if target is None:
+        return None, f"No Claude profile called {name}"
+    busy = open_in(profiles, chat_id)
+    if busy:
+        return None, f"It's open in a session on {busy}. A chat can be open in one session at a time: exit that one first."
+    paths = [path for p in profiles for path in [cs.transcript_path(p, chat_id)] if path]
+    if not paths:
+        return None, "That chat has no transcript on this computer"
+    there = cs.transcript_path(target, chat_id)
+    if there is None:
+        ok, message = share(profiles, chat_id, [target], root)
+        if not ok:
+            return None, message
+        there = cs.transcript_path(target, chat_id)
+        if there is None:
+            return None, f"It wasn't added to {target.label}: {message}"
+    elif any(not os.path.samefile(there, other) for other in paths):
+        return None, f"{target.label} has a different chat with the same id; left everything as it is"
+    return target, there
+
+
+def continue_command(profiles, chat_id, name, root, home, claude):
+    """Continue a chat on the profile `name`: share it with that profile if
+    needed, and hand back the shell command that reopens it there (claude:
+    how to run claude): (ok, message, command or None)."""
+    target, there = give_to(profiles, chat_id, name, root)
+    if target is None:
+        return False, there, None
+    folder = cs.chat_folder(there)
+    command = cs.in_folder(folder, cs.resume_command(target, chat_id, home, folder, claude))
+    return True, f"Continuing it on {target.label}", command
+
+
+def share_with_all(profiles, chat_id, root, name=None):
+    """Share a chat with every profile (from the copy of the profile `name`, if given)."""
+    busy = open_in(profiles, chat_id)
+    if busy:
+        return False, f"It's open in a session on {busy}. Exit that session first."
+    return share(profiles, chat_id, profiles, root, named(profiles, name))
+
+
+def keep_only_on(profiles, chat_id, name, root):
+    """Make a shared chat a normal chat of the profile `name` again; the others lose it."""
+    keep = named(profiles, name)
+    if keep is None:
+        return False, f"No Claude profile called {name}"
+    busy = open_in(profiles, chat_id)
+    if busy:
+        return False, f"It's open in a session on {busy}. Exit that session first."
+    return keep_only(profiles, chat_id, keep, root)
+
+
+USAGE = ("usage: sharing.py (--share CHAT_ID | --continue CHAT_ID | --unshare CHAT_ID) [--profile PROFILE]\n"
+         "                  [--config-dir DIR]... [--remote]   (--continue and --unshare need --profile)")
+
+
+def main(argv=None):
+    """On an SSH host (remote.py): prints {"ok", "message"} and, for
+    --continue, "command"."""
+    args = sys.argv[1:] if argv is None else list(argv)
+    action, chat_id, name, extra, remote = None, None, None, [], False
+    while args:
+        arg = args.pop(0)
+        if arg in ("--share", "--continue", "--unshare") and args and action is None:
+            action, chat_id = arg, args.pop(0)
+        elif arg == "--profile" and args:
+            name = args.pop(0)
+        elif arg == "--config-dir" and args:
+            extra.append(args.pop(0))
+        elif arg == "--remote":
+            remote = True
+        else:
+            sys.exit(USAGE)
+    if action is None or (action != "--share" and not name):
+        sys.exit(USAGE)
+    home, command = Path.home(), None
+    try:
+        profiles, root = cs.discover_profiles(home, extra), store_root(home)
+        if action == "--share":
+            ok, message = share_with_all(profiles, chat_id, root, name)
+        elif action == "--unshare":
+            ok, message = keep_only_on(profiles, chat_id, name, root)
+        else:
+            # A click: the login shell may be asked where claude is
+            ok, message, command = continue_command(profiles, chat_id, name, root, home,
+                                                    cs.find_claude(home, ask_shell=True))
+    except Exception as exc:  # report, don't crash: the widget shows the message
+        ok, message = False, f"{type(exc).__name__}: {exc}"
+    if remote:
+        # Login scripts on the host may print things first: the JSON follows a marker
+        sys.stdout.write("\n" + cs.REMOTE_MARK + " ")
+    json.dump({"ok": ok, "message": message, **({"command": command} if command else {})}, sys.stdout,
+              ensure_ascii=False)
+    sys.stdout.write("\n")
+
+
+if __name__ == "__main__":
+    main()

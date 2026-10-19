@@ -37,10 +37,11 @@ RowLayout {
     // Kept in root by row key: rows are refreshed with new data every poll.
     readonly property string rowKey: (remoteHost ? remoteHost + "|" : "") + session.key
     readonly property bool confirmingStop: session.key !== "" && root.stopConfirmSession === rowKey
-    // A finished chat on this computer can be shared, continued on another account
-    // or kept on one (jump.py); not while a session has it open.
-    readonly property bool canShare: root.canShareChats && !remoteHost && session.pid === null && session.state === "done"
-                                     && !!session.chatId && root.shareAccounts.length >= 2
+    // A finished chat can be shared, continued on another account or kept on
+    // one (jump.py; on an SSH host, between its accounts: remote.py); not
+    // while a session has it open.
+    readonly property bool canShare: session.pid === null && session.state === "done" && !!session.chatId
+                                     && root.shareAccountsOf(remoteHost).length >= 2
     readonly property bool confirmingKeepOnly: session.key !== "" && root.shareConfirm.key === rowKey
     // The color of this chat's pet (the strip at the bottom), if it has one
     readonly property string petColor: root.petColors[root.petKeyOf(session, remoteHost)] || ""
@@ -212,13 +213,13 @@ RowLayout {
                 Layout.preferredWidth: Layout.preferredHeight
                 onClicked: root.openShareMenu(shareButton, {
                     chatId: row.session.chatId, name: row.session.name, profileDir: row.session.profileDir,
-                    shared: !!row.session.shared && !row.session.shared.forkOf
+                    shared: !!row.session.shared && !row.session.shared.forkOf, host: row.remoteHost
                 }, row.rowKey)
 
                 PlasmaCore.ToolTipArea {
                     anchors.fill: parent
                     mainText: i18n("Continue on another account")
-                    subText: i18n("Share this chat with your other accounts and pick it up there, or keep it on one account only.")
+                    subText: root.shareHint(row.remoteHost)
                 }
             }
             PlasmaComponents3.ToolButton {

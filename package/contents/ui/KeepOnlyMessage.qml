@@ -14,7 +14,7 @@ Kirigami.InlineMessage {
         },
         Kirigami.Action {
             text: i18n("Cancel")
-            onTriggered: root.shareConfirm = { key: "", chatId: "", name: "", profileKey: "", account: "", others: "" }
+            onTriggered: root.shareConfirm = root.noShareConfirm
         }
     ]
 }

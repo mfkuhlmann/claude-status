@@ -663,9 +663,9 @@ class ResumeChatTests(Fixture):
 
     def test_profile_named_by_real_folder_or_path(self):
         prof = next(p for p in cs.discover_profiles(self.home) if p.label == "work")
-        self.assertTrue(jump.matches(prof, ".claude-work"))
-        self.assertTrue(jump.matches(prof, str(self.home / ".claude-work")))
-        self.assertFalse(jump.matches(prof, ".claude-personal"))
+        self.assertTrue(cs.matches_profile(prof, ".claude-work"))
+        self.assertTrue(cs.matches_profile(prof, str(self.home / ".claude-work")))
+        self.assertFalse(cs.matches_profile(prof, ".claude-personal"))
 
 
 class SwitchedLinkTests(unittest.TestCase):
