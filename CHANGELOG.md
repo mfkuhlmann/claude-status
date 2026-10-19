@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.10.1
 
 - **Share chats on SSH hosts:** a host with two or more Claude accounts
   (the one this window is connected to with Remote-SSH, or any host you
