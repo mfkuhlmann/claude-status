@@ -15,6 +15,11 @@ export interface Agent {
   started: number | null;
   updated: number | null;
   model?: string | null; // e.g. "Haiku 4.5", from its replies
+  task?: string; // what it was asked to do (plain text, may have newlines)
+  steps?: string[]; // its last tool calls, oldest first, e.g. "Bash: npm test"
+  report?: string; // what it handed back (plain text); "" until it's done
+  toolCalls?: number | null; // tool calls so far
+  tokens?: number | null; // tokens so far
 }
 
 export interface SharedInfo {
@@ -318,6 +323,7 @@ export type WebviewMessage =
   | { type: "dismiss"; chat: ChatRef }
   | { type: "share"; chat: ChatRef }
   | { type: "compareChanges"; chat: ChatRef; turn: boolean }
+  | { type: "openAgentRun"; chat: ChatRef; agentId: string }
   | { type: "dismissDigest" }
   | { type: "newChat"; groupId: string; host?: string }
   | { type: "refresh"; host?: string }

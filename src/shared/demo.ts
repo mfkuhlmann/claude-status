@@ -38,9 +38,27 @@ function session(now: number, partial: Partial<Session> & Pick<Session, "key" | 
 
 function agents(now: number): Session["agents"] {
   const tree: Agent[] = [
-    { id: "a1", parent: null, depth: 0, type: "Explore", description: "Find the date parsing code", status: "done", activity: "", started: now - 9 * MIN, updated: now - 6 * MIN },
-    { id: "a2", parent: null, depth: 0, type: "general-purpose", description: "Write tests for the parser", status: "running", activity: "Running the test suite", started: now - 4 * MIN, updated: now - 10000 },
-    { id: "a3", parent: "a2", depth: 1, type: "Explore", description: "Look for existing fixtures", status: "running", activity: "Reading tests/fixtures", started: now - 2 * MIN, updated: now - 5000 },
+    {
+      id: "a1", parent: null, depth: 0, type: "Explore", description: "Find the date parsing code", status: "done",
+      activity: "parseIsoWeek() in src/date/week.ts", started: now - 9 * MIN, updated: now - 6 * MIN, model: "Haiku 4.5",
+      task: "Find where ISO week dates are parsed and why week 53 can land in the wrong year. Read only; list the files and functions involved.",
+      steps: ["Grep: isoWeek", "Read: parse.ts", "Read: week.ts", "Grep: getFullYear"],
+      report: "parseIsoWeek() in src/date/week.ts\n\n• It takes the year from the week's Monday, so week 53 of 2026 lands in 2027.\n• parse.ts calls it for every \"YYYY-Www\" string.\n• Tests: test/date.test.ts covers weeks 1–52 only.",
+      toolCalls: 7, tokens: 182_400,
+    },
+    {
+      id: "a2", parent: null, depth: 0, type: "general-purpose", description: "Write tests for the parser", status: "running",
+      activity: "Bash: npm test -- date", started: now - 4 * MIN, updated: now - 10000, model: "Sonnet 4.5",
+      task: "Add tests for ISO week 53 (2020, 2026) and the years around it to test/date.test.ts, then run them.",
+      steps: ["Read: date.test.ts", "Agent: Look for existing fixtures", "Edit: date.test.ts", "Bash: npm test -- date"],
+      report: "", toolCalls: 5, tokens: 96_300,
+    },
+    {
+      id: "a3", parent: "a2", depth: 1, type: "Explore", description: "Look for existing fixtures", status: "running",
+      activity: "Read: weeks.json", started: now - 2 * MIN, updated: now - 5000,
+      task: "Are there fixtures with ISO week dates under test/fixtures?", steps: ["Glob: test/fixtures/**", "Read: weeks.json"],
+      report: "", toolCalls: 2, tokens: null,
+    },
   ];
   return { running: 2, done: 1, stopped: 0, total: 3, tree };
 }

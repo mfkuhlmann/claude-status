@@ -21,6 +21,10 @@ a new chat (used by the Claude Status widget).
     python3 -I jump.py --unshare SESSION_ID --profile PROFILE   (keep it only there)
     python3 -I jump.py --changes CHAT_ID [--profile PROFILE] [--turn] [--list]
                                                  (compare the files a chat changed in VS Code)
+    python3 -I jump.py --phone MESSAGE [--device ID]   (to your phone, with KDE Connect)
+    python3 -I jump.py --phone-devices           (the phones paired with KDE Connect)
+    python3 -I jump.py --agent-run AGENT_ID --chat CHAT_ID [--profile PROFILE] [--no-open]
+                                                 (a subagent's whole run, as a Markdown file)
 
 Sharing is done by sharing.py; a chat that's open in a session isn't touched
 (it can be open in one at a time).
@@ -962,6 +966,70 @@ def resume_remote_vscode(host, session_id, folder=""):
     return remote_vscode(host, folder, vscode_chat_link(session_id), "the chat shows")
 
 
+# ---------------------------------------------------------------- your phone
+#
+# While you're away, the widget can send chats that need you to your phone
+# with KDE Connect: `--phone MESSAGE [--device ID]` pings the phone named, or
+# every paired phone that's reachable now (on the same network);
+# `--phone-devices` lists the paired ones for the settings.
+
+
+def kdeconnect_ids(*args):
+    """The lines kdeconnect-cli prints for these options (its "0 devices found" goes to stderr)."""
+    cli = shutil.which("kdeconnect-cli")
+    if not cli:
+        return None
+    try:
+        out = subprocess.run([cli, *args], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, timeout=10).stdout.decode(errors="replace")
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    return [line.strip() for line in out.splitlines() if line.strip()]
+
+
+def phone_devices():
+    """(ok, message, [{"id", "name", "reachable"}]) of the devices paired with KDE Connect."""
+    paired = kdeconnect_ids("-l", "--id-name-only")
+    if paired is None:
+        return False, "KDE Connect isn't installed (kdeconnect-cli)", []
+    reachable = set(kdeconnect_ids("-a", "--id-only") or [])
+    devices = []
+    for line in paired:
+        ident, _, name = line.partition(" ")
+        devices.append({"id": ident, "name": name.strip() or ident, "reachable": ident in reachable})
+    return True, f"{len(devices)} paired device{'s' if len(devices) != 1 else ''}", devices
+
+
+def send_to_phone(message, device=None):
+    """Ping the phone with message (the one named, else every reachable paired one)."""
+    ok, why, devices = phone_devices()
+    if not ok:
+        return False, why
+    if device:
+        targets = [d for d in devices if d["id"] == device]
+        if not targets:
+            return False, "That phone isn't paired with KDE Connect any more"
+        if not targets[0]["reachable"]:
+            return False, f"{targets[0]['name']} isn't reachable (is it on the same network?)"
+    else:
+        targets = [d for d in devices if d["reachable"]]
+        if not targets:
+            return False, "No paired phone is reachable through KDE Connect right now"
+    sent = []
+    for d in targets:
+        try:
+            done = subprocess.run([shutil.which("kdeconnect-cli"), "-d", d["id"], "--ping-msg", message],
+                                  stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                  timeout=15).returncode == 0
+        except (OSError, subprocess.TimeoutExpired):
+            done = False
+        if done:
+            sent.append(d["name"])
+    if not sent:
+        return False, "KDE Connect couldn't send it"
+    return True, "Sent to " + ", ".join(sent)
+
+
 # ---------------------------------------------------------------- what a chat changed
 #
 # `--changes ID` compares the files a chat changed (claude_status.chat_edits)
@@ -1157,6 +1225,57 @@ def list_changes(home, extra_dirs, session_id, profile_dir=None, turn=False):
     return chat_comparison(home, extra_dirs, session_id, profile_dir, turn)
 
 
+# ---------------------------------------------------------------- a subagent's run
+#
+# A subagent can't be opened in Claude Code from outside, so its whole run is
+# saved as a Markdown file (claude_status.agent_run) and opened in the app you
+# use for those. The VS Code extension opens the file itself (--no-open).
+
+RUNS_KEEP_S = 86400  # saved runs are removed after a day
+
+
+def runs_folder(home):
+    """The folder for saved runs; files older than a day are removed."""
+    root = cs.cache_dir(home) / "agent-runs"
+    cs.private_dir(root)
+    now = time.time()
+    for old in root.iterdir():
+        try:
+            if now - old.stat().st_mtime > RUNS_KEEP_S:
+                old.unlink()
+        except OSError:
+            pass
+    return root
+
+
+def save_run(home, title, agent_id, markdown):
+    """Write a subagent's run to a file named after it; its path."""
+    name = " ".join(re.sub(r"[^\w .,()+!'-]+", " ", title or "").split())[:60].strip() or "Subagent"
+    path = runs_folder(home) / f"{name} ({re.sub(r'[^A-Za-z0-9]', '', agent_id)[:8]}).md"
+    path.write_text(markdown, encoding="utf-8")
+    return path
+
+
+def open_file(path):
+    """Open a file in the app you use for its type; False without xdg-open."""
+    opener = shutil.which("xdg-open")
+    if opener is None:
+        return False
+    start_app([opener, str(path)])
+    return True
+
+
+def show_agent_run(home, extra_dirs, chat_id, agent_id, profile_dir=None, open_it=True):
+    """Save a chat's subagent's run as Markdown and open it: (ok, message, file)."""
+    ok, message, title, markdown = cs.agent_run(home, extra_dirs, chat_id, agent_id, profile_dir)
+    if not ok:
+        return False, message, None
+    path = save_run(home, title, agent_id, markdown)
+    if open_it and not open_file(path):
+        return False, f"Saved it as {path}, but there's no xdg-open to open it with", str(path)
+    return True, message, str(path)
+
+
 # ---------------------------------------------------------------- shared chats
 
 
@@ -1281,7 +1400,10 @@ USAGE = ("usage: jump.py [--stop [--busy] | --interrupt] SESSION_ID [--profile P
          "       jump.py --remote-new-vscode HOST [--cwd FOLDER_ON_HOST]\n"
          "       jump.py --resume SESSION_ID --profile PROFILE --vscode\n"
          "       jump.py --remote-resume-vscode HOST SESSION_ID [--cwd FOLDER_ON_HOST]\n"
-         "       jump.py --changes CHAT_ID [--profile PROFILE] [--turn] [--list]")
+         "       jump.py --changes CHAT_ID [--profile PROFILE] [--turn] [--list]\n"
+         "       jump.py --phone MESSAGE [--device ID]\n"
+         "       jump.py --phone-devices\n"
+         "       jump.py --agent-run AGENT_ID --chat CHAT_ID [--profile PROFILE] [--no-open]")
 
 
 def main(argv=None):
@@ -1289,7 +1411,8 @@ def main(argv=None):
     extra, session_id, action, folder, profile_dir = [], None, jump, None, None
     remote_host, name_arg, choose, vscode, print_command = None, "", False, False, False
     busy, settings_json, settings_by, unless_default = False, None, "", False
-    turn, listing = False, False
+    turn, listing, device, devices = False, False, None, None
+    agent_id, open_it, run_file = None, True, None
     while args:
         arg = args.pop(0)
         if arg == "--config-dir" and args:
@@ -1306,6 +1429,18 @@ def main(argv=None):
             action = interrupt
         elif arg == "--changes":
             action = show_changes
+        elif arg == "--phone" and args:
+            action, session_id = send_to_phone, args.pop(0)  # the message
+        elif arg == "--device" and args:
+            device = args.pop(0)
+        elif arg == "--agent-run" and args:
+            action, agent_id = show_agent_run, args.pop(0)
+        elif arg == "--chat" and args:
+            session_id = args.pop(0)
+        elif arg == "--no-open":
+            open_it = False
+        elif arg == "--phone-devices":
+            action, session_id = phone_devices, "-"
         elif arg == "--turn":
             turn = True
         elif arg == "--list":
@@ -1348,6 +1483,8 @@ def main(argv=None):
         sys.exit(USAGE)
     if (turn or listing) and action is not show_changes:
         sys.exit(USAGE)
+    if not open_it and action is not show_agent_run:
+        sys.exit(USAGE)
     command, comparison = None, None
     try:
         if print_command:
@@ -1364,6 +1501,12 @@ def main(argv=None):
             ok, message = resume_vscode(Path.home(), extra, session_id, profile_dir)
         elif action is stop:
             ok, message = stop(Path.home(), extra, session_id, profile_dir, busy)
+        elif action is send_to_phone:
+            ok, message = send_to_phone(session_id, device)
+        elif action is phone_devices:
+            ok, message, devices = phone_devices()
+        elif action is show_agent_run:
+            ok, message, run_file = show_agent_run(Path.home(), extra, session_id, agent_id, profile_dir, open_it)
         elif action is show_changes and listing:
             ok, message, comparison = list_changes(Path.home(), extra, session_id, profile_dir, turn)
         elif action is show_changes:
@@ -1382,7 +1525,9 @@ def main(argv=None):
     except Exception as exc:  # report, don't crash: the widget shows the message
         ok, message = False, f"{type(exc).__name__}: {exc}"
     print(json.dumps({"ok": ok, "message": message, **({"command": command} if command else {}),
-                      **({"comparison": comparison} if comparison else {})}))
+                      **({"comparison": comparison} if comparison else {}),
+                      **({"devices": devices} if devices is not None else {}),
+                      **({"file": run_file} if run_file else {})}))
 
 
 if __name__ == "__main__":

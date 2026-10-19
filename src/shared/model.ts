@@ -1,7 +1,7 @@
 // The dashboard's derived values, shared by the extension (status bar,
 // notifications) and the webview. Ported from the widget's main.qml.
 
-import type { ChangeSummary, ChatStats, ClaudeCodeInfo, Counts, Group, HostState, LimitWindow, Overall, ReopenIn, Session, StatsDay, Status, TaskProgress, UsageStats, ViewState } from "./types";
+import type { Agent, ChangeSummary, ChatStats, ClaudeCodeInfo, Counts, Group, HostState, LimitWindow, Overall, ReopenIn, Session, StatsDay, Status, TaskProgress, UsageStats, ViewState } from "./types";
 
 // This computer's accounts, then the hosts' (each marked with its host).
 export function allGroups(status: Status | null, hosts: HostState[]): Group[] {
@@ -429,6 +429,29 @@ export function recapText(st: ChatStats, costUsd?: number | null): string {
   if (st.tokens.total) parts.push(`${formatTokens(st.tokens.total)} tokens (${formatTokens(st.tokens.output)} out)`);
   if (costUsd) parts.push(`$${costUsd.toFixed(2)} at API prices`);
   return parts.join(" · ");
+}
+
+// ---------------------------------------------------------------- a subagent unfolded
+
+// Its open state, kept by row and agent ("[host|]row key|agent id")
+export function agentDetailKey(rowKey: string, agentId: string): string {
+  return `${rowKey}|${agentId}`;
+}
+
+// "12 tool calls · 45.2k tokens", leaving out what isn't known
+export function agentSummary(a: Pick<Agent, "toolCalls" | "tokens">): string {
+  const parts = [];
+  if (typeof a.toolCalls === "number") parts.push(plural(a.toolCalls, "%1 tool call", "%1 tool calls"));
+  if (typeof a.tokens === "number" && a.tokens > 0) parts.push(`${formatTokens(a.tokens)} tokens`);
+  return parts.join(" · ");
+}
+
+// The tooltip of "Open the whole run"
+export function agentRunTitle(host?: string): string {
+  return (
+    "Its task, every step with the start of each result, and its report, as Markdown. Claude Code itself can't open a subagent from outside." +
+    (host ? ` Fetched from ${host} over ssh.` : "")
+  );
 }
 
 function clock(ms: number, now: number): string {

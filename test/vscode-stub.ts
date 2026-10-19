@@ -52,6 +52,7 @@ export const window = {
     recorded.uriHandlers.push(handler);
     return disposable();
   },
+  showTextDocument: async () => undefined,
   showInformationMessage: async (m: string) => void recorded.messages.push(m),
   showWarningMessage: async (m: string) => void recorded.messages.push(m),
   showErrorMessage: async (m: string) => void recorded.messages.push(m),

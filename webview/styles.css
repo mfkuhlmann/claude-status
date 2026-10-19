@@ -1070,10 +1070,42 @@ button:focus-visible {
   min-width: 0;
 }
 
+/* An agent's lines: click them to unfold it */
+.agent-head {
+  display: block;
+  width: calc(100% + 4px);
+  min-width: 0;
+  padding: 0 2px;
+  margin: 0 -2px;
+  border: none;
+  border-radius: 3px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.agent-head:hover {
+  background: var(--cs-hover);
+}
+
 .agent-line {
   display: flex;
   gap: 6px;
   min-width: 0;
+}
+
+.agent-line .icon {
+  width: 12px;
+  height: 12px;
+  margin-top: calc((1.4em - 12px) / 2);
+  color: var(--cs-muted);
+  transition: transform 120ms;
+}
+
+.agent-line .icon.open {
+  transform: rotate(90deg);
 }
 
 .agent-desc,
@@ -1102,7 +1134,60 @@ button:focus-visible {
 }
 
 .agent-activity {
+  display: block;
   color: var(--cs-muted);
+}
+
+/* Unfolded: its task, numbers, last steps and report */
+.agent-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 2px 0 4px;
+  padding: 4px 7px;
+  border-left: 2px solid var(--cs-tag-border);
+  border-radius: 0 4px 4px 0;
+  background: color-mix(in srgb, var(--cs-fg) 5%, transparent);
+}
+
+.agent-label {
+  font-weight: 600;
+}
+
+.agent-task,
+.agent-report {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.agent-task {
+  -webkit-line-clamp: 4;
+}
+
+.agent-report {
+  -webkit-line-clamp: 12;
+}
+
+.agent-steps {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent-steps li {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-steps .current {
+  font-weight: 600;
 }
 
 /* Shared chats in use on another account: a line pointing there */

@@ -22,6 +22,12 @@ As an editor tab (**Claude Status: Open in Editor Tab**):
 - **Every chat**, grouped by account: waiting for you (permission prompt,
   question…), working, your turn, finished. Background jobs too, and the
   subagents a chat runs.
+- **What a subagent did**: click one in a chat's agent tree for the task it
+  was given, its tool calls and tokens, its last steps and its report.
+  **Open the whole run** shows every step in VS Code's Markdown preview (the
+  start of each result, messages from the chat, the report). Claude Code
+  can't open a subagent from outside, so the run is rendered from its
+  transcript; an SSH host's is fetched over ssh.
 - **What a chat is doing, without switching to it**: a line under each chat
   says what it's on right now (*▸ Bash: npm test*), what it needs, or the
   first line of Claude's last reply. Click it for your last prompt, Claude's

@@ -144,7 +144,7 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
 
         {showPeek ? <PeekPanel session={s} host={host} chat={chat} /> : null}
 
-        {showAgents && agents ? <AgentTree tree={agents.tree} now={now} /> : null}
+        {showAgents && agents ? <AgentTree tree={agents.tree} now={now} rowKey={rowKey} chat={chat} host={host} /> : null}
       </div>
 
       {share || remove || stop ? (

@@ -8,6 +8,7 @@ import * as os from "node:os";
 import * as vscode from "vscode";
 import type { Answer, Backend } from "./backend";
 import { configDirArgs, setSshHosts, settings } from "./config";
+import { agentRunArgs, isAgentRunFile, openAgentRunFile } from "./agentRun";
 import { openComparison } from "./changes";
 import { claudePanelAvailable, localPanelProfileKey, openPanelChat } from "./claudePanel";
 import type { Dashboard } from "./dashboard";
@@ -527,6 +528,20 @@ export class Actions {
     }
     const error = await openComparison(answer.comparison);
     if (error) this.fail(`Couldn't show ${chat.name}'s changes: ${error}`);
+  }
+
+  // ---------------------------------------------------------------- a subagent's run
+
+  // Its task, every step and its report, in the Markdown preview
+  // (src/agentRun.ts); an SSH host's is fetched over ssh
+  async openAgentRun(chat: ChatRef, agentId: string): Promise<void> {
+    if (this.demoOnly()) return;
+    const [script, args] = agentRunArgs(chat, agentId, chat.host ? [] : configDirArgs());
+    const answer = await this.backend.action(script, args);
+    if (!answer.ok) return this.fail(`Couldn't open the subagent's run: ${answer.message}`);
+    if (!isAgentRunFile(answer.file)) return this.fail("Couldn't open the subagent's run: the helper saved it somewhere unexpected");
+    const error = await openAgentRunFile(answer.file);
+    if (error) this.fail(`Couldn't open the subagent's run: ${error}`);
   }
 
   async hideHost(host: string): Promise<void> {

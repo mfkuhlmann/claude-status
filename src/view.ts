@@ -135,6 +135,9 @@ export class ViewHost implements vscode.WebviewViewProvider, vscode.Disposable {
       case "compareChanges":
         void this.actions.compareChanges(m.chat, m.turn);
         break;
+      case "openAgentRun":
+        void this.actions.openAgentRun(m.chat, m.agentId);
+        break;
       case "dismissDigest":
         this.dash.dismissDigest();
         break;

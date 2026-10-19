@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { demoState } from "../src/shared/demo";
 import {
+  agentDetailKey,
+  agentRunTitle,
+  agentSummary,
   allGroups,
   countStates,
   duration,
@@ -76,4 +79,14 @@ test("formatting", () => {
   assert.equal(resetText({ ...window, resetsAt: null }, NOW), "");
   assert.equal(resetText({ ...window, resetsAt: NOW - 1000, reset: true }, NOW), "reset");
   assert.equal(petKeyOf({ chatId: "c", sessionId: "s", key: "k" }, "build-server"), "ssh:build-server|c");
+});
+
+test("an unfolded subagent: its numbers, its open state's key, the run's tooltip", () => {
+  assert.equal(agentSummary({ toolCalls: 12, tokens: 45_200 }), "12 tool calls · 45.2k tokens");
+  assert.equal(agentSummary({ toolCalls: 1, tokens: 0 }), "1 tool call");
+  assert.equal(agentSummary({ toolCalls: null, tokens: 1_300_000 }), "1.3M tokens");
+  assert.equal(agentSummary({}), "");
+  assert.equal(agentDetailKey("lab|.claude/s1/live", "a1"), "lab|.claude/s1/live|a1");
+  assert.match(agentRunTitle(), /as Markdown\. Claude Code itself can't open a subagent from outside\.$/);
+  assert.match(agentRunTitle("lab"), /from outside\. Fetched from lab over ssh\.$/);
 });

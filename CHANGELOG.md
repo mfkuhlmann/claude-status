@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **Open a subagent:** click a subagent in a chat's agent tree to unfold it:
+  the task it was given, its tool calls and tokens so far, its last steps
+  and, once it's done, its report. **Open the whole run** shows everything
+  it did in VS Code's Markdown preview: the task, every step with the start
+  of each result, messages the chat sent it, and its report (an SSH host's
+  is fetched over ssh). Claude Code itself can't open a subagent from
+  outside, so this is the way to read one.
+
 ## 1.9.0
 
 - **Your last days:** an account's token line unfolds its last 14 days:
