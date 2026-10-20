@@ -95,6 +95,237 @@ export default class ClaudeStatusPreferences extends ExtensionPreferences {
             'show-pet'));
         look.add(toggle('show-tokens', 'Show token totals', 'from local transcripts'));
         page.add(look);
+
+        window.add(this._accountsPage(window, settings));
+    }
+
+    // The Claude accounts on this computer (code/accounts.py; port of the
+    // Plasma widget's configAccounts.qml): add one, log in or out, remove one
+    _accountsPage(window, settings) {
+        const page = new Adw.PreferencesPage({title: 'Accounts', icon_name: 'system-users-symbolic'});
+        const esc = text => GLib.markup_escape_text(text, -1);
+        const state = {accounts: [], loaded: false, canCheck: true, busy: '', confirm: '', rows: [], closed: false};
+
+        const list = new Adw.PreferencesGroup({title: 'Accounts on this computer',
+            description: 'Each account is a Claude folder (~/.claude, ~/.claude-NAME) with a login, history and chats of its own. Plain claude runs on ~/.claude; a chat started with the + next to an account runs on that account.'});
+        page.add(list);
+
+        const add = new Adw.PreferencesGroup({title: 'Add an account',
+            description: "A terminal opens with Claude's own login: sign in in your browser with the other account. Claude keeps the login in the new folder; the extension never sees it."});
+        const nameRow = new Adw.EntryRow({title: 'Name, e.g. work (its folder: ~/.claude-NAME)'});
+        add.add(nameRow);
+        const shareRow = new Adw.ComboRow({title: 'Settings',
+            subtitle: 'Shared: settings.json (your status line), CLAUDE.md, keybindings and your own skills, agents and commands are linked to that account\'s. The login, MCP servers, plugins and claude.ai\'s skills stay per account.'});
+        add.add(shareRow);
+        const commandRow = new Adw.ActionRow({title: 'Add a claude-NAME command', subtitle: 'In ~/.local/bin: runs Claude on the new account in any terminal'});
+        const commandSwitch = new Gtk.Switch({active: true, valign: Gtk.Align.CENTER});
+        commandRow.add_suffix(commandSwitch);
+        commandRow.activatable_widget = commandSwitch;
+        add.add(commandRow);
+        const addRow = new Adw.ActionRow({title: ''});
+        const addButton = new Gtk.Button({label: 'Add and Log In…', valign: Gtk.Align.CENTER, css_classes: ['suggested-action']});
+        addRow.add_suffix(addButton);
+        add.add(addRow);
+        page.add(add);
+
+        const toast = (text, ok) => {
+            if (text)
+                window.add_toast(new Adw.Toast({title: esc(text), timeout: ok ? 5 : 10}));
+        };
+        const run = args => new Promise(resolve => {
+            const dirs = settings.get_string('extra-config-dirs').split(',').map(d => d.trim()).filter(d => d)
+                .flatMap(d => ['--config-dir', d]);
+            try {
+                const proc = Gio.Subprocess.new(['python3', '-I', GLib.build_filenamev([this.path, 'code', 'accounts.py']),
+                    ...args, ...dirs], Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE);
+                proc.communicate_utf8_async(null, null, (pr, res) => {
+                    try {
+                        const [, out, err] = pr.communicate_utf8_finish(res);
+                        try {
+                            resolve(JSON.parse(out));
+                        } catch {
+                            resolve({ok: false, message: (err || '').trim().split('\n').pop() || 'the helper gave no answer'});
+                        }
+                    } catch (e) {
+                        resolve({ok: false, message: e.message});
+                    }
+                });
+            } catch (e) {
+                resolve({ok: false, message: e.message});
+            }
+        });
+
+        const nameProblem = () => {
+            const name = nameRow.text.trim();
+            if (!name)
+                return 'empty';
+            if (name === 'default')
+                return 'default is the name of ~/.claude';
+            if (!/^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(name))
+                return 'Up to 32 letters, digits, - and _, starting with a letter';
+            if (state.accounts.some(a => a.folder === `~/.claude-${name}`))
+                return `There's an account called ${name} already`;
+            return '';
+        };
+        const syncAdd = () => {
+            const problem = nameProblem();
+            const name = nameRow.text.trim();
+            addRow.title = problem && problem !== 'empty' ? esc(problem) : name ? esc(`Folder: ~/.claude-${name}`) : '';
+            commandRow.title = esc(`Add a claude-${!problem ? name : 'NAME'} command`);
+            addButton.sensitive = !problem && !state.busy && state.canCheck;
+        };
+        nameRow.connect('changed', () => {
+            nameRow.remove_css_class('error');
+            syncAdd();
+        });
+
+        let shareKeys = [];
+        const render = () => {
+            for (const row of state.rows)
+                list.remove(row);
+            state.rows = state.accounts.map(a => this._accountRow(a, state, esc, act));
+            for (const row of state.rows)
+                list.add(row);
+            if (!state.loaded) {
+                const row = new Adw.ActionRow({title: 'Looking…'});
+                state.rows.push(row);
+                list.add(row);
+            }
+            const keys = state.accounts.map(a => a.key);
+            if (keys.join('\n') !== shareKeys.join('\n')) {
+                shareKeys = keys;
+                shareRow.model = Gtk.StringList.new([...state.accounts.map(a => `Shared with ${a.label}`), "Claude's defaults, nothing shared"]);
+                shareRow.selected = 0;
+            }
+            syncAdd();
+        };
+
+        const load = async check => {
+            const result = await run(check ? ['--list', '--check'] : ['--list']);
+            if (state.closed)
+                return;
+            if (!result.ok) {
+                state.loaded = true;
+                toast(result.message, false);
+                render();
+                return;
+            }
+            const before = Object.fromEntries(state.accounts.map(a => [a.key, a]));
+            // A quick look keeps what Claude said last while the folder says the
+            // same (quick); when that changes, Claude is asked again
+            const changed = result.accounts.some(a => !before[a.key] || before[a.key].quick !== a.quick);
+            state.accounts = result.accounts.map(a => {
+                const old = before[a.key];
+                return check || !old || !old.checked || old.quick !== a.quick ? a
+                    : {...a, checked: true, method: old.method, email: old.email, loggedIn: old.loggedIn};
+            });
+            state.canCheck = result.canCheck;
+            const first = !state.loaded;
+            state.loaded = true;
+            render();
+            if (!check && (first || changed))
+                load(true);
+        };
+
+        const act = async (args, key) => {
+            state.busy = key;
+            state.confirm = '';
+            render();
+            const result = await run(args);
+            if (state.closed)
+                return;
+            state.busy = '';
+            toast(result.message, result.ok);
+            if (result.ok && args[0] === '--add')
+                nameRow.text = '';
+            await load(true);
+        };
+        state.render = render;
+
+        addButton.connect('clicked', () => {
+            const share = shareKeys[shareRow.selected];
+            act(['--add', nameRow.text.trim(), ...share ? ['--share-from', share] : [],
+                ...commandSwitch.active ? ['--command'] : []], 'add');
+        });
+
+        load(true);
+        // A login happens in a terminal: look again every few seconds
+        const timer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 4, () => {
+            if (state.closed)
+                return GLib.SOURCE_REMOVE;
+            if (state.loaded && !state.busy && window.is_active)
+                load(false);
+            return GLib.SOURCE_CONTINUE;
+        });
+        window.connect('close-request', () => {
+            state.closed = true;
+            GLib.source_remove(timer);
+            return false;
+        });
+        return page;
+    }
+
+    // One account: what it is, and its buttons (log in or out, remove, its
+    // claude-NAME command); logging out and removing ask first
+    _accountRow(a, state, esc, act) {
+        const parts = [a.folder];
+        if (a.main)
+            parts.push('plain claude');
+        if (a.vscode)
+            parts.push("VS Code's Claude");
+        if (!a.loggedIn)
+            parts.push('not logged in');
+        else if (a.method && a.method !== 'claude.ai')
+            parts.push(`logged in (${a.method})`);
+        else
+            parts.push(...[a.email || a.account || 'logged in', a.plan].filter(t => t));
+        if (a.chats > 0)
+            parts.push(a.chats === 1 ? '1 chat running' : `${a.chats} chats running`);
+        const row = new Adw.ActionRow({title: esc(a.label), subtitle: esc(parts.join(' · '))});
+        const button = (label, onClick, css = [], tip = '') => {
+            const b = new Gtk.Button({label, valign: Gtk.Align.CENTER, css_classes: css, tooltip_text: tip});
+            b.sensitive = !state.busy;
+            b.connect('clicked', onClick);
+            row.add_suffix(b);
+            return b;
+        };
+        const rerender = () => state.render();
+        if (state.confirm === `remove:${a.key}` || state.confirm === `logout:${a.key}`) {
+            const removing = state.confirm.startsWith('remove:');
+            row.subtitle = esc(removing
+                ? `Remove ${a.label}? It logs out, then moves ${a.folder} to the Trash with its chats, history and settings. Chats shared with your other accounts stay on them.`
+                : `Log out of ${a.label}? Claude deletes its login; its chats and history stay, and Log in… signs it in again.`);
+            button(removing ? 'Remove' : 'Log out', () => act([removing ? '--remove' : '--logout', a.key], a.key),
+                [removing ? 'destructive-action' : 'suggested-action']);
+            button('Cancel', () => {
+                state.confirm = '';
+                rerender();
+            });
+            return row;
+        }
+        if (!a.loggedIn) {
+            button('Log in…', () => act(['--login', a.key], a.key), [],
+                "Opens a terminal with Claude's own login (claude auth login): sign in in your browser with the account for this folder.");
+        } else {
+            const out = button('Log out…', () => {
+                state.confirm = `logout:${a.key}`;
+                rerender();
+            }, [], a.chats > 0 ? "Close its chats first: they'd lose the login." : "Claude deletes this account's login (claude auth logout).");
+            out.sensitive = !state.busy && a.chats === 0;
+        }
+        const remove = button('Remove…', () => {
+            state.confirm = `remove:${a.key}`;
+            rerender();
+        }, [], a.notRemovable || 'Logs out and moves the folder to the Trash.');
+        remove.sensitive = !state.busy && !a.notRemovable;
+        if (a.commandName) {
+            const check = new Gtk.CheckButton({label: a.commandName, active: !!a.command, valign: Gtk.Align.CENTER,
+                tooltip_text: `~/.local/bin/${a.commandName} runs Claude on this account in any terminal.`});
+            check.sensitive = !state.busy;
+            check.connect('toggled', () => act([check.active ? '--command' : '--no-command', a.key], a.key));
+            row.add_suffix(check);
+        }
+        return row;
     }
 
     // An accelerator like <Super><Shift>c, checked before it's kept

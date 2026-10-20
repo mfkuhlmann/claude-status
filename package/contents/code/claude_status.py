@@ -20,6 +20,8 @@ Data sources (per Claude config dir, e.g. ~/.claude, ~/.claude-work):
   ~/.cache/claude-widget/statusline/<cfg dirname>/<session_id>.json
                                   status-line input snapshots (rate limits,
                                   context window), written by statusline-snippet.sh
+  ~/.cache/claude-widget/accounts.json
+                                  profiles accounts.py logged out of
 """
 
 import fcntl
@@ -231,11 +233,19 @@ class Profile:
         self.is_default = is_default
 
 
+def is_profile_dir(path):
+    """A Claude config folder: one Claude has run in, or a new one (made by
+    accounts.py or claude-switch: .profile-name; Claude's .claude.json once
+    you've started to log in)."""
+    return is_dir(path) and (is_dir(path / "sessions") or is_dir(path / "projects")
+                             or os.path.isfile(str(path / ".profile-name")) or os.path.isfile(str(path / ".claude.json")))
+
+
 def discover_profiles(home, extra_dirs=()):
     candidates = [home / ".claude", *sorted(home.glob(".claude-*"))]
     found = []
     for d in candidates:
-        if is_dir(d) and (is_dir(d / "sessions") or is_dir(d / "projects")):
+        if is_profile_dir(d):
             found.append(d)
     for e in extra_dirs:
         d = Path(e).expanduser()
@@ -277,6 +287,23 @@ def is_dir(path):
         return path.is_dir()
     except OSError:
         return False
+
+
+def logged_out_notes(cache_root):
+    """Real folders of the profiles accounts.py logged out of: {path: ms}."""
+    data = read_json(cache_root / "accounts.json")
+    notes = data.get("loggedOut") if isinstance(data, dict) else None
+    return notes if isinstance(notes, dict) else {}
+
+
+def needs_login(profile, logged_out=()):
+    """Isn't this profile logged in to a Claude account? Claude's logout
+    takes oauthAccount out of its .claude.json. Without it, a profile may
+    still use an API key (which the widget can't see), so only a new one
+    (.profile-name, no chats yet) or one logged out here counts."""
+    if profile.account_id is not None:
+        return False
+    return profile.custom_name or not is_dir(profile.path / "projects") or str(profile.real) in logged_out
 
 
 def group_profiles(profiles):
@@ -2768,6 +2795,15 @@ def new_chat_command(profile, home=None, claude="claude"):
     return f"CLAUDE_CODE_DISABLE_AGENT_VIEW=1 {config_env(profile, home)} {claude_words(claude)}"
 
 
+def login_command(profile, home=None, claude="claude"):
+    """Shell command logging this profile in to a Claude account: Claude's
+    own `claude auth login`, which keeps the login in the profile's folder."""
+    note = (f"Log in to Claude for {profile.label} ({short_folder(str(profile.path), home)}): sign in with the "
+            "account this folder is for. Claude opens your browser; where it can't (over ssh), open the address "
+            "it shows and paste the code you get back here.")
+    return f"printf '%s\\n\\n' {shlex.quote(note)}; {config_env(profile, home)} {claude_words(claude)} auth login"
+
+
 def stop_command(profile, job_id, home=None, job=None, claude="claude"):
     """Shell command stopping a background job (its conversation is kept)."""
     return f"{config_env(profile, home, job, for_job=True)} {claude_words(claude)} stop {shlex.quote(job_id)}"
@@ -3801,10 +3837,13 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
         for p, row in newest_job.values():
             rows[p.real].append(row)
 
+        logged_out = logged_out_notes(cache_root)
         for gid, members in group_profiles(profiles):
             named = next((p for p in members if not p.is_default), members[0])
             plan = next((p.plan for p in members if p.plan), None)
             group = {
+                # not logged in to an account: "Log in…" (accounts.py --login chatProfile)
+                "loggedOut": all(needs_login(p, logged_out) for p in members),
                 "id": short_id(gid),
                 "name": named.label,
                 "plan": plan,
@@ -3822,7 +3861,8 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
                 "projects": recent_projects([histories[p.real] for p in members], home),
             }
             try:
-                group["limits"] = plan_limits(snapshot_root, members, now_ms)
+                # a logged-out account's last status lines are no one's plan usage now
+                group["limits"] = None if group["loggedOut"] else plan_limits(snapshot_root, members, now_ms)
                 if group["limits"]:
                     if lock.held:
                         usage.record(group["id"], group["limits"], now_ms)
@@ -4242,6 +4282,8 @@ def add_remote_commands(result, home, extra_dirs=(), claude=None):
         # what VS Code's Claude there needs to run on this account (jump.py
         # --remote-new-vscode --account, the VS Code extension's switch)
         g["configDir"] = config_dir_value(named, home) if named is not None else None
+        g["loginCommand"] = (in_folder(str(home), login_command(named, home, claude))
+                             if named is not None and g.get("loggedOut") else None)
         if named is not None:
             chat = new_chat_command(named, home, claude)
             g["homeChatCommand"] = in_folder(str(home), chat)

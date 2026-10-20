@@ -118,6 +118,8 @@
 .claude-text-button { padding: 3px 6px; border-radius: 8px; }
 .claude-text-button:hover, .claude-text-button:focus { background-color: rgba(127, 127, 127, 0.2); }
 .claude-expander { margin-left: 2px; }
+.claude-login { spacing: 6px; padding: 2px 4px; }
+.claude-login-button { border: 1px solid rgba(127, 127, 127, 0.45); }
 .claude-link { border-radius: 4px; }
 .claude-link:hover StLabel, .claude-link:focus StLabel { text-decoration: underline; }
 

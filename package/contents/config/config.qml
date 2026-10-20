@@ -7,4 +7,9 @@ ConfigModel {
         icon: "configure"
         source: "configGeneral.qml"
     }
+    ConfigCategory {
+        name: i18n("Accounts")
+        icon: "system-users"
+        source: "configAccounts.qml"
+    }
 }

@@ -37,6 +37,22 @@ export function buildGroupSection(ctx, group, {last = false, remoteHost = ''} = 
     if (stage)
         section.add_child(stage);
 
+    // Not logged in to an account (a new one, or logged out): Claude's own
+    // login, in a terminal (over ssh for a host's)
+    if (group.loggedOut) {
+        const row = box('claude-login', {x_expand: true});
+        row.add_child(new St.Icon({icon_name: 'avatar-default-symbolic', style_class: 'claude-button-icon claude-dim'}));
+        row.add_child(label('Not logged in', 'claude-dim', {x_expand: true}));
+        if (!remoteHost || group.loginCommand) {
+            const login = textButton('Log in…', () => ctx.logIn(group, remoteHost), 'claude-text-button claude-login-button');
+            tips.add(login, [L.fmt('Log in to %1', group.title), remoteHost
+                ? L.fmt("Opens a terminal with Claude's own login on %1 (over ssh): open the address it shows in your browser, sign in, and paste the code you get back.", remoteHost)
+                : "Opens a terminal with Claude's own login (claude auth login): sign in in your browser with the account for this folder. The extension never sees the login."]);
+            row.add_child(login);
+        }
+        section.add_child(row);
+    }
+
     // Plan limits (from the status line)
     const limits = column('claude-limits', {x_expand: true});
     for (const w of group.limits ? group.limits.windows : []) {
@@ -67,7 +83,8 @@ export function buildGroupSection(ctx, group, {last = false, remoteHost = ''} = 
             'Plan limits come from the Claude Code status line (statusline-snippet.sh). They update whenever a session of this account gets a reply.']);
     }
     limits.add_child(asOf);
-    section.add_child(limits);
+    if (!group.loggedOut)
+        section.add_child(limits);
 
     // Token totals (from local transcripts); with stats, a toggle for the last days
     if (group.tokens) {

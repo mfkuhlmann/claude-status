@@ -189,9 +189,47 @@ ColumnLayout {
         }
     }
 
+    // Not logged in to an account (a new one, or logged out): Claude's own
+    // login, in a terminal (over ssh for a host's)
+    RowLayout {
+        visible: !!section.group.loggedOut
+        Layout.fillWidth: true
+        Layout.leftMargin: Kirigami.Units.smallSpacing
+        Layout.rightMargin: Kirigami.Units.smallSpacing
+        spacing: Kirigami.Units.smallSpacing
+
+        Kirigami.Icon {
+            source: "im-user-offline"
+            Layout.preferredWidth: Kirigami.Units.iconSizes.small
+            Layout.preferredHeight: Layout.preferredWidth
+        }
+        PlasmaComponents3.Label {
+            textFormat: Text.PlainText
+            Layout.fillWidth: true
+            elide: Text.ElideRight
+            text: i18n("Not logged in")
+            opacity: 0.8
+        }
+        PlasmaComponents3.Button {
+            text: i18n("Log in…")
+            icon.name: "go-next"
+            enabled: !section.remoteHost || !!section.group.loginCommand
+
+            PlasmaCore.ToolTipArea {
+                textFormat: Text.PlainText
+                anchors.fill: parent
+                mainText: i18n("Log in to %1", section.group.title)
+                subText: section.remoteHost
+                         ? i18n("Opens a terminal with Claude's own login on %1 (over ssh): open the address it shows in your browser, sign in, and paste the code you get back.", section.remoteHost)
+                         : i18n("Opens a terminal with Claude's own login (claude auth login): sign in in your browser with the account for this folder. The widget never sees the login.")
+            }
+            onClicked: root.logIn(section.group, section.remoteHost)
+        }
+    }
+
     // Plan limits (from the status line); not where they show elsewhere (root.withUsage)
     ColumnLayout {
-        visible: !section.group.limitsHidden
+        visible: !section.group.limitsHidden && !section.group.loggedOut
         Layout.fillWidth: true
         Layout.leftMargin: Kirigami.Units.smallSpacing
         Layout.rightMargin: Kirigami.Units.smallSpacing

@@ -49,6 +49,7 @@ On GNOME (Ubuntu 26.04 and newer) it lives in the top bar: see [On GNOME](#on-gn
 
 - **SSH hosts:** pick hosts from your `~/.ssh/config`, and their Claude accounts, sessions, usage and recent chats join the dashboard. Nothing is installed on the host.
 - **Several profiles and accounts:** every `~/.claude` and `~/.claude-*` config folder is found automatically, including linked ones such as `~/.claude` → `~/.claude-work`.
+- **Add, log in, log out and remove accounts** in the widget's settings (**Accounts**), with no extra tool: a new account is a `~/.claude-NAME` folder that Claude's own login signs in, in a terminal (see [Accounts](#accounts)). An account that isn't logged in shows **Log in…** in the popup, also on an SSH host.
 - **Share chats between accounts:** continue a finished chat on another account, e.g. when one hits its limit (see [Sharing chats](#sharing-chats)). A shared chat is listed once, where it runs, with a pointer from the other accounts.
 
 <p align="center"><img src="docs/screenshots/ssh-host.png" alt="An SSH host in the popup: its Claude account with pets, plan usage, sessions and recent chats" width="500"></p>
@@ -210,6 +211,7 @@ The same dashboard as a GNOME Shell extension: the ✳ in the top bar, the popup
 | **+** next to an account | Lists the account's recent folders and **Choose folder…** (an SSH host's: its home folder instead). Click one for a new chat there: in a terminal, or in VS Code (the switch at the top of the list). |
 | *Recent chats* | Unfolds the account's older conversations; click one to reopen it, in a terminal or in VS Code (the switch at the top of the list). |
 | Server button at the top | Picks the SSH hosts to show. |
+| **Log in…** at an account | An account that isn't logged in (a new one, or one you logged out of): a terminal opens with Claude's own login. |
 
 ## Sharing chats
 
@@ -219,7 +221,7 @@ With two or more Claude accounts on this computer (say `~/.claude` and `~/.claud
 - **Share with all accounts:** the chat shows up in every account's past chats.
 - **Keep only on personal…** (asks first): the chat becomes a normal chat of that account again; the others lose it.
 
-**A second account to share with** is a second Claude config folder, logged into a *different* Claude account: profiles logged into the same account count as one, and sharing needs two. Make one with `CLAUDE_CONFIG_DIR=~/.claude-work claude` and log in there (`/login`) with the other account; an alias like `alias claude-work='CLAUDE_CONFIG_DIR=~/.claude-work claude'` keeps it handy. The widget finds every `~/.claude-*` folder by itself. For its plan usage bars, give it a status line as well: copy the `statusLine` entry from `~/.claude/settings.json` into `~/.claude-work/settings.json`, then run `./install.sh` again.
+**A second account to share with** is a second Claude config folder, logged into a *different* Claude account: profiles logged into the same account count as one, and sharing needs two. Add one in the widget's settings, **Accounts** → **Add an account** (see [Accounts](#accounts)), and log in with the other account. By hand: `CLAUDE_CONFIG_DIR=~/.claude-work claude`, log in there (`/login`), and for its plan usage bars copy the `statusLine` entry from `~/.claude/settings.json` into `~/.claude-work/settings.json`, then run `./install.sh` again. The widget finds every `~/.claude-*` folder by itself.
 
 A shared chat is one transcript file hard-linked into each profile's `projects/<project>/` folder, so whichever account continues it writes to the same file and nothing is copied. Its subagent folder and undo checkpoints move to `~/.local/share/claude-status/shared-chats/<project>/`, and each profile links to them. Sharing uses no tokens and installs no hooks or settings.
 
@@ -255,6 +257,20 @@ Right-click the widget → **Configure Claude Status…**
 | Chat pets per account | 5 | 0 keeps only the big Clawd |
 | Popup | on | Token totals |
 
+## Accounts
+
+The **Accounts** page of the settings (on GNOME, the *Accounts* tab of its settings) lists the Claude accounts on this computer: each one's folder, whom it's logged in as (Claude's own `claude auth status` says), whether plain `claude` or VS Code's Claude runs on it, and its running chats. What `claude-switch` does, without it:
+
+- **Add an account:** a name, e.g. `work`, makes `~/.claude-work` (with a `.profile-name` file, like `claude-switch`'s), then opens a terminal with Claude's own login (`claude auth login`): Claude opens your browser, you sign in with the other account, and Claude keeps the login in that folder. The account is in the popup right away, with **Log in…** until you're logged in.
+  - **Settings shared with** an account you pick: its `settings.json` (your status line too, so the plan usage bars work at once), `CLAUDE.md`, `keybindings.json`, and your own skills, agents, commands and output styles one by one, are linked into the new folder. A change on one account is a change on both. The links point at the real files, never through `~/.claude` (which may be switched to another account). The login, history, MCP servers, plugins and the skills claude.ai syncs for an account (`skills/synced`) stay per account. Or *Claude's defaults*: a fresh folder.
+  - **A `claude-work` command** (on unless you untick it): `~/.local/bin/claude-work` runs Claude on the account in any terminal, like `claude-switch work`, in bash, zsh or fish. An existing program of that name is never replaced. Where `~/.claude` links to the account, it runs Claude under that name, as terminals do, since Claude keys its background service by the folder's name.
+- **Log in…** for an account that isn't logged in; **Log out…** (asks first) is `claude auth logout`: Claude revokes the login and deletes it, and the account's chats and history stay. Not while chats run on it: they'd lose the login.
+- **Remove…** (asks first) logs out, then moves the folder to the Trash, with its chats, history and settings: restore it from there if you change your mind. Its `claude-NAME` command goes too. Only for `~/.claude-NAME` folders that no chat, `~/.claude` (a link to it) or VS Code's Claude uses. Chats shared with your other accounts stay on them.
+
+The widget never sees a login: you sign in on Claude's own pages, and Claude itself writes and deletes it (`.credentials.json` in the account's folder, which the widget never opens). On an SSH host, **Log in…** runs the same login there over ssh: open the address Claude shows in your browser and paste the code you get back into that terminal. A login terminal in VS Code isn't kept or restored by VS Code.
+
+`claude-switch sync` has no counterpart on purpose: it copies every transcript between all profiles, work and personal included. To move a chat to another account, share it (see [Sharing chats](#sharing-chats)).
+
 **The icon** shows one number, the most urgent: red for chats that need you, else green for chats that finished since you last opened the popup (turns as long as the "finished" notifications ask for). A working chat makes the spark spin, and hovering the icon lists every count.
 
 **In the system tray (Plasma):** Claude Status can sit in the system tray as well as (or instead of) on a panel: right-click the tray's arrow → **Configure System Tray…** → **Entries** → **Claude Status**. It's off until you switch it on. *Shown when relevant* shows it while a chat runs; clicking it opens the same popup. With two Claude Status widgets, only one of them (the one running longest) sends notifications and sounds, and they share their settings: a change in one shows in the other within a few seconds, and a new one starts with what the others use.
@@ -281,7 +297,7 @@ If the panel keeps showing the old version, restart Plasma's shell: `systemctl -
    This removes the widget and takes the snippet out of your status-line scripts (it shows the change and keeps a backup).
 3. Optionally delete the widget's cache: `rm -rf ~/.cache/claude-widget`.
 
-Apart from the chats you share, the widget never changes Claude Code's own files, so nothing else is left behind. Shared chats stay shared: use **Keep only on …** first if you want them back as normal chats (see [Sharing chats](#sharing-chats)).
+Apart from the chats you share and the accounts you add, the widget never changes Claude Code's own files, so nothing else is left behind. Accounts you added stay (they're Claude's folders now), and so do their `~/.local/bin/claude-NAME` commands: remove those on the Accounts page first if you like. Shared chats stay shared: use **Keep only on …** first if you want them back as normal chats (see [Sharing chats](#sharing-chats)).
 
 ## Troubleshooting
 
@@ -329,7 +345,7 @@ Issues and ideas are welcome on the [issue tracker](https://github.com/wzaielamr
 - The widget reads the files Claude Code writes, on your computer and on the SSH hosts you pick (through your own SSH login). It never handles your SSH password: you type it into `ssh` itself, in a terminal, and nothing of it is stored. On an SSH host it also reads which account VS Code's Claude uses there (the VS Code server's settings), and changes only that one setting (`claudeCode.environmentVariables`' `CLAUDE_CONFIG_DIR`), when you start a VS Code chat there on another account. Besides those it reads only your `~/.ssh/config` host list, the desktop settings it needs (default terminal, sound theme, Do Not Disturb) and process and window info (`/proc`, Konsole, tmux, KWin) to find where a session runs (and, for a widget on the desktop, where your windows are, to rest the pets while one covers it); of a Claude process's environment it keeps only `CLAUDE_CONFIG_DIR` and `HOME`. To know which account VS Code's Claude uses, it reads `CLAUDE_CONFIG_DIR` from VS Code's settings (`claudeCode.environmentVariables`) or from VS Code's environment, nothing else. It never opens Claude's credentials (`.credentials.json`, the system keyring); of `.claude.json` it reads only what's listed above. When `claude` isn't on the desktop's PATH or in the usual install folders, a click on a chat runs your login shell once (`$SHELL -l -i -c env`) to read the PATH it sets up, nothing else.
 - It doesn't call any Anthropic API and sends no data anywhere. *Open Usage Page on claude.ai* just opens that page in your browser. The one exception is the *Phone* setting (off unless you turn it on): then a chat's name, what it needs and its folder go to your phone through KDE Connect.
 - Everything it stores lives in `~/.cache/claude-widget`, plus shared chats' folders in `~/.local/share/claude-status/shared-chats`; only your user can read either (mode 0700). SSH connection sockets go to `$XDG_RUNTIME_DIR/claude-status-ssh`, which is cleared when you log out. Its JSON output replaces account ids with a one-way hash.
-- It changes Claude Code's files only when you share a chat (here, or between an SSH host's accounts on that host): it links the chat into your other profiles, or out of them again.
+- It changes Claude Code's files only when you share a chat (here, or between an SSH host's accounts on that host): it links the chat into your other profiles, or out of them again; and when you add or remove an account in its settings (see [Accounts](#accounts)): it makes the `~/.claude-NAME` folder (its `.profile-name` and the links to the settings you share) and the `~/.local/bin/claude-NAME` command, or moves the folder to the Trash. Logging in and out is Claude's own `claude auth login` / `logout`; the Accounts page asks `claude auth status` whom each account is logged in as, and shows its email address only there. Before a removed folder goes to the Trash, the widget deletes its `.credentials.json` without opening it, so no login ends up in the Trash.
 - To show what a chat changed, it reads Claude's backups of the chat's files (`file-history/`) and the files themselves, runs `git show HEAD:<file>` for a file with no backup, and puts copies of the earlier versions in `~/.cache/claude-widget/changes` for VS Code to show; they're removed after a day. A subagent's run you open is written to `~/.cache/claude-widget/agent-runs` (an SSH host's comes over your ssh connection) and opened with `xdg-open`; it's removed after a day too. It also reads Claude's task lists (`tasks/`), and asks the screen saver over D-Bus whether the screen is locked.
 
 ## Limitations
@@ -365,7 +381,8 @@ package/                  the widget (what install.sh installs)
     ├── ui/               QML: main.qml (data, actions), FullRepresentation.qml (popup), GroupSection.qml (account),
     │                     SessionRow.qml, PetStrip.qml + Pet.qml (pets), hub/Hub.qml (checks shared by all copies), …
     ├── code/             Python: claude_status.py (status; poll.py runs it for each check, compiled code cached),
-    │                     jump.py (actions), sharing.py (shared chats), remote.py (SSH), notify_sound.py
+    │                     jump.py (actions), sharing.py (shared chats), accounts.py (accounts), remote.py (SSH),
+    │                     notify_sound.py
     ├── config/           settings schema and pages
     └── pets/             Clawd artwork (clawd-pet, MIT)
 gnome/                    the GNOME Shell extension: extension/ (GJS: indicator.js, logic.js, ui/, prefs.js), build.sh, tests/
@@ -386,7 +403,7 @@ I built this widget to make my own day-to-day work with Claude Code easier. With
 
 This is an independent, personal project. It is not affiliated with, endorsed by, sponsored by or otherwise connected to Anthropic, PBC, and building it does not make me a representative of Anthropic in any way. "Claude" and "Claude Code" are trademarks of Anthropic, PBC; they appear here only to describe what the widget works with.
 
-The widget only reads files that Claude Code writes on your own computer, and changes them only when you share a chat between your accounts. It does not call any Anthropic API, and it sends no data anywhere. The *Open Usage Page on claude.ai* menu entry just opens that page in your browser.
+The widget only reads files that Claude Code writes on your own computer, and changes them only when you share a chat between your accounts or add or remove an account. It does not call any Anthropic API, and it sends no data anywhere: logging in and out is Claude Code's own command. The *Open Usage Page on claude.ai* menu entry just opens that page in your browser.
 
 ### AI-assisted development
 

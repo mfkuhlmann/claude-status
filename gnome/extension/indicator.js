@@ -486,6 +486,22 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         this._newChatDone(await this._helper('jump.py', ['--remote-new-vscode', host, ...cwd]));
     }
 
+    // Claude's own login for an account that isn't logged in, in a terminal
+    // (accounts.py --login; an SSH host's account: its loginCommand over ssh)
+    async logIn(group, host) {
+        if (host) {
+            this.remoteOpen(host, group.loginCommand);
+            return;
+        }
+        const result = await this._helper('accounts.py', ['--login', group.chatProfile, ...this._configDirArgs]);
+        if (this._destroyed)
+            return;
+        if (result.ok)
+            this.menu.close();
+        else
+            this._showError(L.fmt("Couldn't log in: %1", result.message));
+    }
+
     // A recent chat, reopened in VS Code's Claude extension (in its folder)
     async resumeInVscode(sessionId, profileDir) {
         const profile = profileDir ? ['--profile', profileDir] : [];

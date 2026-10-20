@@ -1238,6 +1238,34 @@ PlasmoidItem {
 
     property var launcherHosts: ({})   // command -> SSH host it was for (checked again after: its accounts may have switched)
 
+    // Claude's own login for an account that isn't logged in, in a terminal
+    // (accounts.py --login; an SSH host's account: its loginCommand over ssh)
+    function logIn(group, host) {
+        if (host) {
+            remoteOpen(host, group.loginCommand)
+            return
+        }
+        loginRunner.connectSource("python3 -I " + shellQuote(codeDir + "accounts.py") + " --login " + shellQuote(group.chatProfile)
+                                  + configDirArgs + " # " + Date.now())
+    }
+
+    P5Support.DataSource {
+        id: loginRunner
+        engine: "executable"
+        connectedSources: []
+        onNewData: (source, data) => {
+            disconnectSource(source)
+            const result = root.helperResult(data)
+            if (result.ok) {
+                root.actionError = ""
+                root.expanded = false
+            } else {
+                root.actionError = i18n("Couldn't log in: %1", result.message)
+                actionErrorTimer.restart()
+            }
+        }
+    }
+
     // ---------------------------------------------------------------- SSH hosts
 
     // ~/.ssh/config's hosts (loaded at start and whenever the menu opens)
