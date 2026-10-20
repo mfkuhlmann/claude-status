@@ -71,7 +71,7 @@ As an editor tab (**Claude Status: Open in Editor Tab**):
   on an SSH host), a finished chat's share button continues it on another
   account (say, when one hits its limit), shares it with all of them, or
   keeps it on one again (see "Good to know" for adding a second account).
-- **Accounts, without claude-switch**: **Claude Status: Claude Accounts…**
+- **Accounts**: **Claude Status: Claude Accounts…**
   (the view's **⋯** menu) lists the Claude accounts of this computer or of
   an SSH host in the view: whom each is logged in as, which one is the
   default, which ones VS Code's Claude and plain `claude` run on. **Add
@@ -295,8 +295,7 @@ you paste goes straight to Claude on the host.
   line too, so its plan usage bars work), `CLAUDE.md`, keybindings and your
   own skills, agents and commands; the login, MCP servers, plugins and the
   skills claude.ai syncs stay per account. Its `claude-NAME` command
-  (`~/.local/bin`) runs Claude on it in any terminal, like `claude-switch
-  NAME`. Logging out isn't done while chats run on the account, and only a
+  (`~/.local/bin`) runs Claude on it in any terminal. Logging out isn't done while chats run on the account, and only a
   `~/.claude-NAME` folder that no chat, `~/.claude` or VS Code's Claude uses
   can be removed. On an SSH host it's the same, over ssh with nothing
   installed there: the login runs there in a terminal (you paste the code

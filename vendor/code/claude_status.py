@@ -211,7 +211,8 @@ class Profile:
         name = (read_text(path / ".profile-name") or "").strip()
         self.custom_name = bool(name)
         if not name:
-            name = "default" if is_default else strip_prefix(path.name, ".claude-").lstrip(".") or path.name
+            # (~/.claude: "main", not "default", which marks the default account)
+            name = "main" if is_default else strip_prefix(path.name, ".claude-").lstrip(".") or path.name
         self.label = name
         # Claude Code keeps account info in $CLAUDE_CONFIG_DIR/.claude.json, or
         # ~/.claude.json when running with the default config dir.
@@ -235,7 +236,7 @@ class Profile:
 
 def is_profile_dir(path):
     """A Claude config folder: one Claude has run in, or a new one (made by
-    accounts.py or claude-switch: .profile-name; Claude's .claude.json once
+    accounts.py or another profile tool: .profile-name; Claude's .claude.json once
     you've started to log in)."""
     return is_dir(path) and (is_dir(path / "sessions") or is_dir(path / "projects")
                              or os.path.isfile(str(path / ".profile-name")) or os.path.isfile(str(path / ".claude.json")))
@@ -263,7 +264,7 @@ def discover_profiles(home, extra_dirs=()):
         if p.key in keys:
             p.key = f"{p.key}-{short_id(str(p.real))[:6]}"
         keys.add(p.key)
-    # A lone ~/.claude isn't the "default" of anything: name it the way Claude
+    # A lone ~/.claude isn't the "main" one of anything: name it the way Claude
     # knows you (the account's display name), unless .profile-name says otherwise.
     if len(profiles) == 1 and profiles[0].is_default and not profiles[0].custom_name:
         profiles[0].label = profiles[0].display_name or "Claude"

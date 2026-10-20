@@ -309,7 +309,7 @@ export function maxFiveHour(groups: Group[]): number {
 // and checks again), or "". folders: the accounts' folders now (~/.claude-work)
 export function accountNameProblem(name: string, folders: string[]): string {
   if (!name) return "Give the account a name";
-  if (name === "default") return "default is the name of ~/.claude";
+  if (name === "default" || name === "main") return `${name} is taken: main is what ~/.claude is called, default marks the default account`;
   if (!/^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(name)) return "Up to 32 letters, digits, - and _, starting with a letter";
   if (folders.includes(`~/.claude-${name}`)) return `There's an account called ${name} already`;
   return "";

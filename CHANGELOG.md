@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **Accounts, without claude-switch:** **Claude Status: Claude Accounts…**
+- **Accounts:** **Claude Status: Claude Accounts…**
   (in the view's ⋯ menu) lists this computer's Claude accounts: whom each
   is logged in as, whether plain `claude` or VS Code's Claude runs on it,
   its running chats. **Add Claude Account…** (also in the account item's

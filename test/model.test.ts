@@ -220,6 +220,7 @@ test("a new account's name: the backend's rule, and not one there already", () =
   assert.equal(accountNameProblem("side", folders), "");
   assert.equal(accountNameProblem("my_Work-2", folders), "");
   assert.match(accountNameProblem("work", folders), /already/);
-  assert.match(accountNameProblem("default", folders), /~\/\.claude/);
+  assert.match(accountNameProblem("default", folders), /taken/);
+  assert.match(accountNameProblem("main", folders), /~\/\.claude/);
   for (const bad of ["", "1st", "a b", "../x", "x".repeat(33)]) assert.notEqual(accountNameProblem(bad, folders), "", bad);
 });
