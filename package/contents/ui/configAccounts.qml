@@ -27,6 +27,7 @@ KCM.SimpleKCM {
     property bool loaded: false
     property bool canCheck: true
     property bool linked: false       // ~/.claude is a link: plain claude can follow the default
+    property bool canDefault: false   // Make Default can point VS Code's Claude or plain claude somewhere
     readonly property var defaultAccount: accounts.find(a => a.default) || null
     readonly property var plainAccount: accounts.find(a => a.main) || null
     property string message: ""
@@ -116,6 +117,7 @@ KCM.SimpleKCM {
                 })
                 page.canCheck = result.canCheck
                 page.linked = !!result.linked
+                page.canDefault = !!result.canDefault
                 if (!checked && (!page.loaded || changed))
                     page.load(true)
                 page.loaded = true
@@ -300,7 +302,7 @@ KCM.SimpleKCM {
                         visible: !card.asking
 
                         QQC2.Button {
-                            visible: page.accounts.length > 1 && card.account.loggedIn
+                            visible: page.canDefault && page.accounts.length > 1 && card.account.loggedIn
                                      && (!card.account.default || (page.linked && !card.account.main))
                             text: i18n("Make Default")
                             icon.name: "starred-symbolic"

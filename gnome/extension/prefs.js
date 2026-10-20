@@ -242,6 +242,7 @@ export default class ClaudeStatusPreferences extends ExtensionPreferences {
             });
             state.canCheck = result.canCheck;
             state.linked = !!result.linked;
+            state.canDefault = !!result.canDefault;
             const first = !state.loaded;
             state.loaded = true;
             render();
@@ -338,7 +339,7 @@ export default class ClaudeStatusPreferences extends ExtensionPreferences {
             });
             return row;
         }
-        if (state.accounts.length > 1 && a.loggedIn && (!a.default || (state.linked && !a.main))) {
+        if (state.canDefault && state.accounts.length > 1 && a.loggedIn && (!a.default || (state.linked && !a.main))) {
             button('Make Default', () => act(['--default', a.key], a.key), [], state.linked
                 ? "Lists it first and shows its usage in the top bar; VS Code's Claude and plain claude (~/.claude) run on it. Not while a chat runs through ~/.claude: it would go on on this account."
                 : "Lists it first and shows its usage in the top bar; VS Code's Claude runs on it. Plain claude stays on ~/.claude, a folder.");

@@ -340,8 +340,11 @@ def list_accounts(home, extra, check=False):
             "command": bool(name) and ours(bin_dir(home) / name),
             "notRemovable": not_removable(p, profiles, home, vscode_on, chats),
         })
-    return True, "", {"accounts": accounts, "canCheck": found is not None,
-                      "linked": default_link(home), "vscodeInstalled": bool(installed)}
+    switchable = vscode_state(home, profiles)[0]
+    return True, "", {"accounts": accounts, "canCheck": found is not None, "linked": default_link(home),
+                      "vscodeInstalled": bool(installed),
+                      # Make Default can point VS Code's Claude or plain claude somewhere
+                      "canDefault": bool(switchable) or default_link(home)}
 
 
 # ---------------------------------------------------------------- adding
@@ -578,10 +581,12 @@ def remove_account(home, extra, key):
 
 
 def default_link(home):
-    """Can plain claude be pointed at any account: is ~/.claude a link (or
-    not there at all, so that a link can go there)?"""
-    link = home / ".claude"
-    return link.is_symlink() or not os.path.lexists(str(link))
+    """Can plain claude be pointed at any account: is ~/.claude a link? One
+    is only ever re-pointed, never made: without CLAUDE_CONFIG_DIR set (a
+    shell of its own: the profile tools that link ~/.claude set it), plain
+    claude reads its account file from ~/.claude.json, whatever the link
+    says, and would mix two accounts."""
+    return (home / ".claude").is_symlink()
 
 
 def process_env(pid, names):
@@ -668,12 +673,11 @@ def make_default(home, extra, key, vscode=True):
         return False, f"No Claude profile called {key}"
     link = home / ".claude"
     linked = default_link(home)
-    missing = not os.path.lexists(str(link))  # no ~/.claude at all: a link there makes plain claude follow
     try:
         current = link.resolve() if linked else None
     except (OSError, RuntimeError):
         current = None
-    moves_link = (linked and current != profile.real) or missing
+    moves_link = linked and current != profile.real
     switchable, on = vscode_state(home, profiles) if vscode else (False, None)
     moves_vscode = switchable and (on is None or on.real != profile.real)
     if moves_link:
@@ -690,14 +694,15 @@ def make_default(home, extra, key, vscode=True):
                            "off once its window reloads. Try again once it's done")
     done, notes, failed = [], [], []
     if moves_link:
-        target = str(profile.real) if missing else os.readlink(str(link))
+        target = os.readlink(str(link))
         new = profile.path.name if not os.path.isabs(target) else str(profile.real)
         tmp = home / f".claude.{os.getpid()}.tmp"
         os.symlink(new, str(tmp))
         os.replace(str(tmp), str(link))
         done.append("plain claude")
     elif not linked and profile.path != link:
-        notes.append("plain claude stays on ~/.claude (a folder, not a link): run "
+        notes.append(("plain claude stays on ~/.claude (a folder, not a link)" if os.path.lexists(str(link))
+                      else "plain claude has no ~/.claude here") + ": run "
                      + (command_name(profile, home) or "claude") + " for this account")
     if switchable:
         value = vscode_value(profile, home)

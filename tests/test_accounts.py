@@ -459,12 +459,19 @@ class DefaultTests(Home):
         self.assertTrue(accounts.make_default(self.home, [], ".claude")[0])
         self.assertEqual(cs.jsonc(self.settings.read_text())["claudeCode.environmentVariables"], [])
 
-    def test_no_main_folder_gets_a_link(self):
-        (self.home / ".claude").unlink()  # only ~/.claude-NAME folders
+    def test_no_main_folder_gets_no_link(self):
+        # only ~/.claude-NAME folders: a link made there would mix accounts
+        # (plain claude reads ~/.claude.json without CLAUDE_CONFIG_DIR)
+        (self.home / ".claude").unlink()
         ok, message = accounts.make_default(self.home, [], ".claude-work")
         self.assertTrue(ok, message)
-        self.assertEqual(os.readlink(self.home / ".claude"), str(self.home / ".claude-work"))
-        self.assertIn("plain claude", message)
+        self.assertFalse(os.path.lexists(self.home / ".claude"))
+        self.assertIn("plain claude has no ~/.claude here: run claude-work", message)
+        self.assertEqual(self.first()[0][0], "work")  # VS Code's Claude runs on it now
+        with mock.patch.object(cs, "vscode_app", lambda: (None, None)):
+            listed = accounts.list_accounts(self.home, [])[2]
+        self.assertFalse(listed["canDefault"])  # nothing Make Default could change
+        self.assertTrue(accounts.list_accounts(self.home, [])[2]["canDefault"])
 
     def test_one_account(self):
         import shutil
