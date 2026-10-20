@@ -58,6 +58,7 @@ export class Accounts {
   ) {}
 
   private linked = false; // ~/.claude is a link there: plain claude can follow the default
+  private canDefault = false; // Make Default can point VS Code's Claude or plain claude somewhere there
 
   // Where a terminal for host opens: here, in this window's host (Remote-SSH), or over ssh
   private place(host?: string): Place {
@@ -83,6 +84,7 @@ export class Accounts {
       return null;
     }
     this.linked = r.linked === true;
+    this.canDefault = r.canDefault !== false;
     return r.accounts as AccountInfo[];
   }
 
@@ -147,7 +149,7 @@ export class Accounts {
     const items: Item<() => Promise<void>>[] = [];
     if (!a.loggedIn)
       items.push({ label: "$(sign-in) Log In…", detail: "A terminal with Claude's own login: sign in in your browser", run: () => this.login(a.key, host) });
-    else if (!a.default || (this.linked && !a.main))
+    else if (this.canDefault && (!a.default || (this.linked && !a.main)))
       items.push({
         label: "$(star-full) Make Default",
         detail: this.linked

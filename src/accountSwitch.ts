@@ -153,9 +153,10 @@ export class AccountSwitch implements vscode.Disposable {
   async switchTo(group: Group): Promise<void> {
     const onIt = group.profileKeys.includes(localPanelProfileKey());
     const link = path.join(os.homedir(), ".claude");
-    // ~/.claude a link, or not there at all (a link can go there): plain
-    // claude can follow the default
-    let linked = true;
+    // ~/.claude a link: plain claude can follow the default (one is only
+    // re-pointed, never made: without CLAUDE_CONFIG_DIR, plain claude reads
+    // ~/.claude.json whatever the link says)
+    let linked = false;
     try {
       linked = fs.lstatSync(link).isSymbolicLink();
     } catch {
