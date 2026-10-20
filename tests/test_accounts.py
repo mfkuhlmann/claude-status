@@ -24,7 +24,9 @@ from test_claude_status import session, write  # noqa: E402
 # A stand-in claude: notes each call (its arguments and CLAUDE_CONFIG_DIR),
 # answers `auth status` from the folder's .claude.json and logs out the way
 # Claude does (oauthAccount gone from .claude.json, the login file deleted)
-FAKE_CLAUDE = r"""#!/usr/bin/env python3
+# (run by the Python running the tests: PATH here may not have python3, as in
+# the python:3.7 image, where it is in /usr/local/bin)
+FAKE_CLAUDE = "#!" + sys.executable + r"""
 import json, os, sys
 d = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
 with open(os.environ["CALLS"], "a") as f:
@@ -276,7 +278,7 @@ class LoginTests(Home):
     def main(self, *args):
         with mock.patch("sys.stdout") as out:
             accounts.main(list(args))
-        return json.loads("".join(c.args[0] for c in out.write.call_args_list))
+        return json.loads("".join(c[0][0] for c in out.write.call_args_list))  # (call.args: Python 3.8+)
 
 
 class RemoveTests(Home):
@@ -356,7 +358,7 @@ class DefaultTests(Home):
         self.children = []
         self.patches.append(mock.patch.object(cs, "vscode_app", lambda: ("/usr/bin/code", "Code")))
         self.patches.append(mock.patch.object(cs, "vscode_running_config_dir", lambda: (False, None)))
-        self.patches[1].stop()  # the real vscode_profile: it reads the settings above
+        self.patches.pop(1).stop()  # the real vscode_profile: it reads the settings above
         for p in self.patches[-2:]:
             p.start()
 
