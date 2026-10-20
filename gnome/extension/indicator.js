@@ -742,15 +742,17 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
 
     // Bring up a session of an SSH host: background sessions and finished
     // chats open in a terminal (ssh); one running there shows where it runs
-    // here (its VS Code window or the terminal with the ssh connection)
+    // here (its VS Code window, the terminal of one, or the terminal with the
+    // ssh connection)
     async remoteShow(host, session) {
+        const cwd = session.cwd ? ['--cwd', session.cwd] : [];
         if (session.openCommand) {
             this.remoteOpen(host, session.openCommand);
         } else if (session.entrypoint === 'claude-vscode') {
-            const cwd = session.cwd ? ['--cwd', session.cwd] : [];
             this._jumped(await this._helper('jump.py', ['--remote-vscode', host, session.sessionId, ...cwd]));
         } else {
-            this._jumped(await this._helper('jump.py', ['--remote-terminal', host, '--name', session.name || '']));
+            const vscode = session.vscodeTerminal ? ['--vscode-terminal', String(Math.trunc(session.vscodeTerminal)), ...cwd] : [];
+            this._jumped(await this._helper('jump.py', ['--remote-terminal', host, '--name', session.name || '', ...vscode]));
         }
     }
 

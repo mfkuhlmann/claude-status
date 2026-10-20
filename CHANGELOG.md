@@ -21,6 +21,7 @@
 - **Checks cost about 40% less** (Plasma, GNOME, and VS Code once its copy of the backend is updated): Python compiled all of `claude_status.py` on every check; the widgets now start it through `poll.py`, which keeps the compiled code in `~/.cache/claude-widget/pycache` (Python 3.8 or newer; nothing is written into the installed widget).
 - **Says when Claude Code writes something new:** the widget reads files Claude Code doesn't document, and a session status, session kind or background-job state it doesn't know used to count as idle, or hide the chat, without a word. The popup now names the new values and the Claude Code version that wrote them, so a wrong state doesn't go unnoticed until the widget is updated. On every front end.
 - Plasma: a dashboard on the desktop froze its pets after you opened a chat (or its changes) from it, until plasmashell restarted: opening something "closed the popup", which a dashboard on the desktop doesn't have.
+- **A chat in VS Code's terminal comes into view** (Plasma, GNOME): clicking it raised VS Code's window, but a terminal panel you had closed stayed closed, and another terminal could be the one showing. With the Claude Status extension for VS Code (1.11 or newer) the chat's own terminal now comes up, the panel too. Also on SSH hosts, for a chat in the terminal of a VS Code window connected to the host (Remote-SSH): that click looked for a terminal tab with an ssh connection to the host, so it showed an unrelated one or said there was none.
 
 ## 1.10.1 (2026-10-19)
 

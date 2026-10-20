@@ -1205,6 +1205,117 @@ class RemoteShowTests(unittest.TestCase):
         self.assertIn("no terminal here has an ssh connection to buildbox", msg)
 
 
+# VS Code's terminal host on an SSH host (`node … --type=ptyHost`), and a
+# terminal of it: a shell running a command
+PTY_HOST = ("import subprocess; p = subprocess.Popen(['sh', '-c', 'sleep 60; :']); "
+            "print(p.pid, flush=True); p.wait()")
+
+
+class VscodeTerminalTests(unittest.TestCase):
+    """A chat in VS Code's terminal: VS Code shows its window, the Claude
+    Status extension the terminal (even with the panel closed)."""
+
+    def setUp(self):
+        self.home = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.home)
+        self.raised, self.opened = [], []
+        fake = type("S", (), {"Popen": staticmethod(lambda args, **k: self.opened.append(args)), "DEVNULL": None})
+        self.desktop = dict(raise_window=lambda *a, **k: self.raised.append((a, k)) or True, subprocess=fake,
+                            shutil=type("W", (), {"which": staticmethod(lambda n: "/usr/bin/" + n)}),
+                            time=type("T", (), {"sleep": staticmethod(lambda s: None)}))
+
+    def extension(self, version):
+        write(self.home / ".vscode/extensions/extensions.json",
+              [{"identifier": {"id": "wzaielamri.claude-status"}, "version": version}])
+
+    def test_the_terminal_a_process_runs_in(self):
+        host = subprocess.Popen([sys.executable, "-c", PTY_HOST, "--type=ptyHost"], stdout=subprocess.PIPE,
+                                text=True, start_new_session=True)
+        self.addCleanup(host.stdout.close)
+        self.addCleanup(host.wait)
+        self.addCleanup(os.killpg, host.pid, 9)
+        shell = int(host.stdout.readline())
+        command = None
+        for _ in range(100):
+            command = Path(f"/proc/{shell}/task/{shell}/children").read_text().split()
+            if command:
+                break
+            time.sleep(0.02)
+        (command,) = map(int, command)
+        self.assertTrue(cs.is_vscode_terminal_host(host.pid))
+        self.assertEqual(cs.vscode_terminal(command), shell)  # the process VS Code started, not the host
+        self.assertEqual(cs.vscode_terminal(shell), shell)
+        self.assertIsNone(cs.vscode_terminal(1))
+        self.assertIsNone(cs.vscode_terminal(None))
+        # the rows of an SSH host say so (only chats with a process, not VS Code's Claude tabs)
+        rows = [{"key": f"x/{n}", "profileDir": "x", "pid": pid, "entrypoint": entrypoint, "kind": kind}
+                for n, (pid, entrypoint, kind) in enumerate([(command, "cli", "interactive"),
+                                                             (command, "claude-vscode", "interactive"),
+                                                             (None, "cli", "chat")])]
+        result = {"groups": [{"chatProfile": None, "sessions": rows, "projects": [], "recent": [], "sharedHere": []}]}
+        cs.add_remote_commands(result, self.home, claude="/usr/bin/claude")
+        self.assertEqual([s["vscodeTerminal"] for s in rows], [shell, None, None])
+
+    def test_no_terminal_without_vscode(self):
+        # (made up: these tests may well run in a VS Code terminal themselves)
+        real = cs.parent_pid
+        cs.parent_pid = {9000003: 9000002, 9000002: 9000001, 9000001: 1}.get  # past any pid_max
+        self.addCleanup(setattr, cs, "parent_pid", real)
+        self.assertIsNone(cs.vscode_terminal(9000003))
+
+    def test_a_chat_here_brings_its_terminal_up(self):
+        # claude 500 ← sh 400 (the terminal) ← VS Code's terminal host 300 ← VS Code 200
+        chain = {500: [500, 400, 300, 200], 700: [700, 650, 300, 200]}
+        names = {300: "code", 200: "code"}
+        entry = {"pid": 500, "cwd": "/home/me/app"}
+        procs = dict(ancestors=lambda pid: chain.get(pid, []), proc_name=lambda pid: names.get(pid, "sh"))
+        real = cs.vscode_terminal
+        cs.vscode_terminal = lambda pid: {500: 400, 700: 650}.get(pid)
+        self.addCleanup(setattr, cs, "vscode_terminal", real)
+        self.extension("1.11.0")
+        with Patch(**self.desktop, **procs), mock_home(self.home):
+            ok, message = jump.jump_terminal(entry)
+            self.assertEqual((ok, message), (True, "Switched to the VS Code terminal running this session"))
+            # in tmux: the terminal of the client that shows it
+            with Patch(tmux_client_pids=lambda pane, socket=None: [700]):
+                self.assertTrue(jump.jump_terminal({**entry, "tmux": "s:@1.%3"})[0])
+        self.assertEqual(self.raised, [(([500, 400, 300, 200], "app"), {}), (([700, 650, 300, 200], "app"), {})])
+        self.assertEqual(self.opened, [["/usr/bin/xdg-open", "vscode://wzaielamri.claude-status/terminal?pid=400"],
+                                       ["/usr/bin/xdg-open", "vscode://wzaielamri.claude-status/terminal?pid=650"]])
+        # an extension too old for the link (it would say it doesn't know it): the window only
+        self.raised, self.opened = [], []
+        self.extension("1.10.1")
+        with Patch(**self.desktop, **procs), mock_home(self.home):
+            self.assertEqual(jump.jump_terminal(entry), (True, "Switched to the terminal running this session"))
+        self.assertEqual((len(self.raised), self.opened), (1, []))
+
+    def test_a_chat_on_an_ssh_host_in_a_remote_ssh_window(self):
+        procs = RemoteShowTests.procs(None, {100: [110], 110: [120]}, {100: "code", 120: "ssh"},
+                                      {100: ["/usr/share/code/code"], 120: ["ssh", "-T", "-D", "1", "labserver"]})
+        self.extension("1.11.0")
+        with Patch(**self.desktop, **procs, vscode_main_pids=lambda: [100],
+                   konsole_pids=lambda: self.fail("it's in VS Code, not in a terminal tab")), mock_home(self.home):
+            ok, message = jump.jump_remote_terminal("labserver", "fix parser", 4321, "/home/me/proj")
+            self.assertEqual((ok, message), (True, "Switched to the VS Code terminal running this chat on labserver"))
+            # no window connected to the host
+            ok, message = jump.jump_remote_terminal("buildbox", "fix parser", 4321, "/home/me/proj")
+            self.assertEqual((ok, message), (False, "This chat runs in a VS Code terminal on buildbox, "
+                                                    "and no VS Code window here is connected to it"))
+        self.assertEqual(self.raised, [(([100], "[SSH: labserver]"), {"require": True, "prefer": "proj"})])
+        self.assertEqual(self.opened, [["/usr/bin/xdg-open",
+                                        "vscode://wzaielamri.claude-status/terminal?pid=4321&host=labserver"]])
+
+    def test_command_line(self):
+        calls = []
+        with Patch(jump_remote_terminal=lambda *a: calls.append(a) or (True, "ok")), \
+                contextlib.redirect_stdout(io.StringIO()):
+            jump.main(["--remote-terminal", "lab", "--name", "fix", "--vscode-terminal", "4321", "--cwd", "/p"])
+            jump.main(["--remote-terminal", "lab", "--name", "fix"])
+            with self.assertRaises(SystemExit):
+                jump.main(["abc", "--vscode-terminal", "4321"])
+        self.assertEqual(calls, [("lab", "fix", 4321, "/p"), ("lab", "fix", None, "")])
+
+
 if __name__ == "__main__":
     unittest.main()
 

@@ -38,7 +38,8 @@ its terminal stays open (VS Code's tab goes on with the next message), and
 told it's working or waiting). `--interrupt` presses Ctrl+C for a chat in tmux.
 
 - terminal session: switch Konsole to the tab running it (or select its tmux
-  pane) and raise that window;
+  pane) and raise that window; in VS Code's terminal, the Claude Status
+  extension (1.11 or newer) brings that terminal up too;
 - VS Code session: raise the VS Code window of the project and reveal the
   conversation through the Claude extension's vscode:// link;
 - background job: raise a terminal already attached to it, else open a new
@@ -384,22 +385,28 @@ def jump_terminal(entry, what="session"):
     pids = ancestors(entry.get("pid"))
     if not pids:
         return False, f"This {what} has no running process to show"
+    shown_by = [entry.get("pid")]  # the processes a terminal shows it in
     if isinstance(entry.get("tmux"), str) and entry["tmux"]:
-        clients = tmux_client_pids(entry["tmux"], cs.tmux_socket(entry.get("pid")))
-        if not clients:
+        shown_by = tmux_client_pids(entry["tmux"], cs.tmux_socket(entry.get("pid")))
+        if not shown_by:
             return False, f"This {what} runs in a tmux session no terminal shows right now: attach to it to see it"
-        pids = [p for c in clients for p in ancestors(c)]
+        pids = [p for c in shown_by for p in ancestors(c)]
     if any(proc_name(p).startswith("sshd") for p in pids):
         return False, f"This {what} runs in an SSH login to this computer: there's no window here to show"
-    caption = ""
+    caption, vscode = "", None
     konsole = next((p for p in pids if proc_name(p) == "konsole"), None)
     if konsole:
         title = konsole_tab(konsole, pids)
         caption = title or ""
-    elif any(proc_name(p) == "code" for p in pids):  # VS Code's integrated terminal
-        caption = os.path.basename(entry.get("cwd") or "")
+    else:  # VS Code's integrated terminal?
+        vscode = next((proc_name(p) for p in pids if proc_name(p) in VSCODE_NAMES), None)
+        if vscode:
+            caption = os.path.basename(entry.get("cwd") or "")
     if not raise_window(pids, caption):
         return False, f"Couldn't raise the window of this {what} ({raise_hint()})"
+    terminal = next((t for t in map(cs.vscode_terminal, shown_by) if t), None) if vscode else None
+    if terminal and show_vscode_terminal(vscode, terminal):
+        return True, f"Switched to the VS Code terminal running this {what}"
     return True, f"Switched to the terminal running this {what}"
 
 
@@ -458,6 +465,16 @@ def host_names(host):
     return names
 
 
+def vscode_connected_to(host):
+    """VS Code's main processes with a window connected to host (Remote-SSH's
+    ssh to it runs under them)."""
+    names = host_names(host)
+    children = process_children()
+    return [main for main in vscode_main_pids()
+            if any(proc_name(pid) == "ssh" and ssh_target(proc_cmdline(pid)) in names
+                   for pid in descendants(main, children))]
+
+
 def jump_remote_vscode(host, session_id, folder=""):
     """Show a VS Code chat that runs on an SSH host: raise the VS Code window
     connected to that host (Remote-SSH puts "[SSH: host]" in its title) and
@@ -466,12 +483,8 @@ def jump_remote_vscode(host, session_id, folder=""):
     opener = shutil.which("xdg-open")
     if not opener:
         return False, "xdg-open is missing; can't hand the session link to VS Code"
-    names = host_names(host)
-    children = process_children()
-    mains = vscode_main_pids()
-    connected = any(ssh_target(proc_cmdline(pid)) in names
-                    for main in mains for pid in descendants(main, children) if proc_name(pid) == "ssh")
-    if connected:
+    mains = vscode_connected_to(host)
+    if mains:
         raise_window(mains, f"[SSH: {host}]", require=True, prefer=os.path.basename(folder.rstrip("/")))
         time.sleep(0.3)  # let VS Code see its window focused, so the link opens there
         subprocess.Popen([opener, url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
@@ -488,9 +501,26 @@ def jump_remote_vscode(host, session_id, folder=""):
     return True, f"Opening VS Code on {host}; the chat shows once it's connected"
 
 
-def jump_remote_terminal(host, name=""):
+def jump_remote_vscode_terminal(host, terminal, folder=""):
+    """Show a chat that runs in a terminal of a VS Code window connected to
+    host (terminal: the process that terminal started there): raise that
+    window, then have the Claude Status extension bring the terminal up."""
+    mains = vscode_connected_to(host)
+    if not mains:
+        return False, f"This chat runs in a VS Code terminal on {host}, and no VS Code window here is connected to it"
+    if not raise_window(mains, f"[SSH: {host}]", require=True, prefer=os.path.basename(folder.rstrip("/"))):
+        return False, f"Couldn't raise the VS Code window ({raise_hint()})"
+    if show_vscode_terminal(proc_name(mains[0]), terminal, host):
+        return True, f"Switched to the VS Code terminal running this chat on {host}"
+    return True, f"Switched to the VS Code window connected to {host}"
+
+
+def jump_remote_terminal(host, name="", vscode_terminal=None, folder=""):
     """Switch to the terminal tab here that runs ssh to host (the one whose
-    title has the session's name, if several)."""
+    title has the session's name, if several), or to the VS Code terminal
+    that runs it there (vscode_terminal: the process that terminal started)."""
+    if vscode_terminal:
+        return jump_remote_vscode_terminal(host, vscode_terminal, folder)
     names = host_names(host)
     children = process_children()
     best, best_score = None, -1
@@ -523,6 +553,25 @@ def jump_vscode(entry):
         return False, "xdg-open is missing; can't hand the session link to VS Code"
     subprocess.Popen([opener, url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     return True, "Opened the conversation in VS Code"
+
+
+# VS Code has no way to show one of its terminals from outside (and leaves it
+# hidden when you closed the panel); the Claude Status extension does it for
+# this link, in the window it reaches: the one focused last.
+TERMINAL_LINK = "vscode://wzaielamri.claude-status/terminal"
+
+
+def show_vscode_terminal(code, terminal, host=None):
+    """Have the VS Code window just raised bring up its terminal whose
+    process is terminal (on host, for a window connected to it). False when
+    that needs a Claude Status extension it hasn't (code: VS Code's command)."""
+    opener = shutil.which("xdg-open")
+    if not opener or not status_extension_since(code, STATUS_EXTENSION_TERMINALS):
+        return False
+    time.sleep(0.3)  # let VS Code see its window focused, so the link opens there
+    link = TERMINAL_LINK + "?" + urlencode({"pid": terminal, **({"host": host} if host else {})})
+    subprocess.Popen([opener, link], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    return True
 
 
 # Shell commands for a profile (they live in the backend, which remote hosts run too)
@@ -1040,6 +1089,7 @@ CHANGES_KEEP_S = 86400  # comparison folders are removed after a day
 CHANGES_ONE_BY_ONE = 25  # files `code --diff` opens, at most
 STATUS_EXTENSION = "wzaielamri.claude-status"
 STATUS_EXTENSION_CHANGES = (1, 8)  # its first version that opens CHANGES_LINK
+STATUS_EXTENSION_TERMINALS = (1, 11)  # its first version that opens TERMINAL_LINK
 CHANGES_LINK = "vscode://wzaielamri.claude-status/changes"
 EXTENSION_FOLDERS = {"code": ".vscode", "code-insiders": ".vscode-insiders", "codium": ".vscode-oss",
                      "code-oss": ".vscode-oss"}
@@ -1163,6 +1213,12 @@ def chat_comparison(home, extra_dirs, session_id, profile_dir=None, turn=False):
 
 def status_extension_opens_changes(code):
     """Has VS Code the Claude Status extension, new enough for CHANGES_LINK?"""
+    return status_extension_since(code, STATUS_EXTENSION_CHANGES)
+
+
+def status_extension_since(code, since):
+    """Has VS Code (code: its command) the Claude Status extension, version
+    since or newer?"""
     folder = EXTENSION_FOLDERS.get(os.path.basename(code or ""), ".vscode")
     installed = cs.read_json(Path.home() / folder / "extensions" / "extensions.json")
     for ext in installed if isinstance(installed, list) else []:
@@ -1172,7 +1228,7 @@ def status_extension_opens_changes(code):
                 version = tuple(int(x) for x in str(ext.get("version", "")).split(".")[:2])
             except ValueError:
                 continue
-            if version >= STATUS_EXTENSION_CHANGES:
+            if version >= since:
                 return True
     return False
 
@@ -1336,7 +1392,7 @@ USAGE = ("usage: jump.py [--stop [--busy] | --interrupt] SESSION_ID [--profile P
          "       jump.py --continue SESSION_ID --profile PROFILE --print-command   (share it; print the command, no terminal)\n"
          "       jump.py --share SESSION_ID\n"
          "       jump.py --remote-vscode HOST SESSION_ID [--cwd FOLDER_ON_HOST]\n"
-         "       jump.py --remote-terminal HOST [--name SESSION_NAME]\n"
+         "       jump.py --remote-terminal HOST [--name SESSION_NAME] [--vscode-terminal PID [--cwd FOLDER_ON_HOST]]\n"
          "       jump.py --remote-new-vscode HOST [--cwd FOLDER_ON_HOST] [--account CONFIG_DIR|-]\n"
          "       jump.py --resume SESSION_ID --profile PROFILE --vscode\n"
          "       jump.py --remote-resume-vscode HOST SESSION_ID [--cwd FOLDER_ON_HOST]\n"
@@ -1360,7 +1416,7 @@ def main(argv=None):
     remote_host, name_arg, choose, vscode, print_command = None, "", False, False, False
     busy, settings_json, settings_by, unless_default = False, None, "", False
     turn, listing, device, devices = False, False, None, None
-    agent_id, open_it, run_file, account = None, True, None, None
+    agent_id, open_it, run_file, account, vscode_terminal = None, True, None, None, None
     while args:
         arg = args.pop(0)
         if arg == "--config-dir" and args:
@@ -1413,6 +1469,8 @@ def main(argv=None):
             action, remote_host = arg, args.pop(0)
         elif arg == "--name" and args:
             name_arg = args.pop(0)
+        elif arg == "--vscode-terminal" and args and args[0].isdigit():
+            vscode_terminal = int(args.pop(0))
         elif arg in ("--resume", "--continue", "--share", "--unshare"):
             action = {"--resume": resume, "--continue": continue_on, "--share": share, "--unshare": unshare}[arg]
         elif arg == "--cwd" and args:
@@ -1425,6 +1483,8 @@ def main(argv=None):
             sys.exit(USAGE)
     if action in ("--remote-terminal", "--remote-new-vscode"):
         session_id = session_id or "-"
+    if vscode_terminal and action != "--remote-terminal":
+        sys.exit(USAGE)
     if not session_id or (action in (continue_on, unshare) and not profile_dir):
         sys.exit(USAGE)
     if print_command and action is not continue_on:
@@ -1442,7 +1502,7 @@ def main(argv=None):
         elif action == "--remote-vscode":
             ok, message = jump_remote_vscode(remote_host, session_id, folder or "")
         elif action == "--remote-terminal":
-            ok, message = jump_remote_terminal(remote_host, name_arg)
+            ok, message = jump_remote_terminal(remote_host, name_arg, vscode_terminal, folder or "")
         elif action == "--remote-new-vscode":
             ok, message = new_chat_remote_vscode(remote_host, folder or "", account)
         elif action == "--remote-resume-vscode":

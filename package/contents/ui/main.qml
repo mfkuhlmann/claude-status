@@ -1553,17 +1553,19 @@ PlasmoidItem {
 
     // Bring up a session of an SSH host: background sessions and finished chats
     // open in a terminal (ssh); one running there shows where it runs here (its
-    // VS Code window or the terminal tab with the ssh connection)
+    // VS Code window, the terminal of one, or the terminal tab with the ssh connection)
     function remoteShow(host, session) {
+        const cwd = session.cwd ? " --cwd " + shellQuote(session.cwd) : ""
         if (session.openCommand)
             remoteOpen(host, session.openCommand)
         else if (session.entrypoint === "claude-vscode")
             jumper.connectSource("python3 -I " + shellQuote(codeDir + "jump.py") + " --remote-vscode " + shellQuote(host)
-                                 + " " + shellQuote(session.sessionId) + (session.cwd ? " --cwd " + shellQuote(session.cwd) : "")
-                                 + " # " + Date.now())
+                                 + " " + shellQuote(session.sessionId) + cwd + " # " + Date.now())
         else
             jumper.connectSource("python3 -I " + shellQuote(codeDir + "jump.py") + " --remote-terminal " + shellQuote(host)
-                                 + " --name " + shellQuote(session.name || "") + " # " + Date.now())
+                                 + " --name " + shellQuote(session.name || "")
+                                 + (session.vscodeTerminal ? " --vscode-terminal " + Math.trunc(session.vscodeTerminal) + cwd : "")
+                                 + " # " + Date.now())
     }
 
     function remoteOpen(host, command) {
