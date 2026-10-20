@@ -112,6 +112,7 @@ export function chatRef(c: StageChat): ChatRef {
     jobId: s.jobId,
     openCommand: s.openCommand,
     stopCommand: s.stopCommand,
+    vscodeTerminal: s.vscodeTerminal,
   };
 }
 

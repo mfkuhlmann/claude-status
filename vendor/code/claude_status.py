@@ -2948,6 +2948,43 @@ def tmux_socket(pid):
     return socket if socket.startswith("/") else None
 
 
+def parent_pid(pid):
+    try:
+        with open(f"/proc/{pid}/stat", encoding="utf-8", errors="replace") as f:
+            stat = f.read()
+        return int(stat[stat.rfind(")") + 2:].split()[1])
+    except (OSError, ValueError, IndexError):
+        return 0
+
+
+def is_vscode_terminal_host(pid):
+    """Is pid VS Code's terminal host: one of VS Code's own processes on a
+    desktop, `node … --type=ptyHost` in the VS Code server of a host that a
+    Remote-SSH window works on?"""
+    try:
+        with open(f"/proc/{pid}/comm", encoding="utf-8", errors="replace") as f:
+            if f.read().strip() in {c for c, _ in VSCODE_APPS}:
+                return True
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            return b"--type=ptyHost" in f.read().split(b"\0")
+    except OSError:
+        return False
+
+
+def vscode_terminal(pid):
+    """The process a VS Code terminal started, that pid runs under, or None
+    when it runs in no VS Code terminal. VS Code's extensions know a terminal
+    by that process (its processId), so the Claude Status extension can bring
+    the chat's terminal up, even with the panel closed."""
+    child, seen = None, set()
+    while isinstance(pid, int) and pid > 1 and pid not in seen and len(seen) < 64:
+        if child is not None and is_vscode_terminal_host(pid):
+            return child
+        seen.add(pid)
+        child, pid = pid, parent_pid(pid)
+    return None
+
+
 def interrupt_chat(entry):
     """Interrupt a working or waiting chat in tmux: Ctrl+C in its pane, as if
     you pressed it there (the turn and its subagents stop; the chat stays).
@@ -4433,6 +4470,10 @@ def add_remote_commands(result, home, extra_dirs=(), claude=None):
         for s in g["sessions"]:
             p = profiles.get(s["profileDir"])
             s["openCommand"] = s["stopCommand"] = None
+            # a chat in the terminal of a VS Code window connected to this
+            # host: that window shows it (jump.py --remote-terminal --vscode-terminal)
+            s["vscodeTerminal"] = (vscode_terminal(s["pid"]) if s["pid"] is not None
+                                   and s["entrypoint"] != "claude-vscode" else None)
             if p is None:
                 continue
             if s.get("jobId"):

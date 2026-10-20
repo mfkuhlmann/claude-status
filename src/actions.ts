@@ -122,7 +122,9 @@ export class Actions {
     } else if (chat.entrypoint === "claude-vscode") {
       answer = await this.backend.action("jump.py", ["--remote-vscode", host, chat.sessionId, ...(chat.cwd ? ["--cwd", chat.cwd] : [])]);
     } else {
-      answer = await this.backend.action("jump.py", ["--remote-terminal", host, "--name", chat.name || ""]);
+      // in a VS Code terminal there: the window connected to the host shows it
+      const vscode = chat.vscodeTerminal ? ["--vscode-terminal", String(Math.trunc(chat.vscodeTerminal)), ...(chat.cwd ? ["--cwd", chat.cwd] : [])] : [];
+      answer = await this.backend.action("jump.py", ["--remote-terminal", host, "--name", chat.name || "", ...vscode]);
     }
     // jump.py's "is the Claude Status extension enabled?" means GNOME's, not this one
     if (!answer.ok && isGnome()) answer.message = answer.message.replace("Claude Status extension", "Claude Status GNOME Shell extension");

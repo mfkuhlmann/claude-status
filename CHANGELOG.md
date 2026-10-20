@@ -51,6 +51,16 @@
 - **Plan usage of accounts used in VS Code** (also on SSH hosts), the
   **Claude Code changed something** note, checks that cost less (`poll.py`)
   and VS Code's account listed first come with the widget's backend.
+- **A chat in another window's terminal comes into view:** opening a chat
+  that runs in the terminal of another VS Code window raised that window
+  only; its terminal now comes up there, also with the panel closed. The
+  same for a chat in the terminal of a Remote-SSH window connected to an
+  SSH host, and when the Plasma and GNOME widgets open such a chat (they
+  hand it over with a `vscode://wzaielamri.claude-status/terminal` link).
+- **Orange like the widgets:** *needs you* and plan usage from 70% use VS
+  Code's orange (`charts.orange`); they were the theme's warning color,
+  which is yellow in VS Code's own themes, while the Plasma and GNOME
+  widgets show orange.
 
 ## 1.10.1
 

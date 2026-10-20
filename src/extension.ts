@@ -15,7 +15,7 @@ import { Notifier } from "./notify";
 import { allGroups, countStates } from "./shared/model";
 import { StatusBar } from "./statusBar";
 import { registerPreview, setUpUsageBars } from "./statusline";
-import { Terminals } from "./terminals";
+import { terminalLinkOf, Terminals } from "./terminals";
 import { ViewHost } from "./view";
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -53,7 +53,16 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("claudeStatus.addAccount", () => accounts.add()),
     vscode.commands.registerCommand("claudeStatus.nextChat", () => a.nextChat()),
     // the Plasma and GNOME widgets hand over what a chat changed (changes.ts)
-    vscode.window.registerUriHandler({ handleUri: (uri) => void openChangesLink(uri, log) }),
+    // and which terminal a chat runs in (terminals.ts)
+    vscode.window.registerUriHandler({
+      handleUri: async (uri) => {
+        const link = terminalLinkOf(uri);
+        if (!link) return openChangesLink(uri, log);
+        if (await terminals.showLinked(link, dash.currentHost)) return;
+        log.warn(`No terminal of this window runs that chat: ${uri.toString()}`);
+        void vscode.window.showWarningMessage("Claude Status: this window has no terminal running that chat.");
+      },
+    }),
     vscode.commands.registerCommand("claudeStatus.refresh", () => dash.refreshAll()),
     vscode.commands.registerCommand("claudeStatus.pickHosts", () => a.pickHosts()),
     vscode.commands.registerCommand("claudeStatus.openInEditor", () => view.openInEditor()),

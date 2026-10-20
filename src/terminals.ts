@@ -54,6 +54,25 @@ function hasChildren(pid: number): boolean {
   return false;
 }
 
+// The widgets' link to a chat's terminal (jump.py's TERMINAL_LINK):
+// vscode://wzaielamri.claude-status/terminal?pid=<the process the terminal
+// started>[&host=<the SSH host it runs on, for a Remote-SSH window>]. VS Code
+// itself can't show one of its terminals from outside, nor bring the panel
+// back once you closed it.
+export interface TerminalLink {
+  pid: number;
+  host?: string;
+}
+
+export function terminalLinkOf(uri: { path: string; query: string }): TerminalLink | null {
+  if (uri.path.replace(/\/+$/, "") !== "/terminal") return null;
+  const q = new URLSearchParams(uri.query);
+  const pid = Number(q.get("pid"));
+  if (!/^\d+$/.test(q.get("pid") ?? "") || !Number.isSafeInteger(pid) || pid <= 1) return null;
+  const host = q.get("host");
+  return host ? { pid, host } : { pid };
+}
+
 export class Terminals implements vscode.Disposable {
   private local = new WeakSet<vscode.Terminal>(); // the ones made here on this computer
   private byKey = new Map<string, vscode.Terminal>();
@@ -85,6 +104,15 @@ export class Terminals implements vscode.Disposable {
       if (pid && ancestors.has(pid)) return t;
     }
     return undefined;
+  }
+
+  // Show the terminal a widget's link names (windowHost: the host this window
+  // is connected to, if known); false when this window has none such
+  async showLinked(link: TerminalLink, windowHost: string | undefined): Promise<boolean> {
+    if (link.host && windowHost && link.host !== windowHost) return false;
+    const t = await this.find(new Set([link.pid]), !!link.host);
+    t?.show();
+    return !!t;
   }
 
   // Run command in a new terminal, or show the one still running it for key

@@ -89,6 +89,9 @@ export interface Session {
   // --remote: shell commands, run on the machine the session is on
   openCommand?: string | null;
   stopCommand?: string | null;
+  // --remote: the process of the VS Code terminal it runs in (that terminal's
+  // processId, on the machine the session is on), if it does
+  vscodeTerminal?: number | null;
 }
 
 // A chat's numbers (claude_status.py: stats_summary): your prompts, its tool
@@ -329,6 +332,7 @@ export interface ChatRef {
   jobId?: string | null;
   openCommand?: string | null;
   stopCommand?: string | null;
+  vscodeTerminal?: number | null;
   shared?: boolean;
 }
 
