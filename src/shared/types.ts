@@ -211,10 +211,17 @@ export interface Group {
   recent: RecentChat[];
   homeChatCommand?: string;
   // VS Code's Claude runs on this account (the backend's view of it; an SSH
-  // host's: its ~/.claude)
+  // host's: what its VS Code server's settings say, else its ~/.claude)
   vscodeHere?: boolean;
+  // On an SSH host: the CLAUDE_CONFIG_DIR VS Code's Claude there needs to run
+  // on this account (null: none, a plain ~/.claude). Older backends leave it out.
+  configDir?: string | null;
   // Set by the extension for an SSH host's accounts
   host?: string;
+  // Set by shareUsage: its plan usage shows on another machine's copy of
+  // the account (or no host's shows), or comes from that host
+  limitsHidden?: boolean;
+  limitsFrom?: string;
 }
 
 export interface Status {
@@ -261,6 +268,9 @@ export interface ViewSettings {
 }
 
 export type ReopenIn = "terminal" | "claudeCode";
+
+// Plan usage on SSH hosts' accounts (shareUsage): once per account, on every host, or on none
+export type SshUsage = "once" | "all" | "none";
 
 // The Claude Code extension in this window: whether it's there, and the
 // account (profile key) it runs on for this computer's chats

@@ -4,7 +4,7 @@
 import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
-import type { ReopenIn, ViewSettings } from "./shared/types";
+import type { ReopenIn, SshUsage, ViewSettings } from "./shared/types";
 
 function cfg() {
   return vscode.workspace.getConfiguration("claudeStatus");
@@ -27,6 +27,10 @@ export const settings = {
   includeCurrentRemote: () => cfg().get<boolean>("includeCurrentRemote", true),
   openIn: () => (cfg().get<string>("openIn", "vscode") === "system" ? "system" : "vscode"),
   reopenIn: (): ReopenIn => (cfg().get<string>("reopenIn", "terminal") === "claudeCode" ? "claudeCode" : "terminal"),
+  sshUsage: (): SshUsage => {
+    const v = cfg().get<string>("sshUsage", "once");
+    return v === "all" || v === "none" ? v : "once";
+  },
   notifyWaiting: () => cfg().get<boolean>("notifyWaiting", true),
   notifyDone: () => cfg().get<boolean>("notifyDone", true),
   notifyDoneMinSeconds: () => num("notifyDoneMinSeconds", 30, 0, 3600),

@@ -205,6 +205,22 @@
           "markdownDescription": "How often SSH hosts are checked, in seconds.",
           "order": 3
         },
+        "claudeStatus.sshUsage": {
+          "type": "string",
+          "enum": [
+            "once",
+            "all",
+            "none"
+          ],
+          "enumDescriptions": [
+            "Once per account: an account logged in on this computer and on a host (or on two hosts) has one plan usage, shown where the account is listed first, with the newest numbers of them all.",
+            "On every host: each machine's own numbers, under each copy of the account.",
+            "Not on hosts: no SSH host's account shows plan usage."
+          ],
+          "default": "once",
+          "markdownDescription": "Plan usage on SSH hosts' accounts.",
+          "order": 3
+        },
         "claudeStatus.pollInterval": {
           "type": "integer",
           "default": 2000,

@@ -6,6 +6,7 @@
 
 import * as os from "node:os";
 import * as vscode from "vscode";
+import type { AccountSwitch } from "./accountSwitch";
 import type { Answer, Backend } from "./backend";
 import { configDirArgs, setSshHosts, settings } from "./config";
 import { agentRunArgs, isAgentRunFile, openAgentRunFile } from "./agentRun";
@@ -51,6 +52,7 @@ export class Actions {
     private dash: Dashboard,
     private terminals: Terminals,
     private log: vscode.LogOutputChannel,
+    private account: AccountSwitch,
   ) {}
 
   private place(host?: string): Place {
@@ -368,7 +370,7 @@ export class Actions {
     const where = host ? `${group.title} on ${host}` : group.title;
     const pick = await vscode.window.showQuickPick(items, { placeHolder: `New chat on ${where} in…` });
     if (!pick) return;
-    if (pick.panel) return this.panelChat();
+    if (pick.panel) return this.panelChat(group);
     let command = pick.command;
     if (pick.choose === "dialog") {
       const remoteHome = host ? folderOf(home) : null;
@@ -408,7 +410,7 @@ export class Actions {
       ...panel,
     ];
     const pick = await vscode.window.showQuickPick(items, { placeHolder: `New chat on ${group.title} in…` });
-    if (pick?.panel) return this.panelChat();
+    if (pick?.panel) return this.panelChat(group);
   }
 
   private async newChatSystem(group: Group): Promise<void> {
@@ -422,7 +424,7 @@ export class Actions {
     items.push(...panel);
     const pick = await vscode.window.showQuickPick(items, { placeHolder: `New chat on ${group.title} in…` });
     if (!pick) return;
-    if (pick.panel) return this.panelChat();
+    if (pick.panel) return this.panelChat(group);
     const args = ["--new-chat", group.chatProfile, ...(pick.folder ? ["--cwd", pick.folder] : ["--choose-folder"]), ...configDirArgs()];
     this.report(await this.backend.action("jump.py", args, 600000), "Couldn't open a new chat");
   }
@@ -437,7 +439,10 @@ export class Actions {
     const folder = vscode.workspace.workspaceFolders?.[0]?.name;
     let note = folder ? `in ${folder}` : "in this window";
     if (host) {
-      note += ` · the account Claude Code has on ${host}`;
+      // (its other account: Claude Code there switches to it, panelChat)
+      note += group.vscodeHere || group.configDir === undefined
+        ? ` · the account Claude Code has on ${host}`
+        : ` · switches Claude Code on ${host} to ${group.title}`;
     } else {
       const key = localPanelProfileKey();
       if (!group.profileKeys.includes(key)) {
@@ -451,7 +456,13 @@ export class Actions {
     ];
   }
 
-  private async panelChat(): Promise<void> {
+  private async panelChat(group?: Group): Promise<void> {
+    // On this window's SSH host, for another account than Claude Code's
+    // there: it switches to that one first, and stays on it
+    if (group?.host && !group.vscodeHere && group.configDir !== undefined) {
+      if (!(await this.account.switchHost(group))) return;
+      await new Promise((r) => setTimeout(r, 1500)); // (the Claude extension follows the setting within a second)
+    }
     try {
       await openPanelChat();
     } catch (e) {

@@ -25,10 +25,10 @@ export function activate(context: vscode.ExtensionContext): void {
   let actions: Actions | undefined;
   const notifier = new Notifier(backend, (chat) => void actions?.open(chat));
   const dash = new Dashboard(backend, notifier, log);
-  actions = new Actions(backend, dash, terminals, log);
-  const view = new ViewHost(context.extensionUri, dash, actions);
-  const statusBar = new StatusBar();
+  const statusBar = new StatusBar(); // (first: the main status bar item)
   const account = new AccountSwitch(dash);
+  actions = new Actions(backend, dash, terminals, log, account);
+  const view = new ViewHost(context.extensionUri, dash, actions);
   const a = actions;
 
   context.subscriptions.push(

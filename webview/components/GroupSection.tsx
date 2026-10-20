@@ -60,6 +60,7 @@ export function GroupSection({ group: g }: { group: Group }) {
   const multiProfile = g.profiles.length > 1;
   const limits = g.limits;
   const usageAge = !limits || !Number.isFinite(limits.updatedAt) ? "" : now - limits.updatedAt < 60000 ? "just now" : `${duration(now - limits.updatedAt)} ago`;
+  const usageOn = g.limitsFrom ? ` on ${g.limitsFrom}` : ""; // (the newer numbers of the account's copy there: shareUsage)
   const tokens = settings.showTokens ? g.tokens : null;
   const topModels = (tokens?.models ?? []).slice(0, 2);
   const ui = useStore(uiState);
@@ -84,7 +85,12 @@ export function GroupSection({ group: g }: { group: Group }) {
           onClick={() => post(host ? { type: "newChat", groupId: g.id, host } : { type: "newChat", groupId: g.id })}
         />
         <span class="spacer" />
-        {usageAge ? <span class="usage-age small muted">usage updated {usageAge}</span> : null}
+        {usageAge ? (
+          <span class="usage-age small muted">
+            usage updated {usageAge}
+            {usageOn}
+          </span>
+        ) : null}
         {multiProfile ? <span class="small muted nowrap">{(g.profiles ?? []).join(" + ")}</span> : null}
       </div>
 
@@ -95,9 +101,9 @@ export function GroupSection({ group: g }: { group: Group }) {
         />
       ) : null}
 
-      {/* Plan limits (from the status line) */}
-      {limits && limits.windows.length ? (
-        <div class="usage" title={`Plan usage as of ${usageAge}`}>
+      {/* Plan limits (from the status line); not where they show elsewhere (shareUsage) */}
+      {g.limitsHidden ? null : limits && limits.windows.length ? (
+        <div class="usage" title={`Plan usage as of ${usageAge}${usageOn}`}>
           {limits.windows.map((w) => (
             <UsageBar key={w.key} window={w} now={now} />
           ))}

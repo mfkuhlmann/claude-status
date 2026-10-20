@@ -190,6 +190,7 @@ code --install-extension claude-status-*.vsix
 | `claudeStatus.sshHosts` | `[]` | SSH hosts to show (use the host picker) |
 | `claudeStatus.includeCurrentRemote` | `true` | Also show the Remote-SSH window's host |
 | `claudeStatus.remotePollSeconds` | `30` | How often hosts are checked |
+| `claudeStatus.sshUsage` | `once` | Plan usage on hosts' accounts: an account on this computer and a host (or two hosts) shows it once, where it's listed first, with the newest numbers; `all`: under every copy; `none`: on no host |
 | `claudeStatus.pollInterval` | `2000` | ms between checks of this computer while the view is open (10 s when hidden) |
 | `claudeStatus.extraConfigDirs` | `[]` | More Claude Code config folders |
 | `claudeStatus.openIn` | `vscode` | `system`: open chats in your desktop's terminal app instead |

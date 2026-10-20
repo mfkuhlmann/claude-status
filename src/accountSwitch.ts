@@ -1,7 +1,9 @@
 // VS Code's Claude, the Claude Code extension's panel: which account it runs
 // on (a status bar item) and switching it, through VS Code's own setting
-// (vscodeAccount.ts). Local windows only: in a Remote-SSH window the panel
-// runs on the host, with the host's own account.
+// (vscodeAccount.ts). In a Remote-SSH window the panel runs on the host: the
+// setting is a machine setting, which VS Code keeps per host (its Remote
+// Settings, written from a window connected to it), so the host's accounts
+// are listed and switched there, and this computer's setting stays as it is.
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -9,6 +11,7 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import { localPanelProfileKey, panelConfigDir, profileKey } from "./claudePanel";
 import type { Dashboard } from "./dashboard";
+import { machineStatus } from "./shared/model";
 import type { Group, ViewState } from "./shared/types";
 import { profileDirs } from "./statusline";
 import { configDirFor, withConfigDir } from "./vscodeAccount";
@@ -48,8 +51,9 @@ export class AccountSwitch implements vscode.Disposable {
   }
 
   update(state: ViewState): void {
+    if (vscode.env.remoteName) return this.updateOnHost(state);
     const groups = state.status?.groups ?? [];
-    if (vscode.env.remoteName || state.demo || groups.length < 2) {
+    if (state.demo || groups.length < 2) {
       this.item.hide();
       return;
     }
@@ -73,13 +77,23 @@ export class AccountSwitch implements vscode.Disposable {
     }
   }
 
-  async switch(): Promise<void> {
-    if (vscode.env.remoteName) {
-      void vscode.window.showInformationMessage(
-        "In a Remote-SSH window, VS Code's Claude runs on the host, with the host's own account. Switch it in a window on this computer.",
-      );
+  // A Remote-SSH window: the host's accounts, and which one Claude Code there
+  // runs on (its backend reads the VS Code server's settings)
+  private updateOnHost(state: ViewState): void {
+    const host = this.dash.currentHost;
+    const groups = host ? (machineStatus(state, host)?.groups ?? []) : [];
+    if (!host || state.demo || groups.length < 2) {
+      this.item.hide();
       return;
     }
+    const on = groups.find((g) => g.vscodeHere);
+    this.item.text = `$(account) Claude: ${on ? on.name : "?"}`;
+    this.item.tooltip = `Claude Code on ${host} runs on ${on ? on.title : "an account the widget can't tell"}. Click to switch.`;
+    this.item.show();
+  }
+
+  async switch(): Promise<void> {
+    if (vscode.env.remoteName) return this.switchOnHost();
     if (!vscode.extensions.getExtension("anthropic.claude-code")) {
       void vscode.window.showInformationMessage("The Claude Code extension isn't installed, so there's no VS Code Claude to switch.");
       return;
@@ -145,6 +159,59 @@ export class AccountSwitch implements vscode.Disposable {
     setTimeout(() => void vscode.commands.executeCommand(RELOAD), 300);
     // the reload can be declined (unsaved files): then other switches count again
     setTimeout(() => (this.switching = false), 15000);
+  }
+
+  private async switchOnHost(): Promise<void> {
+    const host = this.dash.currentHost;
+    if (!host) {
+      void vscode.window.showInformationMessage(
+        "This window isn't connected to an SSH host (Remote-SSH), so there's no Claude account here to switch.",
+      );
+      return;
+    }
+    const groups = machineStatus(this.dash.state(), host)?.groups ?? [];
+    if (groups.length < 2) {
+      void vscode.window.showInformationMessage(`There's one Claude account on ${host}, so there's nothing to switch to.`);
+      return;
+    }
+    const pick = await vscode.window.showQuickPick(
+      groups.map((g) => ({
+        label: g.title,
+        description: g.vscodeHere ? `$(check) Claude Code on ${host} runs on it` : undefined,
+        group: g,
+      })),
+      { title: `Account for Claude Code on ${host}`, placeHolder: "Its new chats start on the account you pick, in its other windows too" },
+    );
+    if (!pick) return;
+    if (pick.group.vscodeHere) {
+      void vscode.window.showInformationMessage(`Claude Code on ${host} already runs on ${pick.group.name}.`);
+      return;
+    }
+    if (await this.switchHost(pick.group))
+      void vscode.window.showInformationMessage(
+        `Claude Code on ${host} runs on ${pick.group.name} now: new chats start there. Chats already open keep their account.`,
+      );
+  }
+
+  // Claude Code on this window's SSH host runs on group's account from now
+  // on (its new chats, its other windows there too). Written as a user
+  // setting from a window connected to the host, VS Code puts this machine
+  // setting into the host's Remote Settings; the Claude extension follows it.
+  async switchHost(group: Group): Promise<boolean> {
+    if (group.configDir === undefined) {
+      this.fail(`Can't tell which folder ${group.name} has on ${group.host}: that host's status comes from an older Claude Status.`);
+      return false;
+    }
+    const cc = vscode.workspace.getConfiguration("claudeCode");
+    const next = withConfigDir(cc.get("environmentVariables"), group.configDir);
+    try {
+      await cc.update("environmentVariables", next.length ? next : undefined, vscode.ConfigurationTarget.Global);
+    } catch (err) {
+      this.fail(`Couldn't change Claude Code's settings on ${group.host}: ${(err as Error).message}`);
+      return false;
+    }
+    void this.dash.refreshAll(); // the host's accounts and this item follow
+    return true;
   }
 
   private fail(message: string): void {

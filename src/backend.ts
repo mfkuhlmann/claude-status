@@ -3,6 +3,7 @@
 // sounds. Every call is a plain argument list (no shell).
 
 import { spawn } from "node:child_process";
+import * as fs from "node:fs";
 import * as path from "node:path";
 import { isComparison, type Comparison } from "./changes";
 import type { Status } from "./shared/types";
@@ -101,6 +102,17 @@ export class Backend {
     return path.join(this.codeDir, name);
   }
 
+  // poll.py runs claude_status.py with its compiled code cached (in the
+  // widget's cache folder); a widget vendored before it came has none
+  private statusScript?: string;
+  private pollScript(): string {
+    if (this.statusScript === undefined) {
+      const poll = this.script("poll.py");
+      this.statusScript = fs.existsSync(poll) ? poll : this.script("claude_status.py");
+    }
+    return this.statusScript;
+  }
+
   // Why Python can't be used, or "" when it can (checked once per path)
   async checkPython(): Promise<string> {
     const python = this.python();
@@ -119,7 +131,7 @@ export class Backend {
   // This computer's status. Run in --remote mode too: then every row carries
   // the shell command that opens it, which the extension runs in a terminal.
   async status(args: string[]): Promise<{ status?: Status; error?: string }> {
-    const r = await runProcess(this.python(), ["-I", this.script("claude_status.py"), "--remote", ...args], { timeoutMs: 60000 });
+    const r = await runProcess(this.python(), ["-I", this.pollScript(), "--remote", ...args], { timeoutMs: 60000 });
     if (r.spawnError) return { error: `Can't run Python: ${r.spawnError.message}` };
     if (r.timedOut) return { error: "The status check took longer than a minute." };
     // The JSON is the one line after the marker; a chat's prompt or reply

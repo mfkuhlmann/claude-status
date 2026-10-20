@@ -11,7 +11,7 @@ import { settings, statusArgs, configDirArgs, viewSettings } from "./config";
 import type { Notifier } from "./notify";
 import { currentRemoteHost } from "./remoteHost";
 import { demoState } from "./shared/demo";
-import { allGroups, chatsNeedingYou, toLocalClock, trackKey, type ChatSpot } from "./shared/model";
+import { allGroups, chatsNeedingYou, shareUsage, toLocalClock, trackKey, type ChatSpot } from "./shared/model";
 import { chatRef } from "./notify";
 import type { ClaudeCodeInfo, DigestCard, HostState, PetEventKind, Status, ViewState } from "./shared/types";
 import { TransitionTracker, type Changes, type PetEvent } from "./transitions";
@@ -379,12 +379,13 @@ export class Dashboard implements vscode.Disposable {
     const now = Date.now();
     if (this.demoPhase !== null) {
       const demo = demoState(now, this.demoPhase);
-      return { ...demo, settings: viewSettings(), actionError: this.actionError, actionInfo: this.actionInfo };
+      return { ...demo, ...shareUsage(demo.status, demo.hosts, settings.sshUsage()), settings: viewSettings(), actionError: this.actionError, actionInfo: this.actionInfo };
     }
+    // (an account's plan usage once: shareUsage; the notifications see each machine's own)
+    const hosts = this.shownHosts().map((name) => this.hosts.get(name)).filter((h): h is HostState => !!h);
     return {
-      status: this.status,
+      ...shareUsage(this.status, hosts, settings.sshUsage()),
       errorText: this.errorText,
-      hosts: this.shownHosts().map((name) => this.hosts.get(name)).filter((h): h is HostState => !!h),
       settings: viewSettings(),
       demo: false,
       platformNote:

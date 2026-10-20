@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+- **Switch Claude Code's account in a Remote-SSH window:** the account item in
+  the status bar shows which of the host's accounts Claude Code there runs on,
+  and switches it. VS Code keeps that setting per host (it's a machine
+  setting, written to the host's Remote Settings from a window connected to
+  it), so this computer's account stays as it is; the Claude extension
+  follows the change for new chats.
+- A new chat in the Claude Code chat tab on the host's other account switches
+  Claude Code there to that account first (the menu says so), and it stays on
+  it. Before, the chat started on the host's other account.
+- **An account's plan usage shows once:** an account logged in on this
+  computer and on an SSH host (or on two hosts) has one plan usage, which
+  showed under each copy. It now shows where the account is listed first,
+  with the newest numbers of them all (the machine they come from is named
+  when it's another one). `claudeStatus.sshUsage` shows each host's own
+  again (`all`) or none on hosts (`none`).
+- The status bar's 5-hour usage is that of the account VS Code's Claude runs
+  on (in a Remote-SSH window: the host's), when it has numbers. It was the
+  account with a running chat, so a terminal chat on another account showed
+  that account's.
+- **Plan usage of accounts used in VS Code** (also on SSH hosts), the
+  **Claude Code changed something** note, checks that cost less (`poll.py`)
+  and VS Code's account listed first come with the widget's backend.
+
 ## 1.10.1
 
 - **Share chats on SSH hosts:** a host with two or more Claude accounts

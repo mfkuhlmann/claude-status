@@ -1,10 +1,11 @@
 // The status bar item: the panel icon of the widget. A status bar can only
 // show text and icons, so the count of chats that need you goes in the text
-// (with the warning background), the 5-hour usage after it.
+// (with the warning background), the 5-hour usage after it: of the account
+// VS Code's Claude runs on, when it has numbers.
 
 import * as vscode from "vscode";
 import { settings } from "./config";
-import { allGroups, countStates, overallState, panelWindow, tooltipLines } from "./shared/model";
+import { allGroups, claudeCodeGroup, countStates, overallState, panelWindow, tooltipLines } from "./shared/model";
 import type { ViewState } from "./shared/types";
 
 export class StatusBar implements vscode.Disposable {
@@ -29,7 +30,8 @@ export class StatusBar implements vscode.Disposable {
     if (overall === "waiting") parts.push(`$(bell-dot) ${counts.waiting}`);
     else if (overall === "working") parts.push(`$(loading~spin) ${counts.working}`);
     else parts.push("$(sparkle)");
-    const usage = settings.showUsageInStatusBar() ? panelWindow(groups) : null;
+    // (the account VS Code's Claude runs on first: its chats are the ones here)
+    const usage = settings.showUsageInStatusBar() ? panelWindow(groups, claudeCodeGroup(groups, state.hosts, state.claudeCode)?.id) : null;
     if (usage) parts.push(`${Math.round(usage.window.pct)}%`);
     this.item.text = parts.join(" ");
     this.item.backgroundColor = overall === "waiting" ? new vscode.ThemeColor("statusBarItem.warningBackground") : undefined;

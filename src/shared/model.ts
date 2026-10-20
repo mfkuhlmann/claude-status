@@ -1,7 +1,7 @@
 // The dashboard's derived values, shared by the extension (status bar,
 // notifications) and the webview. Ported from the widget's main.qml.
 
-import type { Agent, ChangeSummary, ChatRef, ChatStats, ClaudeCodeInfo, Counts, Group, HostState, LimitWindow, Overall, RecentChat, ReopenIn, Session, SharedPointer, StatsDay, Status, TaskProgress, UsageStats, ViewState } from "./types";
+import type { Agent, ChangeSummary, ChatRef, ChatStats, ClaudeCodeInfo, Counts, Group, HostState, Limits, LimitWindow, Overall, RecentChat, ReopenIn, Session, SharedPointer, SshUsage, StatsDay, Status, TaskProgress, UsageStats, ViewState } from "./types";
 
 // This computer's accounts and the hosts', for the counts, the badge and
 // what needs you. A host whose last check failed still shows what it said
@@ -169,7 +169,7 @@ export function claudeCodeReopenHint(g: Pick<Group, "host" | "vscodeHere" | "pro
   if (g.host)
     return g.vscodeHere
       ? `Opens the chat in a Claude Code tab, in a VS Code window connected to ${g.host} (Remote-SSH) on the chat's folder.`
-      : `Claude Code on ${g.host} runs on another account (the host's ~/.claude).`;
+      : `Claude Code on ${g.host} runs on another account: a new chat in its Claude Code chat tab on this one switches it, in a window connected to ${g.host}.`;
   if (!claudeCodeHere(g, info)) {
     const on = groups.find((o) => !o.host && !!info.profileKey && (o.profileKeys ?? []).includes(info.profileKey));
     return `Claude Code runs on ${on ? on.title : info.profileKey || "another account"}, not ${g.title}: switch it with “Use Account for VS Code's Claude…” to reopen this account's chats there.`;
@@ -234,9 +234,56 @@ export function heroMood(state: Pick<ViewState, "status" | "errorText">, overall
   return "sleeping";
 }
 
-// The 5-hour window shown next to the status bar item: the account with an
-// active session, else the one with the freshest numbers.
-export function panelWindow(groups: Group[]): { window: LimitWindow; group: Group } | null {
+// Plan usage is the account's, whichever machine it's used on. An account on
+// several (this computer and SSH hosts: the same id) shows it once, where
+// it's listed first, with the newest numbers of them all ("once"); "all"
+// shows each machine's own, "none" no host's. As the widget (main.qml: withUsage).
+export function shareUsage(
+  status: Status | null,
+  hosts: HostState[],
+  mode: SshUsage,
+): { status: Status | null; hosts: HostState[] } {
+  if (mode === "all") return { status, hosts };
+  const owners = new Map<string, { host: string; limits: Limits | null; from: string }>();
+  const note = (g: Group, host: string) => {
+    let o = owners.get(g.id);
+    if (!o) owners.set(g.id, (o = { host, limits: null, from: "" }));
+    if (g.limits && (!o.limits || g.limits.updatedAt > o.limits.updatedAt)) {
+      o.limits = g.limits;
+      o.from = host;
+    }
+  };
+  for (const g of status?.groups ?? []) note(g, "");
+  for (const h of hosts) for (const g of h.result?.groups ?? []) note(g, h.name);
+  // limitsHidden where it shows elsewhere (or no host's does), limitsFrom
+  // when the numbers come from another machine
+  const shown = (g: Group, host: string): Group => {
+    const o = owners.get(g.id);
+    if (host && (mode === "none" || (o && o.host !== host))) return { ...g, limits: null, limitsHidden: true };
+    return !o || o.from === host ? g : { ...g, limits: o.limits, limitsFrom: o.from };
+  };
+  return {
+    status: status && { ...status, groups: status.groups.map((g) => shown(g, "")) },
+    hosts: hosts.map((h) => (h.result ? { ...h, result: { ...h.result, groups: h.result.groups.map((g) => shown(g, h.name)) } } : h)),
+  };
+}
+
+// The account VS Code's Claude runs on in this window: this computer's, or
+// in a Remote-SSH window the host's (what its VS Code server's settings say)
+export function claudeCodeGroup(groups: Group[], hosts: HostState[], info: ClaudeCodeInfo): Group | undefined {
+  const current = hosts.find((h) => h.current);
+  return current
+    ? groups.find((g) => g.host === current.name && g.vscodeHere)
+    : groups.find((g) => !g.host && claudeCodeHere(g, info));
+}
+
+// The 5-hour window shown next to the status bar item: the account VS Code's
+// Claude runs on (preferId, from claudeCodeGroup: its numbers may show on
+// another machine's copy, shareUsage), else the account with an active
+// session, else the one with the freshest numbers.
+export function panelWindow(groups: Group[], preferId?: string): { window: LimitWindow; group: Group } | null {
+  const preferred = preferId ? groups.find((g) => g.id === preferId && g.limits?.windows.length) : undefined;
+  if (preferred) return { window: preferred.limits!.windows[0], group: preferred };
   let best: { window: LimitWindow; group: Group } | null = null;
   let bestScore = -1;
   for (const g of groups) {
