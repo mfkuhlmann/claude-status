@@ -78,6 +78,11 @@ test('panel shows the active account first', () => {
     eq(L.panelWindow([quiet, busy]).pct, 70);
     eq(L.panelWindow([quiet]).pct, 10);
     eq(L.panelWindow([group([])]), null);
+    // this computer's default account comes first, busy or not; a host's default doesn't
+    const mine = group([], {defaultHere: true, limits: {updatedAt: 5, windows: [{key: 'five_hour', pct: 25}]}});
+    eq(L.panelWindow([busy, mine]).pct, 25);
+    eq(L.panelWindow([busy, Object.assign({}, mine, {host: 'lab'})]).pct, 70);
+    eq(L.panelWindow([busy, Object.assign({}, mine, {limits: null})]).pct, 70);
 });
 
 test('first poll primes, later changes notify', () => {

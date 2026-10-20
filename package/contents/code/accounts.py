@@ -9,7 +9,9 @@ VS Code extension's).
     python3 -I accounts.py --logout PROFILE
     python3 -I accounts.py --remove PROFILE
     python3 -I accounts.py --command PROFILE | --no-command PROFILE
+    python3 -I accounts.py --default PROFILE [--no-vscode]
     [--config-dir DIR]...                         extra Claude config dirs
+    [--remote]                                    on an SSH host (remote.py --accounts HOST …)
 
 An account is a Claude config folder, ~/.claude-NAME (what CLAUDE_CONFIG_DIR
 points at), with a login, history and chats of its own: the layout
@@ -31,8 +33,21 @@ Claude keeps the login in the folder. This script never reads it.
 - --remove logs out, then moves the folder to the Trash (without the login)
   and removes its claude-NAME command. Only for ~/.claude-NAME folders that
   no chat, ~/.claude or VS Code's Claude uses.
+- --default makes the account the default one, listed first everywhere
+  (claude_status.default_profile): VS Code's Claude runs on it (only that
+  entry of VS Code's settings changes; --no-vscode: the VS Code extension
+  does it itself), and plain claude too where ~/.claude is a link (it's
+  pointed there; a ~/.claude folder stays as it is). Refused while a Claude
+  process runs through the name ~/.claude: it would go on on the other account.
 
-Prints one JSON line, {"ok": bool, "message": str, ...}.
+On an SSH host, remote.py runs it there the way it runs sharing.py (on
+python3's stdin, with claude_status.py loaded first): nothing is installed
+there. A login there runs in a terminal here, over ssh (--add and --login
+print the command), VS Code's Claude there is the VS Code server's, and the
+Trash is the host's.
+
+Prints one JSON line, {"ok": bool, "message": str, ...} (with --remote,
+after a marker line).
 """
 
 import json
@@ -48,9 +63,15 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 sys.dont_write_bytecode = True  # no __pycache__ inside the installed widget
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # -I leaves the script dir off sys.path
+# Run from its file: the widget's folder (-I leaves it off sys.path). On an SSH
+# host it comes on python3's stdin, after claude_status.py (remote.py).
+if os.path.isfile(globals().get("__file__") or ""):
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import claude_status as cs  # noqa: E402
-import jump  # noqa: E402
+
+REMOTE = False  # on an SSH host (--remote): VS Code there is its VS Code server, and no terminal opens there
+NO_CLAUDE = ("Can't find the claude command: it isn't on PATH, in ~/.local/bin or npm's or nvm's folders, "
+             "nor on your login shell's PATH")
 
 NAME = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,31}\Z")  # claude-switch's rule
 SHARED_FILES = ("settings.json", "CLAUDE.md", "keybindings.json")
@@ -66,6 +87,21 @@ SERVICE_WAIT = 10  # seconds a stopped background service gets to go
 
 def short(path, home):
     return cs.short_folder(str(path), home)
+
+
+def claude_path(home, ask_shell=True):
+    """The claude command's full path, or None (ask_shell: your login shell's
+    PATH may be asked, which starts it: for a click, not for a quick look)."""
+    found = shutil.which("claude") or cs.find_claude(home, ask_shell=ask_shell)
+    return found if found != "claude" else None
+
+
+def vscode_chats(profiles):
+    """How many chats in VS Code's Claude panel work or wait for you right now
+    (switching VS Code's Claude to another account cuts them off once their
+    window reloads)."""
+    return sum(1 for entry, _, _ in cs.live_entries_all(profiles)
+               if entry.get("entrypoint") == "claude-vscode" and cs.session_state(entry) in ("working", "waiting"))
 
 
 def find_profile(home, extra, key):
@@ -262,10 +298,11 @@ def list_accounts(home, extra, check=False):
     cache_root = cs.cache_dir(home)
     logged_out = cs.logged_out_notes(cache_root)
     try:
-        _, vscode_on = cs.vscode_profile(home, profiles, cache_root=cache_root)
+        installed, vscode_on, _, chosen = cs.default_profile(home, profiles, REMOTE, cache_root)
     except Exception:  # VS Code's settings are only one of the reasons
-        vscode_on = None
-    claude = jump.claude_path(home) if check else None
+        installed, vscode_on, chosen = False, None, cs.plain_profile(home, profiles)
+    found = cs.cached_find_claude(home, cache_root, time.time())  # (a quick look: asks the shell at most hourly)
+    claude = found if check else None
     statuses = {}
     if claude:
         with ThreadPoolExecutor(max_workers=4) as pool:
@@ -298,11 +335,13 @@ def list_accounts(home, extra, check=False):
             "email": status["email"] if status else None,
             "chats": chats,
             "vscode": vscode_on is not None and vscode_on.real == p.real,
+            "default": chosen is not None and chosen.real == p.real,
             "commandName": name,
             "command": bool(name) and ours(bin_dir(home) / name),
             "notRemovable": not_removable(p, profiles, home, vscode_on, chats),
         })
-    return True, "", {"accounts": accounts, "canCheck": jump.claude_path(home) is not None}
+    return True, "", {"accounts": accounts, "canCheck": found is not None,
+                      "linked": default_link(home), "vscodeInstalled": bool(installed)}
 
 
 # ---------------------------------------------------------------- adding
@@ -387,13 +426,17 @@ def add_account(home, extra, name, share_from=None, with_command=False):
 
 def login(profile, home, print_only=False):
     """(ok, message, command): a terminal with Claude's login for the profile
-    (print_only: just the command)."""
-    claude = jump.claude_path(home) if print_only else jump.claude_in_terminal(home)
+    (print_only, or on an SSH host: just the command)."""
+    if print_only or REMOTE:
+        claude = claude_path(home)
+        if claude is None:
+            return False, NO_CLAUDE, None
+        return True, "", cs.in_folder(str(home), cs.login_command(profile, home, claude))
+    import jump  # (the desktop's terminals)
+    claude = jump.claude_in_terminal(home)
     if claude is None:
-        return False, jump.NO_CLAUDE, None
+        return False, NO_CLAUDE, None
     command = cs.login_command(profile, home, claude)
-    if print_only:
-        return True, "", command
     if not jump.open_terminal(str(home), command):
         return False, "No terminal found to log in in", None
     return True, f"Log in to {profile.label} in the terminal that opened", None
@@ -406,9 +449,9 @@ def logout(home, extra, key):
     chats = running_chats(profile, profiles)
     if chats:
         return False, f"{chats_text(chats).capitalize()} on {profile.label}: close them first, they'd lose the login"
-    claude = jump.claude_path(home)
+    claude = claude_path(home)
     if claude is None:
-        return False, jump.NO_CLAUDE
+        return False, NO_CLAUDE
     code, said = run_claude(profile, home, claude, ["auth", "logout"])
     if code != 0:
         return False, f"Couldn't log out of {profile.label}: {said or f'claude exited with {code}'}"
@@ -498,14 +541,14 @@ def remove_account(home, extra, key):
     if profile is None:
         return False, f"No Claude profile called {key}"
     try:
-        _, vscode_on = cs.vscode_profile(home, profiles, cache_root=cs.cache_dir(home))
-    except Exception:
-        vscode_on = None
+        _, vscode_on = cs.vscode_profile(home, profiles, REMOTE, cs.cache_dir(home))
+    except Exception as exc:  # unsure whether VS Code's Claude uses it: keep it
+        return False, f"{profile.label} isn't removed: can't tell which account VS Code's Claude uses ({exc})"
     why = (not_removable(profile, profiles, home, vscode_on, running_chats(profile, profiles))
            or trash_problem(profile.path, home))
     if why:
         return False, f"{profile.label} isn't removed: {why}"
-    claude = jump.claude_path(home)
+    claude = claude_path(home)
     credentials = profile.path / ".credentials.json"
     notes = []
     if claude is not None:
@@ -531,23 +574,171 @@ def remove_account(home, extra, key):
     return True, message + ("; " + "; ".join(notes) if notes else "")
 
 
+# ---------------------------------------------------------------- the default account
+
+
+def default_link(home):
+    """Can plain claude be pointed at any account: is ~/.claude a link (or
+    not there at all, so that a link can go there)?"""
+    link = home / ".claude"
+    return link.is_symlink() or not os.path.lexists(str(link))
+
+
+def process_env(pid, names):
+    """These variables of a process's environment (as it was started)."""
+    try:
+        with open(f"/proc/{pid}/environ", "rb") as f:
+            items = f.read().split(b"\0")
+    except OSError:
+        return {}
+    out = {}
+    for item in items:
+        key, sep, value = item.partition(b"=")
+        if sep and key.decode(errors="replace") in names:
+            out[key.decode()] = value.decode(errors="replace")
+    return out
+
+
+def through_link(home, profiles):
+    """The live Claude processes (chats, background ones, Claude's service)
+    that use the name ~/.claude: pointed elsewhere, they'd go on there."""
+    link = str(home / ".claude")
+    pids = set()
+    for entry, _, _ in cs.live_entries_all(profiles):
+        env = process_env(entry["pid"], ("CLAUDE_CONFIG_DIR", "HOME"))
+        # (without the variable: its home's ~/.claude)
+        value = env.get("CLAUDE_CONFIG_DIR") or (env["HOME"] + "/.claude" if env.get("HOME") else "")
+        if value and os.path.normpath(os.path.expanduser(value)) == link:
+            pids.add(entry["pid"])
+    for p in profiles:
+        if os.path.normpath(cs.service_config_dir(p) or "") == link:
+            pids.add(-1)  # its background service
+    return len(pids)
+
+
+def vscode_value(profile, home):
+    """The CLAUDE_CONFIG_DIR VS Code's Claude needs for this profile (None:
+    none, a plain ~/.claude). The one ~/.claude links to is named by the link,
+    as terminals name it: Claude keys its background service by the name."""
+    link = home / ".claude"
+    if link.is_symlink():
+        try:
+            if link.resolve() == profile.real:
+                return str(link)
+        except (OSError, RuntimeError):
+            pass
+    elif link == profile.path:
+        return None
+    return str(profile.real)
+
+
+def vscode_state(home, profiles):
+    """(VS Code's Claude can be switched, the profile it runs on now): here,
+    VS Code's own; on an SSH host, its VS Code server's (where VS Code ever
+    connected to it)."""
+    if REMOTE:
+        _, on = cs.vscode_profile(home, profiles, remote=True)
+        return any(cs.is_dir(home / s) for s in cs.VSCODE_SERVERS.values()), on
+    installed, on = cs.vscode_profile(home, profiles)
+    return bool(installed), on
+
+
+def vscode_setting(home):
+    """The CLAUDE_CONFIG_DIR VS Code's settings give its Claude (None: none)."""
+    return cs.vscode_server_config_dir(home) if REMOTE else cs.vscode_setting_config_dir(home, cs.vscode_app()[1])
+
+
+def set_vscode(home, value, extra):
+    """VS Code's Claude runs with value from now on: (ok, why not)."""
+    if not REMOTE:
+        return cs.set_vscode_user_config_dir(home, value)
+    for server in cs.VSCODE_SERVERS.values():
+        if cs.is_dir(home / server):
+            ok, why = cs.set_vscode_server_config_dir(home, value, server, extra)
+            if not ok:
+                return False, why
+    return True, ""
+
+
+def make_default(home, extra, key, vscode=True):
+    """(ok, message): the profile is the default account from now on. What
+    a switch would cut off is checked before anything changes."""
+    profile, profiles = find_profile(home, extra, key)
+    if profile is None:
+        return False, f"No Claude profile called {key}"
+    link = home / ".claude"
+    linked = default_link(home)
+    missing = not os.path.lexists(str(link))  # no ~/.claude at all: a link there makes plain claude follow
+    try:
+        current = link.resolve() if linked else None
+    except (OSError, RuntimeError):
+        current = None
+    moves_link = (linked and current != profile.real) or missing
+    switchable, on = vscode_state(home, profiles) if vscode else (False, None)
+    moves_vscode = switchable and (on is None or on.real != profile.real)
+    if moves_link:
+        busy = through_link(home, profiles)
+        if busy:
+            what = "a Claude process runs" if busy == 1 else f"{busy} Claude processes run"
+            return False, (f"{profile.label} isn't the default yet: {what} through ~/.claude (in a terminal, VS Code "
+                           f"or the background), and would go on on {profile.label}. Close those chats first")
+    if moves_vscode:
+        working = vscode_chats(profiles)
+        if working:
+            what = "a chat works" if working == 1 else f"{working} chats work"
+            return False, (f"{profile.label} isn't the default yet: {what} in VS Code's Claude, which a switch would cut "
+                           "off once its window reloads. Try again once it's done")
+    done, notes, failed = [], [], []
+    if moves_link:
+        target = str(profile.real) if missing else os.readlink(str(link))
+        new = profile.path.name if not os.path.isabs(target) else str(profile.real)
+        tmp = home / f".claude.{os.getpid()}.tmp"
+        os.symlink(new, str(tmp))
+        os.replace(str(tmp), str(link))
+        done.append("plain claude")
+    elif not linked and profile.path != link:
+        notes.append("plain claude stays on ~/.claude (a folder, not a link): run "
+                     + (command_name(profile, home) or "claude") + " for this account")
+    if switchable:
+        value = vscode_value(profile, home)
+        # the same account under another name counts too: as the link, it
+        # follows ~/.claude from now on
+        if moves_vscode or vscode_setting(home) != value:
+            ok, why = set_vscode(home, value, extra)
+            now = vscode_state(home, cs.discover_profiles(home, extra))[1] if ok else None
+            if not ok:
+                failed.append(why)
+            elif now is None or now.real != profile.real:
+                failed.append("VS Code was started with another CLAUDE_CONFIG_DIR, which its Claude keeps: "
+                              "start VS Code without it")
+            elif moves_vscode:
+                done.append("VS Code's Claude (new chats there; a window's Claude panel once the window reloads)")
+    message = f"{profile.label} is the default account" + (f": {' and '.join(done)} run on it" if done
+                                                            else "" if failed else " already")
+    return not (failed and not done), "; ".join([message, *failed, *notes])
+
+
 # ---------------------------------------------------------------- main
 
 USAGE = ("usage: accounts.py --list [--check] [--config-dir DIR]...\n"
          "       accounts.py --add NAME [--share-from PROFILE] [--command] [--print-command]\n"
          "       accounts.py --login PROFILE [--print-command]\n"
          "       accounts.py --logout PROFILE | --remove PROFILE\n"
-         "       accounts.py --command PROFILE | --no-command PROFILE")
+         "       accounts.py --command PROFILE | --no-command PROFILE\n"
+         "       accounts.py --default PROFILE [--no-vscode]\n"
+         "       … [--config-dir DIR]... [--remote]")
 
 
 def main(argv=None):
+    global REMOTE
     args = sys.argv[1:] if argv is None else list(argv)
     action, target, extra, check, share_from, with_command, print_only = None, None, [], False, None, False, False
+    vscode = True
     while args:
         arg = args.pop(0)
         if arg == "--list" and action is None:
             action = arg
-        elif arg in ("--add", "--login", "--logout", "--remove", "--no-command") and args and action is None:
+        elif arg in ("--add", "--login", "--logout", "--remove", "--no-command", "--default") and args and action is None:
             action, target = arg, args.pop(0)
         elif arg == "--command" and action is None and args and not args[0].startswith("-"):
             action, target = arg, args.pop(0)
@@ -559,11 +750,16 @@ def main(argv=None):
             share_from = args.pop(0)
         elif arg == "--print-command":
             print_only = True
+        elif arg == "--no-vscode":
+            vscode = False
+        elif arg == "--remote":
+            REMOTE = True
         elif arg == "--config-dir" and args:
             extra.append(args.pop(0))
         else:
             sys.exit(USAGE)
-    if action is None or (with_command and action != "--add") or (print_only and action not in ("--add", "--login")):
+    if (action is None or (with_command and action != "--add") or (print_only and action not in ("--add", "--login"))
+            or (not vscode and action != "--default")):
         sys.exit(USAGE)
     os.umask(0o077)
     home, more, command = Path.home(), {}, None
@@ -589,6 +785,11 @@ def main(argv=None):
             ok, message = logout(home, extra, target)
         elif action == "--remove":
             ok, message = remove_account(home, extra, target)
+        elif action == "--default":
+            ok, message = make_default(home, extra, target, vscode)
+            profile, _ = find_profile(home, extra, target)
+            if ok and profile is not None:  # what VS Code's Claude needs for it now (the VS Code extension sets it)
+                more = {"configDir": vscode_value(profile, home)}
         else:
             profile, _ = find_profile(home, extra, target)
             if profile is None:
@@ -598,6 +799,8 @@ def main(argv=None):
                 message = message or f"{profile.label} has no command to remove"
     except Exception as exc:  # report, don't crash: the widget shows the message
         ok, message = False, f"{type(exc).__name__}: {exc}"
+    if REMOTE:  # login scripts on the host may print things first: the JSON follows a marker
+        sys.stdout.write("\n" + cs.REMOTE_MARK + " ")
     print(json.dumps({"ok": ok, "message": message, **more, **({"command": command} if command else {})}))
 
 

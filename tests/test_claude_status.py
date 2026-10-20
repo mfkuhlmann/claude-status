@@ -1142,10 +1142,10 @@ class SharedCopiesTests(Fixture):
 
 
 class OldPythonTests(unittest.TestCase):
-    """claude_status.py and sharing.py also run on SSH hosts, whose python3 may be as old as 3.7."""
+    """claude_status.py, sharing.py and accounts.py also run on SSH hosts, whose python3 may be as old as 3.7."""
 
     def test_no_syntax_or_calls_newer_than_37(self):
-        for name in ("claude_status.py", "sharing.py"):
+        for name in ("claude_status.py", "sharing.py", "accounts.py"):
             source = (ROOT / "package/contents/code" / name).read_text()
             # no := or f"{x=}" (3.7 itself parses only what it supports)
             tree = ast.parse(source, feature_version=(3, 7)) if sys.version_info >= (3, 8) else ast.parse(source)
@@ -1156,8 +1156,9 @@ class OldPythonTests(unittest.TestCase):
                 if isinstance(node, ast.keyword):
                     self.assertNotIn(node.arg, {"missing_ok", "strict"}, f"{name} line {node.value.lineno}: {node.arg}= needs a newer Python")
                 if isinstance(node, ast.Attribute):
-                    self.assertNotIn(node.attr, newer_methods, f"{name} line {node.lineno}: .{node.attr} needs a newer Python")
                     owner = getattr(node.value, "id", "")
+                    if (owner, node.attr) != ("os", "readlink"):  # (Path.readlink is 3.9's, os.readlink old)
+                        self.assertNotIn(node.attr, newer_methods, f"{name} line {node.lineno}: .{node.attr} needs a newer Python")
                     self.assertNotIn((owner, node.attr), newer_calls, f"{name} line {node.lineno}: {owner}.{node.attr} needs a newer Python")
 
 class StatusCheckCostTests(unittest.TestCase):

@@ -5,6 +5,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -15,7 +16,8 @@ sys.path.insert(0, str(CODE))
 spec = importlib.util.spec_from_file_location("accounts", CODE / "accounts.py")
 accounts = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(accounts)
-cs, jump = accounts.cs, accounts.jump
+cs = accounts.cs
+import jump  # noqa: E402  (accounts.py opens its terminals through it)
 
 from test_claude_status import session, write  # noqa: E402
 
@@ -314,7 +316,7 @@ class RemoveTests(Home):
         write(self.home / ".claude-work/sessions/1.json", session("busy", status="busy"))
         self.assertIn("A chat runs on it", accounts.remove_account(self.home, [], ".claude-work")[1])
         (self.home / ".claude-work/sessions/1.json").unlink()
-        with mock.patch.object(cs, "vscode_profile", lambda home, profiles, **k: (True, profiles[1])):
+        with mock.patch.object(cs, "vscode_profile", lambda home, profiles, *a, **k: (True, profiles[1])):
             self.assertIn("VS Code's Claude runs on it", accounts.remove_account(self.home, [], ".claude-work")[1])
         extra = Path(self.tmp.name) / "elsewhere"
         write(extra / ".profile-name", "elsewhere")
@@ -333,6 +335,143 @@ class RemoveTests(Home):
         self.assertFalse(ok)
         self.assertIn("another disk than your Trash", message)
         self.assertTrue((self.home / ".claude-work/.credentials.json").exists())
+
+
+class DefaultTests(Home):
+    """~/.claude links to work; VS Code's Claude runs on the folder its
+    settings name (a file with comments)."""
+
+    def setUp(self):
+        super().setUp()
+        os.rename(self.home / ".claude", self.home / ".claude-personal")
+        write(self.home / ".claude-personal/.profile-name", "personal")
+        write(self.home / ".claude-personal/.claude.json",
+              {"oauthAccount": {"accountUuid": "acct-pro", "organizationType": "claude_pro"}})
+        os.symlink(self.home / ".claude-work", self.home / ".claude")
+        self.config = Path(self.tmp.name) / "config"
+        os.environ["XDG_CONFIG_HOME"] = str(self.config)
+        self.settings = self.config / "Code/User/settings.json"
+        write(self.settings, '{\n    // my editor\n    "editor.fontSize": 14,\n    "claudeCode.environmentVariables": [\n'
+                             '        {"name": "CLAUDE_CONFIG_DIR", "value": "%s"}\n    ],\n}\n' % (self.home / ".claude-personal"))
+        self.children = []
+        self.patches.append(mock.patch.object(cs, "vscode_app", lambda: ("/usr/bin/code", "Code")))
+        self.patches.append(mock.patch.object(cs, "vscode_running_config_dir", lambda: (False, None)))
+        self.patches[1].stop()  # the real vscode_profile: it reads the settings above
+        for p in self.patches[-2:]:
+            p.start()
+
+    def tearDown(self):
+        for c in self.children:
+            c.kill()
+            c.wait()
+        super().tearDown()
+
+    def chat_through(self, name):
+        """A live chat started with CLAUDE_CONFIG_DIR=name."""
+        env = {**os.environ, "CLAUDE_CONFIG_DIR": str(name)}
+        child = subprocess.Popen(["sleep", "120"], env=env)
+        self.children.append(child)
+        for _ in range(500):
+            if cs.proc_start_time(child.pid) and cs.process_config_dir(child.pid):
+                break
+            time.sleep(0.01)
+        write(self.home / ".claude-work/sessions" / f"{child.pid}.json",
+              session("chat", pid=child.pid, procStart=cs.proc_start_time(child.pid)))
+
+    def first(self):
+        result = cs.collect(self.home, cs.cache_dir(self.home), with_tokens=False)
+        cs.add_vscode(result, self.home)
+        return [(g["name"], g["defaultHere"], g["vscodeHere"], g["plainHere"]) for g in result["groups"]]
+
+    def test_the_default_is_vscodes_and_comes_first(self):
+        self.assertEqual(self.first(), [("personal", True, True, False), ("work", False, False, True)])
+        listed = self.listed()
+        self.assertTrue(listed[".claude-personal"]["default"])
+        self.assertTrue(listed[".claude-work"]["main"])
+
+    def test_without_vscode_plain_claudes(self):
+        with mock.patch.object(cs, "vscode_app", lambda: (None, None)):
+            self.assertEqual(self.first()[0], ("work", True, False, True))
+
+    def test_make_default_points_both_there(self):
+        ok, message = accounts.make_default(self.home, [], ".claude-personal")
+        self.assertTrue(ok, message)
+        self.assertEqual(os.readlink(self.home / ".claude"), str(self.home / ".claude-personal"))
+        text = self.settings.read_text()
+        self.assertIn("// my editor", text)  # the rest of the file as it was
+        self.assertEqual(cs.jsonc(text)["claudeCode.environmentVariables"],
+                         [{"name": "CLAUDE_CONFIG_DIR", "value": str(self.home / ".claude")}])  # follows the link now
+        self.assertIn("plain claude run on it", message)
+        # and back: VS Code follows the link, plain claude moves
+        ok, message = accounts.make_default(self.home, [], ".claude-work")
+        self.assertTrue(ok, message)
+        self.assertEqual(os.readlink(self.home / ".claude"), str(self.home / ".claude-work"))
+        self.assertEqual(self.first()[0][0], "work")
+        self.assertIn("already", accounts.make_default(self.home, [], ".claude-work")[1])
+
+    def test_a_relative_link_stays_relative(self):
+        (self.home / ".claude").unlink()
+        os.symlink(".claude-work", self.home / ".claude")
+        self.assertTrue(accounts.make_default(self.home, [], ".claude-personal")[0])
+        self.assertEqual(os.readlink(self.home / ".claude"), ".claude-personal")
+
+    def test_refused_while_a_chat_runs_through_the_link(self):
+        self.chat_through(self.home / ".claude")
+        ok, message = accounts.make_default(self.home, [], ".claude-personal")
+        self.assertFalse(ok)
+        self.assertIn("a Claude process runs through ~/.claude", message)
+        self.assertEqual(os.readlink(self.home / ".claude"), str(self.home / ".claude-work"))
+        self.assertIn(str(self.home / ".claude-personal"), self.settings.read_text())  # nothing changed
+
+    def test_refused_while_a_chat_works_in_vscodes_claude(self):
+        # VS Code's Claude would switch: a chat working in its panel would be cut off when the window reloads
+        child = subprocess.Popen(["sleep", "120"])
+        self.children.append(child)
+        for _ in range(500):
+            if cs.proc_start_time(child.pid):
+                break
+            time.sleep(0.01)
+        write(self.home / ".claude-personal/sessions" / f"{child.pid}.json",
+              session("panel", pid=child.pid, procStart=cs.proc_start_time(child.pid), entrypoint="claude-vscode",
+                      status="busy"))
+        ok, message = accounts.make_default(self.home, [], ".claude-work")
+        self.assertFalse(ok)
+        self.assertIn("a chat works in VS Code's Claude", message)
+        self.assertEqual(os.readlink(self.home / ".claude"), str(self.home / ".claude-work"))  # nothing changed
+        # done working: it may switch
+        write(self.home / ".claude-personal/sessions" / f"{child.pid}.json",
+              session("panel", pid=child.pid, procStart=cs.proc_start_time(child.pid), entrypoint="claude-vscode"))
+        self.assertTrue(accounts.make_default(self.home, [], ".claude-work")[0])
+
+    def test_a_chat_on_the_folders_own_name_doesnt_move(self):
+        self.chat_through(self.home / ".claude-work")
+        self.assertTrue(accounts.make_default(self.home, [], ".claude-personal")[0])
+
+    def test_a_main_folder_stays_a_folder(self):
+        (self.home / ".claude").unlink()
+        os.rename(self.home / ".claude-work", self.home / ".claude")
+        ok, message = accounts.make_default(self.home, [], ".claude-personal")
+        self.assertTrue(ok, message)
+        self.assertTrue((self.home / ".claude").is_dir() and not (self.home / ".claude").is_symlink())
+        self.assertIn("plain claude stays on ~/.claude (a folder", message)
+        self.assertEqual(self.first()[0][0], "personal")
+        # the main folder as the default: VS Code's Claude without the variable
+        self.assertTrue(accounts.make_default(self.home, [], ".claude")[0])
+        self.assertEqual(cs.jsonc(self.settings.read_text())["claudeCode.environmentVariables"], [])
+
+    def test_no_main_folder_gets_a_link(self):
+        (self.home / ".claude").unlink()  # only ~/.claude-NAME folders
+        ok, message = accounts.make_default(self.home, [], ".claude-work")
+        self.assertTrue(ok, message)
+        self.assertEqual(os.readlink(self.home / ".claude"), str(self.home / ".claude-work"))
+        self.assertIn("plain claude", message)
+
+    def test_one_account(self):
+        import shutil
+        shutil.rmtree(self.home / ".claude-personal")
+        self.settings.unlink()
+        self.assertEqual(self.first(), [("work", True, True, True)])
+        self.assertIn("already", accounts.make_default(self.home, [], ".claude-work")[1])
 
 
 class CommandLineTests(unittest.TestCase):

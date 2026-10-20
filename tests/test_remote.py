@@ -524,6 +524,75 @@ class HostNoiseTests(FakeSSH):
         with self.assertRaises(ProcessLookupError):
             os.kill(ssh_pid, 0)
 
+class AccountTests(FakeSSH):
+    """The host's Claude accounts: accounts.py runs there, sent with
+    claude_status.py like sharing.py; a login opens a terminal here (ssh -t)."""
+
+    def setUp(self):
+        super().setUp()
+        self.claude = self.fake_home / ".local/bin/claude"
+        self.claude.parent.mkdir(parents=True)
+        self.claude.write_text("#!/bin/sh\necho \"Successfully logged out.\"\n")
+        self.claude.chmod(0o755)
+
+    def run_main(self, *args):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            remote.main(list(args))
+        return json.loads(out.getvalue())
+
+    def opening(self, *args):
+        import jump
+        opened, old = [], jump.open_terminal
+        jump.open_terminal = lambda cwd, cmd: opened.append(cmd) or True
+        try:
+            return self.run_main("--accounts", "lab", *args), opened
+        finally:
+            jump.open_terminal = old
+
+    def test_the_hosts_accounts(self):
+        answer = self.run_main("--accounts", "lab", "--list")
+        self.assertTrue(answer["ok"], answer)
+        self.assertEqual([a["key"] for a in answer["accounts"]], [".claude"])
+        self.assertEqual(self.calls()[-1], ["lab", "python3 -I - --remote --list"])
+
+    def test_add_one_and_log_in_here_over_ssh(self):
+        answer, opened = self.opening("--add", "side", "--command")
+        self.assertTrue(answer["ok"], answer)
+        side = self.fake_home / ".claude-side"
+        self.assertEqual((side / ".profile-name").read_text(), "side\n")
+        self.assertTrue((self.fake_home / ".local/bin/claude-side").exists())
+        (line,) = opened  # a terminal here, running Claude's login there
+        words = shlex.split(line)
+        self.assertEqual(words[0], "ssh")
+        self.assertEqual(words[-2], "lab")
+        self.assertIn(f"CLAUDE_CONFIG_DIR={side} {self.claude} auth login", words[-1])
+        self.assertIn("paste the code", words[-1])
+        self.assertNotIn("command", answer)
+
+    def test_the_login_command_for_a_terminal_of_your_own(self):
+        answer, opened = self.opening("--login", ".claude", "--print-command")
+        self.assertEqual(opened, [])
+        self.assertTrue(answer["command"].endswith(f"env -u CLAUDE_CONFIG_DIR {self.claude} auth login"), answer)
+        self.assertEqual(self.calls()[-1], ["lab", "python3 -I - --remote --login .claude"])
+
+    def test_default_and_remove_there(self):
+        main = self.fake_home / ".claude"
+        os.rename(main, self.fake_home / ".claude-main")
+        os.symlink(".claude-main", main)
+        (self.fake_home / ".claude-work/projects").mkdir(parents=True)
+        (self.fake_home / ".claude-work/.profile-name").write_text("work")
+        answer = self.run_main("--accounts", "lab", "--default", ".claude-work")
+        self.assertTrue(answer["ok"], answer)
+        self.assertEqual(os.readlink(main), ".claude-work")  # the host's link, as it was written (relative)
+        answer = self.run_main("--accounts", "lab", "--remove", ".claude-main")
+        self.assertTrue(answer["ok"], answer)
+        self.assertTrue((self.fake_home / ".local/share/Trash/files/.claude-main/jobs").is_dir())
+
+    def test_only_accounts_actions(self):
+        self.assertFalse(self.run_main("--accounts", "lab", "--status")["ok"])
+
+
 if __name__ == "__main__":
     unittest.main()
 

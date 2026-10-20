@@ -6,9 +6,10 @@ import org.kde.kcmutils as KCM
 import org.kde.plasma.plasma5support as P5Support
 import org.kde.plasma.plasmoid
 
-// The Claude accounts on this computer (code/accounts.py): add one (a
-// ~/.claude-NAME folder that Claude's own login, in a terminal, signs in),
-// log in or out, remove one, and its claude-NAME command. Nothing here is a
+// The Claude accounts on this computer or an SSH host (code/accounts.py; a
+// host's through remote.py --accounts): add one (a ~/.claude-NAME folder that
+// Claude's own login, in a terminal, signs in), log in or out, remove one,
+// make one the default, and its claude-NAME command. Nothing here is a
 // setting, so there's nothing to apply.
 KCM.SimpleKCM {
     id: page
@@ -17,9 +18,17 @@ KCM.SimpleKCM {
     readonly property var configDirArgs: Plasmoid.configuration.extraConfigDirs.split(",")
         .map(d => d.trim()).filter(d => d.length).reduce((args, d) => args.concat(["--config-dir", d]), [])
 
+    // whose accounts: this computer's (""), or an SSH host's picked in the popup
+    property string host: ""
+    readonly property var hosts: Plasmoid.configuration.sshHosts.split(",").map(h => h.trim()).filter(h => h.length)
+    property var pending: ({})        // command -> the machine it's for
+
     property var accounts: []
     property bool loaded: false
     property bool canCheck: true
+    property bool linked: false       // ~/.claude is a link: plain claude can follow the default
+    readonly property var defaultAccount: accounts.find(a => a.default) || null
+    readonly property var plainAccount: accounts.find(a => a.main) || null
     property string message: ""
     property bool messageOk: true
     property string busy: ""          // the account (or "add") an action runs for
@@ -40,7 +49,21 @@ KCM.SimpleKCM {
 
     function command(args) {
         const q = s => "'" + String(s).replace(/'/g, "'\\''") + "'"
-        return "python3 -I " + q(codeDir + "accounts.py") + " " + args.concat(configDirArgs).map(q).join(" ") + " # " + Date.now()
+        const line = host
+            ? "python3 -I " + q(codeDir + "remote.py") + " " + ["--accounts", host].concat(args).map(q).join(" ")
+            : "python3 -I " + q(codeDir + "accounts.py") + " " + args.concat(configDirArgs).map(q).join(" ")
+        const source = line + " # " + Date.now() + Math.random()
+        pending[source] = host
+        return source
+    }
+
+    function pick(machine) {
+        host = machine
+        accounts = []
+        loaded = false
+        message = ""
+        confirm = ""
+        load(true)
     }
 
     // check: ask Claude which accounts are logged in (and as whom); without,
@@ -61,6 +84,10 @@ KCM.SimpleKCM {
         connectedSources: []
         onNewData: (source, data) => {
             disconnectSource(source)
+            const machine = page.pending[source]
+            delete page.pending[source]
+            if (machine !== page.host && source.indexOf("'--list'") >= 0)
+                return   // an answer for the machine shown before
             let result = null
             try {
                 result = JSON.parse(data["stdout"])
@@ -88,6 +115,7 @@ KCM.SimpleKCM {
                         : Object.assign({}, a, { checked: true, method: old.method, email: old.email, loggedIn: old.loggedIn })
                 })
                 page.canCheck = result.canCheck
+                page.linked = !!result.linked
                 if (!checked && (!page.loaded || changed))
                     page.load(true)
                 page.loaded = true
@@ -104,9 +132,9 @@ KCM.SimpleKCM {
 
     Component.onCompleted: load(true)
 
-    // A login happens in a terminal: look again every few seconds
+    // A login happens in a terminal: look again every few seconds (a host's over ssh, less often)
     Timer {
-        interval: 4000
+        interval: page.host ? 10000 : 4000
         repeat: true
         running: page.visible && page.loaded
         onTriggered: page.load(false)
@@ -124,10 +152,22 @@ KCM.SimpleKCM {
             onVisibleChanged: if (!visible) page.message = ""
         }
 
-        Kirigami.Heading {
-            level: 3
-            textFormat: Text.PlainText
-            text: i18n("Accounts on this computer")
+        RowLayout {
+            Kirigami.Heading {
+                level: 3
+                textFormat: Text.PlainText
+                text: page.host ? i18n("Accounts on %1", page.host) : i18n("Accounts on this computer")
+            }
+            Item { Layout.fillWidth: true }
+            QQC2.Label {
+                visible: page.hosts.length > 0
+                text: i18n("On:")
+            }
+            QQC2.ComboBox {
+                visible: page.hosts.length > 0
+                model: [i18n("This computer")].concat(page.hosts)
+                onActivated: page.pick(currentIndex === 0 ? "" : page.hosts[currentIndex - 1])
+            }
         }
 
         QQC2.Label {
@@ -135,13 +175,24 @@ KCM.SimpleKCM {
             wrapMode: Text.Wrap
             font: Kirigami.Theme.smallFont
             opacity: 0.7
-            text: i18n("Each account is a Claude folder (~/.claude, ~/.claude-NAME) with a login, history and chats of its own. Plain claude runs on ~/.claude; a chat started with the + next to an account in the popup runs on that account.")
+            text: (page.host ? i18n("On %1, over ssh: nothing is installed there, and its logins open in a terminal here, where you paste the code Claude gives you.", page.host) + " " : "")
+                  + i18n("Each account is a Claude folder (~/.claude, ~/.claude-NAME) with a login, history and chats of its own. The default account is listed first and its usage is in the panel: VS Code's Claude runs on it, and plain claude too where ~/.claude is a link. A chat started with the + next to an account in the popup runs on that account.")
         }
 
         QQC2.Label {
             visible: !page.loaded
             text: i18n("Looking…")
             opacity: 0.7
+        }
+
+        // The default account is listed first everywhere and its usage is in
+        // the panel; VS Code's Claude and plain claude run on it
+        Kirigami.InlineMessage {
+            Layout.fillWidth: true
+            visible: page.linked && !!page.defaultAccount && !!page.plainAccount && page.defaultAccount.key !== page.plainAccount.key
+            type: Kirigami.MessageType.Information
+            text: visible ? i18n("VS Code's Claude runs on %1, the default account, but plain claude on %2 (~/.claude links there). Make Default on %1 points plain claude there too.",
+                                 page.defaultAccount.label, page.plainAccount.label) : ""
         }
 
         Repeater {
@@ -175,6 +226,14 @@ KCM.SimpleKCM {
                             textFormat: Text.PlainText
                             text: card.account.label
                             font.bold: true
+                        }
+                        QQC2.Label {
+                            textFormat: Text.PlainText
+                            visible: card.account.default
+                            text: i18n("default")
+                            font.bold: true
+                            font.pointSize: Kirigami.Theme.smallFont.pointSize
+                            color: Kirigami.Theme.positiveTextColor
                         }
                         QQC2.Label {
                             textFormat: Text.PlainText
@@ -240,6 +299,18 @@ KCM.SimpleKCM {
                         spacing: Kirigami.Units.smallSpacing
                         visible: !card.asking
 
+                        QQC2.Button {
+                            visible: page.accounts.length > 1 && card.account.loggedIn
+                                     && (!card.account.default || (page.linked && !card.account.main))
+                            text: i18n("Make Default")
+                            icon.name: "starred-symbolic"
+                            enabled: page.busy === ""
+                            onClicked: page.act(["--default", card.account.key], card.account.key)
+                            QQC2.ToolTip.visible: hovered
+                            QQC2.ToolTip.text: page.linked
+                                ? i18n("Lists it first and shows its usage in the panel; VS Code's Claude (new chats, and a window's Claude panel once it reloads) and plain claude (~/.claude) run on it. Not while a chat runs through ~/.claude: it would go on on this account.")
+                                : i18n("Lists it first and shows its usage in the panel; VS Code's Claude runs on it (new chats, and a window's Claude panel once it reloads). Plain claude stays on ~/.claude, a folder.")
+                        }
                         QQC2.Button {
                             visible: !card.account.loggedIn
                             text: i18n("Log in…")

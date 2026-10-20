@@ -99,15 +99,26 @@ export default class ClaudeStatusPreferences extends ExtensionPreferences {
         window.add(this._accountsPage(window, settings));
     }
 
-    // The Claude accounts on this computer (code/accounts.py; port of the
-    // Plasma widget's configAccounts.qml): add one, log in or out, remove one
+    // The Claude accounts on this computer or an SSH host (code/accounts.py; a
+    // host's through remote.py --accounts; port of the Plasma widget's
+    // configAccounts.qml): add one, log in or out, remove one, the default one
     _accountsPage(window, settings) {
         const page = new Adw.PreferencesPage({title: 'Accounts', icon_name: 'system-users-symbolic'});
         const esc = text => GLib.markup_escape_text(text, -1);
-        const state = {accounts: [], loaded: false, canCheck: true, busy: '', confirm: '', rows: [], closed: false};
+        const state = {accounts: [], loaded: false, canCheck: true, linked: false, busy: '', confirm: '', rows: [], closed: false,
+            host: '', loadedAt: 0};
+        // whose accounts: this computer's, or an SSH host's picked in the popup
+        const hosts = settings.get_strv('ssh-hosts').map(h => h.trim()).filter(h => h);
+        const where = new Adw.ComboRow({title: 'On', subtitle: 'A host\'s accounts go over ssh: nothing is installed there, and its logins open in a terminal here, where you paste the code Claude gives you.',
+            model: Gtk.StringList.new(['This computer', ...hosts])});
+        if (hosts.length) {
+            const on = new Adw.PreferencesGroup();
+            on.add(where);
+            page.add(on);
+        }
 
-        const list = new Adw.PreferencesGroup({title: 'Accounts on this computer',
-            description: 'Each account is a Claude folder (~/.claude, ~/.claude-NAME) with a login, history and chats of its own. Plain claude runs on ~/.claude; a chat started with the + next to an account runs on that account.'});
+        const about = 'Each account is a Claude folder (~/.claude, ~/.claude-NAME) with a login, history and chats of its own. The default account is listed first and its usage is in the top bar: VS Code\'s Claude runs on it, and plain claude too where ~/.claude is a link. A chat started with the + next to an account runs on that account.';
+        const list = new Adw.PreferencesGroup({title: 'Accounts on this computer', description: about});
         page.add(list);
 
         const add = new Adw.PreferencesGroup({title: 'Add an account',
@@ -135,9 +146,12 @@ export default class ClaudeStatusPreferences extends ExtensionPreferences {
         const run = args => new Promise(resolve => {
             const dirs = settings.get_string('extra-config-dirs').split(',').map(d => d.trim()).filter(d => d)
                 .flatMap(d => ['--config-dir', d]);
+            const code = name => GLib.build_filenamev([this.path, 'code', name]);
+            const argv = state.host
+                ? ['python3', '-I', code('remote.py'), '--accounts', state.host, ...args]
+                : ['python3', '-I', code('accounts.py'), ...args, ...dirs];
             try {
-                const proc = Gio.Subprocess.new(['python3', '-I', GLib.build_filenamev([this.path, 'code', 'accounts.py']),
-                    ...args, ...dirs], Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE);
+                const proc = Gio.Subprocess.new(argv, Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE);
                 proc.communicate_utf8_async(null, null, (pr, res) => {
                     try {
                         const [, out, err] = pr.communicate_utf8_finish(res);
@@ -191,6 +205,11 @@ export default class ClaudeStatusPreferences extends ExtensionPreferences {
                 state.rows.push(row);
                 list.add(row);
             }
+            // VS Code's Claude and plain claude on two accounts: say so
+            const def = state.accounts.find(a => a.default), plain = state.accounts.find(a => a.main);
+            list.description = esc(state.linked && def && plain && def.key !== plain.key
+                ? `${about}\n\nVS Code's Claude runs on ${def.label}, the default account, but plain claude on ${plain.label} (~/.claude links there). Make Default on ${def.label} points plain claude there too.`
+                : about);
             const keys = state.accounts.map(a => a.key);
             if (keys.join('\n') !== shareKeys.join('\n')) {
                 shareKeys = keys;
@@ -201,9 +220,11 @@ export default class ClaudeStatusPreferences extends ExtensionPreferences {
         };
 
         const load = async check => {
+            const host = state.host;
+            state.loadedAt = Date.now();
             const result = await run(check ? ['--list', '--check'] : ['--list']);
-            if (state.closed)
-                return;
+            if (state.closed || host !== state.host)
+                return;   // (an answer for the machine shown before)
             if (!result.ok) {
                 state.loaded = true;
                 toast(result.message, false);
@@ -220,6 +241,7 @@ export default class ClaudeStatusPreferences extends ExtensionPreferences {
                     : {...a, checked: true, method: old.method, email: old.email, loggedIn: old.loggedIn};
             });
             state.canCheck = result.canCheck;
+            state.linked = !!result.linked;
             const first = !state.loaded;
             state.loaded = true;
             render();
@@ -248,12 +270,23 @@ export default class ClaudeStatusPreferences extends ExtensionPreferences {
                 ...commandSwitch.active ? ['--command'] : []], 'add');
         });
 
+        where.connect('notify::selected', () => {
+            state.host = where.selected > 0 ? hosts[where.selected - 1] : '';
+            list.title = state.host ? esc(`Accounts on ${state.host}`) : 'Accounts on this computer';
+            state.accounts = [];
+            state.loaded = false;
+            state.confirm = '';
+            render();
+            load(true);
+        });
+
         load(true);
-        // A login happens in a terminal: look again every few seconds
+        // A login happens in a terminal: look again every few seconds (a
+        // host's over ssh, less often)
         const timer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 4, () => {
             if (state.closed)
                 return GLib.SOURCE_REMOVE;
-            if (state.loaded && !state.busy && window.is_active)
+            if (state.loaded && !state.busy && window.is_active && Date.now() - state.loadedAt >= (state.host ? 10000 : 3500))
                 load(false);
             return GLib.SOURCE_CONTINUE;
         });
@@ -269,6 +302,8 @@ export default class ClaudeStatusPreferences extends ExtensionPreferences {
     // claude-NAME command); logging out and removing ask first
     _accountRow(a, state, esc, act) {
         const parts = [a.folder];
+        if (a.default)
+            parts.push('default');
         if (a.main)
             parts.push('plain claude');
         if (a.vscode)
@@ -302,6 +337,11 @@ export default class ClaudeStatusPreferences extends ExtensionPreferences {
                 rerender();
             });
             return row;
+        }
+        if (state.accounts.length > 1 && a.loggedIn && (!a.default || (state.linked && !a.main))) {
+            button('Make Default', () => act(['--default', a.key], a.key), [], state.linked
+                ? "Lists it first and shows its usage in the top bar; VS Code's Claude and plain claude (~/.claude) run on it. Not while a chat runs through ~/.claude: it would go on on this account."
+                : "Lists it first and shows its usage in the top bar; VS Code's Claude runs on it. Plain claude stays on ~/.claude, a folder.");
         }
         if (!a.loggedIn) {
             button('Log in…', () => act(['--login', a.key], a.key), [],

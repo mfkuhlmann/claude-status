@@ -94,9 +94,13 @@ export function petKeyOf(session, host) {
     return `${host ? `ssh:${host}|` : ''}${session.profileDir || ''}/${session.chatId || session.sessionId || session.key}`;
 }
 
-// The 5-hour usage that goes next to the panel icon: the account with an
-// active session, else the one with the freshest numbers.
+// The 5-hour usage that goes next to the panel icon: this computer's default
+// account (listed first; VS Code's Claude and plain claude run on it), else
+// the account with an active session, else the one with the freshest numbers.
 export function panelWindow(groups) {
+    const own = groups.find(g => !g.host && g.defaultHere && g.limits && g.limits.windows.length);
+    if (own)
+        return own.limits.windows[0];
     let best = null, bestScore = -1;
     for (const g of groups) {
         if (!g.limits || !g.limits.windows.length)

@@ -97,6 +97,43 @@ class SettingsTests(Home):
         self.assertIsNone(cs.vscode_setting_config_dir(self.home, "Code"))
 
 
+class SettingsEditTests(unittest.TestCase):
+    """One setting changed in a file you edit by hand: the rest stays as it is."""
+
+    KEY = "claudeCode.environmentVariables"
+
+    def check(self, text, value=None):
+        value = value if value is not None else [{"name": "CLAUDE_CONFIG_DIR", "value": "/h/.claude"}]
+        new = cs.jsonc_set(text, self.KEY, value)
+        before = cs.jsonc(text) if text.strip() else {}
+        self.assertEqual(cs.jsonc(new), {**before, self.KEY: value})
+        return new
+
+    def test_replaces_only_that_value(self):
+        text = ('{\n    // my font\n    "editor.fontSize": 14, /* big */\n    "claudeCode.environmentVariables": [\n'
+                '        {"name": "FOO", "value": "}"} // a brace in a string\n    ],\n    "x": {"y": [1, 2,]},\n}\n')
+        new = self.check(text)
+        self.assertIn("// my font", new)
+        self.assertIn('"editor.fontSize": 14, /* big */', new)
+        self.assertIn('    "x": {"y": [1, 2,]},\n}\n', new)
+        self.assertNotIn("FOO", new)
+
+    def test_adds_it_after_the_last_setting(self):
+        self.assertTrue(self.check('{\n  "a": 1\n}\n').startswith('{\n  "a": 1,\n  "claudeCode'))
+        self.assertTrue(self.check('{\n    "a": 1, // trailing comma\n}').startswith('{\n    "a": 1,\n    "claudeCode'))
+        self.check("{}")
+        self.check('{\n    // only a comment\n}')
+
+    def test_a_key_in_a_comment_is_no_key(self):
+        new = self.check('{\n    // "claudeCode.environmentVariables": [],\n    "a": true\n}')
+        self.assertIn('// "claudeCode.environmentVariables": [],', new)
+
+    def test_refuses_what_isnt_an_object(self):
+        for text in ("[1]", '{"a": 1', '{"a" 1}', "{1: 2}"):
+            with self.assertRaises(ValueError, msg=text):
+                cs.jsonc_set(text, self.KEY, [])
+
+
 class ProfileTests(Home):
     def test_the_setting_decides_and_links_are_followed(self):
         self.settings(json.dumps({"claudeCode.environmentVariables": [

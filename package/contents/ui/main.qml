@@ -264,9 +264,14 @@ PlasmoidItem {
         return "sleeping"
     }
 
-    // The account whose 5-hour usage goes next to the panel icon: the one
-    // with an active session, else the one with the freshest numbers.
+    // The account whose 5-hour usage goes next to the panel icon: this
+    // computer's default account (listed first; VS Code's Claude and plain
+    // claude run on it, see accounts.py --default), else the one with an
+    // active session, else the one with the freshest numbers.
     readonly property var panelWindow: {
+        const own = allGroups.find(g => !g.host && g.defaultHere && g.limits && g.limits.windows.length)
+        if (own)
+            return own.limits.windows[0]
         let best = null, bestScore = -1
         for (const g of allGroups) {
             if (!g.limits || !g.limits.windows.length)
