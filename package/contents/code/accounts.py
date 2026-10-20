@@ -14,8 +14,8 @@ VS Code extension's).
     [--remote]                                    on an SSH host (remote.py --accounts HOST …)
 
 An account is a Claude config folder, ~/.claude-NAME (what CLAUDE_CONFIG_DIR
-points at), with a login, history and chats of its own: the layout
-claude-switch uses, and --add writes its .profile-name marker too. Logging
+points at), with a login, history and chats of its own; --add writes its
+name into its .profile-name file (the marker other profile tools use too). Logging
 in is Claude's own `claude auth login`, in a terminal (--print-command: the
 command instead, for a terminal of your own): your browser signs you in and
 Claude keeps the login in the folder. This script never reads it.
@@ -27,7 +27,7 @@ Claude keeps the login in the folder. This script never reads it.
   ~/.claude, which may be switched to another account. Skills claude.ai
   syncs for an account (skills/synced) stay that account's, as do the
   login, MCP servers and plugins. --command adds ~/.local/bin/claude-NAME,
-  which runs Claude on the account (like claude-switch NAME).
+  which runs Claude on the account in any terminal.
 - --logout is `claude auth logout`: Claude revokes the login and deletes it.
   Refused while chats run on the account.
 - --remove logs out, then moves the folder to the Trash (without the login)
@@ -73,7 +73,7 @@ REMOTE = False  # on an SSH host (--remote): VS Code there is its VS Code server
 NO_CLAUDE = ("Can't find the claude command: it isn't on PATH, in ~/.local/bin or npm's or nvm's folders, "
              "nor on your login shell's PATH")
 
-NAME = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,31}\Z")  # claude-switch's rule
+NAME = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,31}\Z")  # (what other profile tools allow too)
 SHARED_FILES = ("settings.json", "CLAUDE.md", "keybindings.json")
 SHARED_FOLDERS = ("skills", "agents", "commands", "output-styles")
 # skills/synced: the skills claude.ai syncs for that account; .trash: Claude's
@@ -354,8 +354,8 @@ def name_problem(name, home):
     """Why ~/.claude-NAME can't be a new account, or ""."""
     if not name:
         return "Give the account a name"
-    if name == "default":
-        return "default is the name of ~/.claude"
+    if name in ("default", "main"):
+        return f"{name} is taken: main is what ~/.claude is called, default marks the default account"
     if not NAME.match(name):
         return "A name is up to 32 letters, digits, - and _, starting with a letter"
     folder = home / f".claude-{name}"

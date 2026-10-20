@@ -173,8 +173,8 @@ export default class ClaudeStatusPreferences extends ExtensionPreferences {
             const name = nameRow.text.trim();
             if (!name)
                 return 'empty';
-            if (name === 'default')
-                return 'default is the name of ~/.claude';
+            if (name === 'default' || name === 'main')
+                return `${name} is taken: main is what ~/.claude is called, default marks the default account`;
             if (!/^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(name))
                 return 'Up to 32 letters, digits, - and _, starting with a letter';
             if (state.accounts.some(a => a.folder === `~/.claude-${name}`))

@@ -411,14 +411,14 @@ class SharingTests(FakeSSH):
         self.assertEqual(sorted(g["shareProfile"] for g in result["groups"]), [".claude", ".claude-work"])
 
     def test_share_then_keep_only_on_one_account(self):
-        self.assertEqual(remote.share("lab", self.CHAT), (True, "Chat shared: it's now on default, work."))
+        self.assertEqual(remote.share("lab", self.CHAT), (True, "Chat shared: it's now on main, work."))
         self.assertEqual(self.calls()[-1], ["lab", f"python3 -I - --remote --share {self.CHAT}"])
         self.assertTrue(os.path.samefile(self.there, self.chat))
         self.assertTrue(os.path.samefile(self.store / f"{self.CHAT}.jsonl", self.chat))
         shared = [c for g in remote.status("lab", tokens=False)["result"]["groups"] for c in g["recent"]]
         self.assertTrue(shared and all(c["shared"] for c in shared))
         self.assertEqual(remote.unshare("lab", self.CHAT, ".claude"),
-                         (True, "This chat is now a normal chat of default again. Removed from work."))
+                         (True, "This chat is now a normal chat of main again. Removed from work."))
         self.assertEqual(self.calls()[-1], ["lab", f"python3 -I - --remote --unshare {self.CHAT} --profile .claude"])
         self.assertFalse(os.path.lexists(self.there))
         self.assertFalse(self.store.exists())
@@ -448,10 +448,10 @@ class SharingTests(FakeSSH):
         self.open_in_a_session()
         ok, message = remote.share("lab", self.CHAT)
         self.assertFalse(ok)
-        self.assertIn("It's open in a session on default", message)
+        self.assertIn("It's open in a session on main", message)
         (ok, message, command), opened = self.continue_there(".claude-work")
         self.assertEqual((ok, command, opened), (False, None, []))
-        self.assertIn("It's open in a session on default", message)
+        self.assertIn("It's open in a session on main", message)
         self.assertFalse(os.path.lexists(self.there))
         self.assertFalse(self.store.exists())
 
@@ -470,7 +470,7 @@ class SharingTests(FakeSSH):
         self.open_in_a_session()
         ok, message = remote.share("lab", self.CHAT)
         self.assertFalse(ok)
-        self.assertIn("It's open in a session on default", message)
+        self.assertIn("It's open in a session on main", message)
 
 
 class HostNoiseTests(FakeSSH):

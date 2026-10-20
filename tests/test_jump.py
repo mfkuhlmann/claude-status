@@ -996,18 +996,18 @@ class SharedChatActionTests(unittest.TestCase):
         for action, args in ((jump.continue_on, (".claude-work",)), (jump.share, ()), (jump.unshare, (".claude",))):
             (ok, msg), opened = self.run_action(action, *args)
             self.assertFalse(ok)
-            self.assertIn("open in a session on default", msg)
+            self.assertIn("open in a session on main", msg)
             self.assertEqual(opened, [])
         self.assertFalse(self.store.exists())
         self.assert_own(".claude")
 
     def test_share_then_keep_only_on_one_account(self):
         (ok, msg), _ = self.run_action(jump.share)
-        self.assertEqual((ok, msg), (True, "Chat shared: it's now on default, work."))
+        self.assertEqual((ok, msg), (True, "Chat shared: it's now on main, work."))
         (ok, msg), _ = self.run_action(jump.share)
-        self.assertEqual((ok, msg), (True, "This chat is already shared with default, work."))
+        self.assertEqual((ok, msg), (True, "This chat is already shared with main, work."))
         (ok, msg), _ = self.run_action(jump.unshare, ".claude")
-        self.assertEqual((ok, msg), (True, "This chat is now a normal chat of default again. Removed from work."))
+        self.assertEqual((ok, msg), (True, "This chat is now a normal chat of main again. Removed from work."))
         self.assert_own(".claude")
         self.assert_gone(".claude-work")
         self.assertFalse(self.store.exists())
@@ -1075,7 +1075,7 @@ class SharedChatActionTests(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in (folder / "subagents").iterdir()), ["agent-1.jsonl", "agent-2.jsonl"])
         self.assertFalse(self.store.exists())
         (ok, msg), _ = self.run_action(jump.share)
-        self.assertEqual((ok, msg), (True, "Chat shared: it's now on default, work."))
+        self.assertEqual((ok, msg), (True, "Chat shared: it's now on main, work."))
 
     def test_chat_shared_into_another_store(self):
         """Shared the same way by another tool, into its own store: handled where it is."""

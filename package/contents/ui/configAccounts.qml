@@ -39,8 +39,8 @@ KCM.SimpleKCM {
     readonly property string nameProblem: {
         if (!name)
             return ""
-        if (name === "default")
-            return i18n("default is the name of ~/.claude")
+        if (name === "default" || name === "main")
+            return i18n("%1 is taken: main is what ~/.claude is called, default marks the default account", name)
         if (!/^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(name))
             return i18n("Up to 32 letters, digits, - and _, starting with a letter")
         if (accounts.some(a => a.folder === "~/.claude-" + name))
@@ -351,8 +351,7 @@ KCM.SimpleKCM {
                                 page.act([want ? "--command" : "--no-command", card.account.key], card.account.key)
                             }
                             QQC2.ToolTip.visible: hovered
-                            QQC2.ToolTip.text: i18n("~/.local/bin/%1 runs Claude on this account in any terminal, like claude-switch %2 did.",
-                                                    card.account.commandName || "", (card.account.commandName || "").replace(/^claude-/, ""))
+                            QQC2.ToolTip.text: i18n("~/.local/bin/%1 runs Claude on this account in any terminal.", card.account.commandName || "")
                         }
                         QQC2.BusyIndicator {
                             visible: page.busy === card.account.key

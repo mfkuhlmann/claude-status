@@ -130,7 +130,7 @@ class AddTests(Home):
         self.assertFalse(self.listed()[".claude-side"]["loggedIn"])
 
     def test_names(self):
-        for name, problem in [("", "Give the account a name"), ("default", "default is the name"),
+        for name, problem in [("", "Give the account a name"), ("default", "default is taken"), ("main", "main is what ~/.claude is called"),
                               ("1st", "starting with a letter"), ("a b", "letters, digits"),
                               ("x" * 33, "up to 32"), ("work", "There's an account called work"),
                               ("../etc", "letters, digits")]:

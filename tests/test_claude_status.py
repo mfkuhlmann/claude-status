@@ -105,7 +105,7 @@ class SessionTests(Fixture):
     def test_groups_by_account(self):
         r = self.collect(with_tokens=False)
         self.assertEqual([(g["title"], g["profiles"]) for g in r["groups"]],
-                         [("personal · Pro", ["default", "personal"]), ("work · Team", ["work"])])
+                         [("personal · Pro", ["main", "personal"]), ("work · Team", ["work"])])
 
     def test_lone_default_dir_named_after_account(self):
         h = Path(self.tmp.name) / "lone"
