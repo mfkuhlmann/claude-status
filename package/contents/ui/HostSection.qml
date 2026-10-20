@@ -13,7 +13,7 @@ ColumnLayout {
 
     property string host
     readonly property var info: root.remote[host] || ({ loading: true, ok: false, error: "", result: null, updatedAt: 0 })
-    readonly property var hostGroups: info.result ? info.result.groups : []
+    readonly property var hostGroups: info.result ? info.result.groups.map(g => root.withUsage(g, host)) : []
     readonly property bool stale: !!info.error && info.result !== null
 
     spacing: Kirigami.Units.smallSpacing
@@ -82,6 +82,19 @@ ColumnLayout {
             }
         }
         PlasmaComponents3.ToolButton {
+            icon.name: "network-disconnect"
+            visible: !!hostSection.info.loggedIn
+            display: PlasmaComponents3.AbstractButton.IconOnly
+            text: i18n("Disconnect from %1", hostSection.host)
+            onClicked: root.disconnectHost(hostSection.host)
+            PlasmaCore.ToolTipArea {
+                textFormat: Text.PlainText
+                anchors.fill: parent
+                mainText: i18n("Disconnect from %1", hostSection.host)
+                subText: i18n("Closes the connection you logged in with: to check %1 again, the widget asks you to log in.", hostSection.host)
+            }
+        }
+        PlasmaComponents3.ToolButton {
             icon.name: "view-refresh"
             display: PlasmaComponents3.AbstractButton.IconOnly
             text: i18n("Refresh %1", hostSection.host)
@@ -107,9 +120,40 @@ ColumnLayout {
         }
     }
 
+    // The host wants a password (or a passphrase, a code, its host key):
+    // you log in in a terminal, where ssh asks (root.loginHost)
+    RowLayout {
+        visible: !!hostSection.info.error && !!hostSection.info.login
+        Layout.fillWidth: true
+        Layout.leftMargin: Kirigami.Units.smallSpacing
+        Layout.rightMargin: Kirigami.Units.smallSpacing
+        spacing: Kirigami.Units.smallSpacing
+
+        PlasmaComponents3.Label {
+            textFormat: Text.PlainText
+            Layout.fillWidth: true
+            text: (hostSection.host in root.loginWaits ? i18n("Log in to %1 in the terminal that opened.", hostSection.host)
+                   : i18n("%1 wants you to log in: a password, a passphrase or a code, or its host key confirmed.", hostSection.host))
+                  + (hostSection.stale ? " " + i18n("Showing what it said %1 ago.", root.duration(root.now - hostSection.info.updatedAt)) : "")
+            color: Kirigami.Theme.negativeTextColor
+            wrapMode: Text.Wrap
+        }
+        PlasmaComponents3.Button {
+            icon.name: "dialog-password"
+            text: i18n("Log in…")
+            onClicked: root.loginHost(hostSection.host)
+            PlasmaCore.ToolTipArea {
+                textFormat: Text.PlainText
+                anchors.fill: parent
+                mainText: i18n("Log in to %1", hostSection.host)
+                subText: i18n("Opens a terminal where ssh asks for what it needs. It goes to ssh only: the widget never sees it and keeps nothing. The checks then use that connection until 30 minutes after they stop, until you log out, or until you disconnect.")
+            }
+        }
+    }
+
     PlasmaComponents3.Label {
         textFormat: Text.PlainText
-        visible: !!hostSection.info.error
+        visible: !!hostSection.info.error && !hostSection.info.login
         Layout.fillWidth: true
         Layout.leftMargin: Kirigami.Units.smallSpacing
         Layout.rightMargin: Kirigami.Units.smallSpacing

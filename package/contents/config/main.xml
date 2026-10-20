@@ -73,6 +73,10 @@
       <min>10</min>
       <max>600</max>
     </entry>
+    <entry name="sshUsage" type="String">
+      <label>Plan usage of SSH hosts' accounts: once (where the account is listed first, newest numbers), all, or none</label>
+      <default>once</default>
+    </entry>
     <entry name="keepDoneHours" type="Int">
       <label>Keep finished background jobs listed for this many hours (0 = hide them)</label>
       <default>24</default>

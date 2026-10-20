@@ -14,6 +14,9 @@
     python3 -I remote.py --continue HOST CHAT_ID PROFILE [--print-command]   share it with PROFILE there if needed,
                                                     and reopen it there in a terminal (or print the command)
     python3 -I remote.py --unshare HOST CHAT_ID PROFILE    keep a shared chat only on PROFILE there
+    python3 -I remote.py --login HOST               a terminal where you log in to HOST for the widget
+    python3 -I remote.py --disconnect HOST          close the connection you logged in with
+    python3 -I remote.py --vscode-account HOST CONFIG_DIR|-   VS Code's Claude on HOST runs on that account
 
 --status runs claude_status.py on HOST: the script goes to `python3 -I -` on
 the host's stdin, so nothing is installed there (it keeps its caches in the
@@ -22,6 +25,12 @@ way, with claude_status.py in front (host_script). SSH runs in batch mode, so
 it never asks for a password or a host key: log in once in a terminal for
 that. One connection per host is kept open for a few minutes (ControlMaster),
 so polls are quick even through a jump host. Prints one JSON line.
+
+For a host that wants a password (or a passphrase, a code, a new host key),
+--login opens a terminal where ssh itself asks for it: the widget never sees
+it. That login's connection becomes the shared one the checks use, until
+LOGIN_MINUTES after their last use, logging out (the sockets are in
+$XDG_RUNTIME_DIR), or --disconnect.
 """
 
 import glob
@@ -44,6 +53,8 @@ HERE = Path(__file__).resolve().parent
 HOST_NAME = re.compile(r"^[A-Za-z0-9_.@][A-Za-z0-9_.@:-]*$")
 STATUS_TIMEOUT = 45
 RUN_TIMEOUT = 60
+LOGIN_MINUTES = 30  # a connection you logged in to stays this long after its last use
+LOGIN_SHOWN = 3  # seconds the terminal shows "Logged in" before it closes
 
 
 # ---------------------------------------------------------------- ~/.ssh/config
@@ -259,13 +270,14 @@ def status(host, done_hours=None, recent=None, tokens=True):
         return {"ok": False, "host": host, "error": f"Can't run ssh: {exc}"}
     elapsed = int((time.time() - started) * 1000)
     if "\n" + cs.REMOTE_MARK not in r.stdout:
-        return {"ok": False, "host": host, "error": explain(host, r.returncode, r.stderr), "elapsedMs": elapsed}
+        return {"ok": False, "host": host, "error": explain(host, r.returncode, r.stderr), "elapsedMs": elapsed,
+                "login": needs_login(r.stderr)}
     result = answer_after_mark(r.stdout)
     if result is None:
         return {"ok": False, "host": host, "error": f"{host} sent an answer the widget can't read.", "elapsedMs": elapsed}
     if not result.get("ok"):
         return {"ok": False, "host": host, "error": f"{host}: {result.get('error') or 'status failed'}", "elapsedMs": elapsed}
-    return {"ok": True, "host": host, "result": result, "elapsedMs": elapsed}
+    return {"ok": True, "host": host, "result": result, "elapsedMs": elapsed, "loggedIn": logged_in(host)}
 
 
 def last_line(text):
@@ -320,6 +332,14 @@ def run_status_script(host, args):
     """Run claude_status.py on host with args: (ok, its message)."""
     answer = host_answer(host, args)
     return answer["ok"], answer["message"]
+
+
+def vscode_account(host, config_dir):
+    """Have VS Code's Claude on host run on the account whose folder is
+    config_dir there (None: a plain ~/.claude), in the settings of its VS Code
+    server, which windows connected to the host read: (ok, message)."""
+    server = cs.VSCODE_SERVERS.get(cs.vscode_app()[1] or "", cs.VSCODE_SERVERS["Code"])
+    return run_status_script(host, ["--vscode-account", config_dir or "-", "--vscode-server", server])
 
 
 def dismiss(host, session_id=None):
@@ -404,6 +424,101 @@ def open_remote(host, command):
     return True, f"Opened a terminal on {host}"
 
 
+def needs_login(stderr):
+    """Whether logging in once in a terminal (--login) would let the checks
+    through: the host wants a password, a passphrase or a key the agent
+    doesn't hold, or its host key isn't known yet."""
+    low = stderr.lower()
+    return any(s in low for s in ("permission denied", "too many authentication failures",
+                                  "host key verification failed"))
+
+
+def login_marker(host):
+    """A file next to the shared connections saying you logged in to host
+    through the widget (so it offers to disconnect), or None."""
+    d = control_dir()
+    return d / f"{check_host(host)}.login" if d else None
+
+
+def logged_in(host):
+    """Whether you logged in to host with --login and that connection is still open."""
+    marker = login_marker(host)
+    if marker is None or not marker.exists():
+        return False
+    try:
+        r = subprocess.run(["ssh", *ssh_options(), "-O", "check", host], capture_output=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return r.returncode == 0
+
+
+def login(host):
+    """A terminal where you log in to host for the widget (login_here)."""
+    host = check_host(host)
+    import jump
+    line = " ".join(shlex.quote(a) for a in [sys.executable or "python3", "-I", str(HERE / "remote.py"),
+                                             "--login-here", host])
+    # (the window closes by itself once you're in; it stays when it failed)
+    if not jump.open_terminal(str(Path.home()), line + " && exit"):
+        return False, "No terminal found to log in"
+    return True, f"Log in to {host} in the terminal"
+
+
+def login_here(host):
+    """Log in to host in this terminal: ssh asks for the password (passphrase,
+    code, host key) itself, so it goes to ssh only. The connection stays as
+    the one the checks share. Host keys are checked as always. Exit status:
+    ssh's, or 1 when there's no private folder for the connection."""
+    host = check_host(host)
+    d = control_dir()
+    if d is None:
+        print("There's no private folder for the shared connection ($XDG_RUNTIME_DIR), so the widget can't keep a login.")
+        return 1
+    print(f"Logging in to {host} for Claude Status. Type what ssh asks for (password, passphrase, code):")
+    print("it goes to ssh only, the widget never sees it.\n")
+    # The window closes once you're in, and what's left of its session gets
+    # SIGHUP: the shared connection detaches from it, but the connection to a
+    # jump host it goes through (ProxyJump) doesn't, and ended there (the
+    # next check needed a new login). Ignored here, it's ignored there too.
+    hup = signal.signal(signal.SIGHUP, signal.SIG_IGN)
+    # ssh takes an option's first value: these go before the shared ones
+    try:
+        r = subprocess.run(["ssh", "-o", "ControlMaster=auto", "-o", f"ControlPersist={LOGIN_MINUTES}m",
+                            "-o", "ForwardAgent=no", "-o", "ForwardX11=no",  # (whatever ~/.ssh/config says)
+                            *ssh_options(batch=False), "-T", host, posix("true")])
+    except OSError as exc:
+        print(f"Can't run ssh: {exc}")
+        return 1
+    finally:
+        signal.signal(signal.SIGHUP, hup)
+    if r.returncode != 0:
+        print(f"\nThe login to {host} didn't work (ssh exit {r.returncode}).")
+        return r.returncode
+    marker = login_marker(host)
+    marker.touch(mode=0o600)
+    os.chmod(str(marker), 0o600)
+    print(f"\nLogged in. The widget checks {host} through this connection now. It closes {LOGIN_MINUTES} minutes "
+          "after the widget stops using it, when you log out, or when you disconnect.")
+    time.sleep(LOGIN_SHOWN)
+    return 0
+
+
+def disconnect(host):
+    """Close the shared connection to host (the one you logged in with)."""
+    host = check_host(host)
+    marker = login_marker(host)
+    if marker is not None:
+        try:
+            marker.unlink()
+        except FileNotFoundError:
+            pass
+    try:
+        r = subprocess.run(["ssh", *ssh_options(), "-O", "exit", host], capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, f"Can't close the connection to {host}: {exc}"
+    return True, f"Disconnected from {host}" if r.returncode == 0 else f"No open connection to {host}"
+
+
 USAGE = __doc__.split("\n\n")[1]
 
 
@@ -460,6 +575,17 @@ def main(argv=None):
             printing = "--print-command" in args
             ok, message, command = continue_on(*[a for a in args if a != "--print-command"], open_it=not printing)
             out = {"ok": ok, "message": message, **({"command": command} if command and printing else {})}
+        elif action == "--login" and len(args) == 1:
+            ok, message = login(args[0])
+            out = {"ok": ok, "message": message}
+        elif action == "--login-here" and len(args) == 1:  # (in the terminal --login opens)
+            sys.exit(login_here(args[0]))
+        elif action == "--vscode-account" and len(args) == 2:
+            ok, message = vscode_account(args[0], None if args[1] == "-" else args[1])
+            out = {"ok": ok, "message": message}
+        elif action == "--disconnect" and len(args) == 1:
+            ok, message = disconnect(args[0])
+            out = {"ok": ok, "message": message}
         elif action == "--undismiss-all" and len(args) == 1:
             ok, message = dismiss(args[0])
             out = {"ok": ok, "message": message}

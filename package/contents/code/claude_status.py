@@ -14,7 +14,9 @@ Data sources (per Claude config dir, e.g. ~/.claude, ~/.claude-work):
                                   hard-linked into several profiles)
   <cfg>/history.jsonl             prompt history (recent folders, last use)
   <account file>                  oauthAccount.accountUuid / organizationType /
-                                  displayName, and each folder's trust flag only
+                                  displayName, cachedUsageUtilization (Claude
+                                  Code's own plan usage) and each folder's
+                                  trust flag only
   ~/.cache/claude-widget/statusline/<cfg dirname>/<session_id>.json
                                   status-line input snapshots (rate limits,
                                   context window), written by statusline-snippet.sh
@@ -71,6 +73,17 @@ WAITING_REASONS = {
 }
 FINISHED_JOB_STATES = ("done", "failed", "stopped")
 SESSION_KINDS = ("interactive", "bg")  # not the daemon's own processes
+# Everything Claude Code writes into these fields of its session and job files
+# (read from the 2.1.304 binary). A value outside them is new: an unknown
+# status counts as idle, an unknown kind isn't listed, so the check says so
+# (unknown_values_text) instead of quietly showing chats wrong. (A new
+# waitingFor shows as it is, with the chat waiting: you'd see that.)
+KNOWN_VALUES = {
+    "session kind": ("interactive", "bg", "daemon", "daemon-worker"),
+    "session status": ("busy", "shell", "idle", "waiting"),
+    "job state": ("working", "running", "blocked") + FINISHED_JOB_STATES,
+    "job tempo": ("active", "blocked", "idle"),
+}
 NOT_STARTED = "send a prompt to start"  # needs of a background session given no prompt yet
 RECENT_JOB_MS = 5000
 KEEP_DONE_HOURS = 24  # finished background jobs stay listed this long
@@ -200,10 +213,16 @@ class Profile:
         self.label = name
         # Claude Code keeps account info in $CLAUDE_CONFIG_DIR/.claude.json, or
         # ~/.claude.json when running with the default config dir.
-        account = (read_json(path / ".claude.json") or {}).get("oauthAccount") or {}
-        if is_default and not account:
-            account = (read_json(home / ".claude.json") or {}).get("oauthAccount") or {}
+        data = read_json(path / ".claude.json")
+        if is_default and not (isinstance(data, dict) and data.get("oauthAccount")):
+            data = read_json(home / ".claude.json")
+        data = data if isinstance(data, dict) else {}
+        account = data.get("oauthAccount") if isinstance(data.get("oauthAccount"), dict) else {}
         self.account_id = account.get("accountUuid")
+        # and its own cache of the plan usage (what /usage and the VS Code
+        # panel fetch): for an account whose status line hasn't run lately
+        cache = data.get("cachedUsageUtilization")
+        self.usage_cache = cache if isinstance(cache, dict) and cache.get("accountUuid") in (None, self.account_id) else None
         self.display_name = clean_text(account.get("displayName"), 40) or None
         org_type = account.get("organizationType") or ""
         self.plan = PLAN_NAMES.get(org_type) or (
@@ -305,6 +324,32 @@ def is_recurring(job):
 
 def job_finished(job):
     return job.get("state") in FINISHED_JOB_STATES and job.get("tempo") != "active"
+
+
+def note_unknown(ctx, record, job=False):
+    """Note what a session entry (or a job's state.json) holds that Claude Code
+    didn't write before (KNOWN_VALUES), for unknown_values_text."""
+    unknown = getattr(ctx, "unknown", None)
+    if unknown is None or not isinstance(record, dict):
+        return
+    if job:
+        fields, version = [("job state", "state"), ("job tempo", "tempo")], record.get("cliVersion")
+    else:
+        fields, version = [("session kind", "kind"), ("session status", "status")], record.get("version")
+    for what, key in fields:
+        value = record.get(key)
+        if value is not None and value not in KNOWN_VALUES[what]:
+            unknown.setdefault((what, clean_text(str(value), 40)), version if isinstance(version, str) else "")
+
+
+def unknown_values_text(unknown):
+    """One line for the popup about the new values, or None."""
+    if not unknown:
+        return None
+    versions = sorted({v for v in unknown.values() if v}, key=version_key)
+    found = ", ".join(f'{what} "{value}"' for what, value in sorted(unknown))
+    return (f"{'Claude Code ' + versions[-1] if versions else 'Claude Code'} writes something this widget "
+            f"doesn't know yet ({found}): some chats may show the wrong state until the widget is updated.")
 
 
 def session_state(entry, job=None):
@@ -528,6 +573,7 @@ def live_row(entry, profile, holder, home, ctx):
     own = {k: entry[k] for k in ("state", "tempo", "needs", "detail") if k in entry}
     if own:
         job = {**(job or {}), **own}
+    note_unknown(ctx, job, job=True)
     state = session_state(entry, job)
     waiting_for = entry.get("waitingFor") if entry.get("status") == "waiting" else None
     if state == "waiting":
@@ -587,6 +633,7 @@ def parked_rows(profile, home, live_jobs, ctx, newest=None):
         job = read_json(d / "state.json")
         if not isinstance(job, dict):
             continue
+        note_unknown(ctx, job, job=True)
         try:
             row = parked_row(profile, home, ctx, d, job, roster)
         except Exception as exc:  # one odd record mustn't hide the others
@@ -3090,35 +3137,62 @@ def prune_snapshots(snapshot_root, now):
             continue
 
 
+def limit_window(key, pct, resets_at, now_ms):
+    """A plan window as the widget shows it; one past its reset is at 0%."""
+    resets = to_ms(resets_at)
+    reset = resets is not None and resets <= now_ms
+    return {
+        "key": key,
+        "label": WINDOW_LABELS.get(key, key.replace("_", " ")),
+        "pct": 0.0 if reset else float(pct),
+        "resetsAt": None if reset else resets,
+        "reset": reset,
+    }
+
+
+def in_window_order(windows):
+    rank = {k: i for i, k in enumerate(WINDOW_ORDER)}
+    return sorted(windows, key=lambda w: rank.get(w["key"], len(rank)))
+
+
+def cached_usage_limits(profiles, now_ms):
+    """The group's plan windows from Claude Code's own usage cache (the newest
+    of its profiles'), or None."""
+    best = None
+    for p in profiles:
+        cache = getattr(p, "usage_cache", None)
+        at = number(cache.get("fetchedAtMs")) if isinstance(cache, dict) else None
+        usage = cache.get("utilization") if at is not None else None
+        if not isinstance(usage, dict) or (best is not None and at <= best["updatedAt"]):
+            continue
+        windows = [limit_window(key, usage[key]["utilization"], usage[key].get("resets_at"), now_ms)
+                   for key in WINDOW_ORDER
+                   if isinstance(usage.get(key), dict) and number(usage[key].get("utilization")) is not None]
+        if windows:
+            best = {"updatedAt": int(at), "windows": in_window_order(windows)}
+    return best
+
+
 def plan_limits(snapshot_root, profiles, now_ms):
-    """Rate-limit windows from the newest status-line snapshot of the group."""
+    """Rate-limit windows of the group: from its newest status-line snapshot,
+    or from Claude Code's own usage cache when that's newer. (An account used
+    only in VS Code's panel, which runs no status line, had numbers from the
+    last time a terminal chat ran on it.)"""
+    cached = cached_usage_limits(profiles, now_ms)
     for mtime, path in snapshot_files(snapshot_root, profiles):
+        if cached is not None and cached["updatedAt"] >= int(mtime * 1000):
+            break  # (newest first: the others are older still)
         snap = read_json(path)
         limits = snap.get("rate_limits") if isinstance(snap, dict) else None
         if not isinstance(limits, dict) or not limits:
             continue
-        windows = []
-        for key, w in limits.items():
-            if not isinstance(w, dict):
-                continue
-            pct = number(w.get("used_percentage"))
-            if pct is None:
-                continue
-            resets = to_ms(w.get("resets_at"))
-            reset = resets is not None and resets <= now_ms
-            windows.append({
-                "key": key,
-                "label": WINDOW_LABELS.get(key, key.replace("_", " ")),
-                "pct": 0.0 if reset else float(pct),
-                "resetsAt": None if reset else resets,
-                "reset": reset,
-            })
+        windows = [limit_window(key, w["used_percentage"], w.get("resets_at"), now_ms)
+                   for key, w in limits.items()
+                   if isinstance(w, dict) and number(w.get("used_percentage")) is not None]
         if not windows:
             continue
-        rank = {k: i for i, k in enumerate(WINDOW_ORDER)}
-        windows.sort(key=lambda w: rank.get(w["key"], len(rank)))
-        return {"updatedAt": int(mtime * 1000), "windows": windows}
-    return None
+        return {"updatedAt": int(mtime * 1000), "windows": in_window_order(windows)}
+    return cached
 
 
 # ---------------------------------------------------------------- usage forecast
@@ -3683,7 +3757,7 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
         agents=AgentCache(cache_root / "agents.json"), links=LinkCache(cache_root / "links.json"),
         chats=ChatCache(cache_root / "chats.json"), own_folders=own_folders(profiles),
         prompts={real: last_prompts(entries) for real, entries in histories.items()},
-        errors=errors,
+        errors=errors, unknown={},
     )
     with ScanLock(cache_root / "tokens.lock") as lock:
         # read with the lock: the check holding it is the one that writes it
@@ -3702,6 +3776,7 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
             errors.append(f"sessions: {exc}")
             live = []
         for entry, profile, holder in live:
+            note_unknown(ctx, entry)
             if valid_id(entry.get("jobId")):
                 live_jobs.add(entry["jobId"])
             try:
@@ -3809,6 +3884,9 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
             change_dismissed(cache_root, forget=forget)
         except OSError:
             pass
+    new_values = unknown_values_text(ctx.unknown)
+    if new_values:
+        errors.append(new_values)
     if counts["waiting"]:
         overall = "waiting"
     elif counts["working"]:
@@ -3874,12 +3952,11 @@ def jsonc(text):
     return json.loads(re.sub(r",(\s*[}\]])", r"\1", "".join(out)))
 
 
-def vscode_setting_config_dir(home, settings_folder):
+def config_dir_in_settings(path):
     """CLAUDE_CONFIG_DIR from the Claude extension's environmentVariables
-    setting in VS Code's user settings, or None."""
-    config = Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config")
+    setting in a VS Code settings file, or None."""
     try:
-        settings = jsonc((config / settings_folder / "User" / "settings.json").read_text(encoding="utf-8", errors="replace"))
+        settings = jsonc(path.read_text(encoding="utf-8", errors="replace"))
     except (OSError, ValueError):
         return None
     entries = settings.get("claudeCode.environmentVariables") if isinstance(settings, dict) else None
@@ -3887,6 +3964,82 @@ def vscode_setting_config_dir(home, settings_folder):
         if isinstance(e, dict) and e.get("name") == "CLAUDE_CONFIG_DIR" and isinstance(e.get("value"), str) and e["value"]:
             return e["value"]
     return None
+
+
+def vscode_setting_config_dir(home, settings_folder):
+    """CLAUDE_CONFIG_DIR from VS Code's user settings, or None."""
+    config = Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config")
+    return config_dir_in_settings(config / settings_folder / "User" / "settings.json")
+
+
+# On an SSH host, VS Code's server keeps the host's own settings ("Remote
+# [SSH: host]"): the Claude extension's environmentVariables is a machine
+# setting, so windows connected to the host read it there, never from the
+# settings on your computer. Per VS Code app: its server's folder.
+VSCODE_SERVERS = {"Code": ".vscode-server", "Code - Insiders": ".vscode-server-insiders", "VSCodium": ".vscodium-server"}
+
+
+def vscode_server_settings(home, server):
+    return home / server / "data" / "Machine" / "settings.json"
+
+
+def vscode_server_config_dir(home):
+    """CLAUDE_CONFIG_DIR VS Code's Claude runs with on this host (the first
+    VS Code server whose settings set it), or None."""
+    for server in VSCODE_SERVERS.values():
+        value = config_dir_in_settings(vscode_server_settings(home, server))
+        if value is not None:
+            return value
+    return None
+
+
+def set_vscode_server_config_dir(home, value, server=".vscode-server", extra_dirs=()):
+    """Have VS Code's Claude on this host run with CLAUDE_CONFIG_DIR=value
+    (None: without it, on a plain ~/.claude), in the settings of its VS Code
+    server: (ok, message). Only one of this host's Claude folders, and only in
+    a file as VS Code writes it: one with comments (edited by hand) is left
+    alone. The Claude extension follows the change (new chats, its panels)."""
+    if server not in VSCODE_SERVERS.values():
+        return False, f"Not a VS Code server folder: {server}"
+    profiles = discover_profiles(home, extra_dirs)
+    try:
+        real = (Path(value).expanduser() if value else home / ".claude").resolve()
+    except (OSError, RuntimeError):
+        real = None
+    profile = next((p for p in profiles if p.real == real), None)
+    if profile is None:
+        return False, f"{value or '~/.claude'} isn't a Claude folder on this host"
+    path = vscode_server_settings(home, server)
+    shown = short_path(str(path), home)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        text = ""
+    except OSError as exc:
+        return False, f"Can't read {shown}: {exc}"
+    try:
+        settings = json.loads(text) if text.strip() else {}
+    except ValueError:
+        settings = None
+    if not isinstance(settings, dict):
+        return False, f"{shown} isn't plain JSON (comments?), so it's left as it is: switch the account in VS Code there"
+    old = settings.get("claudeCode.environmentVariables")
+    entries = [e for e in (old if isinstance(old, list) else [])
+               if not (isinstance(e, dict) and e.get("name") == "CLAUDE_CONFIG_DIR")]
+    if value:
+        entries.append({"name": "CLAUDE_CONFIG_DIR", "value": value})
+    if entries:
+        settings["claudeCode.environmentVariables"] = entries
+    else:
+        settings.pop("claudeCode.environmentVariables", None)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(settings, indent=4) + "\n", encoding="utf-8")
+        os.replace(str(tmp), str(path))
+    except OSError as exc:
+        return False, f"Can't write {shown}: {exc}"
+    return True, f"VS Code's Claude runs on {profile.label} here now"
 
 
 def vscode_running_config_dir():
@@ -3960,10 +4113,13 @@ def cached_vscode_lookup(home, cache_root, now):
 
 def vscode_profile(home, profiles, remote=False, cache_root=None):
     """(VS Code installed, the profile a new chat in VS Code's Claude would
-    use or None). On an SSH host (remote) the VS Code server's Claude uses the
-    host's ~/.claude; whether VS Code is installed is up to the other side."""
+    use or None). On an SSH host (remote) the VS Code server's Claude uses what its
+    server's settings say, else the host's ~/.claude; whether VS Code is
+    installed is up to the other side."""
     installed, value = None, None
-    if not remote:
+    if remote:
+        value = vscode_server_config_dir(home)
+    else:
         installed, value = (cached_vscode_lookup(home, cache_root, time.time()) if cache_root is not None
                             else vscode_lookup(home))
         if not installed:
@@ -3977,11 +4133,13 @@ def vscode_profile(home, profiles, remote=False, cache_root=None):
 
 def add_vscode(result, home, extra_dirs=(), remote=False, cache_root=None):
     """Which account a new chat in VS Code would be on: result["vscode"] =
-    {installed, on (its label)} and each group's vscodeHere."""
+    {installed, on (its label)} and each group's vscodeHere. That account is
+    listed first: you switch it in VS Code, and ~/.claude may point elsewhere."""
     installed, profile = vscode_profile(home, discover_profiles(home, extra_dirs), remote, cache_root)
     result["vscode"] = {"installed": installed, "on": profile.label if profile else None}
     for g in result.get("groups", []):
         g["vscodeHere"] = profile is not None and profile.key in g.get("profileKeys", [])
+    result.get("groups", []).sort(key=lambda g: not g["vscodeHere"])  # (stable: the others keep their order)
 
 
 # ---------------------------------------------------------------- remote hosts
@@ -4081,6 +4239,9 @@ def add_remote_commands(result, home, extra_dirs=(), claude=None):
     result["claude"] = claude
     for g in result.get("groups", []):
         named = profiles.get(g.get("chatProfile"))
+        # what VS Code's Claude there needs to run on this account (jump.py
+        # --remote-new-vscode --account, the VS Code extension's switch)
+        g["configDir"] = config_dir_value(named, home) if named is not None else None
         if named is not None:
             chat = new_chat_command(named, home, claude)
             g["homeChatCommand"] = in_folder(str(home), chat)
@@ -4113,6 +4274,7 @@ USAGE = """usage: claude_status.py [--config-dir DIR]... [--done-hours H] [--rec
        claude_status.py --end SESSION_ID [--profile PROFILE] [--busy] [--config-dir DIR]...
        claude_status.py --interrupt SESSION_ID [--profile PROFILE] [--config-dir DIR]...
        claude_status.py --agent-run AGENT_ID --chat CHAT_ID [--profile PROFILE] [--config-dir DIR]...
+       claude_status.py --vscode-account CONFIG_DIR|- [--vscode-server FOLDER]
   --config-dir DIR  extra Claude config dir (repeatable)
   --done-hours H    keep finished background jobs listed for H hours (default 24, 0 = never)
   --recent N        list each account's N latest other chats (default 5, 0 = none)
@@ -4125,6 +4287,8 @@ USAGE = """usage: claude_status.py [--config-dir DIR]... [--done-hours H] [--rec
                     unless --busy (you were told it's working or waiting)
   --interrupt ID    interrupt a working chat in tmux (Ctrl+C in its pane)
   --agent-run ID    a subagent's whole run (of the chat --chat), as Markdown in the JSON
+  --vscode-account  VS Code's Claude on this host runs with that CLAUDE_CONFIG_DIR (- for
+                    none: a plain ~/.claude), in its VS Code server's settings (on an SSH host)
   --instance ID     this copy of the widget (with --interval-ms N, how often it checks):
                     says whether it sends the notifications, and the shared settings"""
 
@@ -4137,6 +4301,7 @@ def main(argv=None):
     recent, remote, dismiss, undismiss = RECENT_CHATS, False, None, False
     end, interrupt, profile_key, busy, instance, interval_ms = None, None, None, False, None, 2000
     agent_run_id, chat_id = None, None
+    vscode_account, vscode_server = None, VSCODE_SERVERS["Code"]
     while args:
         arg = args.pop(0)
         if arg == "--config-dir" and args:
@@ -4151,6 +4316,10 @@ def main(argv=None):
             chat_id = args.pop(0)
         elif arg == "--busy":
             busy = True
+        elif arg == "--vscode-account" and args:
+            vscode_account = args.pop(0)
+        elif arg == "--vscode-server" and args:
+            vscode_server = args.pop(0)
         elif arg == "--profile" and args:
             profile_key = args.pop(0)
         elif arg == "--instance" and args:
@@ -4201,6 +4370,10 @@ def main(argv=None):
                            else interrupt_chat_by_id(home, config_dirs, interrupt, profile_key))
         except Exception as exc:
             ok, message = False, f"{type(exc).__name__}: {exc}"
+        result = {"ok": ok, "message": message}
+    elif vscode_account is not None:
+        ok, message = set_vscode_server_config_dir(home, None if vscode_account == "-" else vscode_account,
+                                                   vscode_server, config_dirs)
         result = {"ok": ok, "message": message}
     elif dismiss is not None or undismiss:
         try:

@@ -144,3 +144,109 @@ class PlainTextTests(unittest.TestCase):
             block = block[:block.index("actions:")]
             self.assertIn('"<span>"', block, name)
             self.assertNotRegex(block, r"[^(]row\.session\.name\)|shareConfirm\.name,", name)
+
+
+class SeveralCopiesTests(unittest.TestCase):
+    """Five copies (panel and one dashboard per screen) each ran the status
+    check every 2 s and kept their pets moving under maximized windows:
+    plasmashell took most of a core (2026-10-20)."""
+
+    def test_the_status_check_runs_once_for_all_copies(self):
+        # main.qml asks hub/Hub.qml (a singleton, shared by the copies in
+        # plasmashell); only the hub runs claude_status.py and names the copy
+        main = (ROOT / "ui/main.qml").read_text()
+        hub = (ROOT / "ui/hub/Hub.qml").read_text()
+        self.assertNotIn("\" --instance", main)
+        self.assertNotRegex(main, r"connectSource\(\s*command\b")
+        self.assertIn("pragma Singleton", hub)
+        self.assertIn("singleton Hub 1.0 Hub.qml", (ROOT / "ui/hub/qmldir").read_text())
+        self.assertIn('--instance " + shellQuote(instanceName)', hub)
+
+    def test_the_pets_wake_at_once_when_you_look(self):
+        # Showing the desktop hides the windows without minimizing them, and a
+        # 5 s re-check woke one copy after the other: you saw some dashboards
+        # still while looking at all of them (2026-10-20). It's a binding now,
+        # and with the mouse on a dashboard it can't be covered either.
+        watch = (ROOT / "ui/CoverWatch.qml").read_text()
+        main = (ROOT / "ui/main.qml").read_text()
+        self.assertIn("readonly property bool covered: windowCovers && !KWindowSystem.showingDesktop", watch)
+        self.assertRegex(main, r"coveredByWindow: .*covered && !mouseOnWidget\.hovered")
+
+    def test_a_dashboard_on_the_desktop_keeps_its_pets_after_a_click(self):
+        # Opening a chat "closes the popup" (expanded = false), but a dashboard
+        # on the desktop stays on screen: its pets froze (seen on one screen,
+        # 2026-10-20). What moves goes by dashboardShown, not by expanded.
+        strip = (ROOT / "ui/PetStrip.qml").read_text()
+        full = (ROOT / "ui/FullRepresentation.qml").read_text()
+        self.assertIn("readonly property bool live: visible && root.dashboardShown", strip)
+        self.assertNotIn("root.expanded", strip + (ROOT / "ui/Pet.qml").read_text())
+        self.assertIn("root.dashboardShown && !root.coveredByWindow", full)
+
+    def test_each_ssh_host_is_checked_once_for_all_copies(self):
+        # (Plasma merged identical checks that started at the same moment,
+        # which held only while the copies' timers kept in step)
+        main = (ROOT / "ui/main.qml").read_text()
+        self.assertIn('Hub.want(instanceId, "ssh:" + host, next[host], interval, false)', main)
+        self.assertNotIn("remotePoller", main)
+        self.assertNotRegex(main, r'connectSource\([^)]*--status')
+
+    def test_looping_animations_stop_under_a_window(self):
+        # Every repeating timer and endless animation of the pets runs only
+        # while it can be seen (playing), not just while the popup is open
+        # (live): on the desktop the dashboard is always "open".
+        for name in ("Pet.qml", "PetStrip.qml"):
+            lines = (ROOT / "ui" / name).read_text().split("\n")
+            for i, line in enumerate(lines):
+                if not re.search(r"^\s*(loops: Animation\.Infinite|repeat: true)\s*$", line):
+                    continue
+                indent = len(line) - len(line.lstrip())
+                start = i
+                while start > 0 and not lines[start].rstrip().endswith("{"):
+                    start -= 1
+                end = i
+                while end < len(lines) and not (lines[end].strip() == "}" and len(lines[end]) - len(lines[end].lstrip()) < indent):
+                    end += 1
+                running = [l for l in lines[start:end] if l.strip().startswith("running:")
+                           and len(l) - len(l.lstrip()) == indent]
+                self.assertTrue(running and "playing" in running[0] and ".live" not in running[0],
+                                f"{name}:{i + 1}: a loop that should stop while covered")
+
+
+class NewChatTests(unittest.TestCase):
+    def test_only_a_new_chat_switches_vscode_on_a_host(self):
+        # A new chat on an SSH host's other account opens in VS Code, which
+        # switches there first (--account); a recent chat reopens on its own
+        # account, so its switch never offers that
+        switch = (ROOT / "ui/OpenInSwitch.qml").read_text()
+        main = (ROOT / "ui/main.qml").read_text()
+        self.assertIn("root.openInVscode(group, remoteHost, resuming)", switch)
+        self.assertIn("readonly property bool switching: !resuming && root.vscodeSwitches(group, remoteHost)", switch)
+        self.assertIn('const account = group && !group.vscodeHere ? " --account " + shellQuote(group.configDir || "-") : ""', main)
+        self.assertIn("(group.vscodeHere || (!resuming && vscodeSwitches(group, host)))", main)
+
+    def test_a_folder_row_never_closes_its_own_list(self):
+        # Closing the list (newChatGroup = "") destroys its rows: the rest of
+        # the row's click handler lost root ("ReferenceError: root is not
+        # defined") and no terminal opened on the host (2026-10-20). Root's
+        # functions close it, after the row handed them what they need.
+        section = (ROOT / "ui/GroupSection.qml").read_text()
+        main = (ROOT / "ui/main.qml").read_text()
+        self.assertNotIn("newChatGroup = ", section)
+        self.assertIn("root.remoteNewChat(section.remoteHost, folderRow.folder.newChatCommand)", section)
+        self.assertIn('function remoteNewChat(host, command) {\n        newChatGroup = ""\n        remoteOpen(host, command)', main)
+
+
+class SshUsageTests(unittest.TestCase):
+    def test_every_host_view_shows_an_accounts_usage_once(self):
+        # An account on this computer and on a host has one plan usage: the
+        # host lists, the badge's and the tooltip's (allGroups) all go
+        # through withUsage, and the setting is shared between copies
+        main = (ROOT / "ui/main.qml").read_text()
+        host = (ROOT / "ui/HostSection.qml").read_text()
+        section = (ROOT / "ui/GroupSection.qml").read_text()
+        self.assertIn('<entry name="sshUsage" type="String">', (ROOT / "config/main.xml").read_text())
+        self.assertIn('"sshUsage"', main[main.index("readonly property var sharedKeys"):])
+        self.assertIn('status.groups.map(g => withUsage(g, ""))', main)
+        self.assertIn("out.push(Object.assign({}, withUsage(g, host), { host: host }))", main)
+        self.assertIn("info.result.groups.map(g => root.withUsage(g, host))", host)
+        self.assertIn("visible: !section.group.limitsHidden", section)

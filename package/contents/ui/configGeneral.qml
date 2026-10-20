@@ -39,6 +39,7 @@ KCM.SimpleKCM {
     property alias cfg_recentChats: recentChats.value
     property alias cfg_remotePollSeconds: remotePollSeconds.value
     property string cfg_sshHosts
+    property string cfg_sshUsage
     property alias cfg_notifySound: notifySound.checked
     property alias cfg_soundVolume: soundVolume.value
     property alias cfg_soundWaiting: soundWaiting.value
@@ -69,6 +70,7 @@ KCM.SimpleKCM {
     property int cfg_recentChatsDefault
     property int cfg_remotePollSecondsDefault
     property string cfg_sshHostsDefault
+    property string cfg_sshUsageDefault
     property bool cfg_notifySoundDefault
     property int cfg_soundVolumeDefault
     property string cfg_soundWaitingDefault
@@ -314,12 +316,29 @@ KCM.SimpleKCM {
             stepSize: 10
         }
 
+        QQC2.ComboBox {
+            id: sshUsage
+            readonly property var values: ["once", "all", "none"]
+            Kirigami.FormData.label: i18n("Plan usage on SSH hosts:")
+            model: [i18n("Once per account"), i18n("On every host"), i18n("Not on hosts")]
+            currentIndex: Math.max(0, values.indexOf(page.cfg_sshUsage))
+            onActivated: page.cfg_sshUsage = values[currentIndex]
+        }
+
         QQC2.Label {
             Layout.maximumWidth: Kirigami.Units.gridUnit * 20
             wrapMode: Text.Wrap
             font: Kirigami.Theme.smallFont
             opacity: 0.7
-            text: i18n("Pick SSH hosts with the server button at the top of the popup. They need key-based login (the widget can't type a password) and python3 on the host; nothing gets installed there.")
+            text: i18n("An account logged in here and on a host (or on two hosts) has one plan usage. Once per account shows it where the account is listed first, with the newest numbers of them all.")
+        }
+
+        QQC2.Label {
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 20
+            wrapMode: Text.Wrap
+            font: Kirigami.Theme.smallFont
+            opacity: 0.7
+            text: i18n("Pick SSH hosts with the server button at the top of the popup. A host that wants a password (or a passphrase, a code, its host key confirmed) shows Log in…, which opens a terminal where ssh asks for it: the widget never sees it. With your key in the agent (ssh-add) that isn't needed. The host needs python3; nothing gets installed there.")
         }
 
         QQC2.CheckBox {

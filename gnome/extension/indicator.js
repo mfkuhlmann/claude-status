@@ -201,7 +201,8 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         if (this._polling)
             return;
         this._polling = true;
-        const out = await this._runner.run('claude_status.py', [...this._configDirArgs, ...this._listArgs], {poll: true});
+        // (poll.py runs claude_status.py with its compiled code cached)
+        const out = await this._runner.run('poll.py', [...this._configDirArgs, ...this._listArgs], {poll: true});
         this._polling = false;
         if (this._destroyed || out.cancelled)
             return;

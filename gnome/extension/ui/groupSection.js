@@ -97,7 +97,7 @@ export function buildGroupSection(ctx, group, {last = false, remoteHost = ''} = 
     // Recent chats: this account's latest other chats, to pick one up again
     const recent = group.recent || [];
     if (recent.length > 0) {
-        const isOpen = groupKey in ctx.ui.expandedRecent ? ctx.ui.expandedRecent[groupKey] : remoteHost !== '';
+        const isOpen = !!ctx.ui.expandedRecent[groupKey];
         const toggle = textButton(L.fmt('Recent chats (%1)', recent.length), () => ctx.toggleRecent(groupKey, isOpen),
             'claude-text-button claude-small claude-expander', isOpen ? 'pan-down-symbolic' : 'pan-end-symbolic');
         tips.add(toggle, ['Recent chats',

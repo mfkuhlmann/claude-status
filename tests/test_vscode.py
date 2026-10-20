@@ -131,6 +131,62 @@ class ProfileTests(Home):
         here = {p.label: g["vscodeHere"] for p, g in zip(self.profiles(), result["groups"])}
         self.assertEqual(here, {"work": True, "personal": False})
 
+    def test_an_ssh_hosts_vscode_runs_on_what_its_server_settings_say(self):
+        # Windows connected to a host read the Claude extension's
+        # environmentVariables (a machine setting) from the host's VS Code
+        # server, never from the settings on your computer
+        settings = self.home / ".vscode-server/data/Machine/settings.json"
+        settings.parent.mkdir(parents=True)
+        settings.write_text(json.dumps({"claudeCode.environmentVariables": [
+            {"name": "CLAUDE_CONFIG_DIR", "value": str(self.home / ".claude-personal")}]}))
+        with Patch((cs, "vscode_app", lambda: (None, None))):
+            installed, profile = cs.vscode_profile(self.home, self.profiles(), remote=True)
+        self.assertEqual((installed, profile.label), (None, "personal"))
+
+    def test_switching_an_ssh_hosts_vscode_to_another_account(self):
+        settings = self.home / ".vscode-server/data/Machine/settings.json"
+        personal = str(self.home / ".claude-personal")
+        self.assertEqual(cs.set_vscode_server_config_dir(self.home, personal),
+                         (True, "VS Code's Claude runs on personal here now"))
+        self.assertEqual(json.loads(settings.read_text()),
+                         {"claudeCode.environmentVariables": [{"name": "CLAUDE_CONFIG_DIR", "value": personal}]})
+        # other settings and variables stay; back on ~/.claude (a link here) by its name
+        settings.write_text(json.dumps({"editor.fontSize": 13, "claudeCode.environmentVariables": [
+            {"name": "FOO", "value": "1"}, {"name": "CLAUDE_CONFIG_DIR", "value": personal}]}))
+        self.assertTrue(cs.set_vscode_server_config_dir(self.home, str(self.home / ".claude"))[0])
+        self.assertEqual(json.loads(settings.read_text()), {"editor.fontSize": 13, "claudeCode.environmentVariables": [
+            {"name": "FOO", "value": "1"}, {"name": "CLAUDE_CONFIG_DIR", "value": str(self.home / ".claude")}]})
+        # only this host's Claude folders, and never a file edited by hand
+        ok, message = cs.set_vscode_server_config_dir(self.home, "/etc")
+        self.assertFalse(ok)
+        self.assertIn("isn't a Claude folder", message)
+        settings.write_text('{\n  // mine\n  "editor.fontSize": 14\n}\n')
+        ok, message = cs.set_vscode_server_config_dir(self.home, personal)
+        self.assertFalse(ok)
+        self.assertIn("isn't plain JSON", message)
+        self.assertIn("// mine", settings.read_text())
+        self.assertFalse(cs.set_vscode_server_config_dir(self.home, personal, server="../../etc")[0])
+
+    def test_each_hosts_account_says_what_vscodes_claude_needs_for_it(self):
+        # (~/.claude links to work here: named by the link, as terminals name it)
+        result = {"groups": [{"chatProfile": p.key, "sessions": [], "projects": [], "recent": [], "sharedHere": []}
+                             for p in self.profiles()]}
+        cs.add_remote_commands(result, self.home, claude="/usr/bin/claude")
+        self.assertEqual({g["chatProfile"]: g["configDir"] for g in result["groups"]},
+                         {".claude-work": str(self.home / ".claude"), ".claude-personal": str(self.home / ".claude-personal")})
+
+    def test_the_account_vscode_is_on_comes_first(self):
+        # You switch VS Code's account in its settings; ~/.claude (listed
+        # first otherwise) may still point to the other one
+        self.settings(json.dumps({"claudeCode.environmentVariables": [
+            {"name": "CLAUDE_CONFIG_DIR", "value": str(self.home / ".claude-personal")}]}))
+        result = {"groups": [{"name": p.label, "profileKeys": [p.key]} for p in self.profiles()]}
+        self.assertEqual([g["name"] for g in result["groups"]], ["work", "personal"])
+        with Patch((cs, "vscode_app", lambda: ("/usr/bin/code", "Code")),
+                   (cs, "vscode_running_config_dir", lambda: (False, None))):
+            cs.add_vscode(result, self.home)
+        self.assertEqual([(g["name"], g["vscodeHere"]) for g in result["groups"]], [("personal", True), ("work", False)])
+
 
 class VscodeHome(Home):
     """Stand-ins for VS Code, xdg-open and KWin, recording what they're asked."""
@@ -213,16 +269,43 @@ class NewChatTests(VscodeHome):
         calls = []
         with Patch((jump, "new_chat_vscode", lambda home, extra, name, folder: calls.append(("vscode", name, folder)) or (True, "")),
                    (jump, "new_chat", lambda home, extra, name, folder: calls.append(("terminal", name, folder)) or (True, "")),
-                   (jump, "new_chat_remote_vscode", lambda host, folder: calls.append(("ssh", host, folder)) or (True, "")),
+                   (jump, "new_chat_remote_vscode", lambda host, folder, account=None:
+                    calls.append(("ssh", host, folder, account)) or (True, "")),
                    (jump, "new_chat_choosing_folder", lambda home, extra, name, vscode=False:
                     calls.append(("choose", name, vscode)) or (True, ""))), \
                 contextlib.redirect_stdout(io.StringIO()):
             jump.main(["--new-chat", ".claude-work", "--cwd", "/p", "--vscode"])
             jump.main(["--new-chat", ".claude-work", "--cwd", "/p"])
             jump.main(["--remote-new-vscode", "lab", "--cwd", "/srv"])
+            jump.main(["--remote-new-vscode", "lab", "--cwd", "/srv", "--account", "/home/me/.claude-personal"])
             jump.main(["--new-chat", ".claude-work", "--choose-folder", "--vscode"])
-        self.assertEqual(calls, [("vscode", ".claude-work", "/p"), ("terminal", ".claude-work", "/p"), ("ssh", "lab", "/srv"),
+        self.assertEqual(calls, [("vscode", ".claude-work", "/p"), ("terminal", ".claude-work", "/p"),
+                                 ("ssh", "lab", "/srv", None), ("ssh", "lab", "/srv", "/home/me/.claude-personal"),
                                  ("choose", ".claude-work", True)])
+
+    def test_a_host_chat_on_another_account_switches_vscode_there_first(self):
+        import remote
+        opened, switched = [], []
+        with Patch((jump, "remote_vscode", lambda host, folder, link, what: opened.append((host, folder)) or (True, "ok"))):
+            with Patch((remote, "vscode_account", lambda host, value: switched.append((host, value)) or (False, "it has comments"))):
+                ok, message = jump.new_chat_remote_vscode("lab", "/srv", "/home/me/.claude-personal")
+            self.assertFalse(ok)
+            self.assertIn("it has comments", message)
+            self.assertEqual(opened, [])  # the chat would have started on the other account
+            with Patch((remote, "vscode_account", lambda host, value: switched.append((host, value)) or (True, "now personal"))):
+                self.assertTrue(jump.new_chat_remote_vscode("lab", "/srv", "-")[0])
+        self.assertEqual(switched, [("lab", "/home/me/.claude-personal"), ("lab", None)])
+        self.assertEqual(opened, [("lab", "/srv")])
+
+    def test_the_switch_goes_to_the_server_of_your_vscode(self):
+        import remote
+        runs = []
+        with Patch((remote, "run_status_script", lambda host, args: runs.append((host, args)) or (True, "")),
+                   (cs, "vscode_app", lambda: ("/usr/bin/code-insiders", "Code - Insiders"))):
+            remote.vscode_account("lab", "/home/me/.claude-personal")
+            remote.vscode_account("lab", None)
+        self.assertEqual(runs, [("lab", ["--vscode-account", "/home/me/.claude-personal", "--vscode-server", ".vscode-server-insiders"]),
+                                ("lab", ["--vscode-account", "-", "--vscode-server", ".vscode-server-insiders"])])
 
 
 class ResumeTests(VscodeHome):

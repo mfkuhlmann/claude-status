@@ -6,6 +6,7 @@ import io
 import json
 import os
 import shlex
+import signal
 import subprocess
 import sys
 import tempfile
@@ -30,6 +31,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     -o) shift 2 ;;
     -T|-t) shift ;;
+    -O) shift 2 ;;  # (a control command, e.g. -O check: the "connection" is always there)
     *) break ;;
   esac
 done
@@ -524,3 +526,100 @@ class HostNoiseTests(FakeSSH):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+ARGV_SSH = r'''#!/bin/bash
+# Stand-in ssh that notes its whole command line; FAKE_LOGIN says how a login goes
+printf '%s\n' "$(printf '%q ' "$@")" >> "$FAKE_SSH_LOG"
+# whether it was started with SIGHUP ignored (bit 0 of SigIgn)
+echo $(( 0x$(awk '/^SigIgn:/{print $2}' /proc/$$/status) & 1 )) > "$FAKE_SSH_LOG.hup"
+if [ "$1" = -O ] || [[ " $* " == *" -O "* ]]; then exit 0; fi
+[ "$FAKE_LOGIN" = ok ] && exit 0
+echo "lab: Permission denied (publickey,password)." >&2
+exit 255
+'''
+
+
+class LoginTests(FakeSSH):
+    """A host that wants a password: you type it into ssh itself, in a
+    terminal, and the checks then share that login's connection."""
+
+    def setUp(self):
+        super().setUp()
+        self.run_dir = Path(self.tmp.name) / "run"
+        self.run_dir.mkdir(mode=0o700)
+        self.saved["XDG_RUNTIME_DIR"] = os.environ.get("XDG_RUNTIME_DIR")
+        self.saved["FAKE_LOGIN"] = os.environ.get("FAKE_LOGIN")
+        os.environ["XDG_RUNTIME_DIR"] = str(self.run_dir)
+        self.old_shown, remote.LOGIN_SHOWN = remote.LOGIN_SHOWN, 0
+        self.hup_before = signal.getsignal(signal.SIGHUP)
+        self.addCleanup(setattr, remote, "LOGIN_SHOWN", self.old_shown)
+
+    def argv_ssh(self):
+        (self.bin / "ssh").write_text(ARGV_SSH)
+
+    def argvs(self):
+        return [shlex.split(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
+
+    def test_status_says_when_a_login_would_help(self):
+        for mode, login in (("denied", True), ("hostkey", True), ("unreachable", False)):
+            self.mode(mode)
+            self.assertIs(remote.status("lab")["login"], login, mode)
+
+    def test_logged_in_while_the_connection_you_opened_is_there(self):
+        self.assertIs(remote.status("lab")["loggedIn"], False)
+        self.assertEqual(len(self.calls()), 1)  # no connection check without a login
+        remote.login_marker("lab").write_text("")
+        self.assertIs(remote.status("lab")["loggedIn"], True)
+
+    def test_login_lets_ssh_ask_and_keeps_the_connection(self):
+        self.argv_ssh()
+        os.environ["FAKE_LOGIN"] = "ok"
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(remote.login_here("lab"), 0)
+        (argv,) = self.argvs()
+        # ssh takes an option's first value: the login's own come first
+        self.assertEqual(argv[:8], ["-o", "ControlMaster=auto", "-o", "ControlPersist=30m",
+                                    "-o", "ForwardAgent=no", "-o", "ForwardX11=no"])
+        self.assertNotIn("BatchMode=yes", argv)  # it may ask for a password, a code, a host key
+        self.assertIn(f"ControlPath={self.run_dir}/claude-status-ssh/%C", argv)
+        self.assertNotIn("StrictHostKeyChecking=no", " ".join(argv))
+        self.assertEqual(argv[-3:], ["-T", "lab", "sh -c true"])
+        self.assertTrue(remote.login_marker("lab").exists())
+        self.assertEqual(remote.login_marker("lab").stat().st_mode & 0o777, 0o600)
+        self.assertIn("never sees it", out.getvalue())
+        # Through a jump host (ProxyJump), the connection to it is a child of
+        # this ssh that stays in the window's session: started with SIGHUP
+        # ignored, it outlives the window (checked with real OpenSSH)
+        self.assertEqual(Path(str(self.log) + ".hup").read_text().strip(), "1")
+        self.assertIs(signal.getsignal(signal.SIGHUP), self.hup_before)
+
+    def test_a_failed_login_keeps_nothing(self):
+        self.argv_ssh()
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(remote.login_here("lab"), 255)
+        self.assertFalse(remote.login_marker("lab").exists())
+        self.assertIn("didn't work", out.getvalue())
+
+    def test_disconnect_closes_the_connection(self):
+        self.argv_ssh()
+        remote.login_marker("lab").write_text("")
+        ok, message = remote.disconnect("lab")
+        self.assertTrue(ok)
+        self.assertEqual(message, "Disconnected from lab")
+        ((*options, op, what, host),) = self.argvs()
+        self.assertEqual((op, what, host), ("-O", "exit", "lab"))
+        self.assertFalse(remote.login_marker("lab").exists())
+
+    def test_login_opens_a_terminal_that_closes_once_in(self):
+        import jump
+        lines = []
+        real = jump.open_terminal
+        jump.open_terminal = lambda cwd, line: lines.append(line) or True
+        self.addCleanup(setattr, jump, "open_terminal", real)
+        self.assertEqual(remote.login("lab"), (True, "Log in to lab in the terminal"))
+        (line,) = lines
+        self.assertTrue(line.endswith(" --login-here lab && exit"), line)
+        self.assertIn(" -I ", line)
+        with self.assertRaises(ValueError):
+            remote.login("-oProxyCommand=evil")

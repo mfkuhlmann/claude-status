@@ -42,7 +42,8 @@ Item {
     readonly property real tagWidth: Math.max(gu * 3.5, slotSpacing - Kirigami.Units.smallSpacing * 2)
     readonly property real chatGround: height - tagHeight - Kirigami.Units.smallSpacing
     readonly property real loneGround: height - gu * 0.55
-    readonly property bool live: visible && root.expanded
+    readonly property bool live: visible && root.dashboardShown
+    readonly property bool playing: live && !root.coveredByWindow   // can be seen: things move
     property real cursorX: -1        // mouse x while it hovers the stage
     property bool firstShown: false  // once shown, a returning pet walks in
     readonly property int maxPets: Math.max(0, Plasmoid.configuration.chatPets)
@@ -239,7 +240,7 @@ Item {
     }
 
     SequentialAnimation on glow {
-        running: strip.hero && strip.live && strip.mood === "waving"
+        running: strip.hero && strip.playing && strip.mood === "waving"
         loops: Animation.Infinite
         NumberAnimation { to: 1.6; duration: 900; easing.type: Easing.InOutSine }
         NumberAnimation { to: 1; duration: 900; easing.type: Easing.InOutSine }
@@ -279,7 +280,7 @@ Item {
             color: strip.darkTheme ? "#d4dbff" : "#5363b8"
             opacity: 0.5
             SequentialAnimation on opacity {
-                running: strip.live && strip.mood === "sleeping"
+                running: strip.playing && strip.mood === "sleeping"
                 loops: Animation.Infinite
                 NumberAnimation { to: 0.9; duration: 900 + 260 * index; easing.type: Easing.InOutSine }
                 NumberAnimation { to: 0.15; duration: 1100 + 190 * index; easing.type: Easing.InOutSine }

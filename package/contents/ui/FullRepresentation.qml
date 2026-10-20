@@ -27,7 +27,7 @@ PlasmaExtras.Representation {
                 Layout.preferredWidth: Kirigami.Units.iconSizes.small
                 Layout.preferredHeight: Kirigami.Units.iconSizes.small
                 color: root.stateColor(root.overall)
-                spinning: root.overall === "working" && root.expanded
+                spinning: root.overall === "working" && root.dashboardShown && !root.coveredByWindow
             }
             Kirigami.Heading {
                 textFormat: Text.PlainText

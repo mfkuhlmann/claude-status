@@ -8,7 +8,8 @@ import org.kde.kirigami as Kirigami
 // folders and of its recent chats (GroupSection.qml). One choice for both,
 // kept for next time. A half is greyed out where it can't work: no claude
 // command (on that SSH host), no VS Code, or VS Code's Claude on another
-// account (root.openInVscode picks the other one then). When neither works,
+// account (root.openInVscode picks the other one then; a new chat on an SSH
+// host's other account switches VS Code's Claude there). When neither works,
 // a line under it says why.
 ColumnLayout {
     id: openIn
@@ -17,9 +18,11 @@ ColumnLayout {
     property string remoteHost: ""
     property bool resuming: false   // the recent chats' switch: they reopen
 
-    readonly property bool inVscode: root.openInVscode(group, remoteHost)
+    readonly property bool inVscode: root.openInVscode(group, remoteHost, resuming)
     readonly property bool terminalHere: root.cliHere(remoteHost)
-    readonly property bool vscodeHere: root.vscodeInstalled && !!group.vscodeHere
+    // a new chat on an SSH host's other account: VS Code's Claude there switches to it
+    readonly property bool switching: !resuming && root.vscodeSwitches(group, remoteHost)
+    readonly property bool vscodeHere: root.vscodeInstalled && (!!group.vscodeHere || switching)
 
     spacing: 0
 
@@ -49,6 +52,7 @@ ColumnLayout {
             text: i18n("VS Code")
             tipTitle: !root.vscodeInstalled ? i18n("VS Code isn't installed")
                       : !openIn.vscodeHere ? i18n("Not on this account")
+                      : openIn.switching ? i18n("New chats in VS Code, on this account")
                       : openIn.resuming ? i18n("Reopen chats in VS Code") : i18n("New chats in VS Code")
             tip: root.vscodeHint(openIn.group, openIn.remoteHost, openIn.resuming)
             onClicked: Plasmoid.configuration.newChatInVscode = true

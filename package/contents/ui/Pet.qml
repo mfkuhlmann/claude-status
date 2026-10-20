@@ -52,6 +52,7 @@ Item {
     readonly property real minX: bodyWidth / 2 + Kirigami.Units.smallSpacing
     readonly property real maxX: Math.max(minX, strip.width - bodyWidth / 2 - Kirigami.Units.smallSpacing)
     readonly property bool live: strip.live
+    readonly property bool playing: strip.playing   // not under a window: he moves
 
     // Where he is: px = horizontal centre, lift = height above the ground.
     property real px: homeX
@@ -486,7 +487,7 @@ Item {
         id: brain
         interval: 3000
         repeat: true
-        running: pet.live && !pet.held && !pet.leaving && !pet.offstage
+        running: pet.playing && !pet.held && !pet.leaving && !pet.offstage
         onTriggered: {
             interval = 2000 + Math.random() * 3000
             if (pet.reaction !== "" || pet.moving || pet.action !== "")
@@ -510,7 +511,7 @@ Item {
     Timer {
         interval: 350
         repeat: true
-        running: pet.live && pet.lone && pet.strip.cursorX >= 0 && !pet.moving && !pet.held && pet.mood !== "sleeping"
+        running: pet.playing && pet.lone && pet.strip.cursorX >= 0 && !pet.moving && !pet.held && pet.mood !== "sleeping"
         onTriggered: {
             if (Math.abs(pet.strip.cursorX - pet.px) > pet.bodyWidth * 0.4)
                 pet.facingLeft = pet.strip.cursorX < pet.px
@@ -553,7 +554,7 @@ Item {
     Timer {
         interval: 14000
         repeat: true
-        running: pet.live && pet.mood.startsWith("working") && pet.reaction === ""
+        running: pet.playing && pet.mood.startsWith("working") && pet.reaction === ""
         onTriggered: {
             interval = 10000 + Math.random() * 10000
             if (pet.mood === "working-juggling")
@@ -567,7 +568,7 @@ Item {
     Timer {
         interval: 6000
         repeat: true
-        running: pet.live && pet.mood === "waving" && pet.reaction === ""
+        running: pet.playing && pet.mood === "waving" && pet.reaction === ""
         onTriggered: pet.waitPose = pet.pick(pet.waitPoses, pet.waitPose)
     }
 
@@ -579,7 +580,7 @@ Item {
     Timer {
         interval: 40000
         repeat: true
-        running: pet.live && pet.contextFullText !== "" && pet.mood.startsWith("working") && !pet.leaving
+        running: pet.playing && pet.contextFullText !== "" && pet.mood.startsWith("working") && !pet.leaving
         triggeredOnStart: true
         onTriggered: {
             if (!pet.held && pet.reaction === "")
@@ -592,7 +593,7 @@ Item {
     Timer {
         interval: 25000
         repeat: true
-        running: pet.live && pet.isMain && root.highUsageText !== "" && pet.mood !== "sleeping" && !pet.leaving
+        running: pet.playing && pet.isMain && root.highUsageText !== "" && pet.mood !== "sleeping" && !pet.leaving
         triggeredOnStart: true
         onTriggered: {
             if (pet.held || pet.reaction !== "")
@@ -643,7 +644,7 @@ Item {
     // Breathing: slow when idle or asleep, quick while he types. Most of the
     // pets' own CSS animations don't play in Qt, so this keeps him alive.
     SequentialAnimation {
-        running: pet.live && !pet.held && !pet.moving
+        running: pet.playing && !pet.held && !pet.moving
         loops: Animation.Infinite
         NumberAnimation { target: pet; property: "breath"; to: 0.94; duration: pet.breathHalf; easing.type: Easing.InOutSine }
         NumberAnimation { target: pet; property: "breath"; to: 1; duration: pet.breathHalf; easing.type: Easing.InOutSine }
@@ -701,7 +702,7 @@ Item {
                 target: animated.item
                 when: animated.status === Loader.Ready
                 property: "playing"
-                value: pet.live
+                value: pet.playing
             }
         }
         Image {

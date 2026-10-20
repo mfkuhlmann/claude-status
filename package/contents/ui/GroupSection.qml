@@ -17,7 +17,7 @@ ColumnLayout {
 
     readonly property string groupKey: (remoteHost ? remoteHost + "/" : "") + group.id
     readonly property var recent: group.recent || []
-    readonly property bool recentOpen: groupKey in root.expandedRecent ? root.expandedRecent[groupKey] : remoteHost !== ""
+    readonly property bool recentOpen: !!root.expandedRecent[groupKey]
 
     readonly property var tokens: group.tokens
     readonly property bool hasTokens: tokens !== null && tokens !== undefined
@@ -79,7 +79,7 @@ ColumnLayout {
         id: newChatBox
         readonly property bool open: root.newChatGroup === section.groupKey
         readonly property var folders: open ? root.newChatFolders(section.group, section.remoteHost) : []
-        readonly property bool inVscode: root.openInVscode(section.group, section.remoteHost)
+        readonly property bool inVscode: root.openInVscode(section.group, section.remoteHost, false)
         readonly property bool terminalHere: root.cliHere(section.remoteHost)
 
         visible: open
@@ -130,10 +130,9 @@ ColumnLayout {
                     enabled: newChatBox.inVscode || (newChatBox.terminalHere && (!section.remoteHost || !!folderRow.folder.newChatCommand))
                     onClicked: {
                         if (section.remoteHost && newChatBox.inVscode) {
-                            root.remoteNewChatVscode(section.remoteHost, folderRow.folder.path)
+                            root.remoteNewChatVscode(section.remoteHost, folderRow.folder.path, section.group)
                         } else if (section.remoteHost) {
-                            root.newChatGroup = ""
-                            root.remoteOpen(section.remoteHost, folderRow.folder.newChatCommand)
+                            root.remoteNewChat(section.remoteHost, folderRow.folder.newChatCommand)
                         } else {
                             root.newChat(section.group.chatProfile, folderRow.folder.path, newChatBox.inVscode)
                         }
@@ -190,8 +189,9 @@ ColumnLayout {
         }
     }
 
-    // Plan limits (from the status line)
+    // Plan limits (from the status line); not where they show elsewhere (root.withUsage)
     ColumnLayout {
+        visible: !section.group.limitsHidden
         Layout.fillWidth: true
         Layout.leftMargin: Kirigami.Units.smallSpacing
         Layout.rightMargin: Kirigami.Units.smallSpacing
@@ -221,6 +221,9 @@ ColumnLayout {
             opacity: 0.6
             font: Kirigami.Theme.smallFont
             text: !section.group.limits ? i18n("No plan usage yet: shows after this account's next reply")
+                  : section.group.limitsFrom
+                    ? (root.now - section.group.limits.updatedAt < 60000 ? i18n("Plan usage updated just now, on %1", section.group.limitsFrom)
+                       : i18n("Plan usage as of %1 ago, on %2", root.duration(root.now - section.group.limits.updatedAt), section.group.limitsFrom))
                   : root.now - section.group.limits.updatedAt < 60000 ? i18n("Plan usage updated just now")
                   : i18n("Plan usage as of %1 ago", root.duration(root.now - section.group.limits.updatedAt))
 

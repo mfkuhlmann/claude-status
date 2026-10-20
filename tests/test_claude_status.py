@@ -321,6 +321,41 @@ class LimitTests(Fixture):
         self.assertEqual((seven["label"], seven["pct"], seven["reset"]), ("7d", 0.0, True))
         self.assertIsNone(self.group(r, "personal")["limits"])
 
+    def usage_cache(self, fetched_ago, account="acct-pro"):
+        # what Claude Code keeps in .claude.json (2.1.30x): /usage, the VS Code panel
+        path = self.home / ".claude-personal/.claude.json"
+        data = json.loads(path.read_text())
+        data["cachedUsageUtilization"] = {
+            "fetchedAtMs": int((self.now - fetched_ago) * 1000), "accountUuid": account,
+            "utilization": {
+                "five_hour": {"utilization": 35, "resets_at": iso(self.now + 3600), "limit_dollars": None},
+                "seven_day": {"utilization": 87, "resets_at": iso(self.now - 60)},  # just reset
+                "seven_day_opus": None, "tangelo": None,
+                "extra_usage": {"is_enabled": False, "monthly_limit": 4000, "utilization": 0},
+            }}
+        write(path, data)
+
+    def test_claude_codes_own_usage_when_its_newer(self):
+        # An account used only in VS Code's panel (no status line there) kept
+        # the numbers of its last terminal chat: a day old
+        self.snapshot(".claude-personal", "old", {"rate_limits": {
+            "five_hour": {"used_percentage": 0, "resets_at": self.now + 900}}}, age=21 * 3600)
+        self.usage_cache(fetched_ago=3600)
+        limits = self.group(self.collect(with_tokens=False), "personal")["limits"]
+        self.assertEqual(limits["updatedAt"], int((self.now - 3600) * 1000))
+        five, seven = limits["windows"]
+        self.assertEqual((five["key"], five["pct"], five["resetsAt"]), ("five_hour", 35.0, int((self.now + 3600) * 1000)))
+        self.assertEqual((seven["key"], seven["pct"], seven["reset"]), ("seven_day", 0.0, True))
+        # a status line newer than the cache wins
+        self.snapshot(".claude-personal", "new", {"rate_limits": {
+            "five_hour": {"used_percentage": 40, "resets_at": self.now + 3600}}}, age=60)
+        (five,) = self.group(self.collect(with_tokens=False), "personal")["limits"]["windows"]
+        self.assertEqual(five["pct"], 40.0)
+
+    def test_a_usage_cache_of_another_account_is_left_out(self):
+        self.usage_cache(fetched_ago=60, account="someone-else")
+        self.assertIsNone(self.group(self.collect(with_tokens=False), "personal")["limits"])
+
     def test_newest_snapshot_across_group_profiles(self):
         self.snapshot(".claude", "a", {"rate_limits": {"five_hour": {"used_percentage": 10}}}, age=300)
         self.snapshot(".claude-personal", "b", {"rate_limits": {"five_hour": {"used_percentage": 20}}}, age=10)
@@ -1701,3 +1736,35 @@ class OlderCopiesTests(Fixture):
         write(self.cache / "chats.json", old)
         work = self.group(self.collect(with_tokens=False), "work")
         self.assertEqual(next(s for s in work["sessions"] if s["sessionId"] == "busy")["stats"]["prompts"], 1)
+
+
+class NewClaudeValuesTests(Fixture):
+    """The widget reads files Claude Code doesn't document. A status it
+    doesn't know counted as idle and a new kind of session wasn't listed, with
+    nothing to say so; now the popup does."""
+
+    def test_new_values_are_named_with_the_version(self):
+        w = self.home / ".claude-work"
+        write(w / "sessions/40.json", session("new-status", status="compacting", version="2.1.400"))
+        write(w / "sessions/41.json", session("new-kind", kind="headless", version="2.1.399"))
+        write(w / "jobs/newjob/state.json", {"state": "paused", "tempo": "dozing", "cliVersion": "2.1.401",
+                                             "updatedAt": iso(self.now - 60)})
+        errors = self.collect(with_tokens=False)["errors"]
+        self.assertEqual(len(errors), 1, errors)
+        for part in ("Claude Code 2.1.401", 'session status "compacting"', 'session kind "headless"',
+                     'job state "paused"', 'job tempo "dozing"', "may show the wrong state"):
+            self.assertIn(part, errors[0])
+
+    def test_what_claude_writes_today_says_nothing(self):
+        # (the fixture holds every status, kind and job state the widget knows)
+        w = self.home / ".claude-work"
+        for i, (state, tempo) in enumerate([("working", "active"), ("running", "idle"), ("failed", "idle"),
+                                            ("stopped", "idle"), ("blocked", "blocked")]):
+            write(w / f"jobs/today{i}/state.json", {"state": state, "tempo": tempo, "updatedAt": iso(self.now - 60)})
+        write(w / "sessions/42.json", session("bg-shell", kind="bg", status="shell"))
+        write(w / "sessions/43.json", session("worker", kind="daemon-worker"))
+        self.assertEqual(self.collect(with_tokens=False)["errors"], [])
+
+    def test_a_value_that_is_no_text_is_named_too(self):
+        write(self.home / ".claude-work/sessions/44.json", session("odd", status=3))
+        self.assertIn('session status "3"', self.collect(with_tokens=False)["errors"][0])

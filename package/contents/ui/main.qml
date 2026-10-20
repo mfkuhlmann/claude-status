@@ -6,6 +6,7 @@ import org.kde.plasma.plasma5support as P5Support
 import org.kde.plasma.extras as PlasmaExtras
 import org.kde.kirigami as Kirigami
 import org.kde.notification
+import "hub"
 
 PlasmoidItem {
     id: root
@@ -54,8 +55,42 @@ PlasmoidItem {
         return ""
     }
 
-    readonly property var groups: status ? status.groups : []
-    readonly property real now: status ? status.generatedAt : Date.now()
+    readonly property var groups: status ? status.groups.map(g => withUsage(g, "")) : []
+    property real now: Date.now()   // the last check's time (handleOutput)
+
+    // Plan usage is the account's, whichever machine it's used on. An
+    // account on several (this computer and SSH hosts: the same id) shows it
+    // once, where it's listed first, with the newest numbers of them all
+    // (sshUsage "once"); "all" shows each machine's own, "none" no host's.
+    readonly property var usageOwners: {
+        const out = {}
+        const note = (g, host) => {
+            const o = out[g.id] || (out[g.id] = { host: host, limits: null, from: "" })
+            if (g.limits && (!o.limits || g.limits.updatedAt > o.limits.updatedAt)) {
+                o.limits = g.limits
+                o.from = host
+            }
+        }
+        for (const g of (status ? status.groups : []))
+            note(g, "")
+        for (const host of shownHosts)
+            for (const g of (remote[host] && remote[host].result ? remote[host].result.groups : []))
+                note(g, host)
+        return out
+    }
+
+    // group as shown on host's section ("" here): limitsHidden when its usage
+    // shows elsewhere (or no host's does), limitsFrom when the numbers come
+    // from another machine
+    function withUsage(group, host) {
+        const mode = Plasmoid.configuration.sshUsage
+        const owner = usageOwners[group.id]
+        if (host && (mode === "none" || (mode !== "all" && owner && owner.host !== host)))
+            return Object.assign({}, group, { limits: null, limitsHidden: true })
+        if (mode === "all" || !owner || owner.from === host)
+            return group
+        return Object.assign({}, group, { limits: owner.limits, limitsFrom: owner.from })
+    }
 
     // SSH hosts (remote.py): the ones in ~/.ssh/config, the ones you picked,
     // and what each answered ({loading, ok, error, result, updatedAt}).
@@ -72,7 +107,7 @@ PlasmoidItem {
             const r = remote[host]
             if (r && r.result && !r.error)
                 for (const g of r.result.groups)
-                    out.push(Object.assign({}, g, { host: host }))
+                    out.push(Object.assign({}, withUsage(g, host), { host: host }))
         }
         return out
     }
@@ -160,6 +195,26 @@ PlasmoidItem {
     // Debian/Ubuntu: qml6-module-qtquick-vectorimage); without them the pets
     // are still images that move all the same.
     readonly property bool animatedPets: Qt.createComponent("PetImage.qml").status === Component.Ready
+    // On the desktop the dashboard is shown all the time, and is often under
+    // your windows: there the pets and the spinner stop moving while a window
+    // covers it all (CoverWatch.qml), since every frame redraws the screen.
+    readonly property bool onDesktop: Plasmoid.formFactor === PlasmaCore.Types.Planar && !inTray
+    // The dashboard is on screen: the popup is open, or it's shown in place
+    // (on the desktop). There, opening a chat "closes the popup" too
+    // (expanded false), though the dashboard stays: its pets froze.
+    readonly property bool dashboardShown: expanded || (Window.window !== null && fullRepresentationItem !== null
+                                                         && fullRepresentationItem.Window.window === Window.window)
+    // (with the mouse on it, it can be seen: a window over it would have the mouse)
+    readonly property bool coveredByWindow: coverWatch.item !== null && coverWatch.item.covered && !mouseOnWidget.hovered
+    HoverHandler {
+        id: mouseOnWidget
+        enabled: root.onDesktop
+    }
+    Loader {
+        id: coverWatch
+        active: root.onDesktop
+        source: "CoverWatch.qml"
+    }
     readonly property int agentsRunning: {
         let n = 0
         for (const g of allGroups)
@@ -230,29 +285,29 @@ PlasmoidItem {
     readonly property string configDirArgs: Plasmoid.configuration.extraConfigDirs.split(",")
         .map(d => d.trim()).filter(d => d.length).map(d => " --config-dir " + shellQuote(d)).join("")
     readonly property string command: {
-        let cmd = "python3 -I " + shellQuote(codeDir + "claude_status.py") + configDirArgs
+        // (poll.py runs claude_status.py with its compiled code cached)
+        let cmd = "python3 -I " + shellQuote(codeDir + "poll.py") + configDirArgs
         cmd += " --done-hours " + Math.max(0, Plasmoid.configuration.keepDoneHours)
         cmd += " --recent " + Math.max(0, Plasmoid.configuration.recentChats)
         if (!Plasmoid.configuration.showTokens)
             cmd += " --no-tokens"
-        cmd += " --instance " + shellQuote(instanceId) + " --interval-ms " + checkInterval
-        return cmd
+        return cmd   // (hub/Hub.qml adds --instance and --interval-ms)
     }
 
     // ---------------------------------------------------------------- several widgets
-    // This widget can run twice, e.g. on a panel and in the system tray
-    // (claude_status.py: several widgets at once). Each copy names itself on
-    // every check; the one running longest sends the notifications and sounds.
-    // Settings are shared: a change is saved for the others at the next check,
-    // and the others take it over at theirs (a new copy takes over what the
-    // others use).
+    // This widget can run several times, e.g. on a panel, in the system tray
+    // and on each screen's desktop. The copies share one check (hub/Hub.qml);
+    // the one here longest sends the notifications and sounds, and across
+    // programs claude_status.py picks one (several widgets at once). Settings
+    // are shared: a change is saved for the others at the next check, and the
+    // others take it over at theirs (a new copy takes over what the others use).
     readonly property string instanceId: (Plasmoid.containment ? Plasmoid.containment.id + "/" : "") + Plasmoid.id
-    readonly property bool notifier: status === null || status.notifier !== false
+    readonly property bool notifier: (status === null || status.notifier !== false) && Hub.leaderId === instanceId
     // In the system tray, which draws the popup's heading itself (settable for render tests)
     property bool inTray: (Plasmoid.containmentDisplayHints & PlasmaCore.Types.ContainmentDrawsPlasmoidHeading) !== 0
     readonly property var sharedKeys: ["pollInterval", "idlePollInterval", "extraConfigDirs", "notifyWaiting", "notifyDone",
         "notifyDoneMinSeconds", "notifySound", "soundVolume", "soundWaiting", "soundDone", "soundFailed", "recentChats",
-        "sshHosts", "remotePollSeconds", "keepDoneHours", "showUsageInPanel", "showPet", "chatPets", "showTokens",
+        "sshHosts", "remotePollSeconds", "sshUsage", "keepDoneHours", "showUsageInPanel", "showPet", "chatPets", "showTokens",
         "newChatInVscode", "iconBlink", "awayDigest", "awayMinutes", "phoneWhileAway", "phoneFinished", "phoneDevice"]
     property real settingsSeenAt: 0     // the newest shared settings this copy has seen
     property string settingsSeen: ""    // its own settings as of the last check (to see changes)
@@ -586,13 +641,19 @@ PlasmoidItem {
         }
     ]
 
-    P5Support.DataSource {
-        id: poller
-        engine: "executable"
-        connectedSources: []
-        onNewData: (source, data) => {
-            disconnectSource(source)
-            root.handleOutput(data["stdout"], data["stderr"])
+    Connections {
+        target: Hub
+        function onOutput(command, stdout, stderr) {
+            if (command === root.command)
+                root.handleOutput(stdout, stderr)
+            const host = root.hostOfCommand(command)
+            if (host)
+                root.handleRemote(host, { stdout: stdout, stderr: stderr })
+        }
+        function onStarted(command) {
+            const host = root.hostOfCommand(command)
+            if (host)
+                root.setRemote(host, { loading: true })
         }
     }
 
@@ -611,7 +672,7 @@ PlasmoidItem {
                 root.actionError = i18n("Couldn't open the session: %1", result.message)
                 actionErrorTimer.restart()
                 root.petEvent("oops", i18n("Hmm, that didn't work."), "")
-                if (!root.expanded)
+                if (!root.dashboardShown)
                     root.notify("jump-error", null, "error", i18n("Couldn't open the session"), result.message, "dialog-error")
             }
         }
@@ -685,25 +746,34 @@ PlasmoidItem {
     // An idle panel then costs less, and a chat that starts still shows
     // within seconds (opening the popup checks at once). The GNOME extension
     // does the same (logic.js).
-    readonly property bool quiet: status !== null && overall === "none" && !root.expanded
+    readonly property bool quiet: status !== null && overall === "none" && !root.dashboardShown
     readonly property int pollMs: Math.max(1000, Plasmoid.configuration.pollInterval)
     readonly property int checkInterval: quiet ? Math.max(pollMs, Plasmoid.configuration.idlePollInterval) : pollMs
 
-    Timer {
-        interval: root.checkInterval
-        running: true
-        repeat: true
-        triggeredOnStart: true
-        onTriggered: root.refresh()
-    }
+    // The checks come from hub/Hub.qml, as often as the most eager copy
+    // wants them (an open popup: pollInterval)
+    onCommandChanged: Hub.want(instanceId, "status", command, checkInterval, true)
+    onCheckIntervalChanged: Hub.want(instanceId, "status", command, checkInterval, true)
+    Component.onDestruction: Hub.drop(instanceId)
 
     function refresh() {
-        // A still-running poll keeps its source connected; don't stack another.
-        if (poller.connectedSources.indexOf(command) < 0)
-            poller.connectSource(command)
+        Hub.refresh(command)
     }
 
+    // Most checks say what the one before said but for their time and the
+    // usage forecasts, which drift with it. Then only the clock moves on
+    // (time labels) and the dashboard isn't rebuilt; the forecasts catch up
+    // within 30 s.
+    property string lastOutputKey: ""
+    property real lastFullUpdate: 0
+
     function handleOutput(stdout, stderr) {
+        const time = /"generatedAt": *(\d+)/.exec(stdout)
+        const key = stdout.replace(/"generatedAt": *\d+/g, "").replace(/"forecast": *\{[^{}]*\}/g, "")
+        if (status && time && key === lastOutputKey && Date.now() - lastFullUpdate < 30000) {
+            now = Number(time[1])
+            return
+        }
         let parsed = null
         try {
             parsed = JSON.parse(stdout)
@@ -717,6 +787,9 @@ PlasmoidItem {
             return
         }
         errorText = parsed.errors.length ? parsed.errors.join("\n") : ""
+        lastOutputKey = key
+        lastFullUpdate = Date.now()
+        now = parsed.generatedAt
         status = parsed   // first: whether this copy notifies
         trackTransitions("", parsed.groups, parsed.generatedAt, "")
         celebrateResets("", parsed.groups)
@@ -1005,7 +1078,7 @@ PlasmoidItem {
     }
 
     function markUnseen(sid, kind) {
-        if (!root.expanded)
+        if (!root.dashboardShown)
             unseen = Object.assign({}, unseen, { [sid]: kind })
     }
 
@@ -1047,10 +1120,18 @@ PlasmoidItem {
 
     // Where this account's chats open: VS Code when you picked it, or when
     // there's no claude command but VS Code's Claude runs on this account
-    function openInVscode(group, host) {
-        if (!vscodeInstalled || !group.vscodeHere)
+    // (resuming: a recent chat, which reopens on its own account)
+    function openInVscode(group, host, resuming) {
+        if (!vscodeInstalled || !(group.vscodeHere || (!resuming && vscodeSwitches(group, host))))
             return false
         return Plasmoid.configuration.newChatInVscode || !cliHere(host)
+    }
+
+    // A new chat on an SSH host's other account opens in VS Code too: VS
+    // Code's Claude there switches to that account first, and stays on it
+    // (jump.py --remote-new-vscode --account; configDir comes from the host)
+    function vscodeSwitches(group, host) {
+        return !!host && vscodeInstalled && !group.vscodeHere && group.configDir !== undefined
     }
 
     // resuming: for the recent chats' switch (they reopen) instead of new chats'
@@ -1075,8 +1156,10 @@ PlasmoidItem {
         if (group.vscodeHere)
             return host ? i18n("Opens VS Code connected to %1 (Remote-SSH) with a new chat in its Claude panel.", host)
                         : i18n("Opens the folder in VS Code with a new chat in its Claude panel.")
+        if (host && !resuming && vscodeSwitches(group, host))
+            return i18n("Opens VS Code connected to %1 (Remote-SSH) with a new chat in its Claude panel. VS Code's Claude on %1 switches to %2 for it, and stays on it.", host, group.title)
         if (host)
-            return i18n("VS Code's Claude on %1 runs on another account (the host's ~/.claude).", host)
+            return i18n("VS Code's Claude on %1 runs on another account: a new chat in VS Code on this one switches it.", host)
         const on = status && status.vscode ? status.vscode.on : null
         return on ? i18n("VS Code's Claude runs on %1, not %2: switch its profile to use this account there.", on, group.title)
                   : i18n("VS Code's Claude doesn't run on this account.")
@@ -1095,6 +1178,13 @@ PlasmoidItem {
             } else {
                 root.actionError = i18n("Couldn't open a new chat: %1", result.message)
                 actionErrorTimer.restart()
+            }
+            const host = root.launcherHosts[source]
+            if (host) {
+                const rest = Object.assign({}, root.launcherHosts)
+                delete rest[source]
+                root.launcherHosts = rest
+                root.pollHost(host)
             }
         }
     }
@@ -1127,12 +1217,26 @@ PlasmoidItem {
                              + " " + shellQuote(sessionId) + (folder ? " --cwd " + shellQuote(folder) : "") + " # " + Date.now())
     }
 
-    // VS Code connected to an SSH host, with a new chat (in folder there, or home)
-    function remoteNewChatVscode(host, folder) {
+    // A new chat in a terminal on an SSH host (a folder's newChatCommand).
+    // The list closes here, not in the folder's row: closing it destroys
+    // the row, and the rest of the row's click handler lost root with it.
+    function remoteNewChat(host, command) {
         newChatGroup = ""
-        launcher.connectSource("python3 -I " + shellQuote(codeDir + "jump.py") + " --remote-new-vscode " + shellQuote(host)
-                               + (folder ? " --cwd " + shellQuote(folder) : "") + " # " + Date.now())
+        remoteOpen(host, command)
     }
+
+    // VS Code connected to an SSH host, with a new chat (in folder there, or home)
+    // group: the account the chat is for, when it isn't VS Code's there yet
+    function remoteNewChatVscode(host, folder, group) {
+        newChatGroup = ""
+        const account = group && !group.vscodeHere ? " --account " + shellQuote(group.configDir || "-") : ""
+        const line = "python3 -I " + shellQuote(codeDir + "jump.py") + " --remote-new-vscode " + shellQuote(host)
+                     + (folder ? " --cwd " + shellQuote(folder) : "") + account + " # " + Date.now()
+        launcherHosts = Object.assign({}, launcherHosts, { [line]: host })
+        launcher.connectSource(line)
+    }
+
+    property var launcherHosts: ({})   // command -> SSH host it was for (checked again after: its accounts may have switched)
 
     // ---------------------------------------------------------------- SSH hosts
 
@@ -1153,58 +1257,48 @@ PlasmoidItem {
         hostLister.connectSource("python3 -I " + shellQuote(codeDir + "remote.py") + " --hosts # " + Date.now())
     }
 
-    Component.onCompleted: loadHosts()
-
-    // Status of the hosts you picked: polled less often than this computer
-    P5Support.DataSource {
-        id: remotePoller
-        engine: "executable"
-        connectedSources: []
-        onNewData: (source, data) => {
-            disconnectSource(source)
-            const host = root.remoteSources[source]
-            if (host)
-                root.handleRemote(host, data)
-        }
+    Component.onCompleted: {
+        loadHosts()
+        Hub.want(instanceId, "status", command, checkInterval, true)
+        wantHosts()
     }
 
-    property var remoteSources: ({})   // poll command -> host
+    // Status of the hosts you picked: polled less often than this computer,
+    // once for all copies (hub/Hub.qml; a host just picked is checked at once)
+    property var wantedHosts: ({})   // host -> its check's command
+    readonly property string hostWish: JSON.stringify([shownHosts, Plasmoid.configuration.remotePollSeconds,
+        Plasmoid.configuration.keepDoneHours, Plasmoid.configuration.recentChats, Plasmoid.configuration.showTokens])
+    onHostWishChanged: wantHosts()
 
-    Timer {
-        interval: Math.max(10, Plasmoid.configuration.remotePollSeconds) * 1000
-        running: root.shownHosts.length > 0
-        repeat: true
-        triggeredOnStart: true
-        onTriggered: {
-            for (const host of root.shownHosts)
-                root.pollHost(host)
+    function wantHosts() {
+        const next = {}
+        const interval = Math.max(10, Plasmoid.configuration.remotePollSeconds) * 1000
+        for (const host of shownHosts) {
+            next[host] = hostCommand(host)
+            Hub.want(instanceId, "ssh:" + host, next[host], interval, false)
         }
+        for (const host in wantedHosts)
+            if (!(host in next))
+                Hub.unwant(instanceId, "ssh:" + host)
+        wantedHosts = next
+    }
+
+    function hostOfCommand(command) {
+        for (const host in wantedHosts)
+            if (wantedHosts[host] === command)
+                return host
+        return ""
     }
 
     onShownHostsChanged: {
         const next = {}
-        for (const host of shownHosts) {
+        for (const host of shownHosts)
             if (host in remote)
                 next[host] = remote[host]
-            else
-                hostsToPoll[host] = true  // just picked: load it now
-        }
         for (const host in remote)
             if (!(host in next))
                 forgetSource("ssh:" + host)  // shown again later, it starts afresh
         remote = next
-        Qt.callLater(pollNewHosts)
-    }
-
-    // Hosts just picked, polled at once (Qt.callLater runs a function once
-    // with its last arguments: all of them in one go)
-    property var hostsToPoll: ({})
-
-    function pollNewHosts() {
-        const hosts = Object.keys(hostsToPoll)
-        hostsToPoll = ({})
-        for (const host of hosts)
-            pollHost(host)
     }
 
     // What a source's chats were (and their notifications): gone with the source
@@ -1255,17 +1349,17 @@ PlasmoidItem {
         return result
     }
 
-    function pollHost(host) {
+    function hostCommand(host) {
         let cmd = "python3 -I " + shellQuote(codeDir + "remote.py") + " --status " + shellQuote(host)
                   + " --done-hours " + Math.max(0, Plasmoid.configuration.keepDoneHours)
                   + " --recent " + Math.max(0, Plasmoid.configuration.recentChats)
         if (!Plasmoid.configuration.showTokens)
             cmd += " --no-tokens"
-        if (remotePoller.connectedSources.indexOf(cmd) >= 0)
-            return  // still waiting for the last answer
-        remoteSources = Object.assign({}, remoteSources, { [cmd]: host })
-        setRemote(host, { loading: true })
-        remotePoller.connectSource(cmd)
+        return cmd
+    }
+
+    function pollHost(host) {
+        Hub.refresh(hostCommand(host))   // (not while its last check still runs)
     }
 
     function setRemote(host, patch) {
@@ -1283,10 +1377,45 @@ PlasmoidItem {
             const result = toLocalClock(answer.result, Date.now() - (answer.result.generatedAt || Date.now()))
             trackTransitions("ssh:" + host, result.groups, result.generatedAt, host)
             celebrateResets("ssh:" + host, result.groups)
-            setRemote(host, { loading: false, ok: true, error: "", result: result, updatedAt: Date.now() })
+            setRemote(host, { loading: false, ok: true, error: "", result: result, updatedAt: Date.now(),
+                              login: false, loggedIn: !!answer.loggedIn })
         } else {
             // keep the last answer to show (dimmed) with the error
-            setRemote(host, { loading: false, ok: false, error: answer.error || answer.message || i18n("no answer") })
+            setRemote(host, { loading: false, ok: false, error: answer.error || answer.message || i18n("no answer"),
+                              login: !!answer.login, loggedIn: false })
+        }
+    }
+
+    // A host that wants a password (or a passphrase, a code, its host key
+    // confirmed): remote.py --login opens a terminal where ssh asks for it,
+    // so it goes to ssh only. The checks then share that connection (until
+    // 30 minutes after their last use, logging out, or Disconnect). Until
+    // you're in, the host is checked every few seconds.
+    function loginHost(host) {
+        remoteAction("login", host, "--login " + shellQuote(host))
+        loginWaits = Object.assign({}, loginWaits, { [host]: Date.now() + 180000 })
+    }
+
+    function disconnectHost(host) {
+        remoteAction("disconnect", host, "--disconnect " + shellQuote(host))
+    }
+
+    property var loginWaits: ({})   // host -> until when it's checked often
+
+    Timer {
+        interval: 3000
+        repeat: true
+        running: Object.keys(root.loginWaits).length > 0
+        onTriggered: {
+            const next = {}
+            for (const host in root.loginWaits) {
+                const info = root.remote[host]
+                if ((info && info.ok) || Date.now() > root.loginWaits[host] || root.shownHosts.indexOf(host) < 0)
+                    continue
+                next[host] = root.loginWaits[host]
+                root.pollHost(host)
+            }
+            root.loginWaits = next
         }
     }
 
@@ -1357,7 +1486,7 @@ PlasmoidItem {
             delete root.remoteActionHosts[source]
             if (result.ok) {
                 root.actionError = ""
-                if (what === "open" || what === "run" || what === "continue")
+                if (what === "open" || what === "run" || what === "continue" || what === "login")
                     root.expanded = false
                 else if (what === "share") {
                     root.actionInfo = result.message
@@ -1370,7 +1499,7 @@ PlasmoidItem {
                                  : result.message
                 actionErrorTimer.restart()
                 root.petEvent("oops", i18n("Hmm, that didn't work."), "")
-                if (!root.expanded)   // e.g. from a notification or the shortcut: say so
+                if (!root.dashboardShown)   // e.g. from a notification or the shortcut: say so
                     root.notify("remote-error", null, "error", i18n("That didn't work on %1", host || i18n("the host")),
                                 root.actionError, "dialog-error")
             }

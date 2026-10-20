@@ -10,7 +10,8 @@ a new chat (used by the Claude Status widget).
     python3 -I jump.py --new-chat PROFILE_DIRNAME --choose-folder   (ask for the folder first)
     python3 -I jump.py --new-chat PROFILE_DIRNAME [--cwd FOLDER | --choose-folder] --vscode
                                                  (in VS Code's Claude extension instead)
-    python3 -I jump.py --remote-new-vscode HOST [--cwd FOLDER_ON_HOST]   (the same on an SSH host)
+    python3 -I jump.py --remote-new-vscode HOST [--cwd FOLDER_ON_HOST] [--account CONFIG_DIR|-]   (the same on an SSH host;
+                                     --account first has VS Code's Claude there run on that account)
     python3 -I jump.py --dismiss SESSION_ID      (hide a finished session in the widget)
     python3 -I jump.py --undismiss-all           (show hidden ones again)
     python3 -I jump.py --resume SESSION_ID --profile PROFILE    (reopen a chat there)
@@ -941,8 +942,16 @@ def remote_vscode(host, folder, link, what):
     return True, f"Opening VS Code on {host}; {what} once it's connected"
 
 
-def new_chat_remote_vscode(host, folder=""):
-    """A new chat in VS Code connected to an SSH host (remote_vscode)."""
+def new_chat_remote_vscode(host, folder="", account=None):
+    """A new chat in VS Code connected to an SSH host (remote_vscode). With
+    account (a CLAUDE_CONFIG_DIR on the host, "-" for none), VS Code's Claude
+    there first switches to that account, and stays on it: nothing opens
+    when it can't (the chat would start on the other account)."""
+    if account is not None:
+        import remote
+        ok, message = remote.vscode_account(host, None if account == "-" else account)
+        if not ok:
+            return False, f"Couldn't switch VS Code's Claude on {host}: {message}"
     return remote_vscode(host, folder, VSCODE_NEW_CHAT, "the new chat starts")
 
 
@@ -1328,7 +1337,7 @@ USAGE = ("usage: jump.py [--stop [--busy] | --interrupt] SESSION_ID [--profile P
          "       jump.py --share SESSION_ID\n"
          "       jump.py --remote-vscode HOST SESSION_ID [--cwd FOLDER_ON_HOST]\n"
          "       jump.py --remote-terminal HOST [--name SESSION_NAME]\n"
-         "       jump.py --remote-new-vscode HOST [--cwd FOLDER_ON_HOST]\n"
+         "       jump.py --remote-new-vscode HOST [--cwd FOLDER_ON_HOST] [--account CONFIG_DIR|-]\n"
          "       jump.py --resume SESSION_ID --profile PROFILE --vscode\n"
          "       jump.py --remote-resume-vscode HOST SESSION_ID [--cwd FOLDER_ON_HOST]\n"
          "       jump.py --changes CHAT_ID [--profile PROFILE] [--turn] [--list]\n"
@@ -1351,7 +1360,7 @@ def main(argv=None):
     remote_host, name_arg, choose, vscode, print_command = None, "", False, False, False
     busy, settings_json, settings_by, unless_default = False, None, "", False
     turn, listing, device, devices = False, False, None, None
-    agent_id, open_it, run_file = None, True, None
+    agent_id, open_it, run_file, account = None, True, None, None
     while args:
         arg = args.pop(0)
         if arg == "--config-dir" and args:
@@ -1408,6 +1417,8 @@ def main(argv=None):
             action = {"--resume": resume, "--continue": continue_on, "--share": share, "--unshare": unshare}[arg]
         elif arg == "--cwd" and args:
             folder = args.pop(0)
+        elif arg == "--account" and args:
+            account = args.pop(0)
         elif session_id is None and not arg.startswith("-"):
             session_id = arg
         else:
@@ -1433,7 +1444,7 @@ def main(argv=None):
         elif action == "--remote-terminal":
             ok, message = jump_remote_terminal(remote_host, name_arg)
         elif action == "--remote-new-vscode":
-            ok, message = new_chat_remote_vscode(remote_host, folder or "")
+            ok, message = new_chat_remote_vscode(remote_host, folder or "", account)
         elif action == "--remote-resume-vscode":
             ok, message = resume_remote_vscode(remote_host, session_id, folder or "")
         elif action is resume and vscode:
