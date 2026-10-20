@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.11.0
 
 - **Accounts:** **Claude Status: Claude Accounts…**
   (in the view's ⋯ menu) lists this computer's Claude accounts: whom each
