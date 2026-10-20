@@ -4129,66 +4129,11 @@ def vscode_server_config_dir(home):
     return None
 
 
-def set_vscode_server_config_dir(home, value, server=".vscode-server", extra_dirs=()):
-    """Have VS Code's Claude on this host run with CLAUDE_CONFIG_DIR=value
-    (None: without it, on a plain ~/.claude), in the settings of its VS Code
-    server: (ok, message). Only one of this host's Claude folders, and only in
-    a file as VS Code writes it: one with comments (edited by hand) is left
-    alone. The Claude extension follows the change (new chats, its panels)."""
-    if server not in VSCODE_SERVERS.values():
-        return False, f"Not a VS Code server folder: {server}"
-    profiles = discover_profiles(home, extra_dirs)
-    try:
-        real = (Path(value).expanduser() if value else home / ".claude").resolve()
-    except (OSError, RuntimeError):
-        real = None
-    profile = next((p for p in profiles if p.real == real), None)
-    if profile is None:
-        return False, f"{value or '~/.claude'} isn't a Claude folder on this host"
-    path = vscode_server_settings(home, server)
-    shown = short_path(str(path), home)
-    try:
-        text = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        text = ""
-    except OSError as exc:
-        return False, f"Can't read {shown}: {exc}"
-    try:
-        settings = json.loads(text) if text.strip() else {}
-    except ValueError:
-        settings = None
-    if not isinstance(settings, dict):
-        return False, f"{shown} isn't plain JSON (comments?), so it's left as it is: switch the account in VS Code there"
-    old = settings.get("claudeCode.environmentVariables")
-    entries = [e for e in (old if isinstance(old, list) else [])
-               if not (isinstance(e, dict) and e.get("name") == "CLAUDE_CONFIG_DIR")]
-    if value:
-        entries.append({"name": "CLAUDE_CONFIG_DIR", "value": value})
-    if entries:
-        settings["claudeCode.environmentVariables"] = entries
-    else:
-        settings.pop("claudeCode.environmentVariables", None)
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-        tmp.write_text(json.dumps(settings, indent=4) + "\n", encoding="utf-8")
-        os.replace(str(tmp), str(path))
-    except OSError as exc:
-        return False, f"Can't write {shown}: {exc}"
-    return True, f"VS Code's Claude runs on {profile.label} here now"
-
-
-def set_vscode_user_config_dir(home, value):
-    """Have VS Code's Claude on this computer run with CLAUDE_CONFIG_DIR=value
-    (None: without it) from now on, in VS Code's user settings: (ok,
-    message). Only that entry of claudeCode.environmentVariables changes;
-    the file's comments and layout stay. The Claude extension starts new
-    chats with it; a window's Claude panel follows once the window reloads."""
-    command, folder = vscode_app()
-    if command is None:
-        return False, "VS Code isn't installed"
-    config = Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config")
-    path = config / folder / "User" / "settings.json"
+def set_config_dir_setting(path, value, home):
+    """claudeCode.environmentVariables in the VS Code settings file at path
+    gets CLAUDE_CONFIG_DIR=value (None: none): (ok, why not). Only that entry
+    changes; the file's comments, other settings and layout stay (jsonc_set),
+    and its permissions too."""
     shown = short_path(str(path), home)
     try:
         text = path.read_text(encoding="utf-8")
@@ -4221,6 +4166,37 @@ def set_vscode_user_config_dir(home, value):
     except OSError as exc:
         return False, f"Can't write {shown}: {exc}"
     return True, ""
+
+
+def set_vscode_server_config_dir(home, value, server=".vscode-server", extra_dirs=()):
+    """Have VS Code's Claude on this host run with CLAUDE_CONFIG_DIR=value
+    (None: without it, on a plain ~/.claude), in the settings of its VS Code
+    server: (ok, message). Only one of this host's Claude folders. The Claude
+    extension follows the change (new chats, its panels)."""
+    if server not in VSCODE_SERVERS.values():
+        return False, f"Not a VS Code server folder: {server}"
+    profiles = discover_profiles(home, extra_dirs)
+    try:
+        real = (Path(value).expanduser() if value else home / ".claude").resolve()
+    except (OSError, RuntimeError):
+        real = None
+    profile = next((p for p in profiles if p.real == real), None)
+    if profile is None:
+        return False, f"{value or '~/.claude'} isn't a Claude folder on this host"
+    ok, why = set_config_dir_setting(vscode_server_settings(home, server), value, home)
+    return (True, f"VS Code's Claude runs on {profile.label} here now") if ok else (False, why)
+
+
+def set_vscode_user_config_dir(home, value):
+    """Have VS Code's Claude on this computer run with CLAUDE_CONFIG_DIR=value
+    (None: without it) from now on, in VS Code's user settings: (ok,
+    message). The Claude extension starts new chats with it; a window's
+    Claude panel follows once the window reloads."""
+    command, folder = vscode_app()
+    if command is None:
+        return False, "VS Code isn't installed"
+    config = Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config")
+    return set_config_dir_setting(config / folder / "User" / "settings.json", value, home)
 
 
 def vscode_running_config_dir():

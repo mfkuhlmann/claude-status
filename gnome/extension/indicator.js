@@ -1012,7 +1012,7 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         this._pets.detachStages();
         this._list.destroy_all_children();
         this.groups.forEach((g, i) => {
-            this._list.add_child(buildGroupSection(this, g, {last: i === this.groups.length - 1}));
+            this._list.add_child(buildGroupSection(this, g, {last: i === this.groups.length - 1, accounts: this.groups.length}));
         });
         for (const host of hosts)
             this._list.add_child(buildHostSection(this, host));

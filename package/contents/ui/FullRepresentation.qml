@@ -165,6 +165,7 @@ PlasmaExtras.Representation {
                         required property int index
                         Layout.fillWidth: true
                         group: root.groups[index] || root.emptyGroup
+                        accounts: root.groups.length
                         last: index === root.groups.length - 1
                     }
                 }

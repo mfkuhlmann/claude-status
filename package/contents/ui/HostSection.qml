@@ -171,6 +171,7 @@ ColumnLayout {
             Layout.fillWidth: true
             opacity: hostSection.stale ? 0.5 : 1
             group: hostSection.hostGroups[index] || root.emptyGroup
+            accounts: hostSection.hostGroups.length
             remoteHost: hostSection.host
             last: true
         }

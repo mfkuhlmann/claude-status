@@ -589,6 +589,34 @@ class AccountTests(FakeSSH):
         self.assertTrue(answer["ok"], answer)
         self.assertTrue((self.fake_home / ".local/share/Trash/files/.claude-main/jobs").is_dir())
 
+    def test_default_on_a_host_with_vscode(self):
+        # the host's VS Code server gives Claude Code there its account: Make
+        # Default changes that entry (comments kept) and the host's ~/.claude link
+        main = self.fake_home / ".claude"
+        os.rename(main, self.fake_home / ".claude-main")
+        os.symlink(self.fake_home / ".claude-main", main)
+        (self.fake_home / ".claude-work/projects").mkdir(parents=True)
+        (self.fake_home / ".claude-work/.profile-name").write_text("work")
+        settings = self.fake_home / ".vscode-server/data/Machine/settings.json"
+        settings.parent.mkdir(parents=True)
+        settings.write_text('{\n    // the host\'s own\n    "claudeCode.environmentVariables": [\n'
+                            f'        {{"name": "CLAUDE_CONFIG_DIR", "value": "{self.fake_home / ".claude-main"}"}}\n    ]\n}}\n')
+        status = remote.status("lab", tokens=False)["result"]
+        self.assertEqual([(g["name"], g["defaultHere"]) for g in status["groups"]][0], ("main", True))
+        listed = self.run_main("--accounts", "lab", "--list")
+        self.assertTrue(listed["canDefault"])
+        self.assertTrue(next(a for a in listed["accounts"] if a["key"] == ".claude-main")["default"])
+        answer = self.run_main("--accounts", "lab", "--default", ".claude-work")
+        self.assertTrue(answer["ok"], answer)
+        self.assertEqual(os.readlink(main), str(self.fake_home / ".claude-work"))
+        text = settings.read_text()
+        self.assertIn("// the host's own", text)
+        self.assertEqual(cs.jsonc(text)["claudeCode.environmentVariables"],
+                         [{"name": "CLAUDE_CONFIG_DIR", "value": str(main)}])  # the link's name: it leads there now
+        self.assertEqual(answer["configDir"], str(main))
+        status = remote.status("lab", tokens=False)["result"]
+        self.assertEqual([(g["name"], g["defaultHere"]) for g in status["groups"]][0], ("work", True))
+
     def test_only_accounts_actions(self):
         self.assertFalse(self.run_main("--accounts", "lab", "--status")["ok"])
 

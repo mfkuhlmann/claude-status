@@ -14,6 +14,7 @@ ColumnLayout {
     property var group
     property bool last: false
     property string remoteHost: ""
+    property int accounts: 1          // how many accounts its machine has (the default one is marked)
 
     readonly property string groupKey: (remoteHost ? remoteHost + "/" : "") + group.id
     readonly property var recent: group.recent || []
@@ -38,7 +39,18 @@ ColumnLayout {
             level: 4
             text: section.group.title
             elide: Text.ElideRight
-            Layout.maximumWidth: section.width - newChatButton.width - Kirigami.Units.gridUnit * 6
+            Layout.maximumWidth: section.width - newChatButton.width - (defaultTag.visible ? defaultTag.width : 0) - Kirigami.Units.gridUnit * 6
+        }
+        // The default account: listed first, VS Code's Claude and plain claude run on it
+        Tag {
+            id: defaultTag
+            visible: !!section.group.defaultHere && section.accounts > 1
+            text: i18n("default")
+            tooltipTitle: section.remoteHost ? i18n("The default account on %1", section.remoteHost) : i18n("The default account")
+            tooltip: (section.remoteHost
+                      ? i18n("Listed first; VS Code's Claude on %1 (its VS Code server) and plain claude there run on it.", section.remoteHost)
+                      : i18n("Listed first, its 5-hour usage is next to the panel icon, and VS Code's Claude and plain claude run on it."))
+                     + " " + i18n("Change it in the widget's settings: Accounts, Make Default.")
         }
         PlasmaComponents3.ToolButton {
             id: newChatButton

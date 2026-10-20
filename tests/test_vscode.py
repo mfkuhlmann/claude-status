@@ -193,15 +193,21 @@ class ProfileTests(Home):
         self.assertTrue(cs.set_vscode_server_config_dir(self.home, str(self.home / ".claude"))[0])
         self.assertEqual(json.loads(settings.read_text()), {"editor.fontSize": 13, "claudeCode.environmentVariables": [
             {"name": "FOO", "value": "1"}, {"name": "CLAUDE_CONFIG_DIR", "value": str(self.home / ".claude")}]})
-        # only this host's Claude folders, and never a file edited by hand
+        # only this host's Claude folders; a file edited by hand keeps its comments
         ok, message = cs.set_vscode_server_config_dir(self.home, "/etc")
         self.assertFalse(ok)
         self.assertIn("isn't a Claude folder", message)
-        settings.write_text('{\n  // mine\n  "editor.fontSize": 14\n}\n')
+        settings.write_text('{\n  // mine\n  "editor.fontSize": 14,\n}\n')
+        self.assertTrue(cs.set_vscode_server_config_dir(self.home, personal)[0])
+        text = settings.read_text()
+        self.assertIn("// mine", text)
+        self.assertEqual(cs.jsonc(text), {"editor.fontSize": 14, "claudeCode.environmentVariables": [
+            {"name": "CLAUDE_CONFIG_DIR", "value": personal}]})
+        settings.write_text("{broken")
         ok, message = cs.set_vscode_server_config_dir(self.home, personal)
         self.assertFalse(ok)
-        self.assertIn("isn't plain JSON", message)
-        self.assertIn("// mine", settings.read_text())
+        self.assertIn("couldn't be changed", message)
+        self.assertEqual(settings.read_text(), "{broken")
         self.assertFalse(cs.set_vscode_server_config_dir(self.home, personal, server="../../etc")[0])
 
     def test_each_hosts_account_says_what_vscodes_claude_needs_for_it(self):

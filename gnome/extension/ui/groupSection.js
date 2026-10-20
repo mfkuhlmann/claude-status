@@ -8,9 +8,10 @@ import St from 'gi://St';
 
 import * as L from '../logic.js';
 import {buildSessionRow, buildKeepOnly, buildShareMenu} from './sessionRow.js';
-import {box, column, iconButton, label, link, meter, paragraph, separator, textButton, usageMeter} from './widgets.js';
+import {box, column, iconButton, label, link, meter, paragraph, separator, tag, textButton, usageMeter} from './widgets.js';
 
-export function buildGroupSection(ctx, group, {last = false, remoteHost = ''} = {}) {
+// accounts: how many its machine has (with two or more, the default one is marked)
+export function buildGroupSection(ctx, group, {last = false, remoteHost = '', accounts = 1} = {}) {
     const tips = ctx.tips;
     const groupKey = (remoteHost ? `${remoteHost}/` : '') + group.id;
     const multiProfile = group.profiles.length > 1;
@@ -19,6 +20,16 @@ export function buildGroupSection(ctx, group, {last = false, remoteHost = ''} = 
     // Heading: the account, its new-chat button and its profiles
     const head = box('claude-group-head', {x_expand: true});
     head.add_child(label(group.title, 'claude-group-title'));
+    // The default account: listed first, VS Code's Claude and plain claude run on it
+    if (group.defaultHere && accounts > 1) {
+        const mark = tag('default');
+        tips.add(mark, [remoteHost ? L.fmt('The default account on %1', remoteHost) : 'The default account',
+            (remoteHost
+                ? L.fmt("Listed first; VS Code's Claude on %1 (its VS Code server) and plain claude there run on it.", remoteHost)
+                : "Listed first, its 5-hour usage is in the top bar, and VS Code's Claude and plain claude run on it.")
+            + ' Change it in the settings: Accounts, Make Default.']);
+        head.add_child(mark);
+    }
     const add = iconButton('list-add-symbolic', () => ctx.toggleNewChat(groupKey));
     tips.add(add, [L.fmt('New chat on %1', group.title), remoteHost
         ? L.fmt("Lists this account's folders on %1: start a new Claude chat in one, in a terminal (over ssh) or in VS Code.", remoteHost)
@@ -381,7 +392,7 @@ export function buildHostSection(ctx, host) {
         section.add_child(l);
     }
     groups.forEach(g => {
-        const s = buildGroupSection(ctx, g, {last: true, remoteHost: host});
+        const s = buildGroupSection(ctx, g, {last: true, remoteHost: host, accounts: groups.length});
         if (stale)
             s.opacity = 128;
         section.add_child(s);
