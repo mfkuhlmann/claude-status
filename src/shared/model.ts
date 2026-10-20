@@ -305,6 +305,16 @@ export function maxFiveHour(groups: Group[]): number {
 }
 
 // "work · Team", or "lab: work" for an SSH host's account
+// Why NAME can't be a new account (~/.claude-NAME; accounts.py says the same
+// and checks again), or "". folders: the accounts' folders now (~/.claude-work)
+export function accountNameProblem(name: string, folders: string[]): string {
+  if (!name) return "Give the account a name";
+  if (name === "default") return "default is the name of ~/.claude";
+  if (!/^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(name)) return "Up to 32 letters, digits, - and _, starting with a letter";
+  if (folders.includes(`~/.claude-${name}`)) return `There's an account called ${name} already`;
+  return "";
+}
+
 export function groupLabel(g: Group): string {
   return g.host ? `${g.host}: ${g.name}` : g.name;
 }

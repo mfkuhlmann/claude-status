@@ -122,9 +122,20 @@
       },
       {
         "command": "claudeStatus.switchAccount",
-        "title": "Use Account for VS Code's Claude…",
+        "title": "Default Claude Account…",
         "category": "Claude Status",
         "icon": "$(account)"
+      },
+      {
+        "command": "claudeStatus.accounts",
+        "title": "Claude Accounts…",
+        "category": "Claude Status",
+        "icon": "$(organization)"
+      },
+      {
+        "command": "claudeStatus.addAccount",
+        "title": "Add Claude Account…",
+        "category": "Claude Status"
       }
     ],
     "keybindings": [
@@ -175,6 +186,11 @@
           "command": "claudeStatus.switchAccount",
           "when": "view == claudeStatus.view",
           "group": "more@5"
+        },
+        {
+          "command": "claudeStatus.accounts",
+          "when": "view == claudeStatus.view",
+          "group": "more@6"
         }
       ]
     },

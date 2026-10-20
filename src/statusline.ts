@@ -107,7 +107,9 @@ export function profileDirs(): string[] {
     try {
       const st = fs.statSync(d);
       const real = fs.realpathSync(d);
-      const isProfile = st.isDirectory() && ["sessions", "projects", "settings.json"].some((f) => fs.existsSync(path.join(d, f)));
+      // (a new one: .profile-name, or Claude's .claude.json once you've started to log in)
+      const isProfile =
+        st.isDirectory() && ["sessions", "projects", "settings.json", ".profile-name", ".claude.json"].some((f) => fs.existsSync(path.join(d, f)));
       if (!isProfile || seen.has(real)) return false;
       seen.add(real);
       return true;

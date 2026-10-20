@@ -390,6 +390,16 @@ export class Actions {
     if (command) await this.terminals.run(`new|${Date.now()}`, "new chat", command, this.place(host));
   }
 
+  // Claude's own login for an account that isn't logged in (its loginCommand:
+  // `claude auth login` on the account's folder), in a terminal on its machine
+  async login(groupId?: string, host?: string): Promise<void> {
+    if (this.demoOnly()) return;
+    const state = this.dash.state();
+    const group = allGroups(state.status, state.hosts).find((g) => g.id === groupId && (g.host ?? "") === (host ?? ""));
+    if (!group?.loginCommand) return this.fail(`Can't log in to ${group ? groupLabel(group) : "that account"} from here.`);
+    await this.terminals.run(`login|${host ?? ""}|${group.id}`, `log in to ${group.name}`, group.loginCommand, this.place(host), { private: true });
+  }
+
   // There's a claude command on the machine (here, or that host) for chats in a terminal
   private cliOn(host?: string): boolean {
     const state = this.dash.state();

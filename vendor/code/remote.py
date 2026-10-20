@@ -17,11 +17,16 @@
     python3 -I remote.py --login HOST               a terminal where you log in to HOST for the widget
     python3 -I remote.py --disconnect HOST          close the connection you logged in with
     python3 -I remote.py --vscode-account HOST CONFIG_DIR|-   VS Code's Claude on HOST runs on that account
+    python3 -I remote.py --accounts HOST ACCOUNTS_ARGS... [--print-command]   the host's Claude accounts
+                                                    (accounts.py there: --list, --add, --login, --default, …)
 
 --status runs claude_status.py on HOST: the script goes to `python3 -I -` on
 the host's stdin, so nothing is installed there (it keeps its caches in the
 host's ~/.cache/claude-widget, like here). Sharing sends sharing.py the same
-way, with claude_status.py in front (host_script). SSH runs in batch mode, so
+way, with claude_status.py in front (host_script), and so do the accounts
+(accounts.py: adding one, logging in or out, removing one, the default one).
+A login there opens a terminal here, over ssh: Claude's own login, whose
+code you paste into it. SSH runs in batch mode, so
 it never asks for a password or a host key: log in once in a terminal for
 that. One connection per host is kept open for a few minutes (ControlMaster),
 so polls are quick even through a jump host. Prints one JSON line.
@@ -413,6 +418,27 @@ def continue_on(host, chat_id, profile, open_it=True):
     return ok, message, command
 
 
+ACCOUNT_ACTIONS = ("--list", "--add", "--login", "--logout", "--remove", "--command", "--no-command", "--default")
+
+
+def accounts(host, args):
+    """accounts.py on host with args: its answer. A login (--add, --login)
+    opens a terminal here running it there over ssh, unless --print-command
+    asks for the command itself (the VS Code extension runs it in its own)."""
+    if not args or args[0] not in ACCOUNT_ACTIONS:
+        raise ValueError("not an accounts.py action: " + (args[0] if args else "none"))
+    printing = "--print-command" in args
+    args = [a for a in args if a != "--print-command"]
+    answer = host_answer(host, args, "accounts.py")
+    command = answer.pop("command", None)
+    if not answer["ok"] or not isinstance(command, str) or not command:
+        return answer
+    if printing:
+        return {**answer, "command": command}
+    ok, message = open_remote(host, command)
+    return {**answer, "ok": ok, "message": answer["message"] if ok else message}
+
+
 def open_remote(host, command):
     """A local terminal running command on host (ssh -t: Claude needs a terminal).
     Not in batch mode: ssh may ask for a password or host key there."""
@@ -583,6 +609,8 @@ def main(argv=None):
         elif action == "--vscode-account" and len(args) == 2:
             ok, message = vscode_account(args[0], None if args[1] == "-" else args[1])
             out = {"ok": ok, "message": message}
+        elif action == "--accounts" and len(args) >= 2:
+            out = accounts(args[0], args[1:])
         elif action == "--disconnect" and len(args) == 1:
             ok, message = disconnect(args[0])
             out = {"ok": ok, "message": message}

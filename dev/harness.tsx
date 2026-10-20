@@ -22,6 +22,10 @@ function sendState(): void {
       at: Date.now(),
       first: { key: "demo-2", sessionId: "demo-2", profileDir: ".claude", name: "Release notes for 2.0" },
     };
+  // ?loggedOut=1: the last account isn't logged in (Log in…)
+  const groups = state.status?.groups ?? [];
+  if (params.get("loggedOut") === "1" && groups.length)
+    groups[groups.length - 1] = { ...groups[groups.length - 1], loggedOut: true, loginCommand: "claude auth login", limits: null };
   send({ type: "state", state });
 }
 

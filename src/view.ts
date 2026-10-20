@@ -167,6 +167,9 @@ export class ViewHost implements vscode.WebviewViewProvider, vscode.Disposable {
       case "newChat":
         void this.actions.newChat(text(m.groupId), text(m.host));
         break;
+      case "login":
+        void this.actions.login(text(m.groupId), text(m.host));
+        break;
       case "refresh":
         if (text(m.host)) void this.dash.pollHost(m.host as string);
         else this.dash.refreshAll();

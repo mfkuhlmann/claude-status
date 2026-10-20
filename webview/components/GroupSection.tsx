@@ -101,8 +101,32 @@ export function GroupSection({ group: g }: { group: Group }) {
         />
       ) : null}
 
+      {/* Not logged in to an account (a new one, or logged out): Claude's own login, in a terminal */}
+      {g.loggedOut ? (
+        <div class="logged-out small">
+          <span class="muted">Not logged in.</span>
+          {g.loginCommand ? (
+            <>
+              {" "}
+              <button
+                type="button"
+                class="link"
+                title={
+                  host
+                    ? `Opens a terminal with Claude's own login on ${host} (over ssh): open the address it shows in your browser, sign in, and paste the code you get back.`
+                    : "Opens a terminal with Claude's own login (claude auth login): sign in in your browser with the account for this folder. The extension never sees the login."
+                }
+                onClick={() => post(host ? { type: "login", groupId: g.id, host } : { type: "login", groupId: g.id })}
+              >
+                Log in…
+              </button>
+            </>
+          ) : null}
+        </div>
+      ) : null}
+
       {/* Plan limits (from the status line); not where they show elsewhere (shareUsage) */}
-      {g.limitsHidden ? null : limits && limits.windows.length ? (
+      {g.limitsHidden || g.loggedOut ? null : limits && limits.windows.length ? (
         <div class="usage" title={`Plan usage as of ${usageAge}${usageOn}`}>
           {limits.windows.map((w) => (
             <UsageBar key={w.key} window={w} now={now} />

@@ -63,7 +63,7 @@ As an editor tab (**Claude Status: Open in Editor Tab**):
 - **Notifications** (and a sound) when a chat needs you or finishes a long turn.
 - **The status bar**: how many chats need you, the 5-hour usage, and with
   two or more accounts which one VS Code's Claude runs on (**Claude: work**):
-  click it to switch.
+  click it to change the default account.
 - **Clawd**: one pet for the whole dashboard, one per chat, each acting out
   its chat. Click a pet to open its chat, drag one around, double-click the
   big one.
@@ -71,6 +71,17 @@ As an editor tab (**Claude Status: Open in Editor Tab**):
   on an SSH host), a finished chat's share button continues it on another
   account (say, when one hits its limit), shares it with all of them, or
   keeps it on one again (see "Good to know" for adding a second account).
+- **Accounts, without claude-switch**: **Claude Status: Claude Accounts…**
+  (the view's **⋯** menu) lists the Claude accounts of this computer or of
+  an SSH host in the view: whom each is logged in as, which one is the
+  default, which ones VS Code's Claude and plain `claude` run on. **Add
+  Account…** makes a `~/.claude-NAME` folder and opens a terminal with
+  Claude's own login; an account can log in or out, get a `claude-NAME`
+  command, become the default, or be removed (to the Trash). An account that
+  isn't logged in shows **Log in…** in the view.
+- **One default account**: listed first (here and in the Plasma and GNOME
+  widgets), its usage in the status bar, and both VS Code's Claude and plain
+  `claude` run on it (see "Good to know").
 
 ## Your side, also over Remote-SSH
 
@@ -218,8 +229,20 @@ the account name and plan from `.claude.json`, and the status-line copies in
 `~/.cache/claude-widget/statusline`. It writes only to
 `~/.cache/claude-widget` (caches, the list of chats you removed, copies of
 the files a comparison shows, kept for a day) and, if you
-ask for it, the status-line change above and the links of the chats you share
-(see below).
+ask for it, the status-line change above, the links of the chats you share
+(see below) and the accounts you add or remove.
+
+**Logins stay Claude's.** Logging in and out is Claude Code's own command
+(`claude auth login` in a terminal, where you sign in on Claude's pages in
+your browser; `claude auth logout`). The extension never opens a login
+(`.credentials.json`), never sees a password, token or code, and writes
+nothing of them to its log. A login terminal is a transient one: VS Code
+neither keeps its screen nor restores it after a reload. **Claude
+Accounts…** asks `claude auth status` whom each account is logged in as and
+shows the email address only in that menu. Removing an account deletes its
+`.credentials.json` (without opening it) after the logout, so no login ends
+up in the Trash. On an SSH host, the login runs there over ssh, and the code
+you paste goes straight to Claude on the host.
 
 ## Good to know
 
@@ -250,16 +273,34 @@ ask for it, the status-line change above and the links of the chats you share
   between that host's accounts; the sharing script goes over ssh like the
   status script, so nothing is installed there. A chat can't move between
   this computer and a host.
-- **Switching VS Code's Claude** (click **Claude: …** in the status bar, or
-  run **Claude Status: Use Account for VS Code's Claude…**) sets
-  `CLAUDE_CONFIG_DIR` in VS Code's `claudeCode.environmentVariables` and
-  reloads the window; other windows offer to reload. Plain `claude` in a
-  terminal isn't affected (it keeps whatever account it uses). Remote-SSH windows read that VS Code setting too: on a host without the
+- **The default account** (click **Claude: …** in the status bar, run
+  **Claude Status: Default Claude Account…**, or **Make Default** in Claude
+  Accounts) is the one VS Code's Claude runs on: it sets `CLAUDE_CONFIG_DIR`
+  in VS Code's `claudeCode.environmentVariables` and reloads the window
+  (other windows offer to reload). Where `~/.claude` is a link, it's pointed
+  at the account too, so plain `claude` in a terminal runs on it as well; a
+  `~/.claude` folder stays as it is. It's refused while that would cut a chat
+  off: one working in VS Code's Claude (the reload), or any Claude running
+  through the name `~/.claude` (in a terminal, VS Code or the background: it
+  would go on on the other account). In a Remote-SSH window it's the host's
+  default: Claude Code there (a machine setting) and the host's `~/.claude`.
+  Remote-SSH windows read the VS Code setting too: on a host without the
   folder, set `"claudeCode.environmentVariables": []` in its Remote Settings.
 - **A second account to share with** is a second Claude config folder logged
   into a *different* Claude account (profiles on the same account count as
-  one): run `CLAUDE_CONFIG_DIR=~/.claude-work claude` once and log in there
-  with the other account. Sharing needs your Claude folders and
+  one): **Claude Status: Add Claude Account…** makes one (`~/.claude-NAME`)
+  and opens Claude's login for it; you sign in with the other account. Its
+  settings can be linked to another account's: `settings.json` (your status
+  line too, so its plan usage bars work), `CLAUDE.md`, keybindings and your
+  own skills, agents and commands; the login, MCP servers, plugins and the
+  skills claude.ai syncs stay per account. Its `claude-NAME` command
+  (`~/.local/bin`) runs Claude on it in any terminal, like `claude-switch
+  NAME`. Logging out isn't done while chats run on the account, and only a
+  `~/.claude-NAME` folder that no chat, `~/.claude` or VS Code's Claude uses
+  can be removed. On an SSH host it's the same, over ssh with nothing
+  installed there: the login runs there in a terminal (you paste the code
+  Claude gives you), and a removed account goes to the host's Trash.
+  Sharing needs your Claude folders and
   `~/.local/share` on one filesystem (hard links can't cross disks or
   partitions); it checks first and says so otherwise.
 

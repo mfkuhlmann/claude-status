@@ -4,6 +4,7 @@
 // all, whichever machine the window is connected to.
 
 import * as vscode from "vscode";
+import { Accounts } from "./accounts";
 import { AccountSwitch } from "./accountSwitch";
 import { Actions } from "./actions";
 import { Backend } from "./backend";
@@ -26,8 +27,9 @@ export function activate(context: vscode.ExtensionContext): void {
   const notifier = new Notifier(backend, (chat) => void actions?.open(chat));
   const dash = new Dashboard(backend, notifier, log);
   const statusBar = new StatusBar(); // (first: the main status bar item)
-  const account = new AccountSwitch(dash);
+  const account = new AccountSwitch(dash, backend);
   actions = new Actions(backend, dash, terminals, log, account);
+  const accounts = new Accounts(backend, dash, terminals, account, log);
   const view = new ViewHost(context.extensionUri, dash, actions);
   const a = actions;
 
@@ -47,6 +49,8 @@ export function activate(context: vscode.ExtensionContext): void {
       view.setBadge(countStates(allGroups(state.status, state.hosts)).waiting);
     }),
     vscode.commands.registerCommand("claudeStatus.switchAccount", () => account.switch()),
+    vscode.commands.registerCommand("claudeStatus.accounts", () => accounts.manage()),
+    vscode.commands.registerCommand("claudeStatus.addAccount", () => accounts.add()),
     vscode.commands.registerCommand("claudeStatus.nextChat", () => a.nextChat()),
     // the Plasma and GNOME widgets hand over what a chat changed (changes.ts)
     vscode.window.registerUriHandler({ handleUri: (uri) => void openChangesLink(uri, log) }),

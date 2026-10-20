@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+- **Accounts, without claude-switch:** **Claude Status: Claude Accounts…**
+  (in the view's ⋯ menu) lists this computer's Claude accounts: whom each
+  is logged in as, whether plain `claude` or VS Code's Claude runs on it,
+  its running chats. **Add Claude Account…** (also in the account item's
+  switcher) makes `~/.claude-NAME` and opens a terminal with Claude's own
+  login, optionally with your settings, `CLAUDE.md`, keybindings and own
+  skills, agents and commands linked from another account, and a
+  `claude-NAME` command. An account can log in or out
+  (`claude auth logout`), get or lose its command, be used for VS Code's
+  Claude, or be removed (logged out, its folder to the Trash). Login
+  terminals are transient: VS Code doesn't keep or restore them. The
+  extension never sees a login.
+- **Log in…** in the view for an account that isn't logged in (a new one,
+  or logged out), also on an SSH host.
+- **One default account:** the default account is listed first (as in the
+  Plasma and GNOME widgets: this view listed the account `~/.claude` links
+  to first, while the status bar showed VS Code's), its usage is in the
+  status bar, and VS Code's Claude and plain `claude` run on it. The
+  status bar's account item (**Default Claude Account…**) and **Make
+  Default** in Claude Accounts point VS Code's Claude there and, where
+  `~/.claude` is a link, plain `claude` too; refused while a chat works in
+  VS Code's Claude or any Claude runs through the name `~/.claude`. In a
+  Remote-SSH window: the host's default, its `~/.claude` included.
+- **Accounts on SSH hosts:** Claude Accounts… first asks whose: this
+  computer's or a host's in the view; on a host everything goes over ssh,
+  with nothing installed there.
 - **Switch Claude Code's account in a Remote-SSH window:** the account item in
   the status bar shows which of the host's accounts Claude Code there runs on,
   and switches it. VS Code keeps that setting per host (it's a machine

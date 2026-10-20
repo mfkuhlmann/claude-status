@@ -131,7 +131,8 @@ export class Backend {
   // This computer's status. Run in --remote mode too: then every row carries
   // the shell command that opens it, which the extension runs in a terminal.
   async status(args: string[]): Promise<{ status?: Status; error?: string }> {
-    const r = await runProcess(this.python(), ["-I", this.pollScript(), "--remote", ...args], { timeoutMs: 60000 });
+    // (--local: VS Code's account is this computer's VS Code's, not a VS Code server's)
+    const r = await runProcess(this.python(), ["-I", this.pollScript(), "--remote", "--local", ...args], { timeoutMs: 60000 });
     if (r.spawnError) return { error: `Can't run Python: ${r.spawnError.message}` };
     if (r.timedOut) return { error: "The status check took longer than a minute." };
     // The JSON is the one line after the marker; a chat's prompt or reply
@@ -170,6 +171,13 @@ export class Backend {
       ...(typeof r.command === "string" ? { command: r.command } : {}),
       ...(typeof r.file === "string" ? { file: r.file } : {}),
     };
+  }
+
+  // accounts.py (the accounts on this computer, or host's through remote.py
+  // --accounts): its whole answer
+  async accounts(args: string[], host?: string, timeoutMs = 90000): Promise<Record<string, any>> {
+    const argv = host ? ["remote.py", "--accounts", host, ...args] : ["accounts.py", ...args];
+    return (await this.json(argv, timeoutMs)) ?? { ok: false, message: "the helper gave no answer" };
   }
 
   // What a chat changed (jump.py --changes --list): the files, with copies of

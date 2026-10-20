@@ -89,7 +89,9 @@ export class Terminals implements vscode.Disposable {
 
   // Run command in a new terminal, or show the one still running it for key
   // (a local terminal whose command hasn't finished: its shell has a child).
-  async run(key: string, name: string, command: string, place: Place): Promise<vscode.Terminal> {
+  // private: VS Code doesn't keep it (a login: its screen isn't saved for
+  // restoring the terminal after a reload, nor the terminal restored).
+  async run(key: string, name: string, command: string, place: Place, opts: { private?: boolean } = {}): Promise<vscode.Terminal> {
     const existing = this.byKey.get(key);
     if (existing && !existing.exitStatus) {
       // just opened (its command may not have started yet, and a host's can't
@@ -109,6 +111,7 @@ export class Terminals implements vscode.Disposable {
       iconPath: new vscode.ThemeIcon("sparkle"),
       shellPath: "/bin/sh",
       shellArgs: ["-c", script],
+      ...(opts.private ? { isTransient: true } : {}),
     };
     if (place.kind !== "windowHost") options.cwd = vscode.Uri.file(os.homedir());
     const t = vscode.window.createTerminal(options);

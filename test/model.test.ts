@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { demoState } from "../src/shared/demo";
 import type { Group, HostState, Session, Status } from "../src/shared/types";
 import {
+  accountNameProblem,
   agentDetailKey,
   agentRunTitle,
   agentSummary,
@@ -212,4 +213,13 @@ test("a host that didn't answer this time doesn't count; its clock is put right"
   assert.equal(shifted.generatedAt, result.generatedAt + 60000);
   assert.equal(shifted.groups[0].sessions[0].since, (result.groups[0].sessions[0].since ?? 0) + 60000);
   assert.equal(toLocalClock(result, 2000), result, "a few seconds: just the network");
+});
+
+test("a new account's name: the backend's rule, and not one there already", () => {
+  const folders = ["~/.claude", "~/.claude-work"];
+  assert.equal(accountNameProblem("side", folders), "");
+  assert.equal(accountNameProblem("my_Work-2", folders), "");
+  assert.match(accountNameProblem("work", folders), /already/);
+  assert.match(accountNameProblem("default", folders), /~\/\.claude/);
+  for (const bad of ["", "1st", "a b", "../x", "x".repeat(33)]) assert.notEqual(accountNameProblem(bad, folders), "", bad);
 });

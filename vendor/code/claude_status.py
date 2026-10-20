@@ -20,6 +20,8 @@ Data sources (per Claude config dir, e.g. ~/.claude, ~/.claude-work):
   ~/.cache/claude-widget/statusline/<cfg dirname>/<session_id>.json
                                   status-line input snapshots (rate limits,
                                   context window), written by statusline-snippet.sh
+  ~/.cache/claude-widget/accounts.json
+                                  profiles accounts.py logged out of
 """
 
 import fcntl
@@ -231,11 +233,19 @@ class Profile:
         self.is_default = is_default
 
 
+def is_profile_dir(path):
+    """A Claude config folder: one Claude has run in, or a new one (made by
+    accounts.py or claude-switch: .profile-name; Claude's .claude.json once
+    you've started to log in)."""
+    return is_dir(path) and (is_dir(path / "sessions") or is_dir(path / "projects")
+                             or os.path.isfile(str(path / ".profile-name")) or os.path.isfile(str(path / ".claude.json")))
+
+
 def discover_profiles(home, extra_dirs=()):
     candidates = [home / ".claude", *sorted(home.glob(".claude-*"))]
     found = []
     for d in candidates:
-        if is_dir(d) and (is_dir(d / "sessions") or is_dir(d / "projects")):
+        if is_profile_dir(d):
             found.append(d)
     for e in extra_dirs:
         d = Path(e).expanduser()
@@ -277,6 +287,23 @@ def is_dir(path):
         return path.is_dir()
     except OSError:
         return False
+
+
+def logged_out_notes(cache_root):
+    """Real folders of the profiles accounts.py logged out of: {path: ms}."""
+    data = read_json(cache_root / "accounts.json")
+    notes = data.get("loggedOut") if isinstance(data, dict) else None
+    return notes if isinstance(notes, dict) else {}
+
+
+def needs_login(profile, logged_out=()):
+    """Isn't this profile logged in to a Claude account? Claude's logout
+    takes oauthAccount out of its .claude.json. Without it, a profile may
+    still use an API key (which the widget can't see), so only a new one
+    (.profile-name, no chats yet) or one logged out here counts."""
+    if profile.account_id is not None:
+        return False
+    return profile.custom_name or not is_dir(profile.path / "projects") or str(profile.real) in logged_out
 
 
 def group_profiles(profiles):
@@ -2768,6 +2795,15 @@ def new_chat_command(profile, home=None, claude="claude"):
     return f"CLAUDE_CODE_DISABLE_AGENT_VIEW=1 {config_env(profile, home)} {claude_words(claude)}"
 
 
+def login_command(profile, home=None, claude="claude"):
+    """Shell command logging this profile in to a Claude account: Claude's
+    own `claude auth login`, which keeps the login in the profile's folder."""
+    note = (f"Log in to Claude for {profile.label} ({short_folder(str(profile.path), home)}): sign in with the "
+            "account this folder is for. Claude opens your browser; where it can't (over ssh), open the address "
+            "it shows and paste the code you get back here.")
+    return f"printf '%s\\n\\n' {shlex.quote(note)}; {config_env(profile, home)} {claude_words(claude)} auth login"
+
+
 def stop_command(profile, job_id, home=None, job=None, claude="claude"):
     """Shell command stopping a background job (its conversation is kept)."""
     return f"{config_env(profile, home, job, for_job=True)} {claude_words(claude)} stop {shlex.quote(job_id)}"
@@ -3801,10 +3837,13 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
         for p, row in newest_job.values():
             rows[p.real].append(row)
 
+        logged_out = logged_out_notes(cache_root)
         for gid, members in group_profiles(profiles):
             named = next((p for p in members if not p.is_default), members[0])
             plan = next((p.plan for p in members if p.plan), None)
             group = {
+                # not logged in to an account: "Log in…" (accounts.py --login chatProfile)
+                "loggedOut": all(needs_login(p, logged_out) for p in members),
                 "id": short_id(gid),
                 "name": named.label,
                 "plan": plan,
@@ -3822,7 +3861,8 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
                 "projects": recent_projects([histories[p.real] for p in members], home),
             }
             try:
-                group["limits"] = plan_limits(snapshot_root, members, now_ms)
+                # a logged-out account's last status lines are no one's plan usage now
+                group["limits"] = None if group["loggedOut"] else plan_limits(snapshot_root, members, now_ms)
                 if group["limits"]:
                     if lock.held:
                         usage.record(group["id"], group["limits"], now_ms)
@@ -3952,6 +3992,102 @@ def jsonc(text):
     return json.loads(re.sub(r",(\s*[}\]])", r"\1", "".join(out)))
 
 
+def jsonc_skip(text, i):
+    """The index of text's next character from i that isn't space or a comment."""
+    n = len(text)
+    while i < n:
+        if text[i] in " \t\r\n":
+            i += 1
+        elif text.startswith("//", i):
+            j = text.find("\n", i)
+            i = n if j < 0 else j + 1
+        elif text.startswith("/*", i):
+            j = text.find("*/", i + 2)
+            i = n if j < 0 else j + 2
+        else:
+            break
+    return i
+
+
+def jsonc_string_end(text, i):
+    """The end of the string that starts at text[i] (a quote)."""
+    j = i + 1
+    while j < len(text) and text[j] != '"':
+        j += 2 if text[j] == "\\" else 1
+    return j + 1
+
+
+def jsonc_value_end(text, i):
+    """The end of the value that starts at text[i]."""
+    n, depth = len(text), 0
+    while i < n:
+        c = text[i]
+        if c == '"':
+            i = jsonc_string_end(text, i)
+            if depth == 0:
+                return i
+            continue
+        if text.startswith("//", i) or text.startswith("/*", i):
+            if depth == 0:
+                return i
+            i = jsonc_skip(text, i)
+            continue
+        if c in "[{":
+            depth += 1
+        elif c in "]}":
+            if depth == 0:
+                return i
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        elif depth == 0 and (c == "," or c in " \t\r\n"):
+            return i
+        i += 1
+    return n
+
+
+def jsonc_set(text, key, value):
+    """text (a VS Code settings file: JSON with comments) with its top-level
+    key set to value, and everything else (comments, order, layout) as it
+    was: the edit VS Code makes when you change one setting."""
+    n = len(text)
+    i = jsonc_skip(text, 0)
+    if i >= n or text[i] != "{":
+        raise ValueError("not a JSON object")
+    i = jsonc_skip(text, i + 1)
+    first, last_end = i, None
+    while i < n and text[i] != "}":
+        if text[i] != '"':
+            raise ValueError(f"unexpected {text[i]!r} at {i}")
+        key_end = jsonc_string_end(text, i)
+        name = json.loads(text[i:key_end])
+        colon = jsonc_skip(text, key_end)
+        if colon >= n or text[colon] != ":":
+            raise ValueError(f"no : after {name!r}")
+        start = jsonc_skip(text, colon + 1)
+        end = jsonc_value_end(text, start)
+        if name == key:
+            line_start = text.rfind("\n", 0, i) + 1
+            indent = text[line_start:i] if not text[line_start:i].strip() else ""
+            return text[:start] + json.dumps(value, indent=indent or 4).replace("\n", "\n" + indent) + text[end:]
+        last_end = end
+        i = jsonc_skip(text, end)
+        if i < n and text[i] == ",":
+            i = jsonc_skip(text, i + 1)
+    if i >= n:
+        raise ValueError("no closing }")
+    # Not there yet: after the last setting, indented like the first one
+    line_start = text.rfind("\n", 0, first) + 1
+    indent = text[line_start:first] if last_end is not None and not text[line_start:first].strip() else "    "
+    member = f'"{key}": ' + json.dumps(value, indent=indent).replace("\n", "\n" + indent)
+    if last_end is None:
+        return text[:i].rstrip() + "\n" + indent + member + "\n" + text[i:]
+    after = jsonc_skip(text, last_end)
+    if after < n and text[after] == ",":  # a trailing comma already
+        return text[:after + 1] + "\n" + indent + member + text[after + 1:]
+    return text[:last_end] + ",\n" + indent + member + text[last_end:]
+
+
 def config_dir_in_settings(path):
     """CLAUDE_CONFIG_DIR from the Claude extension's environmentVariables
     setting in a VS Code settings file, or None."""
@@ -4040,6 +4176,51 @@ def set_vscode_server_config_dir(home, value, server=".vscode-server", extra_dir
     except OSError as exc:
         return False, f"Can't write {shown}: {exc}"
     return True, f"VS Code's Claude runs on {profile.label} here now"
+
+
+def set_vscode_user_config_dir(home, value):
+    """Have VS Code's Claude on this computer run with CLAUDE_CONFIG_DIR=value
+    (None: without it) from now on, in VS Code's user settings: (ok,
+    message). Only that entry of claudeCode.environmentVariables changes;
+    the file's comments and layout stay. The Claude extension starts new
+    chats with it; a window's Claude panel follows once the window reloads."""
+    command, folder = vscode_app()
+    if command is None:
+        return False, "VS Code isn't installed"
+    config = Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config")
+    path = config / folder / "User" / "settings.json"
+    shown = short_path(str(path), home)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        text = ""
+    except (OSError, ValueError) as exc:
+        return False, f"Can't read {shown}: {exc}"
+    try:
+        settings = jsonc(text) if text.strip() else {}
+        if not isinstance(settings, dict):
+            raise ValueError("not a JSON object")
+        old = settings.get("claudeCode.environmentVariables")
+        entries = [e for e in (old if isinstance(old, list) else [])
+                   if not (isinstance(e, dict) and e.get("name") == "CLAUDE_CONFIG_DIR")]
+        if value:
+            entries.append({"name": "CLAUDE_CONFIG_DIR", "value": value})
+        new = jsonc_set(text if text.strip() else "{\n}\n", "claudeCode.environmentVariables", entries)
+        # it says what it said before, but for this setting
+        if jsonc(new) != {**settings, "claudeCode.environmentVariables": entries}:
+            raise ValueError("the change came out wrong")
+    except ValueError as exc:
+        return False, f"{shown} couldn't be changed ({exc}): switch the account in VS Code"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        mode = path.stat().st_mode & 0o777 if path.exists() else 0o600
+        tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        tmp.write_text(new, encoding="utf-8")
+        os.chmod(str(tmp), mode)
+        os.replace(str(tmp), str(path))
+    except OSError as exc:
+        return False, f"Can't write {shown}: {exc}"
+    return True, ""
 
 
 def vscode_running_config_dir():
@@ -4131,15 +4312,38 @@ def vscode_profile(home, profiles, remote=False, cache_root=None):
     return installed, next((p for p in profiles if p.real == real), None)
 
 
+def plain_profile(home, profiles):
+    """The profile plain `claude` runs on: ~/.claude, or the one it links to."""
+    try:
+        real = (home / ".claude").resolve()
+    except (OSError, RuntimeError):
+        return None
+    return next((p for p in profiles if p.real == real), None)
+
+
+def default_profile(home, profiles, remote=False, cache_root=None):
+    """(VS Code installed, the profile VS Code's Claude runs on, plain
+    claude's, the default account). The default is VS Code's Claude's where
+    VS Code is (accounts.py --default points ~/.claude there too), else
+    plain claude's: the same on every front end."""
+    installed, vscode = vscode_profile(home, profiles, remote, cache_root)
+    plain = plain_profile(home, profiles)
+    return installed, vscode, plain, vscode or plain
+
+
 def add_vscode(result, home, extra_dirs=(), remote=False, cache_root=None):
-    """Which account a new chat in VS Code would be on: result["vscode"] =
-    {installed, on (its label)} and each group's vscodeHere. That account is
-    listed first: you switch it in VS Code, and ~/.claude may point elsewhere."""
-    installed, profile = vscode_profile(home, discover_profiles(home, extra_dirs), remote, cache_root)
+    """Which account a new chat in VS Code would be on (result["vscode"] =
+    {installed, on (its label)}, each group's vscodeHere), plain claude's
+    (plainHere) and the default account (defaultHere, default_profile),
+    which is listed first."""
+    installed, profile, plain, default = default_profile(home, discover_profiles(home, extra_dirs), remote, cache_root)
     result["vscode"] = {"installed": installed, "on": profile.label if profile else None}
     for g in result.get("groups", []):
-        g["vscodeHere"] = profile is not None and profile.key in g.get("profileKeys", [])
-    result.get("groups", []).sort(key=lambda g: not g["vscodeHere"])  # (stable: the others keep their order)
+        keys = g.get("profileKeys", [])
+        g["vscodeHere"] = profile is not None and profile.key in keys
+        g["plainHere"] = plain is not None and plain.key in keys
+        g["defaultHere"] = default is not None and default.key in keys
+    result.get("groups", []).sort(key=lambda g: not g["defaultHere"])  # (stable: the others keep their order)
 
 
 # ---------------------------------------------------------------- remote hosts
@@ -4242,6 +4446,8 @@ def add_remote_commands(result, home, extra_dirs=(), claude=None):
         # what VS Code's Claude there needs to run on this account (jump.py
         # --remote-new-vscode --account, the VS Code extension's switch)
         g["configDir"] = config_dir_value(named, home) if named is not None else None
+        g["loginCommand"] = (in_folder(str(home), login_command(named, home, claude))
+                             if named is not None and g.get("loggedOut") else None)
         if named is not None:
             chat = new_chat_command(named, home, claude)
             g["homeChatCommand"] = in_folder(str(home), chat)
@@ -4269,7 +4475,7 @@ def add_remote_commands(result, home, extra_dirs=(), claude=None):
             h["openCommand"] = target["openCommand"] if target else None
 
 
-USAGE = """usage: claude_status.py [--config-dir DIR]... [--done-hours H] [--recent N] [--no-tokens] [--pretty] [--remote]
+USAGE = """usage: claude_status.py [--config-dir DIR]... [--done-hours H] [--recent N] [--no-tokens] [--pretty] [--remote [--local]]
        claude_status.py --dismiss SESSION_ID | --undismiss-all
        claude_status.py --end SESSION_ID [--profile PROFILE] [--busy] [--config-dir DIR]...
        claude_status.py --interrupt SESSION_ID [--profile PROFILE] [--config-dir DIR]...
@@ -4282,6 +4488,8 @@ USAGE = """usage: claude_status.py [--config-dir DIR]... [--done-hours H] [--rec
   --pretty          indent the JSON output
   --remote          for the widget on another machine: add the shell commands that open
                     each chat here, and print the JSON after a marker line
+  --local           with --remote: this computer's status for its VS Code extension (VS Code's
+                    account is this computer's VS Code's, not a VS Code server's)
   --dismiss ID      hide a finished session in the widget (--undismiss-all shows them again)
   --end ID          stop a chat in a terminal or VS Code (it's kept); only an idle one
                     unless --busy (you were told it's working or waiting)
@@ -4298,7 +4506,7 @@ def main(argv=None):
     # every poll.
     args = sys.argv[1:] if argv is None else list(argv)
     config_dirs, with_tokens, pretty, done_hours = [], True, False, KEEP_DONE_HOURS
-    recent, remote, dismiss, undismiss = RECENT_CHATS, False, None, False
+    recent, remote, local, dismiss, undismiss = RECENT_CHATS, False, False, None, False
     end, interrupt, profile_key, busy, instance, interval_ms = None, None, None, False, None, 2000
     agent_run_id, chat_id = None, None
     vscode_account, vscode_server = None, VSCODE_SERVERS["Code"]
@@ -4341,6 +4549,8 @@ def main(argv=None):
                 sys.exit(USAGE)
         elif arg == "--remote":
             remote = True
+        elif arg == "--local":
+            local = True
         elif arg == "--dismiss" and args:
             dismiss = args.pop(0)
         elif arg == "--undismiss-all":
@@ -4386,7 +4596,7 @@ def main(argv=None):
             result = collect(home, cache_root, config_dirs, with_tokens=with_tokens, keep_done_hours=done_hours,
                              recent=recent)
             try:
-                add_vscode(result, home, config_dirs, remote, cache_root)
+                add_vscode(result, home, config_dirs, remote and not local, cache_root)
             except Exception as exc:
                 result["errors"].append(f"VS Code: {exc}")
             # Whether chats can open in a terminal here: the widget greys

@@ -213,9 +213,18 @@ export interface Group {
   // VS Code's Claude runs on this account (the backend's view of it; an SSH
   // host's: what its VS Code server's settings say, else its ~/.claude)
   vscodeHere?: boolean;
+  // plain `claude` runs on it (~/.claude, or the one it links to), and the
+  // default account (VS Code's Claude's where VS Code is, else plain claude's;
+  // listed first). Older backends leave them out.
+  plainHere?: boolean;
+  defaultHere?: boolean;
   // On an SSH host: the CLAUDE_CONFIG_DIR VS Code's Claude there needs to run
   // on this account (null: none, a plain ~/.claude). Older backends leave it out.
   configDir?: string | null;
+  // Not logged in to an account (a new one, or logged out): loginCommand runs
+  // Claude's own login on it (`claude auth login`). Older backends leave them out.
+  loggedOut?: boolean;
+  loginCommand?: string | null;
   // Set by the extension for an SSH host's accounts
   host?: string;
   // Set by shareUsage: its plan usage shows on another machine's copy of
@@ -336,6 +345,7 @@ export type WebviewMessage =
   | { type: "openAgentRun"; chat: ChatRef; agentId: string }
   | { type: "dismissDigest" }
   | { type: "newChat"; groupId: string; host?: string }
+  | { type: "login"; groupId: string; host?: string }
   | { type: "refresh"; host?: string }
   | { type: "showRemoved"; host?: string }
   | { type: "hideHost"; host: string }
