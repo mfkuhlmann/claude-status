@@ -26,6 +26,10 @@ function sendState(): void {
   const groups = state.status?.groups ?? [];
   if (params.get("loggedOut") === "1" && groups.length)
     groups[groups.length - 1] = { ...groups[groups.length - 1], loggedOut: true, loginCommand: "claude auth login", limits: null };
+  // ?default=1: a second account here, and the first one marked the default
+  if (params.get("default") === "1" && groups.length)
+    groups.splice(1, 0, { ...groups[0], id: "demo-second", name: "work", title: "work · Team", plan: "Team", defaultHere: false, sessions: [] }),
+      (groups[0] = { ...groups[0], defaultHere: true });
   send({ type: "state", state });
 }
 

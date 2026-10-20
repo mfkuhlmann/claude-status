@@ -75,7 +75,7 @@ export function HostSection({ host: h, groups }: { host: HostState; groups: Grou
 
       <div class="host-groups">
         {groups.map((g) => (
-          <GroupSection key={groupKeyOf(g)} group={g} />
+          <GroupSection key={groupKeyOf(g)} group={g} accounts={groups.length} />
         ))}
       </div>
 

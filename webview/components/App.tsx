@@ -108,7 +108,7 @@ export function App() {
           {!state.status && !state.errorText ? <div class="empty muted">Looking for your chats…</div> : null}
           {local.map((g) => (
             <Guarded key={groupKeyOf(g)} what={g.name}>
-              <GroupSection group={g} />
+              <GroupSection group={g} accounts={local.length} />
             </Guarded>
           ))}
           {state.hosts.map((h) => (

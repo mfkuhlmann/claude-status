@@ -80,8 +80,9 @@ As an editor tab (**Claude Status: Open in Editor Tab**):
   command, become the default, or be removed (to the Trash). An account that
   isn't logged in shows **Log in…** in the view.
 - **One default account**: listed first (here and in the Plasma and GNOME
-  widgets), its usage in the status bar, and both VS Code's Claude and plain
-  `claude` run on it (see "Good to know").
+  widgets) and marked **default**, its usage in the status bar, and both
+  VS Code's Claude and plain `claude` run on it (see "Good to know"). Each
+  SSH host has its own: what Claude Code there runs on.
 
 ## Your side, also over Remote-SSH
 

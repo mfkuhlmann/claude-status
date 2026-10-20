@@ -16,7 +16,8 @@
   extension never sees a login.
 - **Log in…** in the view for an account that isn't logged in (a new one,
   or logged out), also on an SSH host.
-- **One default account:** the default account is listed first (as in the
+- **One default account:** the default account is listed first and marked
+  **default** (on each SSH host too, with two or more accounts) (as in the
   Plasma and GNOME widgets: this view listed the account `~/.claude` links
   to first, while the status bar showed VS Code's), its usage is in the
   status bar, and VS Code's Claude and plain `claude` run on it. The

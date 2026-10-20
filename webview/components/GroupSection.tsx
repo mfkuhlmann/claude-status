@@ -11,6 +11,7 @@ import { IconButton } from "./IconButton";
 import { RecentChats } from "./RecentChats";
 import { SessionRow, stateClass } from "./SessionRow";
 import { StatsPanel } from "./StatsPanel";
+import { Tag } from "./Tag";
 import { UsageBar } from "./UsageBar";
 
 function modelName(model: string): string {
@@ -51,7 +52,8 @@ function TokenLine({ tokens, topModels }: { tokens: Tokens; topModels: Tokens["m
 // One Claude account: its pets, plan limits, token totals, chats (from every
 // config folder logged into it) and recent chats. With group.host set, the
 // account is on that SSH host and its actions run there.
-export function GroupSection({ group: g }: { group: Group }) {
+// accounts: how many its machine has (with two or more, the default one is marked)
+export function GroupSection({ group: g, accounts = 1 }: { group: Group; accounts?: number }) {
   const view = useView();
   const now = view.now;
   const host = g.host;
@@ -74,6 +76,17 @@ export function GroupSection({ group: g }: { group: Group }) {
           {host ? <span class="group-host muted">{host}: </span> : null}
           {g.title}
         </h3>
+        {g.defaultHere && accounts > 1 ? (
+          <Tag
+            text="default"
+            title={
+              (host
+                ? `The default account on ${host}: listed first; Claude Code there (its VS Code server) and plain claude there run on it.`
+                : "The default account: listed first, its usage is in the status bar, and VS Code's Claude and plain claude run on it.") +
+              " Change it with Claude Accounts → Make Default, or the account item in the status bar."
+            }
+          />
+        ) : null}
         <IconButton
           icon="add"
           label={`New chat on ${g.title}`}
