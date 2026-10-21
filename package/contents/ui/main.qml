@@ -2166,8 +2166,23 @@ PlasmoidItem {
     property string searchQuery: ""
     property var searchResults: ({})   // source ("" here, else the host) -> {busy, results, more, error}
     property var searchAsked: ({})     // command -> [source, query]
+    // "<host>/<kind>" -> unfolded, as you clicked it (SearchResults.qml has
+    // the defaults): a source (kind "source") and what it found of each kind
+    property var searchFolds: ({})
 
     onSearchQueryChanged: searchTimer.restart()
+
+    function searchShown(host, kind, otherwise) {
+        const shown = searchFolds[host + "/" + kind]
+        return shown === undefined ? otherwise : shown
+    }
+
+    function showFound(host, kinds, shown) {
+        const next = Object.assign({}, searchFolds)
+        for (const kind of kinds)
+            next[host + "/" + kind] = shown
+        searchFolds = next
+    }
 
     Timer {
         id: searchTimer
@@ -2180,6 +2195,7 @@ PlasmoidItem {
         if (!searchOpen) {
             searchQuery = ""
             searchResults = ({})
+            searchFolds = ({})
         }
     }
 
@@ -2237,6 +2253,7 @@ PlasmoidItem {
         searchOpen = false
         searchQuery = ""
         searchResults = ({})
+        searchFolds = ({})
     }
 
     // ---------------------------------------------------------------- plans

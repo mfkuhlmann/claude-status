@@ -7,8 +7,9 @@ import org.kde.kirigami as Kirigami
 // What "Find a chat" found (main.qml: runSearch): on this computer, then on
 // each SSH host shown, newest first. Click one to bring it up where it runs,
 // or to reopen it (in a terminal or VS Code, as the switch of Recent chats says).
-// After the chats: the project folders, plans and memories with those words
-// (a folder opens the new-chat box, a plan or a memory opens to read).
+// Before the chats: the project folders, plans and memories with those words
+// (a folder opens the new-chat box, a plan or a memory opens to read). Each
+// source and each kind of thing it found folds under its heading.
 ColumnLayout {
     id: found
 
@@ -28,6 +29,17 @@ ColumnLayout {
             readonly property var plans: answer.plans || []
             readonly property var memories: answer.memories || []
             readonly property bool nothing: answer.results.length + projects.length + plans.length + memories.length === 0
+            // Folded or not (main.qml: searchShown): the source, and each kind
+            // of thing it found. Chats show at first; the rest show too when
+            // no chat has the words
+            readonly property bool open: root.searchShown(host, "source", true)
+            readonly property bool projectsOpen: root.searchShown(host, "projects", answer.results.length === 0)
+            readonly property bool plansOpen: root.searchShown(host, "plans", answer.results.length === 0)
+            readonly property bool memoriesOpen: root.searchShown(host, "memories", answer.results.length === 0)
+            readonly property bool chatsOpen: root.searchShown(host, "chats", true)
+            readonly property var kinds: [["projects", projects], ["plans", plans], ["memories", memories], ["chats", answer.results]]
+                                         .filter(kind => kind[1].length > 0).map(kind => kind[0])
+            readonly property bool allOpen: open && kinds.every(kind => block[kind + "Open"])
 
             Layout.fillWidth: true
             Layout.leftMargin: Kirigami.Units.smallSpacing
@@ -38,23 +50,57 @@ ColumnLayout {
                 Layout.fillWidth: true
                 spacing: Kirigami.Units.smallSpacing
 
-                Kirigami.Icon {
-                    source: block.host ? "network-server" : "computer"
-                    Layout.preferredWidth: Kirigami.Units.iconSizes.small
-                    Layout.preferredHeight: Layout.preferredWidth
-                }
-                PlasmaComponents3.Label {
-                    textFormat: Text.PlainText
+                // click to fold or unfold what this source found
+                Item {
                     Layout.fillWidth: true
-                    text: (block.host || i18n("This computer"))
-                          + (block.answer.busy ? "" : " · " + i18np("%1 chat", "%1 chats", block.answer.results.length)
-                                                       + (block.answer.more ? "+" : "")
-                                                       + (block.projects.length ? ", " + i18np("%1 folder", "%1 folders", block.projects.length) : "")
-                                                       + (block.plans.length ? ", " + i18np("%1 plan", "%1 plans", block.plans.length) : "")
-                                                       + (block.memories.length ? ", " + i18np("%1 memory", "%1 memories", block.memories.length) : ""))
-                    font.bold: true
-                    opacity: 0.8
-                    elide: Text.ElideRight
+                    implicitHeight: sourceLine.implicitHeight
+
+                    RowLayout {
+                        id: sourceLine
+                        anchors.fill: parent
+                        spacing: Kirigami.Units.smallSpacing
+
+                        Kirigami.Icon {
+                            source: block.open ? "arrow-down" : "arrow-right"
+                            Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                            Layout.preferredHeight: Layout.preferredWidth
+                            opacity: sourceMouse.containsMouse ? 0.9 : 0.6
+                        }
+                        Kirigami.Icon {
+                            source: block.host ? "network-server" : "computer"
+                            Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                            Layout.preferredHeight: Layout.preferredWidth
+                        }
+                        PlasmaComponents3.Label {
+                            id: sourceLabel
+                            textFormat: Text.PlainText
+                            Layout.fillWidth: true
+                            text: (block.host || i18n("This computer"))
+                                  + (block.answer.busy ? "" : " · " + i18np("%1 chat", "%1 chats", block.answer.results.length)
+                                                               + (block.answer.more ? "+" : "")
+                                                               + (block.projects.length ? ", " + i18np("%1 folder", "%1 folders", block.projects.length) : "")
+                                                               + (block.plans.length ? ", " + i18np("%1 plan", "%1 plans", block.plans.length) : "")
+                                                               + (block.memories.length ? ", " + i18np("%1 memory", "%1 memories", block.memories.length) : ""))
+                            font.bold: true
+                            opacity: 0.8
+                            elide: Text.ElideRight
+                        }
+                    }
+
+                    PlasmaCore.ToolTipArea {
+                        textFormat: Text.PlainText
+                        anchors.fill: parent
+                        mainText: sourceLabel.text
+                        subText: block.open ? i18n("Click to fold what was found here.") : i18n("Click to show what was found here.")
+
+                        MouseArea {
+                            id: sourceMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.showFound(block.host, ["source"], !block.open)
+                        }
+                    }
                 }
                 PlasmaComponents3.BusyIndicator {
                     visible: block.answer.busy
@@ -62,12 +108,21 @@ ColumnLayout {
                     Layout.preferredWidth: Kirigami.Units.iconSizes.small
                     Layout.preferredHeight: Kirigami.Units.iconSizes.small
                 }
+                // every kind it found at once (folding them leaves the source open)
+                PlasmaComponents3.ToolButton {
+                    visible: block.kinds.length > 1
+                    icon.name: block.allOpen ? "collapse-all" : "expand-all"
+                    text: block.allOpen ? i18n("Fold all") : i18n("Unfold all")
+                    font: Kirigami.Theme.smallFont
+                    Layout.preferredHeight: sourceLabel.implicitHeight + Kirigami.Units.smallSpacing
+                    onClicked: root.showFound(block.host, block.allOpen ? block.kinds : ["source"].concat(block.kinds), !block.allOpen)
+                }
             }
 
             PlasmaComponents3.Label {
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
-                visible: block.answer.error !== ""
+                visible: block.open && block.answer.error !== ""
                 text: block.answer.error
                 color: Kirigami.Theme.negativeTextColor
                 wrapMode: Text.Wrap
@@ -77,7 +132,7 @@ ColumnLayout {
             PlasmaComponents3.Label {
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
-                visible: !block.answer.busy && block.answer.error === "" && block.nothing
+                visible: block.open && !block.answer.busy && block.answer.error === "" && block.nothing
                 text: i18n("Nothing with all of these words: no chat (its name, folder or your prompts), project folder, plan or memory.")
                 opacity: 0.6
                 wrapMode: Text.Wrap
@@ -85,16 +140,16 @@ ColumnLayout {
             }
 
             // project folders: click for a new chat there
-            PlasmaComponents3.Label {
-                textFormat: Text.PlainText
-                Layout.leftMargin: Kirigami.Units.gridUnit
-                visible: block.projects.length > 0
-                text: i18n("Folders")
-                opacity: 0.6
+            PlasmaComponents3.ToolButton {
+                visible: block.open && block.projects.length > 0
+                flat: true
+                icon.name: block.projectsOpen ? "arrow-down" : "arrow-right"
+                text: i18n("Folders (%1)", block.projects.length)
                 font: Kirigami.Theme.smallFont
+                onClicked: root.showFound(block.host, ["projects"], !block.projectsOpen)
             }
             Repeater {
-                model: block.projects.length
+                model: block.open && block.projectsOpen ? block.projects.length : 0
                 delegate: FoundLine {
                     required property int index
                     readonly property var project: block.projects[index] || ({ folder: "", folderShort: "", chats: 0, lastActive: 0, account: "", groupId: "" })
@@ -109,16 +164,16 @@ ColumnLayout {
             }
 
             // plans: click to read one
-            PlasmaComponents3.Label {
-                textFormat: Text.PlainText
-                Layout.leftMargin: Kirigami.Units.gridUnit
-                visible: block.plans.length > 0
-                text: i18n("Plans")
-                opacity: 0.6
+            PlasmaComponents3.ToolButton {
+                visible: block.open && block.plans.length > 0
+                flat: true
+                icon.name: block.plansOpen ? "arrow-down" : "arrow-right"
+                text: i18n("Plans (%1)", block.plans.length)
                 font: Kirigami.Theme.smallFont
+                onClicked: root.showFound(block.host, ["plans"], !block.plansOpen)
             }
             Repeater {
-                model: block.plans.length
+                model: block.open && block.plansOpen ? block.plans.length : 0
                 delegate: FoundLine {
                     required property int index
                     readonly property var plan: block.plans[index] || ({ slug: "", title: "", profileDir: "", updatedAt: 0, account: "" })
@@ -133,16 +188,16 @@ ColumnLayout {
             }
 
             // memories: click to read one
-            PlasmaComponents3.Label {
-                textFormat: Text.PlainText
-                Layout.leftMargin: Kirigami.Units.gridUnit
-                visible: block.memories.length > 0
-                text: i18n("Memories")
-                opacity: 0.6
+            PlasmaComponents3.ToolButton {
+                visible: block.open && block.memories.length > 0
+                flat: true
+                icon.name: block.memoriesOpen ? "arrow-down" : "arrow-right"
+                text: i18n("Memories (%1)", block.memories.length)
                 font: Kirigami.Theme.smallFont
+                onClicked: root.showFound(block.host, ["memories"], !block.memoriesOpen)
             }
             Repeater {
-                model: block.memories.length
+                model: block.open && block.memoriesOpen ? block.memories.length : 0
                 delegate: FoundLine {
                     required property int index
                     readonly property var memory: block.memories[index] || ({ name: "", description: "", type: "", path: "", folderShort: "", updatedAt: 0, account: "" })
@@ -157,17 +212,17 @@ ColumnLayout {
                 }
             }
 
-            PlasmaComponents3.Label {
-                textFormat: Text.PlainText
-                Layout.leftMargin: Kirigami.Units.gridUnit
-                visible: block.answer.results.length > 0 && block.projects.length + block.plans.length + block.memories.length > 0
-                text: i18n("Chats")
-                opacity: 0.6
+            PlasmaComponents3.ToolButton {
+                visible: block.open && block.answer.results.length > 0
+                flat: true
+                icon.name: block.chatsOpen ? "arrow-down" : "arrow-right"
+                text: i18n("Chats (%1)", block.answer.results.length + (block.answer.more ? "+" : ""))
                 font: Kirigami.Theme.smallFont
+                onClicked: root.showFound(block.host, ["chats"], !block.chatsOpen)
             }
 
             Repeater {
-                model: block.answer.results.length
+                model: block.open && block.chatsOpen ? block.answer.results.length : 0
                 delegate: ColumnLayout {
                     id: hit
 
@@ -257,7 +312,7 @@ ColumnLayout {
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
                 Layout.leftMargin: Kirigami.Units.gridUnit
-                visible: block.answer.more
+                visible: block.open && block.chatsOpen && block.answer.more
                 text: i18n("More chats have these words: add a word to narrow it down.")
                 opacity: 0.6
                 font: Kirigami.Theme.smallFont
