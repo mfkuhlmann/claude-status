@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.12.0
 
 - **Chats a usage limit stopped:** a chat that hit a usage limit
   (*You've hit your session limit*) says so in red, with when that limit
