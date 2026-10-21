@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.12.0 (2026-10-21)
 
 - **Chats a usage limit stopped:** a chat that hit a usage limit (*You've hit your session limit*) says so in red, with when that limit resets (from the account's plan usage, else from Claude's message), and its pet's battery runs low. Once the limit has reset, one notification per account says which chats can go on (it comes with the "finished" notifications). Meanwhile **Continue on personal** moves the chat to another account with room left in that limit: shared with it, then reopened there in a terminal. An idle Claude that still has the chat open here quits first; a chat in VS Code's Claude tab, close it there first. A chat whose login expired says so too.
 - **Claude's recap:** when you come back to a chat after a while, Claude Code writes a short recap of it (*You asked …; Next step: …*). While nothing was said after it, the line under the chat shows it instead of Claude's last words, and the chat's unfolded box starts with it. Recent chats show theirs in their tooltip.
