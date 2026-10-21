@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- A plan or memory in a long folder lost the end of its time ("5d 22h a")
+  at the row's end, whatever the panel's width: the folder is now cut in
+  the middle, as in **Recent chats**, and the time always shows.
+
 ## 1.13.0
 
 - **Wait for the usage limit:** when an account is at its usage limit,

@@ -1,4 +1,4 @@
-import { planWhere, shareAccounts, machineStatus } from "../../src/shared/model";
+import { ago, shareAccounts, machineStatus } from "../../src/shared/model";
 import type { Group } from "../../src/shared/types";
 import { post } from "../env";
 import { groupKeyOf } from "../util/chat";
@@ -6,6 +6,7 @@ import { Icon } from "../util/icons";
 import { useStore } from "../util/store";
 import { togglePlans, uiState } from "../util/ui";
 import { useView } from "./context";
+import { Elided } from "./Elided";
 import { IconButton } from "./IconButton";
 import { Tag } from "./Tag";
 
@@ -71,8 +72,10 @@ export function PlansList({ group }: { group: Group }) {
                   onClick={() => post({ type: "sendPlanFeedback", ...ref(p.key) })}
                 />
               ) : null}
-              <span class="small muted nowrap recent-folder" title={p.cwd || p.path}>
-                {planWhere(p, view.now)}
+              {p.cwdShort ? <Elided text={p.cwdShort} class="recent-folder small muted" title={p.cwd} /> : null}
+              <span class="small muted nowrap">
+                {p.cwdShort ? "· " : ""}
+                {ago(view.now - p.updatedAt)}
               </span>
               <div class="row-actions">
                 {copy || !p.chatId || host ? null : (

@@ -12,7 +12,6 @@ import {
   headlineText,
   modeText,
   peekLine,
-  planWhere,
   stateText,
   stopText,
   summaryText,
@@ -116,7 +115,6 @@ test("a plan the page names is the extension's own, found by account and key", (
   assert.equal(findPlan(state.status, state.hosts, undefined, "demo-personal", "nope"), null);
   assert.equal(findPlan(state.status, state.hosts, "build-server", "demo-personal", "demo-plan-1"), null);
   assert.equal(findPlan(state.status, state.hosts, 7, "demo-personal", "demo-plan-1"), null);
-  assert.equal(planWhere(found!.plan, NOW), "~/projects/api-server · 2h 0m ago");
 });
 
 test("a host's stops, recaps and plans come onto this computer's clock", () => {

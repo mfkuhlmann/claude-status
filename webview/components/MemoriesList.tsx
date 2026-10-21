@@ -6,6 +6,7 @@ import { Icon } from "../util/icons";
 import { useStore } from "../util/store";
 import { toggleMemories, uiState } from "../util/ui";
 import { useView } from "./context";
+import { Elided } from "./Elided";
 import { IconButton } from "./IconButton";
 
 // What Claude keeps about you and your projects on this account: its
@@ -54,8 +55,12 @@ export function MemoriesList({ group }: { group: Group }) {
               >
                 {m.description || m.name}
               </button>
-              <span class="small muted nowrap recent-folder" title={m.folder}>
-                {m.folderShort || m.type === "account" ? `${m.folderShort || "every folder"} · ${ago(view.now - m.updatedAt)}` : ago(view.now - m.updatedAt)}
+              {m.folderShort || m.type === "account" ? (
+                <Elided text={m.folderShort || "every folder"} class="recent-folder small muted" title={m.folder} />
+              ) : null}
+              <span class="small muted nowrap">
+                {m.folderShort || m.type === "account" ? "· " : ""}
+                {ago(view.now - m.updatedAt)}
               </span>
               {elsewhere ? null : (
                 <div class="row-actions">

@@ -653,10 +653,6 @@ export function findMemory(status: Status | null, hosts: HostState[], host: unkn
   return memory && group ? { memory, group: host ? { ...group, host: host as string } : group } : null;
 }
 
-// "~/repos/app · 2d ago"
-export function planWhere(p: Pick<PlanItem, "cwdShort" | "updatedAt">, now: number): string {
-  return p.cwdShort ? `${p.cwdShort} · ${ago(now - p.updatedAt)}` : ago(now - p.updatedAt);
-}
 
 export function taskMark(status: string): string {
   return status === "completed" ? "✓" : status === "in_progress" ? "▸" : "○";
