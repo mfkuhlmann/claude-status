@@ -185,7 +185,7 @@ Rectangle {
         // Any folder, picked in the folder dialog (not on an SSH host)
         PlasmaComponents3.ItemDelegate {
             visible: !box.remoteHost
-            enabled: box.queued ? false : box.background ? box.terminalHere : (box.inVscode || box.terminalHere)
+            enabled: box.background ? box.terminalHere : (box.inVscode || box.terminalHere)
             Layout.fillWidth: true
             icon.name: "folder-open"
             text: i18n("Choose folder…")

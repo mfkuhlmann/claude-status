@@ -10,6 +10,7 @@ RowLayout {
     property var session
     property bool showProfile: false
     property string remoteHost: ""   // set for a session on an SSH host
+    property string account: ""      // its account's title
 
     readonly property string tag: session.entrypoint === "claude-vscode" ? i18n("VS Code")
                                   : session.kind === "bg" ? i18n("background") : ""
@@ -80,6 +81,9 @@ RowLayout {
     readonly property string modeText: root.modeText(peek ? peek.mode : null)
     // A usage limit stopped it: it can go on on another account with room left
     readonly property var handover: root.handoverTarget(session, remoteHost)
+    // or by itself once the limit resets (queued), when the widget knows when
+    readonly property real goOnAt: root.goOnAt(session)
+    readonly property var goingOn: goOnAt || stopped ? root.queuedChat(session.chatId, remoteHost) : null
     readonly property string openHint: remoteHost
                                        ? (session.entrypoint === "claude-vscode" && !session.openCommand
                                           ? i18n("Show this conversation in VS Code (connected to %1)", remoteHost)
@@ -329,12 +333,22 @@ RowLayout {
             spacing: Kirigami.Units.smallSpacing
 
             PlasmaComponents3.Label {
+                id: folderLabel
                 textFormat: Text.PlainText
                 text: row.session.cwdShort
                 opacity: 0.7
                 font: Kirigami.Theme.smallFont
                 elide: Text.ElideMiddle
                 Layout.fillWidth: true
+
+                PlasmaCore.ToolTipArea {   // (the whole folder: the line may be cut short)
+                    textFormat: Text.PlainText
+                    width: folderLabel.contentWidth
+                    height: parent.height
+                    active: !!row.session.cwd
+                    mainText: i18n("Folder")
+                    subText: (row.remoteHost ? row.remoteHost + ":" : "") + row.session.cwd
+                }
             }
             PlasmaComponents3.Label {
                 textFormat: Text.PlainText
@@ -446,6 +460,34 @@ RowLayout {
                                                ? i18n("This background session is stopped first (claude stop); then the chat is shared with %1 and reopens there in a terminal.", row.handover.title)
                                                : i18n("Claude here quits first (its terminal stays open); then the chat is shared with %1 and reopens there in a terminal.", row.handover.title))
                                             : i18n("The chat is shared with %1 and reopens there in a terminal.", row.handover.title))
+                    }
+                }
+                // or go on by itself once the limit resets (queued; again: cancelled)
+                PlasmaComponents3.ToolButton {
+                    visible: row.goOnAt > 0 || row.goingOn !== null
+                    icon.name: row.goingOn ? "checkmark" : "chronometer"
+                    text: row.goingOn ? i18n("Goes on at %1", root.clockText(row.goingOn.startAt))
+                                      : i18n("Go on at %1", root.clockText(row.goOnAt))
+                    font: Kirigami.Theme.smallFont
+                    Layout.preferredHeight: stepLabel.implicitHeight + Kirigami.Units.smallSpacing
+                    onClicked: {
+                        if (row.goingOn)
+                            root.unqueue(row.goingOn)
+                        else
+                            root.queueContinue(row.session, row.remoteHost, row.account)
+                    }
+
+                    PlasmaCore.ToolTipArea {
+                        textFormat: Text.PlainText
+                        anchors.fill: parent
+                        mainText: row.goingOn ? i18n("Goes on by itself at %1", root.clockText(row.goingOn.startAt))
+                                              : i18n("Go on by itself after the limit resets")
+                        subText: (row.goingOn ? "" : i18n("At %1, a minute after the limit resets, the chat goes on in the background, telling Claude that the limit has reset.", root.clockText(row.goOnAt)) + " ")
+                                 + (row.session.pid === null || row.session.pid === undefined ? ""
+                                    : row.session.kind === "bg" ? i18n("This background session is stopped first (claude stop).")
+                                    : i18n("Claude here quits first (its terminal stays open); open the chat from here to see it.")) + " "
+                                 + i18n("If it went on before then, nothing happens.")
+                                 + (row.goingOn ? "\n\n" + i18n("Click to cancel it.") : "")
                     }
                 }
                 Kirigami.Icon {

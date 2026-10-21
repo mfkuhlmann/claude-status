@@ -1899,6 +1899,65 @@ PlasmoidItem {
         return new Date(ms).toLocaleTimeString(Qt.locale(), Locale.ShortFormat)
     }
 
+    // What a queued task does, in a line
+    function queuedWhat(t) {
+        return t.chat ? i18n("Go on with “%1”", t.name || t.chat.slice(0, 8))
+             : t.planTitle ? i18n("Carry out “%1”", t.planTitle) + (t.prompt ? ": " + t.prompt : "")
+             : t.prompt
+    }
+
+    // The queued task that goes on with this chat (here, or on host), or null
+    function queuedChat(chatId, host) {
+        return (status && status.queue ? status.queue : []).find(t => t.chat === chatId && (t.host || "") === (host || ""))
+               || null
+    }
+
+    // When a chat a usage limit stopped can go on by itself (a minute after
+    // the limit resets: jump.py --queue-continue), in ms, or 0. Not one open
+    // in VS Code's Claude (its tab can't be ended), nor one at work again.
+    function goOnAt(session) {
+        const stop = session.stopped
+        if (!stop || stop.kind !== "limit" || stop.over || !stop.resetsAt || !(session.chatId || session.sessionId))
+            return 0
+        if (session.pid !== undefined && session.pid !== null
+                && (session.entrypoint === "claude-vscode" || session.state !== "idle" || session.sessionId !== session.chatId))
+            return 0
+        return stop.resetsAt + 60000
+    }
+
+    function queueContinue(session, host, account) {
+        const at = goOnAt(session)
+        if (!at)
+            return
+        queuer.connectSource("python3 -I " + shellQuote(codeDir + "jump.py") + " --queue-continue "
+                             + shellQuote(session.chatId || session.sessionId) + " --profile " + shellQuote(session.profileDir)
+                             + " --at " + Math.round(at) + (session.cwd ? " --cwd " + shellQuote(session.cwd) : "")
+                             + " --name " + shellQuote(session.name || "") + (host ? " --host " + shellQuote(host) : "")
+                             + " --account " + shellQuote(account) + configDirArgs + " # " + Date.now())
+    }
+
+    // Queueing a task or a chat: says when it starts, or why it can't
+    P5Support.DataSource {
+        id: queuer
+        engine: "executable"
+        connectedSources: []
+        onNewData: (source, data) => {
+            disconnectSource(source)
+            const result = root.helperResult(data)
+            if (result.ok) {
+                root.actionError = ""
+                if (result.message) {
+                    root.actionInfo = result.message
+                    actionInfoTimer.restart()
+                }
+            } else {
+                root.actionError = i18n("Couldn't queue it: %1", result.message)
+                actionErrorTimer.restart()
+            }
+            root.refresh()
+        }
+    }
+
     // The account's queued tasks (here, or on host)
     function queuedFor(group, host) {
         return (status && status.queue ? status.queue : []).filter(t => (t.host || "") === (host || "")
@@ -1936,7 +1995,7 @@ PlasmoidItem {
             const t = root.queueRuns[source]
             delete root.queueRuns[source]
             const result = root.helperResult(data)
-            const what = t ? (t.planTitle || t.prompt.split("\n")[0]) : ""
+            const what = t ? root.queuedWhat(t).split("\n")[0] : ""
             if (t) {
                 const rest = Object.assign({}, root.startingTasks)
                 delete rest[t.id]
@@ -2274,8 +2333,11 @@ PlasmoidItem {
         taskQueued = false
         if (reset) {
             // to start a minute after the limit resets
-            taskStarter.connectSource("python3 -I " + shellQuote(codeDir + "jump.py") + " --queue " + shellQuote(group.chatProfile)
-                                      + " --cwd " + shellQuote(folder.path || (host ? "~" : "")) + " --at " + Math.round(reset.at + 60000)
+            if (!folder.path && !host)
+                root.expanded = false   // the folder dialog takes over
+            queuer.connectSource("python3 -I " + shellQuote(codeDir + "jump.py") + " --queue " + shellQuote(group.chatProfile)
+                                      + (folder.path || host ? " --cwd " + shellQuote(folder.path || "~") : " --choose-folder")
+                                      + " --at " + Math.round(reset.at + 60000)
                                       + (text ? " --prompt " + shellQuote(text) : "")
                                       + (plan ? " --plan " + shellQuote(plan.slug) + " --plan-profile " + shellQuote(plan.profileDir) : "")
                                       + (host ? " --host " + shellQuote(host) : "") + " --account " + shellQuote(group.title)

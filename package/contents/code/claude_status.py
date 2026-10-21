@@ -709,6 +709,11 @@ def finish_row(row, job, job_id, profile, ctx, alive):
         row["peek"] = chats.peek(path)
         peek = row["peek"] or {}
         row["plan"] = plan_of(profile, peek.get("slug"))
+        if peek.get("stopped") and row["state"] == "waiting" and not row["waitingFor"] \
+                and isinstance(job, dict) and job.get("tempo") == "blocked":
+            # a background session a usage limit stopped is "blocked" ("rate
+            # limited — wait and retry"): it waits for the limit, not for you
+            row["state"], row["reason"], row["detail"] = "idle", "", ""
         # (one that works again, or waits for you, got past it)
         row["stopped"] = dict(peek["stopped"]) if peek.get("stopped") and row["state"] in ("idle", "done") else None
         files = chats.changed_files(path, row["cwd"], ctx.own_folders)
@@ -2872,11 +2877,14 @@ def change_queue(cache_root, add=None, take=None, put_back=None):
 
 
 def queue_entry(profile, folder, prompt, start_at, host="", account="", plan=None, plan_profile=None,
-                plan_title="", now_ms=None):
-    """A task to queue (checked), or ValueError."""
+                plan_title="", now_ms=None, chat=None, name=""):
+    """A task to queue (checked), or ValueError. With chat (its id), it goes
+    on with that chat (one a usage limit stopped: continue_chat), named name."""
     if not isinstance(profile, str) or not profile or not isinstance(folder, str):
         raise ValueError("A queued task needs an account and a folder")
-    if not (prompt or "").strip() and not plan:
+    if chat is not None and not valid_id(chat):
+        raise ValueError(f"Not a chat id: {chat}")
+    if not (prompt or "").strip() and not plan and chat is None:
         raise ValueError("Write what Claude should do first")
     if len(prompt or "") > QUEUE_PROMPT_MAX:
         raise ValueError("That task is too long")
@@ -2889,6 +2897,7 @@ def queue_entry(profile, folder, prompt, start_at, host="", account="", plan=Non
         "id": os.urandom(4).hex(), "host": host or "", "profile": profile, "account": account or profile,
         "folder": folder, "prompt": (prompt or "").strip(), "plan": plan, "planProfile": plan_profile,
         "planTitle": plan_title or "", "startAt": start_at, "createdAt": now_ms, "error": "",
+        "chat": chat, "name": clean_text(name, 80) if chat else "",
     }
 
 
@@ -2897,7 +2906,7 @@ def queued_tasks(cache_root, now_ms):
     has come, and it didn't fail to start) and "folderShort"."""
     out = []
     for t in load_queue(cache_root):
-        t = dict(t)
+        t = {"chat": None, "name": "", **t}
         t["due"] = not t.get("error") and isinstance(t.get("startAt"), (int, float)) and t["startAt"] <= now_ms
         t["folderShort"] = short_path(t["folder"], Path.home()) if not t.get("host") else t.get("folder") or "~"
         out.append(t)
@@ -3470,12 +3479,14 @@ def task_command(profile, prompt, home=None, claude="claude"):
     return f"{new_chat_command(profile, home, claude)} {prompt_word(prompt)}"
 
 
-def start_background(profile, folder, prompt, home=None, claude="claude", wait=BACKGROUND_WAIT, prefix=()):
+def start_background(profile, folder, prompt, home=None, claude="claude", wait=BACKGROUND_WAIT, prefix=(),
+                     resume=None):
     """Start a background session on this profile in folder, with prompt:
     (ok, message, its short id or None). prefix: words claude runs behind,
     e.g. systemd-run's, so a background service it starts lives on its own
     (not in the widget's group of processes, which a restart of the desktop
-    shell ends: jump.scope_prefix)."""
+    shell ends: jump.scope_prefix). resume: the id of a chat it goes on
+    with (claude --bg --resume: the same chat, if nothing has it open)."""
     import subprocess
     home = home or Path.home()
     if not prompt.strip():
@@ -3495,7 +3506,7 @@ def start_background(profile, folder, prompt, home=None, claude="claude", wait=B
     folder_bin = os.path.dirname(claude)
     if folder_bin and os.path.isfile(os.path.join(folder_bin, "node")):
         env["PATH"] = folder_bin + os.pathsep + env.get("PATH", "")
-    argv = [*prefix, claude, "--bg", prompt_arg(prompt)]
+    argv = [*prefix, claude, "--bg", *(["--resume", resume] if resume else []), prompt_arg(prompt)]
     try:
         r = subprocess.run(argv, cwd=folder, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                            stderr=subprocess.PIPE, timeout=wait)
@@ -3535,6 +3546,44 @@ def run_task(home, extra_dirs, background, folder, profile_key, text, plan_slug=
         return {"ok": ok, "message": message, "id": job}
     command = task_command(profile, prompt, home, claude) if prompt else new_chat_command(profile, home, claude)
     return {"ok": True, "message": "", "command": in_folder(folder, command)}
+
+
+CONTINUE_PROMPT = "The usage limit has reset: go on where you stopped."
+
+
+def continue_chat(home, extra_dirs, profile_key, chat_id, folder=None, text="", claude=None, prefix=(),
+                  wait=None):
+    """Go on with a chat a usage limit stopped, now that the limit has reset
+    (a queued one: jump.py --start-queued; here or on an SSH host,
+    --continue-chat): in the background on its account, with text (else
+    CONTINUE_PROMPT) as your next message. A session that has it open idle
+    ends first (end_for_handover), then claude --bg --resume goes on with the
+    same chat. {"ok", "message", "id"}; ok with no message when it went on
+    already (its newest turn isn't the limit's any more): nothing to do."""
+    profiles = discover_profiles(home, extra_dirs)
+    profile = next((p for p in profiles if matches_profile(p, profile_key)), None)
+    if profile is None:
+        return {"ok": False, "message": f"No Claude profile called {profile_key}"}
+    path = transcript_path(profile, chat_id)
+    if path is None:
+        return {"ok": False, "message": "That chat isn't on this account any more"}
+    if ((chat_peek(path) or {}).get("stopped") or {}).get("kind") != "limit":
+        return {"ok": True, "message": ""}
+    if not (isinstance(folder, str) and os.path.isdir(folder)):
+        folder = chat_folder(path) or str(home)
+    claude = claude or find_claude(home, ask_shell=True)
+    ok, message = end_for_handover(home, profiles, chat_id, claude)
+    if not ok:
+        return {"ok": False, "message": message}
+    # (claude --bg --resume starts a copy while a process still has the chat open)
+    deadline = time.time() + (END_WAIT if wait is None else wait)
+    while any(e.get("sessionId") == chat_id for e, _, _ in live_entries_all(profiles)) and time.time() < deadline:
+        time.sleep(0.2)
+    ok, message, job = start_background(profile, folder, (text or "").strip() or CONTINUE_PROMPT, home, claude,
+                                        prefix=prefix, resume=chat_id)
+    if ok:
+        message = f"Went on in the background on {profile.label}" + (f" ({job})" if job else "")
+    return {"ok": ok, "message": message, "id": job}
 
 
 def plan_markdown(home, extra_dirs, slug, profile_key=None):
@@ -5323,6 +5372,7 @@ USAGE = """usage: claude_status.py [--config-dir DIR]... [--done-hours H] [--rec
        claude_status.py --start-task|--task-command FOLDER --profile PROFILE [--prompt TEXT]
                         [--plan SLUG [--plan-profile PROFILE]] [--remote]
        claude_status.py --plan-text SLUG [--profile PROFILE] [--remote]
+       claude_status.py --continue-chat CHAT_ID --profile PROFILE [--folder F] [--prompt TEXT] [--remote]
   --config-dir DIR  extra Claude config dir (repeatable)
   --done-hours H    keep finished background jobs listed for H hours (default 24, 0 = never)
   --recent N        list each account's N latest other chats (default 5, 0 = none)
@@ -5331,6 +5381,7 @@ USAGE = """usage: claude_status.py [--config-dir DIR]... [--done-hours H] [--rec
   --start-task F    start a background session in folder F with the prompt (and plan)
   --task-command F  the shell command that starts a chat in folder F with the prompt (and plan)
   --plan-text SLUG  a plan's Markdown
+  --continue-chat ID  go on with a chat a usage limit stopped, in the background (the limit has reset)
   --no-tokens       skip transcript token totals
   --pretty          indent the JSON output
   --remote          for the widget on another machine: add the shell commands that open
@@ -5357,6 +5408,7 @@ def main(argv=None):
     end, interrupt, profile_key, busy, instance, interval_ms = None, None, None, False, None, 2000
     agent_run_id, chat_id, plans, find, find_limit = None, None, PLANS_LISTED, None, FIND_LIMIT
     task_folder, task_action, prompt, plan_slug, plan_profile, plan_text = None, None, "", None, None, None
+    continue_id, continue_folder = None, None
     vscode_account, vscode_server = None, VSCODE_SERVERS["Code"]
     while args:
         arg = args.pop(0)
@@ -5374,6 +5426,10 @@ def main(argv=None):
             find = args.pop(0)
         elif arg in ("--start-task", "--task-command") and args:
             task_action, task_folder = arg, args.pop(0)
+        elif arg == "--continue-chat" and args:
+            continue_id = args.pop(0)
+        elif arg == "--folder" and args:
+            continue_folder = args.pop(0)
         elif arg == "--prompt" and args:
             prompt = args.pop(0)
         elif arg == "--plan" and args:
@@ -5434,7 +5490,7 @@ def main(argv=None):
     cache_root = cache_dir(home)
     if (agent_run_id is None) != (chat_id is None):
         sys.exit(USAGE)
-    if task_action is not None and not profile_key:
+    if (task_action is not None or continue_id is not None) and not profile_key:
         sys.exit(USAGE)
     if find is not None:
         try:
@@ -5446,6 +5502,11 @@ def main(argv=None):
     elif plan_text is not None:
         try:
             result = plan_markdown(home, config_dirs, plan_text, profile_key)
+        except Exception as exc:
+            result = {"ok": False, "message": f"{type(exc).__name__}: {exc}"}
+    elif continue_id is not None:
+        try:
+            result = continue_chat(home, config_dirs, profile_key, continue_id, continue_folder, prompt)
         except Exception as exc:
             result = {"ok": False, "message": f"{type(exc).__name__}: {exc}"}
     elif task_action is not None:

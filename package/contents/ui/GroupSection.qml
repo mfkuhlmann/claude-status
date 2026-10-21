@@ -295,6 +295,7 @@ ColumnLayout {
             session: section.group.sessions[index] || root.emptySession
             showProfile: section.multiProfile
             remoteHost: section.remoteHost
+            account: section.group.title
         }
     }
 
@@ -315,9 +316,10 @@ ColumnLayout {
 
             required property int index
             readonly property var task: section.queued[index]
-                                        || ({ id: "", prompt: "", planTitle: "", folder: "", folderShort: "", startAt: 0, error: "", due: false })
-            readonly property string what: task.planTitle ? i18n("Carry out “%1”", task.planTitle) + (task.prompt ? ": " + task.prompt : "")
-                                                          : task.prompt
+                                        || ({ id: "", prompt: "", planTitle: "", folder: "", folderShort: "", startAt: 0, error: "", due: false,
+                                              chat: null, name: "" })
+            readonly property string what: root.queuedWhat(task)
+            readonly property string folder: (task.host ? task.host + ":" : "") + (task.folder || "~")
 
             Layout.fillWidth: true
             Layout.leftMargin: Kirigami.Units.smallSpacing
@@ -344,8 +346,11 @@ ColumnLayout {
                         textFormat: Text.PlainText
                         anchors.fill: parent
                         mainText: i18n("Waits for the usage limit")
-                        subText: queuedLine.what + "\n\n" + i18n("Starts in the background in %1, at %2.", queuedLine.task.folderShort || "~",
-                                                                     root.clockText(queuedLine.task.startAt))
+                        subText: queuedLine.what + "\n\n"
+                                 + (queuedLine.task.chat
+                                    ? i18n("The chat goes on in the background in %1, at %2, telling Claude that the limit has reset. A session that still has it open (in a terminal, or in the background) ends first; if it went on before then, nothing happens.",
+                                           queuedLine.folder, root.clockText(queuedLine.task.startAt))
+                                    : i18n("Starts in the background in %1, at %2.", queuedLine.folder, root.clockText(queuedLine.task.startAt)))
                     }
                 }
                 PlasmaComponents3.Label {
@@ -373,7 +378,7 @@ ColumnLayout {
                         textFormat: Text.PlainText
                         anchors.fill: parent
                         mainText: i18n("Start it now")
-                        subText: i18n("In the background, without waiting for the limit to reset.")
+                        subText: i18n("In the background, without waiting for the limit to reset. While the limit lasts, Claude stops again at once.")
                     }
                 }
                 PlasmaComponents3.ToolButton {
@@ -555,6 +560,7 @@ ColumnLayout {
                         subText: (recentLine.canOpen ? (recentOpenIn.inVscode ? root.vscodeHint(section.group, section.remoteHost, true)
                                                                               : root.terminalHint(section.remoteHost, true))
                                                      : root.terminalHint(section.remoteHost, true) + "\n" + root.vscodeHint(section.group, section.remoteHost, true))
+                                 + (recentLine.chat.cwd ? "\n" + i18n("Folder: %1", (section.remoteHost ? section.remoteHost + ":" : "") + recentLine.chat.cwd) : "")
                                  + (recentLine.chat.shared ? "\n" + i18n("Shared between accounts; last used on %1.", recentLine.chat.profile) : "")
                                  + (recentLine.chat.stopped ? "\n\n" + root.stopText(recentLine.chat.stopped) : "")
                                  + (recentLine.chat.recap ? "\n\n" + i18n("Recap: %1", recentLine.chat.recap.text) : "")
@@ -575,15 +581,32 @@ ColumnLayout {
                     text: "⇄"
                     opacity: 0.6
                 }
-                // a usage limit stopped it (claude_status.py: limit_stop): until it resets
+                // a usage limit stopped it (claude_status.py: limit_stop): until it resets;
+                // click: it goes on by itself then (queued; again: cancelled)
                 Tag {
-                    visible: !!recentLine.chat.stopped && recentLine.chat.stopped.kind === "limit" && !recentLine.chat.stopped.over
-                    text: i18n("limit")
-                    warning: true
-                    tooltipTitle: i18n("A usage limit stopped it")
-                    tooltip: recentLine.chat.stopped ? recentLine.chat.stopped.text : ""
+                    readonly property real goOnAt: root.goOnAt(recentLine.chat)
+                    readonly property var goingOn: root.queuedChat(recentLine.chat.sessionId, section.remoteHost)
+                    visible: goingOn !== null
+                             || (!!recentLine.chat.stopped && recentLine.chat.stopped.kind === "limit" && !recentLine.chat.stopped.over)
+                    text: goingOn ? i18nc("a chat that goes on by itself at this time", "⏱ %1", root.clockText(goingOn.startAt))
+                                  : i18n("limit")
+                    warning: goingOn === null
+                    active: goingOn !== null
+                    clickable: goingOn !== null || goOnAt > 0
+                    tooltipTitle: goingOn ? i18n("Goes on by itself at %1", root.clockText(goingOn.startAt))
+                                          : i18n("A usage limit stopped it")
+                    tooltip: goingOn ? i18n("In the background, telling Claude that the limit has reset (if it didn't go on before then).") + "\n\n" + i18n("Click to cancel it.")
+                             : (recentLine.chat.stopped ? recentLine.chat.stopped.text : "")
+                               + (goOnAt > 0 ? "\n\n" + i18n("Click to have it go on by itself in the background at %1, a minute after the limit resets.", root.clockText(goOnAt)) : "")
+                    onClicked: {
+                        if (goingOn)
+                            root.unqueue(goingOn)
+                        else
+                            root.queueContinue(recentLine.chat, section.remoteHost, section.group.title)
+                    }
                 }
                 PlasmaComponents3.Label {
+                    id: recentFolder
                     textFormat: Text.PlainText
                     text: i18nc("recent chat: folder, how long ago", "%1 · %2 ago", recentLine.chat.cwdShort || "~",
                                 root.duration(root.now - recentLine.chat.lastActive))
@@ -591,6 +614,14 @@ ColumnLayout {
                     font: Kirigami.Theme.smallFont
                     elide: Text.ElideLeft
                     Layout.maximumWidth: Kirigami.Units.gridUnit * 12
+
+                    PlasmaCore.ToolTipArea {   // (the whole folder: the line may be cut short)
+                        textFormat: Text.PlainText
+                        anchors.fill: parent
+                        active: !!recentLine.chat.cwd
+                        mainText: i18n("Folder")
+                        subText: (section.remoteHost ? section.remoteHost + ":" : "") + recentLine.chat.cwd
+                    }
                 }
                 PlasmaComponents3.ToolButton {
                     id: recentShare
@@ -685,6 +716,7 @@ ColumnLayout {
                         mainText: planLine.plan.title
                         subText: (section.remoteHost ? i18n("Click to open it: a copy, fetched from %1.", section.remoteHost)
                                                      : i18n("Click to open it in your app for Markdown: what you change there is the plan."))
+                                 + (planLine.plan.cwd ? "\n" + i18n("Folder: %1", (section.remoteHost ? section.remoteHost + ":" : "") + planLine.plan.cwd) : "")
                                  + (planLine.plan.shared ? "\n" + i18n("Shared with your other accounts.") : "")
                                  + (planLine.plan.chatId ? "" : "\n" + i18n("The chat that made it isn't here any more."))
 
@@ -712,6 +744,14 @@ ColumnLayout {
                     font: Kirigami.Theme.smallFont
                     elide: Text.ElideLeft
                     Layout.maximumWidth: Kirigami.Units.gridUnit * 10
+
+                    PlasmaCore.ToolTipArea {   // (the whole folder: the line may be cut short)
+                        textFormat: Text.PlainText
+                        anchors.fill: parent
+                        active: !!planLine.plan.cwd
+                        mainText: i18n("Folder")
+                        subText: (section.remoteHost ? section.remoteHost + ":" : "") + planLine.plan.cwd
+                    }
                 }
                 PlasmaComponents3.ToolButton {
                     id: planGo

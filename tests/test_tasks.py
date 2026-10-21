@@ -181,6 +181,26 @@ class RowTests(Fixture):
         self.assertEqual((plan["slug"], plan["title"], plan["chatId"], plan["cwd"], plan["shared"]),
                          ("calm-red-owl", "Calm plan", "limited", "/tmp/x", False))
 
+    def test_a_background_session_the_limit_blocked_waits_for_the_limit(self):
+        # Claude marks it "blocked" ("rate limited — wait and retry"), as if it
+        # needed you: it's stopped by the limit instead
+        w = self.home / ".claude-work"
+        sid = "e3de1242-7bc8-40a5-938f-aadb5f5aa9ee"
+        write(w / "sessions/31.json", session(sid, kind="bg", jobId="e3de1242", cwd="/tmp/x"))
+        write(w / "jobs/e3de1242/state.json", {
+            "state": "blocked", "tempo": "blocked", "sessionId": sid, "cwd": "/tmp/x",
+            "detail": "You've hit your session limit · resets 10:40am (Europe/Berlin)",
+            "needs": "rate limited — wait and retry · You've hit your session limit · resets 10:40am (Europe/Berlin)"})
+        write(w / f"projects/-tmp-x/{sid}.jsonl",
+              lines(prompt("test", self.now - 60), limit_error("You've hit your session limit · resets 10:40am (Europe/Berlin)", self.now - 59)))
+        g = self.group(self.collect(with_tokens=False), "work")
+        row = next(s for s in g["sessions"] if s["sessionId"] == sid)
+        self.assertEqual((row["state"], row["detail"], row["stopped"]["kind"]), ("idle", "", "limit"))
+        # blocked on something else, it still needs you
+        write(w / f"projects/-tmp-x/{sid}.jsonl", lines(prompt("test", self.now - 60)))
+        row = next(s for s in self.group(self.collect(with_tokens=False), "work")["sessions"] if s["sessionId"] == sid)
+        self.assertEqual((row["state"], row["stopped"]), ("waiting", None))
+
     def test_working_again_isnt_stopped(self):
         w = self.home / ".claude-work"
         write(w / "projects/-x/busy.jsonl", lines(limit_error("You've hit your session limit", self.now - 60)))
@@ -565,6 +585,91 @@ class QueueTests(TaskTests):
         # an SSH host's task: checked there when it starts
         self.assertTrue(self.queue("--queue", ".claude", "--cwd", "/srv/app", "--at", at, "--prompt", "x", "--host", "lab")["ok"])
         self.assertEqual(cs.load_queue(self.cache_root())[0]["host"], "lab")
+
+
+class ContinueAfterResetTests(TaskTests):
+    """A chat a usage limit stopped, queued to go on once the limit resets."""
+
+    SID = "e3de1242-7bc8-40a5-938f-aadb5f5aa9ee"
+    queue, cache_root = QueueTests.queue, QueueTests.cache_root
+
+    def stopped_chat(self, *more):
+        t = self.now - 120
+        write(self.home / f".claude-work/projects/-repos-app/{self.SID}.jsonl",
+              lines(prompt("fix it", t, cwd=str(self.folder)),
+                    limit_error("You've hit your session limit · resets 10:40am (Europe/Berlin)", t + 1), *more))
+
+    def test_queue_then_go_on_in_the_background(self):
+        self.stopped_chat()
+        at = int((time.time() + 3600) * 1000)
+        answer = self.queue("--queue-continue", self.SID, "--profile", ".claude-work", "--at", str(at),
+                            "--name", "Fix it", "--account", "work · Team")
+        self.assertTrue(answer["ok"], answer)
+        self.assertRegex(answer["message"], r"^Queued: it goes on at \d\d:\d\d, when the limit resets$")
+        self.assertTrue(self.queue("--queue-continue", self.SID, "--profile", ".claude-work", "--at", str(at),
+                                   "--name", "Fix it", "--account", "work · Team")["ok"])  # (twice: queued once)
+        (task,) = cs.queued_tasks(self.cache_root(), int(time.time() * 1000))
+        self.assertEqual((task["chat"], task["name"], task["folder"], task["prompt"], task["account"]),
+                         (self.SID, "Fix it", str(self.folder), "", "work · Team"))
+        self.assertEqual(self.queue("--start-queued", task["id"]),
+                         {"ok": True, "message": "Went on in the background on work (1a2b3c4d)"})
+        call, = self.calls()
+        self.assertEqual(call["argv"], ["--bg", "--resume", self.SID, cs.CONTINUE_PROMPT])
+        self.assertEqual(call["cwd"], str(self.folder))
+        self.assertEqual(cs.load_queue(self.cache_root()), [])
+
+    def test_a_chat_that_went_on_already_is_left_alone(self):
+        self.stopped_chat(reply("Done.", self.now - 10))
+        at = int(time.time() * 1000)
+        self.assertTrue(self.queue("--queue-continue", self.SID, "--profile", ".claude-work", "--at", str(at),
+                                   "--prompt", "go on with step 2")["ok"])
+        (task,) = cs.load_queue(self.cache_root())
+        self.assertEqual(self.queue("--start-queued", task["id"]), {"ok": True, "message": ""})
+        self.assertEqual((self.calls(), cs.load_queue(self.cache_root())), ([], []))
+
+    def test_a_session_that_still_has_it_open_is_stopped_first(self):
+        self.stopped_chat()
+        stops = []
+        with mock.patch.object(cs, "stop_background", side_effect=lambda *a, **k: stops.append(a[1]) or (True, "stopped")), \
+                mock.patch.object(cs, "live_entries_all", return_value=[]) as live:
+            live.side_effect = [[({"sessionId": self.SID, "kind": "bg", "jobId": "e3de1242", "status": "idle"},
+                                  self.profile, self.profile)], []]
+            answer = cs.continue_chat(self.home, [], ".claude-work", self.SID, None, "", str(self.bin / "claude"))
+        self.assertTrue(answer["ok"], answer)
+        self.assertEqual(stops, ["e3de1242"])
+        self.assertEqual(self.calls()[0]["argv"][:3], ["--bg", "--resume", self.SID])
+
+    def test_its_folder_must_be_trusted_and_ssh_hosts_go_through_ssh(self):
+        t = self.now - 120
+        write(self.home / f".claude-work/projects/-home/{self.SID}.jsonl",
+              lines(prompt("hi", t, cwd=str(self.home)), limit_error("You've hit your session limit", t + 1)))
+        at = str(int(time.time() * 1000))
+        answer = self.queue("--queue-continue", self.SID, "--profile", ".claude-work", "--at", at)
+        self.assertFalse(answer["ok"])
+        self.assertIn("Claude doesn't trust your home folder", answer["message"])
+        self.assertEqual(self.queue("--queue-continue", "nope", "--profile", ".claude-work", "--at", at),
+                         {"ok": False, "message": "That chat isn't on this account any more"})
+        # on an SSH host: checked there, when it goes on
+        self.assertTrue(self.queue("--queue-continue", self.SID, "--profile", ".claude", "--at", at, "--cwd", "/srv/app",
+                                   "--host", "lab", "--name", "Fix it")["ok"])
+        (task,) = cs.load_queue(self.cache_root())
+        import remote
+        with mock.patch.object(remote, "host_answer", return_value={"ok": True, "message": "Went on in the background on work (1a2b3c4d)"}) as ask:
+            self.assertEqual(self.queue("--start-queued", task["id"])["message"], "Went on in the background on work (1a2b3c4d)")
+        ask.assert_called_once_with("lab", ["--continue-chat", self.SID, "--profile", ".claude", "--folder", "/srv/app"])
+
+    def test_queue_in_a_folder_picked_in_the_dialog(self):
+        at = str(int((time.time() + 3600) * 1000))
+        with mock.patch.object(jump, "choose_folder", return_value=(str(self.folder), "")), \
+                mock.patch.object(jump, "claude_in_terminal", return_value="claude"):
+            answer = self.queue("--queue", ".claude-work", "--choose-folder", "--at", at, "--prompt", "fix it")
+        self.assertTrue(answer["ok"], answer)
+        self.assertEqual(cs.load_queue(self.cache_root())[0]["folder"], str(self.folder))
+        with mock.patch.object(jump, "choose_folder", return_value=(None, "")), \
+                mock.patch.object(jump, "claude_in_terminal", return_value="claude"):
+            self.assertEqual(self.queue("--queue", ".claude-work", "--choose-folder", "--at", at, "--prompt", "x"),
+                             {"ok": True, "message": ""})  # (cancelled)
+        self.assertEqual(len(cs.load_queue(self.cache_root())), 1)
 
 
 class OverlapTests(Fixture):
