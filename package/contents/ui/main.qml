@@ -45,7 +45,7 @@ PlasmoidItem {
     readonly property var emptyFound: ({ key: "", sessionId: "", name: "", cwd: "", cwdShort: "", lastActive: 0, profile: "",
                                          profileDir: "", groupId: "", account: "", shared: false, match: "", openCommand: "" })
     readonly property var emptyPlan: ({ key: "", slug: "", title: "", path: "", profileDir: "", profile: "", updatedAt: 0,
-                                        shared: false, chatId: null, chatProfileDir: null, cwd: "", cwdShort: "",
+                                        shared: false, chatId: null, chatProfileDir: null, cwd: "", cwdShort: "", edited: false,
                                         openCommand: null })
     readonly property var emptyTask: ({ subject: "", status: "pending" })
     readonly property var emptyDay: ({ day: "", total: 0, output: 0, messages: 0, chats: 0, prompts: 0 })
@@ -2256,6 +2256,51 @@ PlasmoidItem {
                 actionErrorTimer.restart()
             }
         }
+    }
+
+    // Your changes to a plan (its file, since Claude wrote it), sent to the
+    // chat that made it, which revises the plan in plan mode (jump.py
+    // --plan-feedback): it reopens with them, gets them typed in (tmux), or
+    // they go to the clipboard and the chat comes up, to paste them there
+    function sendPlanFeedback(slug, profileDir, chatId) {
+        feedbackSender.connectSource("python3 -I " + shellQuote(codeDir + "jump.py") + " --plan-feedback " + shellQuote(slug)
+                                     + profileArg(profileDir) + " --chat " + shellQuote(chatId) + configDirArgs + " # " + Date.now())
+    }
+
+    P5Support.DataSource {
+        id: feedbackSender
+        engine: "executable"
+        connectedSources: []
+        onNewData: (source, data) => {
+            disconnectSource(source)
+            const result = root.helperResult(data)
+            if (!result.ok) {
+                root.actionError = i18n("Couldn't send your feedback: %1", result.message)
+                actionErrorTimer.restart()
+                return
+            }
+            root.actionError = ""
+            if (result.how === "clipboard" && !result.copied && result.text)
+                root.copyText(result.text)
+            root.actionInfo = result.message
+            actionInfoTimer.restart()
+            if (result.how === "clipboard")   // (the chat came up: say what to do there)
+                root.notify("feedback|" + Date.now(), null, "feedback", i18n("Your feedback on the plan"), result.message, "mail-send", "")
+            root.refresh()
+        }
+    }
+
+    // Text on the clipboard, where no clipboard tool is (jump.py: copy_to_clipboard)
+    TextEdit {
+        id: clipboardText
+        visible: false
+    }
+
+    function copyText(text) {
+        clipboardText.text = text
+        clipboardText.selectAll()
+        clipboardText.copy()
+        clipboardText.text = ""
     }
 
     function continuePlanChat(plan, group, host) {

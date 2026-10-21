@@ -353,7 +353,9 @@ if "--bg" in sys.argv:  # (what Claude Code 2.1.306 prints)
 """
 
 
-class TaskTests(Fixture):
+class TaskFixture(Fixture):
+    """A fake claude that notes how it was run, a trusted folder and a plan."""
+
     def setUp(self):
         super().setUp()
         self.bin = self.home / "bin"
@@ -372,6 +374,8 @@ class TaskTests(Fixture):
     def calls(self):
         return [json.loads(l) for l in self.log.read_text().splitlines()] if self.log.exists() else []
 
+
+class TaskTests(TaskFixture):
     def test_prompt_with_a_plan(self):
         text = cs.task_prompt("Do step 1 only.", self.home / ".claude-work/plans/calm-red-owl.md", self.home)
         self.assertEqual(text, "Do step 1 only.\n\nThe plan (saved as ~/.claude-work/plans/calm-red-owl.md):\n\n"
@@ -529,7 +533,7 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class QueueTests(TaskTests):
+class QueueTests(TaskFixture):
     """Background tasks that wait for a usage limit to reset."""
 
     def queue(self, *args):
@@ -602,7 +606,7 @@ class QueueTests(TaskTests):
         self.assertEqual(cs.load_queue(self.cache_root())[0]["host"], "lab")
 
 
-class ContinueAfterResetTests(TaskTests):
+class ContinueAfterResetTests(TaskFixture):
     """A chat a usage limit stopped, queued to go on once the limit resets."""
 
     SID = "e3de1242-7bc8-40a5-938f-aadb5f5aa9ee"
@@ -685,6 +689,131 @@ class ContinueAfterResetTests(TaskTests):
             self.assertEqual(self.queue("--queue", ".claude-work", "--choose-folder", "--at", at, "--prompt", "x"),
                              {"ok": True, "message": ""})  # (cancelled)
         self.assertEqual(len(cs.load_queue(self.cache_root())), 1)
+
+
+def tool_use(tid, name, inp, ts):
+    return {"type": "assistant", "timestamp": iso(ts),
+            "message": {"id": "m" + tid, "role": "assistant", "content": [{"type": "tool_use", "id": tid, "name": name, "input": inp}]}}
+
+
+def tool_result(tid, ts, error=False):
+    return {"type": "user", "timestamp": iso(ts),
+            "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": tid, "is_error": error, "content": "ok"}]}}
+
+
+class PlanFeedbackTests(TaskFixture):
+    """Your changes to a plan and your comments on it, sent to the chat that made it."""
+
+    SID = "a1b2c3d4-0000-4000-8000-000000000001"
+
+    def setUp(self):
+        super().setUp()
+        w = self.home / ".claude-work"
+        self.plan = w / "plans/calm-red-owl.md"
+        t = self.now - 600
+        pf = str(self.home / ".claude/plans/calm-red-owl.md")  # (the plan by the link name: the same file)
+        write(w / f"projects/-repos-app/{self.SID}.jsonl", lines(
+            prompt("plan it", t, cwd=str(self.folder), slug="calm-red-owl"),
+            tool_use("t1", "Write", {"file_path": pf, "content": "# Calm plan\n\n1. Do it\n2. Test it\n"}, t + 1),
+            tool_result("t1", t + 2),
+            tool_use("t2", "Edit", {"file_path": pf, "old_string": "2. Test it", "new_string": "2. Test it well"}, t + 3),
+            tool_result("t2", t + 4),
+            tool_use("t3", "Edit", {"file_path": pf, "old_string": "1. Do it", "new_string": "1. Skip it"}, t + 5),
+            tool_result("t3", t + 6, error=True),  # (refused: the file didn't change)
+            tool_use("t4", "ExitPlanMode", {"planFilePath": pf}, t + 7), tool_result("t4", t + 8, error=True)))
+        write(self.plan, "# Calm plan\n\n1. Do it first\n2. Test it well\n")  # (you changed step 1)
+
+    def send(self, *extra, comments=None):
+        out = io.StringIO()
+        args = ["--plan-feedback", "calm-red-owl", "--profile", ".claude-work", "--chat", self.SID, *extra]
+        if comments is not None:
+            args += ["--comments", json.dumps(comments)]
+        with mock.patch.object(jump.Path, "home", return_value=self.home), \
+                mock.patch.object(jump, "claude_in_terminal", return_value=str(self.bin / "claude")), \
+                contextlib.redirect_stdout(out):
+            jump.main(args)
+        return json.loads(out.getvalue())
+
+    def test_claudes_version_is_rebuilt_from_its_transcript(self):
+        transcript = self.home / f".claude-work/projects/-repos-app/{self.SID}.jsonl"
+        self.assertEqual(cs.claude_plan(transcript, "calm-red-owl"), "# Calm plan\n\n1. Do it\n2. Test it well\n")
+        self.assertIsNone(cs.claude_plan(transcript, "other-plan-here"))
+        # an edit that doesn't fit what it knows: it can't tell
+        self.assertIsNone(cs.apply_plan_tool("# A\n", "Edit", {"old_string": "B", "new_string": "C"}))
+        self.assertEqual(cs.apply_plan_tool("a a", "MultiEdit", {"edits": [{"old_string": "a", "new_string": "b", "replace_all": True}]}), "b b")
+        self.assertEqual(cs.apply_plan_tool(None, "ExitPlanMode", {"plan": "# P\n"}), "# P\n")
+
+    def test_the_message_has_your_changes_and_comments(self):
+        text = cs.plan_feedback(self.plan, "# Calm plan\n\n1. Do it\n2. Test it well\n",
+                                [{"from": 3, "to": 3, "quote": "1. Do it first", "text": "Why first?"}], self.home)
+        self.assertTrue(text.startswith("Here is my feedback on your plan (~/.claude-work/plans/calm-red-owl.md)."))
+        self.assertIn("stay in plan mode", text)
+        self.assertIn("-1. Do it\n+1. Do it first", text)
+        self.assertIn("Comment 1, on line 3:\n> 1. Do it first\nWhy first?", text)
+        self.assertEqual(cs.plan_feedback(self.plan, self.plan.read_text(), [], self.home), "")  # nothing to say
+        self.assertIn("read ~/.claude-work/plans/calm-red-owl.md again", cs.plan_feedback(self.plan, None, [], self.home))
+
+    def test_a_chat_without_a_process_reopens_in_plan_mode_with_it(self):
+        answer = self.send("--print-command")
+        self.assertTrue(answer["ok"], answer)
+        self.assertEqual(answer["how"], "resumed")
+        words = shlex.split(answer["command"].split("; ", 1)[1])
+        self.assertEqual(words[-5:-1], ["--resume", self.SID, "--permission-mode", "plan"])
+        self.assertIn("-1. Do it\n+1. Do it first", words[-1])
+        self.assertTrue(answer["command"].startswith(f"cd {self.folder} 2>/dev/null; "))
+
+    def test_an_open_chat_gets_it_typed_in_or_pasted(self):
+        w = self.home / ".claude-work"
+        write(w / "sessions/50.json", session(self.SID, cwd=str(self.folder), tmux="s:@1.%3"))
+        with mock.patch.object(jump, "tmux_paste", return_value=(True, "")) as paste:
+            answer = self.send()
+        self.assertEqual((answer["ok"], answer["how"]), (True, "typed"))
+        self.assertIn("Do it first", paste.call_args[0][1])
+        # in a terminal tmux doesn't show: the clipboard, and the chat comes up
+        write(w / "sessions/50.json", session(self.SID, cwd=str(self.folder), status="waiting", waitingFor="permission prompt"))
+        with mock.patch.object(jump, "copy_to_clipboard", return_value=True) as copy, \
+                mock.patch.object(jump, "jump", return_value=(True, "")) as up:
+            answer = self.send()
+        self.assertEqual((answer["how"], answer["copied"], answer["text"]), ("clipboard", True, ""))
+        self.assertIn("keep planning", answer["message"])
+        self.assertIn("Do it first", copy.call_args[0][0])
+        up.assert_called_once()
+        # for VS Code: the text, to paste or type in itself
+        answer = self.send("--print-command", comments=[{"from": 1, "to": 1, "quote": "# Calm plan", "text": "Rename it"}])
+        self.assertEqual(answer["how"], "clipboard")
+        self.assertIn("Rename it", answer["text"])
+
+    def test_the_chat_found_by_the_plans_name(self):
+        transcript = self.home / f".claude-work/projects/-repos-app/{self.SID}.jsonl"
+        profile, found = cs.plan_chat(cs.discover_profiles(self.home), "calm-red-owl")
+        self.assertEqual((profile.key, found), (".claude-work", transcript))
+        self.assertEqual(cs.plan_chat(cs.discover_profiles(self.home), "no-such-plan"), (None, None))
+        self.assertEqual(self.send_to("-")["how"], "resumed")
+
+    def send_to(self, chat):
+        out = io.StringIO()
+        with mock.patch.object(jump.Path, "home", return_value=self.home), \
+                mock.patch.object(jump, "claude_in_terminal", return_value=str(self.bin / "claude")), \
+                contextlib.redirect_stdout(out):
+            jump.main(["--plan-feedback", "calm-red-owl", "--profile", ".claude-work", "--chat", chat, "--print-command"])
+        return json.loads(out.getvalue())
+
+    def test_nothing_to_send_and_a_chat_thats_gone(self):
+        write(self.plan, "# Calm plan\n\n1. Do it\n2. Test it well\n")
+        self.assertEqual(self.send(), {"ok": False, "message": "Nothing to send: the plan is as Claude wrote it, and there are no comments"})
+        out = io.StringIO()
+        with mock.patch.object(jump.Path, "home", return_value=self.home), contextlib.redirect_stdout(out):
+            jump.main(["--plan-feedback", "calm-red-owl", "--chat", "a1b2c3d4-0000-4000-8000-000000000009"])
+        self.assertIn("isn't there any more", json.loads(out.getvalue())["message"])
+
+    def test_a_plan_you_changed_keeps_its_chat_and_says_so(self):
+        def plan():
+            return next(p for p in self.group(self.collect(with_tokens=False), "work")["plans"] if p["slug"] == "calm-red-owl")
+        os.utime(self.plan, (self.now - 10, self.now - 10))  # (as Claude wrote it: before its chat's last line)
+        self.assertEqual((plan()["chatId"], plan()["edited"]), (self.SID, False))
+        # you changed it later: newer than its chat, still its chat (noted before)
+        os.utime(self.plan, (self.now + 3600, self.now + 3600))
+        self.assertEqual((plan()["chatId"], plan()["edited"]), (self.SID, True))
 
 
 class OverlapTests(Fixture):

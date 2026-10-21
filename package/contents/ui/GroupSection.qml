@@ -779,6 +779,25 @@ ColumnLayout {
                                  : i18n("Opens its Markdown file in your text editor (VS Code, if the settings open plans there). What you change there is the plan.")
                     }
                 }
+                // what you changed in it, to the chat that made it (main.qml: sendPlanFeedback)
+                PlasmaComponents3.ToolButton {
+                    visible: !section.remoteHost && !!planLine.plan.chatId
+                    icon.name: "mail-send"
+                    display: PlasmaComponents3.AbstractButton.IconOnly
+                    text: i18n("Send your changes to Claude")
+                    opacity: planHover.hovered || planLine.plan.edited ? 1 : 0
+                    Layout.preferredHeight: planName.implicitHeight
+                    Layout.preferredWidth: Layout.preferredHeight
+                    onClicked: root.sendPlanFeedback(planLine.plan.slug, planLine.plan.profileDir, planLine.plan.chatId)
+
+                    PlasmaCore.ToolTipArea {
+                        textFormat: Text.PlainText
+                        anchors.fill: parent
+                        mainText: i18n("Send your changes to Claude")
+                        subText: (planLine.plan.edited ? i18n("You changed this plan since Claude wrote it.") + " " : "")
+                                 + i18n("Sends what you changed in it (and notes you wrote into it) to the chat that made it: Claude revises the plan, in plan mode. In tmux it's typed in for you; else it goes to the clipboard and the chat comes up, to paste it there. A chat that isn't open reopens in plan mode with it.")
+                    }
+                }
                 PlasmaComponents3.ToolButton {
                     id: planGo
                     icon.name: "media-playback-start"

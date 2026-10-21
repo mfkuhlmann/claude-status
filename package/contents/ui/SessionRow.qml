@@ -240,9 +240,21 @@ RowLayout {
                 onClicked: root.editPlan({ slug: row.session.plan.slug, path: row.session.plan.path,
                                            profileDir: row.session.profileDir }, row.remoteHost)
                 tooltipTitle: i18n("Edit the plan")
-                tooltip: row.remoteHost
-                         ? i18n("Opens its Markdown file on %1 in VS Code (Remote - SSH). What you change there is the plan.", row.remoteHost)
-                         : i18n("Opens its Markdown file in your text editor (VS Code, if the settings open plans there). What you change there is the plan.")
+                tooltip: (row.remoteHost
+                          ? i18n("Opens its Markdown file on %1 in VS Code (Remote - SSH). What you change there is the plan.", row.remoteHost)
+                          : i18n("Opens its Markdown file in your text editor (VS Code, if the settings open plans there). What you change there is the plan."))
+                         + (row.remoteHost ? "" : " " + i18n("Then send your changes to this chat (↩ send to Claude): Claude revises the plan."))
+            }
+            Tag {
+                // you changed its plan since the chat last did anything (claude_status.py: plan_edited)
+                visible: !!row.session.plan && !!row.session.plan.edited && !row.remoteHost && !!row.session.chatId
+                text: i18nc("send your changes to the plan to the chat", "↩ send to Claude")
+                active: true
+                clickable: true
+                onClicked: root.sendPlanFeedback(row.session.plan.slug, row.session.profileDir, row.session.chatId)
+                tooltipTitle: i18n("Send your changes to Claude")
+                tooltip: i18n("You changed this plan since Claude wrote it. Click to send what you changed (and notes you wrote into it) to this chat: Claude revises the plan, in plan mode.")
+                         + "\n\n" + i18n("In tmux it's typed in for you. Else it goes to the clipboard and the chat comes up: paste it there (if Claude asks whether to go ahead with the plan, choose to keep planning first). A chat that isn't open reopens in plan mode with it.")
             }
             Tag {
                 // another chat with a process changed some of the same files (claude_status.py: note_overlaps)

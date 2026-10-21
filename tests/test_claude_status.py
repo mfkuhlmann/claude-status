@@ -1064,6 +1064,20 @@ class SharedCopiesTests(Fixture):
                          [("chat1", "personal", "working", True)])
         self.assertEqual(self.group(r, "personal")["sharedHere"], [])
 
+    def test_record_left_behind_when_kept_only_on_another_account(self):
+        # A background chat of personal, shared, then kept only on work: the
+        # transcript left personal, its finished background record didn't
+        write(self.home / ".claude-work/projects/-w-proj/chat2.jsonl", assistant("m2", self.now - 30, 1) + "\n")
+        write(self.home / ".claude-personal/jobs/chat2/state.json",
+              {"state": "stopped", "tempo": "idle", "sessionId": "chat2", "updatedAt": iso(self.now - 600)})
+        r = self.collect(with_tokens=False)
+        self.assertEqual([g["name"] for g in r["groups"] for s in g["sessions"] if s["sessionId"] == "chat2"], [])
+        # one with no transcript anywhere yet (just started) is still listed
+        write(self.home / ".claude-personal/jobs/fresh/state.json",
+              {"state": "stopped", "tempo": "idle", "sessionId": "fresh", "updatedAt": iso(self.now - 600)})
+        r = self.collect(with_tokens=False)
+        self.assertIn("fresh", [s["sessionId"] for s in self.group(r, "personal")["sessions"]])
+
     def test_shared_chat_points_from_the_other_account(self):
         write(self.home / ".claude-personal/sessions/50.json", session("chat1", status="busy"))
         r = self.collect(with_tokens=False)
