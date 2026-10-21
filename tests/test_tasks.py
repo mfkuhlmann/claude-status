@@ -295,6 +295,17 @@ class FindTests(Fixture):
         ccc = [c for c in self.find("tests")["results"] if c["sessionId"] == "ccc"]
         self.assertEqual([(c["profileDir"], c["account"]) for c in ccc], [(".claude-work", "work · Team")])
 
+    def test_a_chat_and_its_copies_once(self):
+        w = self.home / ".claude-work"
+        t = self.now - 7200
+        start = dict(prompt("refactor the parser", t, cwd="/srv/app"), uuid="u-first")
+        write(w / "projects/-a/fork.jsonl", lines(start, reply("Forked.", t + 50, cwd="/srv/app")))
+        os.utime(w / "projects/-a/fork.jsonl", (t + 60, t + 60))
+        write(w / "projects/-a/aaa.jsonl", lines(start, reply("Done.", t + 1, cwd="/srv/app"),
+                                                 {"type": "ai-title", "aiTitle": "Parser cleanup"}))
+        os.utime(w / "projects/-a/aaa.jsonl", (t + 5, t + 5))
+        self.assertEqual([c["sessionId"] for c in self.find("refactor")["results"]], ["fork"])
+
     def test_limit(self):
         found = self.find("parser", limit=2)
         self.assertEqual((len(found["results"]), found["more"]), (2, True))

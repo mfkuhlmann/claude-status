@@ -3059,7 +3059,7 @@ def find_chats(home, cache_root, extra_dirs, query, limit=FIND_LIMIT):
         plan = next((p.plan for p in members if p.plan), None)
         for p in members:
             accounts[p.key] = (short_id(gid), f"{named.label} · {plan}" if plan else named.label)
-    results, seen, more = [], set(), False
+    results, seen, firsts, more = [], set(), set(), False
     for t, p, f, st in all_transcripts(ctx):
         inode = (st.st_dev, st.st_ino)
         if inode in seen:
@@ -3070,6 +3070,11 @@ def find_chats(home, cache_root, extra_dirs, query, limit=FIND_LIMIT):
         name, cwd, messages = ctx.links.chat_info(f, st)
         if not messages or not all(w in "\n".join([name, cwd, *said]).casefold() for w in words):
             continue
+        # of a chat and its copies (Claude's forks start with its entries), the newest
+        first = ctx.links.first_uuid(f)
+        if first and first in firsts:
+            continue
+        firsts.add(first)
         if len(results) >= limit:
             more = True
             break
@@ -4579,7 +4584,6 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
                         w["forecast"] = usage_forecast(w, usage.points(group["id"], w), now_ms)
             except Exception as exc:
                 errors.append(f"{group['title']}: limits: {exc}")
-            note_limit_stops(group, now_ms)
             if with_tokens:
                 try:
                     caches = [load_token_cache(cache_root, p, now, lock.held) for p in members]
@@ -4615,6 +4619,8 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
     # removed session now: forget it only after a long while
     forget.update(i for i, t in dismissed.items() if not isinstance(t, (int, float)) or now_ms - t > DISMISSED_KEEP_MS)
     link_shared_elsewhere(groups)
+    for g in groups:  # (after place_chats: a row moved to another account goes by that one's limits)
+        note_limit_stops(g, now_ms)
     try:
         # a finished session you removed from the list is still one of your
         # recent chats: it shows there

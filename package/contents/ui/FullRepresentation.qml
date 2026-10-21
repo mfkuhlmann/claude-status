@@ -123,6 +123,14 @@ PlasmaExtras.Representation {
                 }
             }
             Keys.onEscapePressed: root.toggleSearch()
+
+            Connections {   // (cleared when the search closes)
+                target: root
+                function onSearchQueryChanged() {
+                    if (searchField.text !== root.searchQuery)
+                        searchField.text = root.searchQuery
+                }
+            }
         }
 
         PlasmaComponents3.ScrollView {
