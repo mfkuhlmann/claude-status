@@ -38,6 +38,7 @@ import {
 } from "./shared/model";
 import type { ChatRef, FoundChat, Group, PlanItem, Project, Session } from "./shared/types";
 import { localAncestors, type Place, type Terminals } from "./terminals";
+import type { PlanReview } from "./planReview";
 
 const CHAT_LINK = "vscode://anthropic.claude-code/open?session=";
 
@@ -74,6 +75,8 @@ export class Actions {
     private log: vscode.LogOutputChannel,
     private account: AccountSwitch,
   ) {}
+
+  planReview?: PlanReview; // your comments on plans (set once it's there)
 
   private place(host?: string): Place {
     if (!host) return { kind: "local" };
@@ -397,6 +400,52 @@ export class Actions {
     }
     const error = await showMarkdown(uri);
     if (error) this.fail(`Couldn't open the plan: ${error}`);
+  }
+
+  // Your feedback on a plan (what you changed in its file since Claude wrote
+  // it, and your comments on its lines) to the chat that made it, which
+  // revises the plan in plan mode (jump.py --plan-feedback --print-command):
+  // a chat with no process reopens in a terminal with it; one idle in a
+  // terminal of this window gets it typed in (tmux: the backend does);
+  // else it goes to the clipboard and the chat comes up, to paste it there.
+  async sendPlanFeedback(plan: { slug: string; path: string; profileDir: string; chatId?: string | null; title?: string }): Promise<void> {
+    if (this.demoOnly()) return;
+    const uri = vscode.env.remoteName ? vscode.Uri.from({ scheme: "vscode-local", path: plan.path }) : vscode.Uri.file(plan.path);
+    const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri.toString());
+    if (doc?.isDirty) await doc.save(); // (what you changed and didn't save yet counts)
+    const comments = (await this.planReview?.comments(plan.path)) ?? [];
+    const answer = await this.backend.action("jump.py", [
+      "--plan-feedback", plan.slug, "--profile", plan.profileDir, "--chat", plan.chatId || "-",
+      ...(comments.length ? ["--comments", JSON.stringify(comments)] : []), "--print-command", ...configDirArgs(),
+    ]);
+    if (!this.report(answer, "Couldn't send your feedback")) return;
+    this.planReview?.clear(plan.path);
+    const text = typeof answer.text === "string" ? answer.text : "";
+    if (answer.how === "resumed" && answer.command) {
+      await this.terminals.run(`feedback|${plan.chatId ?? plan.slug}`, plan.title || "plan feedback", answer.command, this.place());
+    } else if (answer.how === "clipboard" && text) {
+      const status = this.dash.state().status;
+      const row = (status?.groups ?? []).flatMap((g) => g.sessions).find((s) => s.chatId === plan.chatId && s.pid !== null);
+      const chat = row ? chatRefOf(row) : null;
+      if (chat?.pid && chat.state === "idle" && chat.entrypoint !== "claude-vscode") {
+        const terminal = await this.terminals.find(localAncestors(chat.pid), false);
+        if (terminal) {
+          // as a paste (Claude takes it in as one), then Enter
+          terminal.sendText(`\x1b[200~${text}\x1b[201~`, false);
+          await new Promise((r) => setTimeout(r, 300));
+          terminal.sendText("\r", false);
+          terminal.show();
+          this.dash.setActionInfo("Sent your feedback to the chat");
+          return this.refresh();
+        }
+      }
+      await vscode.env.clipboard.writeText(text);
+      if (chat) await this.open(chat);
+      void vscode.window.showInformationMessage(`Your feedback is in the clipboard. ${answer.message}.`);
+    } else if (answer.message) {
+      this.dash.setActionInfo(answer.message);
+    }
+    this.refresh();
   }
 
   // The chat that made a plan, to change the plan with Claude: its row's

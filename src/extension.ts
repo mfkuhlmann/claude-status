@@ -3,6 +3,7 @@
 // files and reaches SSH hosts with this computer's ssh, so one view shows them
 // all, whichever machine the window is connected to.
 
+import * as path from "node:path";
 import * as vscode from "vscode";
 import { Accounts } from "./accounts";
 import { AccountSwitch } from "./accountSwitch";
@@ -13,6 +14,7 @@ import { extraConfigDirs, settings } from "./config";
 import { markdownLinkFile, openAgentRunFile } from "./agentRun";
 import { Dashboard } from "./dashboard";
 import { Notifier } from "./notify";
+import { PlanReview, planFileOf } from "./planReview";
 import { allGroups, countStates } from "./shared/model";
 import { StatusBar } from "./statusBar";
 import { registerPreview, setUpUsageBars } from "./statusline";
@@ -33,6 +35,28 @@ export function activate(context: vscode.ExtensionContext): void {
   const accounts = new Accounts(backend, dash, terminals, account, log);
   const view = new ViewHost(context.extensionUri, dash, actions);
   const a = actions;
+  const review = new PlanReview(extraConfigDirs);
+  a.planReview = review;
+
+  // Send Feedback to Claude, for a plan's file (the editor's, or the active one)
+  const sendFeedback = (uri?: vscode.Uri) => {
+    const target = uri instanceof vscode.Uri ? uri : vscode.window.activeTextEditor?.document.uri;
+    const file = target ? planFileOf(target, extraConfigDirs()) : null;
+    if (!file) return void vscode.window.showInformationMessage("Claude Status: open a plan's file first (✎ next to a plan).");
+    const state = dash.state();
+    const groups = state.status?.groups ?? [];
+    const listed = groups.flatMap((g) => g.plans ?? []).find((p) => p.path === file.file);
+    const row = groups.flatMap((g) => g.sessions).find((s) => s.plan?.path === file.file);
+    void a.sendPlanFeedback(
+      listed ?? {
+        slug: file.slug,
+        path: file.file,
+        profileDir: row?.profileDir ?? path.dirname(path.dirname(file.file)),
+        chatId: row ? row.chatId : null,
+        title: row?.plan?.title,
+      },
+    );
+  };
 
   context.subscriptions.push(
     log,
@@ -49,6 +73,10 @@ export function activate(context: vscode.ExtensionContext): void {
       account.update(state);
       view.setBadge(countStates(allGroups(state.status, state.hosts)).waiting);
     }),
+    review,
+    vscode.commands.registerCommand("claudeStatus.planComment.add", (reply: vscode.CommentReply) => review.add(reply)),
+    vscode.commands.registerCommand("claudeStatus.planComment.delete", (thread: vscode.CommentThread) => review.remove(thread)),
+    vscode.commands.registerCommand("claudeStatus.sendPlanFeedback", sendFeedback),
     vscode.commands.registerCommand("claudeStatus.switchAccount", () => account.switch()),
     vscode.commands.registerCommand("claudeStatus.accounts", () => accounts.manage()),
     vscode.commands.registerCommand("claudeStatus.addAccount", () => accounts.add()),

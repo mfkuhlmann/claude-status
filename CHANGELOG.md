@@ -36,6 +36,17 @@
   the usage limit* (red), instead of counting them as idle or done.
 - **A recent chat's or a plan's tooltip** shows its whole folder (the
   line may cut it short).
+- **Feedback on a plan, as in a review:** in a plan's file (✎), the **+**
+  next to a line adds a comment for Claude; change the file itself too if
+  you like. **Send Feedback to Claude** (the send button in the editor's
+  title bar, **↩ send to Claude** next to the chat's plan, or the plan's
+  row) sends your comments, with the lines they're on, and exactly what
+  you changed (told apart from Claude's own version of the plan, rebuilt
+  from the chat) to the chat that made it, which revises the plan in plan
+  mode. A chat idle in one of this window's terminals, or in tmux, gets it
+  typed in; one in a Claude Code tab or another terminal gets it on the
+  clipboard and comes up, to paste it there; one that isn't open reopens
+  in plan mode with it.
 - **Plans open in the Markdown preview,** rendered, instead of as a text
   file. To change one, the **✎** next to a chat's **plan ↗** tag, or in
   the plan's row, opens its file in an editor tab (so does the preview's

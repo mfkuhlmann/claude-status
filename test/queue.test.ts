@@ -10,6 +10,7 @@ import { demoState } from "../src/shared/demo";
 import { goOnAt, laterAt, laterDays, limitReset, overlapText, queuedChat, queuedFor, queuedWhat, startText } from "../src/shared/model";
 import type { Group, QueuedTask, Session } from "../src/shared/types";
 import { TransitionTracker } from "../src/transitions";
+import { planPath } from "../src/planReview";
 
 const NOW = 1_800_000_000_000;
 const OPTS = { notifyWaiting: true, notifyDone: true, notifyDoneMinSeconds: 30 };
@@ -45,6 +46,15 @@ test("a chat a usage limit stopped can go on by itself after the reset", () => {
   assert.equal(queuedChat({ queue: [t] } as never, "c1", "lab"), t);
   assert.equal(queuedChat({ queue: [t] } as never, "c1"), null); // (that's the host's chat)
   assert.equal(queuedChat({ queue: [{ ...t, chat: null }] } as never, "c1", "lab"), null);
+});
+
+test("feedback goes with the plan files of Claude's config folders", () => {
+  const file = "/home/alice/.claude-work/plans/calm-red-owl.md";
+  assert.deepEqual(planPath(file, [], "/home/alice"), { slug: "calm-red-owl", file });
+  assert.equal(planPath("/home/alice/.claude/plans/calm-red-owl.md", [], "/home/alice")?.slug, "calm-red-owl");
+  assert.equal(planPath("/home/alice/notes/plans/calm-red-owl.md", [], "/home/alice"), null); // not Claude's
+  assert.equal(planPath("/srv/claude/plans/a.md", ["/srv/claude"], "/home/alice")?.slug, "a"); // a config folder of the settings
+  assert.equal(planPath("/home/alice/.claude-work/plans/notes.txt", [], "/home/alice"), null);
 });
 
 test("a task can start later, at a day and time you pick", () => {

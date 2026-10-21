@@ -69,6 +69,15 @@ export const commands = {
 
 export const extensions = { onDidChange: disposable };
 
+export const comments = {
+  createCommentController: (id: string, label: string) => ({ id, label, options: undefined, commentingRangeProvider: undefined, dispose: () => undefined }),
+};
+
+export enum CommentMode {
+  Editing = 0,
+  Preview = 1,
+}
+
 export const env = { remoteName: undefined as string | undefined, openExternal: async () => true };
 
 export enum ConfigurationTarget {

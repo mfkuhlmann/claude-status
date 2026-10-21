@@ -149,6 +149,17 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
               onClick={() => post({ type: "openPlan", chat, edit: true })}
             />
           ) : null}
+          {s.plan?.edited && !host ? (
+            <Tag
+              text="↩ send to Claude"
+              active
+              title={
+                "You changed this plan since Claude wrote it. Click to send what you changed (and your comments on it) to this chat: Claude revises the plan, in plan mode.\n\n" +
+                "In one of this window's terminals, or in tmux, it's typed in for you. Else it goes to the clipboard and the chat comes up, to paste it there (if Claude asks whether to go ahead with the plan, choose to keep planning first). A chat that isn't open reopens in plan mode with it."
+              }
+              onClick={() => post({ type: "sendPlanFeedback", chat })}
+            />
+          ) : null}
           {changes ? (
             <Tag
               text={`± ${plural(changes.count, "%1 file", "%1 files")}`}

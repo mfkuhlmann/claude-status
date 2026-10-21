@@ -7,6 +7,7 @@ import { useStore } from "../util/store";
 import { togglePlans, uiState } from "../util/ui";
 import { useView } from "./context";
 import { IconButton } from "./IconButton";
+import { Tag } from "./Tag";
 
 // The plans this account's chats wrote in plan mode (<config>/plans), newest
 // first. Folded by default. A plan opens in the Markdown preview (an SSH
@@ -62,10 +63,29 @@ export function PlansList({ group }: { group: Group }) {
                   ⇄
                 </span>
               ) : null}
+              {p.edited && p.chatId && !host ? (
+                <Tag
+                  text="↩ send"
+                  active
+                  title="You changed this plan since Claude wrote it. Click to send what you changed (and your comments on it) to the chat that made it: Claude revises the plan, in plan mode."
+                  onClick={() => post({ type: "sendPlanFeedback", ...ref(p.key) })}
+                />
+              ) : null}
               <span class="small muted nowrap recent-folder" title={p.cwd || p.path}>
                 {planWhere(p, view.now)}
               </span>
               <div class="row-actions">
+                {copy || !p.chatId || host ? null : (
+                  <IconButton
+                    icon="send"
+                    label="Send your feedback to Claude"
+                    title={
+                      (p.edited ? "You changed this plan since Claude wrote it. " : "") +
+                      "Send what you changed in it, and your comments on its lines (the + next to a line, in its file), to the chat that made it: Claude revises the plan, in plan mode."
+                    }
+                    onClick={() => post({ type: "sendPlanFeedback", ...ref(p.key) })}
+                  />
+                )}
                 {copy ? null : (
                   <IconButton
                     icon="edit"

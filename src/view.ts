@@ -188,6 +188,15 @@ export class ViewHost implements vscode.WebviewViewProvider, vscode.Disposable {
         }
         break;
       }
+      case "sendPlanFeedback": {
+        // (this computer's plans: an SSH host's chat isn't sent feedback from here)
+        if (chat?.plan && !chat.host) void this.actions.sendPlanFeedback({ ...chat.plan, profileDir: chat.profileDir, chatId: chat.chatId ?? chat.sessionId });
+        else if (!chat) {
+          const found = this.planOf(m);
+          if (found && !found.group.host) void this.actions.sendPlanFeedback(found.plan);
+        }
+        break;
+      }
       case "carryOutPlan": {
         const found = this.planOf(m);
         if (found) void this.actions.newChat(found.group.id, found.group.host, found.plan);

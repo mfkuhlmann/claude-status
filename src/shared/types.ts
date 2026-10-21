@@ -94,6 +94,7 @@ export interface ChatPlan {
   title: string;
   path: string; // on the machine the chat is on
   updatedAt: number;
+  edited?: boolean; // changed since its chat last did anything: by you (claude_status.py: plan_edited)
 }
 
 // One of an account's plans (claude_status.py: account_plans)
@@ -453,6 +454,7 @@ export type WebviewMessage =
   | { type: "newChat"; groupId: string; host?: string }
   | { type: "handOver"; chat: ChatRef; profile: string }
   | { type: "openPlan"; chat?: ChatRef; groupId?: string; host?: string; plan?: string; edit?: boolean } // a chat's plan, or an account's (edit: its file, to change it)
+  | { type: "sendPlanFeedback"; chat?: ChatRef; groupId?: string; host?: string; plan?: string } // your changes and comments, to the chat that made it
   | { type: "carryOutPlan"; groupId: string; host?: string; plan: string }
   | { type: "continuePlanChat"; groupId: string; host?: string; plan: string }
   | { type: "sharePlan"; groupId: string; host?: string; plan: string }

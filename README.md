@@ -48,8 +48,11 @@ As an editor tab (**Claude Status: Open in Editor Tab**):
   the SSH hosts shown. Pick one to go to it, or to reopen it.
 - **Plans**: a chat that wrote a plan in plan mode gets a **plan ↗** tag
   that shows it in VS Code's Markdown preview, and a **✎** that opens its
-  file to change it (as does **Open Source** in the preview). Each account
-  lists its plans (**Plans**):
+  file to change it (as does **Open Source** in the preview). There, the
+  **+** next to a line adds a comment for Claude, and **Send Feedback to
+  Claude** (the send button in the title bar) sends your comments and your
+  changes to the chat that made the plan: Claude revises it in plan mode.
+  Each account lists its plans (**Plans**):
   open one, carry it out in a new chat (the plan is its first message, with
   what you add), go back to the chat that made it, or share it with your
   other accounts (sharing a chat shares its plan too).

@@ -1661,6 +1661,99 @@ def edit_remote_file(host, path):
     return True, f"Opened {path} on {host} in VS Code"
 
 
+# ---------------------------------------------------------------- feedback on a plan
+
+
+def send_plan_feedback(home, extra_dirs, slug, profile_dir, chat_id, comments=(), print_command=False):
+    """Send your feedback on a plan (what you changed in its file, your
+    comments on its lines: cs.plan_feedback) to the chat that made it, which
+    revises the plan in plan mode. A chat with no process reopens in a
+    terminal in plan mode with it (print_command: the command that does, for
+    VS Code's terminal); one idle in tmux gets it typed into its pane; else
+    it goes to the clipboard and the chat comes up, to paste it there (with
+    print_command, the caller does both). (ok, message, extra): extra's
+    "how" is "resumed", "typed" or "clipboard", with "text" and "copied"."""
+    plan = cs.find_plan(cs.discover_profiles(home, extra_dirs), slug, profile_dir)
+    if plan is None:
+        return False, "That plan isn't there any more", {}
+    chat_profile, transcript = (find_chat(home, extra_dirs, chat_id) if chat_id != "-"
+                                else cs.plan_chat(cs.discover_profiles(home, extra_dirs), slug))
+    if transcript is None:
+        return False, "The chat that made it isn't there any more: carry the plan out in a new chat instead", {}
+    chat_id = transcript.stem
+    text = cs.plan_feedback(plan, cs.claude_plan(transcript, slug), comments, home)
+    if not text:
+        return False, "Nothing to send: the plan is as Claude wrote it, and there are no comments", {}
+    entry = cs.find_chat_entry(home, extra_dirs, chat_id)
+    if entry is None:
+        claude = claude_in_terminal(home)
+        if claude is None:
+            return False, NO_CLAUDE, {}
+        folder = cs.chat_folder(transcript)
+        command = cs.claude_command(chat_profile, ["--resume", chat_id, "--permission-mode", "plan", cs.prompt_arg(text)],
+                                    home, None, folder, claude)
+        if print_command:
+            return True, "Reopening the chat in plan mode with your feedback", {"how": "resumed",
+                                                                               "command": cs.in_folder(folder, command)}
+        if not open_terminal(folder, command):
+            return False, "No terminal found to reopen the chat in", {}
+        return True, "Reopened the chat in plan mode with your feedback", {"how": "resumed"}
+    state = cs.session_state(entry)
+    if entry.get("kind") == "interactive" and entry.get("tmux") and state == "idle":
+        ok, _ = tmux_paste(entry, text)
+        if ok:
+            return True, "Sent your feedback to the chat (typed into its tmux pane)", {"how": "typed"}
+    hint = ("Choose to keep planning there, then paste it" if state == "waiting"
+            else "Paste it into the chat (Ctrl+Shift+V in a terminal)")
+    if print_command:
+        return True, hint, {"how": "clipboard", "text": text, "copied": False}
+    copied = copy_to_clipboard(text)
+    jump(home, extra_dirs, chat_id, chat_profile.key)
+    return True, f"Your feedback is in the clipboard. {hint}." if copied else hint, \
+        {"how": "clipboard", "text": "" if copied else text, "copied": copied}
+
+
+def tmux_paste(entry, text):
+    """Paste text into the tmux pane of a chat and send it (Enter): (ok, message)."""
+    tmux = shutil.which("tmux")
+    pane = entry.get("tmux")
+    if tmux is None or not isinstance(pane, str) or not pane:
+        return False, "tmux isn't there"
+    socket = cs.tmux_socket(entry["pid"])
+    base = [tmux, *(["-S", socket] if socket else [])]
+    target = pane.rsplit(".", 1)[-1] if "." in pane else pane  # its pane id, e.g. %3
+    try:
+        for args, data in ((["load-buffer", "-b", "claude-status", "-"], text.encode()),
+                           (["paste-buffer", "-p", "-d", "-b", "claude-status", "-t", target], None),
+                           (["send-keys", "-t", target, "Enter"], None)):
+            if args[0] == "send-keys":
+                time.sleep(0.3)  # (Claude takes the paste in first)
+            r = subprocess.run(base + args, input=data, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=10)
+            if r.returncode != 0:
+                return False, f"tmux: {r.stderr.decode(errors='replace').strip()}"
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, f"tmux didn't answer: {exc}"
+    return True, ""
+
+
+def copy_to_clipboard(text):
+    """Put text on the clipboard (wl-copy on Wayland, else xclip or xsel): whether it worked."""
+    tools = ([["wl-copy"]] if os.environ.get("WAYLAND_DISPLAY") else []) \
+        + [["xclip", "-selection", "clipboard"], ["xsel", "--clipboard", "--input"]]
+    for args in tools:
+        exe = shutil.which(args[0])
+        if exe is None:
+            continue
+        try:  # (they stay on to hand it out: not with our output, which the widget waits for)
+            r = subprocess.run([exe, *args[1:]], input=text.encode(), stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if r.returncode == 0:
+            return True
+    return False
+
+
 def share_plan(home, extra_dirs, slug, profile_dir=None, to=None):
     """Share a plan (from profile_dir's copy) with every profile, or only with to."""
     return sharing.plan_sharing(cs.discover_profiles(home, extra_dirs), slug, profile_dir, True, to)
@@ -1706,6 +1799,8 @@ USAGE = ("usage: jump.py [--stop [--busy] | --interrupt] SESSION_ID [--profile P
          "               (share it and reopen it there, or print the command; --end-first: quit an idle session first)\n"
          "       jump.py --open-plan|--edit-plan|--share-plan|--unshare-plan SLUG [--profile PROFILE] [--to PROFILE]\n"
          "       jump.py --remote-edit HOST PATH   (a file of an SSH host, in VS Code)\n"
+         "       jump.py --plan-feedback SLUG --profile PROFILE --chat CHAT_ID|- [--comments JSON] [--print-command]\n"
+         "               (- : the chat whose slug it is)\n"
          "       jump.py --queue PROFILE [--cwd FOLDER | --choose-folder] --at MS [--prompt TEXT] [--plan SLUG [--plan-profile P]]\n"
          "               [--host HOST] [--account TITLE] [--scheduled]\n"
          "               (a background task that starts at MS: a limit's reset, or --scheduled: a time you picked)\n"
@@ -1742,6 +1837,7 @@ def main(argv=None):
     agent_id, open_it, run_file, account, vscode_terminal = None, True, None, None, None
     task, background, end_first, to = Task(), False, False, None
     start_at, queue_host, account_title, scheduled = None, "", "", False
+    feedback_plan, comments, extra_out = None, [], {}
     while args:
         arg = args.pop(0)
         if arg == "--config-dir" and args:
@@ -1764,6 +1860,15 @@ def main(argv=None):
             start_at = int(args.pop(0))
         elif arg == "--scheduled":
             scheduled = True
+        elif arg == "--plan-feedback" and args:
+            action, feedback_plan = send_plan_feedback, args.pop(0)
+        elif arg == "--comments" and args:
+            try:
+                comments = json.loads(args.pop(0))
+            except ValueError:
+                sys.exit(USAGE)
+            if not isinstance(comments, list):
+                sys.exit(USAGE)
         elif arg == "--host" and args:
             queue_host = args.pop(0)
         elif arg == "--account" and args and action in (queue_task, queue_continue):
@@ -1843,7 +1948,9 @@ def main(argv=None):
         sys.exit(USAGE)
     if not session_id or (action in (continue_on, unshare, unshare_plan, queue_continue) and not profile_dir):
         sys.exit(USAGE)
-    if print_command and action is not continue_on:
+    if print_command and action not in (continue_on, send_plan_feedback):
+        sys.exit(USAGE)
+    if (action is send_plan_feedback) != (feedback_plan is not None) or (comments and action is not send_plan_feedback):
         sys.exit(USAGE)
     if (task or background) and action not in (new_chat, "--remote-new-vscode", queue_task, queue_continue):
         sys.exit(USAGE)
@@ -1866,7 +1973,11 @@ def main(argv=None):
         sys.exit(USAGE)
     command, comparison = None, None
     try:
-        if print_command:
+        if action is send_plan_feedback:
+            ok, message, extra_out = send_plan_feedback(Path.home(), extra, feedback_plan, profile_dir, session_id,
+                                                        comments, print_command)
+            command = extra_out.pop("command", None)
+        elif print_command:
             ok, message, command = continue_command(Path.home(), extra, session_id, profile_dir, end_first)
         elif action is continue_on:
             ok, message = continue_on(Path.home(), extra, session_id, profile_dir, end_first)
@@ -1928,7 +2039,7 @@ def main(argv=None):
     print(json.dumps({"ok": ok, "message": message, **({"command": command} if command else {}),
                       **({"comparison": comparison} if comparison else {}),
                       **({"devices": devices} if devices is not None else {}),
-                      **({"file": run_file} if run_file else {})}))
+                      **({"file": run_file} if run_file else {}), **extra_out}))
 
 
 if __name__ == "__main__":

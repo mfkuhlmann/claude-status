@@ -691,7 +691,8 @@ def parked_row(profile, home, ctx, d, job, roster):
         kind="bg", entrypoint="", state=state, reason=reason, waiting_for="",
         detail=clean_text(job.get("needs") if state == "waiting" else job.get("detail") if state == "done" else ""),
         since=to_ms(job.get("updatedAt")), started_at=to_ms(job.get("createdAt")))
-    return finish_row(row, job, d.name, profile, ctx, alive=False)
+    row = finish_row(row, job, d.name, profile, ctx, alive=False)
+    return None if handed_over(profile, row["chatId"], ctx.profiles) else row
 
 
 def finish_row(row, job, job_id, profile, ctx, alive):
@@ -709,6 +710,8 @@ def finish_row(row, job, job_id, profile, ctx, alive):
         row["peek"] = chats.peek(path)
         peek = row["peek"] or {}
         row["plan"] = plan_of(profile, peek.get("slug"))
+        if row["plan"] is not None:
+            row["plan"]["edited"] = plan_edited(row["plan"]["updatedAt"], mtime(path) if path is not None else None)
         if peek.get("stopped") and row["state"] == "waiting" and not row["waitingFor"] \
                 and isinstance(job, dict) and job.get("tempo") == "blocked":
             # a background session a usage limit stopped is "blocked" ("rate
@@ -2368,6 +2371,15 @@ def chat_link(row, job, profile, ctx):
     return chat, None
 
 
+def handed_over(profile, chat, profiles):
+    """The chat isn't this profile's any more: it has no transcript of it, and
+    another profile has (a shared chat kept only there, sharing.py's
+    --unshare). A background record of it left here is stale."""
+    if transcript_path(profile, chat) is not None:
+        return False
+    return any(p.real != profile.real and transcript_path(p, chat) is not None for p in profiles)
+
+
 def chat_id(session):
     """The conversation a row shows (a background session that took a chat
     over has an id of its own but is that chat)."""
@@ -2957,6 +2969,12 @@ def plan_of(profile, slug):
     return {"slug": slug, "title": plan_title(path) or slug, "path": str(path), "updatedAt": int(st.st_mtime * 1000)}
 
 
+def plan_edited(plan_ms, transcript_mtime):
+    """Was the plan changed after its chat last did anything (so not by
+    Claude: by you, e.g. with the widget's edit button)?"""
+    return isinstance(transcript_mtime, (int, float)) and plan_ms / 1000 > transcript_mtime + 2
+
+
 class SlugCache:
     """Each transcript's slug (the name of the plan it would write), read from
     its end and kept in plans.json until the transcript grows."""
@@ -2984,6 +3002,15 @@ class SlugCache:
             self.changed = True
         self.data["slugs"][key] = [st.st_size, slug]
         return slug or None
+
+    def cached(self, st):
+        """The slug noted for this transcript as it is, without reading it; None if there's none."""
+        key = file_key(st)
+        cached = self.data["slugs"].get(key, self.old.get("slugs", {}).get(key))
+        if not (isinstance(cached, list) and len(cached) == 2 and cached[0] == st.st_size and isinstance(cached[1], str)):
+            return None
+        self.data["slugs"][key] = cached
+        return cached[1] or None
 
     def save(self):
         kept = keep_unused(self.old, self.data, ("slugs",), time.time())
@@ -3080,7 +3107,7 @@ def account_plans(group, ctx, limit=PLANS_LISTED):
             # linked into another profile's plans too (sharing.py)
             "shared": st.st_nlink > 1 and any(q.real != p.real and same_file(plan_path(q, f.stem), st)
                                               for q in ctx.profiles),
-            "chatId": None, "chatProfileDir": None, "cwd": "", "cwdShort": "",
+            "chatId": None, "chatProfileDir": None, "cwd": "", "cwdShort": "", "edited": False,
         })
     if plans:
         find_plan_chats(plans, ctx)
@@ -3098,22 +3125,145 @@ def same_file(path, st):
 def find_plan_chats(plans, ctx):
     """The chat that made each plan: the newest transcript with its slug. It
     was active when the plan was written, so only transcripts changed since
-    the oldest plan's time are looked at."""
+    the oldest plan's time are read; older ones count with the slug noted
+    for them then (a plan you changed since is newer than its chat)."""
     slugs = getattr(ctx, "slugs", None)
     if slugs is None:
         return
     wanted = {pl["slug"]: pl for pl in plans}
     oldest = min(pl["updatedAt"] for pl in plans) / 1000 - 60
     for t, p, f, st in all_transcripts(ctx):
-        if t < oldest or not wanted:
+        if not wanted:
             break
-        slug = slugs.slug(f, st)
+        slug = slugs.slug(f, st) if t >= oldest else slugs.cached(st)
         pl = wanted.pop(slug, None) if slug else None
         if pl is None:
             continue
         _, cwd, _ = ctx.links.chat_info(f, st)
         pl["chatId"], pl["chatProfileDir"] = f.stem, p.key
         pl["cwd"], pl["cwdShort"] = cwd, short_path(cwd, ctx.home) if cwd else ""
+        pl["edited"] = plan_edited(pl["updatedAt"], t)
+
+
+# ---------------------------------------------------------------- feedback on a plan
+#
+# You change a plan (its file) or comment on its lines (VS Code), then send
+# that to the chat that made it, which revises the plan in plan mode. What
+# you changed is told apart from what Claude wrote by Claude's own version
+# of the plan, rebuilt from the chat's transcript (claude_plan): what it
+# last wrote to the file (Write), with its edits since (Edit, MultiEdit),
+# or the plan it presented (ExitPlanMode's "plan"), counting only the tool
+# calls that went through.
+
+PLAN_FEEDBACK_MAX = 90_000  # characters of a message (one argument can be 128 KB)
+PLAN_TOOLS = ("Write", "Edit", "MultiEdit", "ExitPlanMode")
+
+
+def claude_plan(transcript, slug):
+    """The plan <slug>.md as Claude last wrote it, from its transcript; None
+    when that can't be told (no full version, or an edit that doesn't fit)."""
+    text, pending = None, {}
+    name_end = f"/plans/{slug}.md"
+    try:
+        with open(transcript, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if name_end not in line and not any(i in line for i in pending):
+                    continue
+                try:
+                    e = json.loads(line)
+                except ValueError:
+                    continue
+                content = (e.get("message") or {}).get("content") if isinstance(e.get("message"), dict) else None
+                for c in content if isinstance(content, list) else []:
+                    if not isinstance(c, dict):
+                        continue
+                    if c.get("type") == "tool_use" and c.get("name") in PLAN_TOOLS and isinstance(c.get("input"), dict):
+                        inp = c["input"]
+                        where = inp.get("planFilePath") if c["name"] == "ExitPlanMode" else inp.get("file_path")
+                        if isinstance(where, str) and where.endswith(name_end) and isinstance(c.get("id"), str):
+                            pending[c["id"]] = (c["name"], inp)
+                    elif c.get("type") == "tool_result" and c.get("tool_use_id") in pending:
+                        name, inp = pending.pop(c["tool_use_id"])
+                        if c.get("is_error") and name != "ExitPlanMode":
+                            continue  # (refused: the file didn't change; a plan you didn't approve still is the file)
+                        text = apply_plan_tool(text, name, inp)
+    except OSError:
+        return None
+    return text
+
+
+def plan_chat(profiles, slug, limit=2000):
+    """(profile, transcript) of the chat that made a plan: the newest chat
+    with its slug at its end (entries carry it), else (None, None)."""
+    found = []
+    for p in profiles:
+        try:
+            files = list(p.path.glob("projects/*/*.jsonl"))
+        except OSError:
+            continue
+        for f in files:
+            if not valid_id(f.stem):
+                continue
+            try:
+                found.append((f.stat().st_mtime, p, f))
+            except OSError:
+                pass
+    found.sort(key=lambda c: -c[0])
+    needle = re.compile(rb'"slug":\s*"' + re.escape(slug.encode()) + rb'"')
+    for _, p, f in found[:limit]:
+        try:
+            with open(f, "rb") as fh:
+                fh.seek(max(0, fh.seek(0, 2) - 65536))
+                if needle.search(fh.read()):
+                    return p, f
+        except OSError:
+            continue
+    return None, None
+
+
+def apply_plan_tool(text, name, inp):
+    """The plan after one of Claude's tool calls on it (None: lost track)."""
+    if name == "ExitPlanMode":
+        return inp["plan"] if isinstance(inp.get("plan"), str) and inp["plan"].strip() else text
+    if name == "Write":
+        return inp["content"] if isinstance(inp.get("content"), str) else None
+    edits = inp.get("edits") if name == "MultiEdit" else [inp]
+    for ed in edits if isinstance(edits, list) else [None]:
+        old, new = (ed or {}).get("old_string"), (ed or {}).get("new_string")
+        if text is None or not isinstance(old, str) or not isinstance(new, str) or old not in text:
+            return None
+        text = text.replace(old, new) if ed.get("replace_all") else text.replace(old, new, 1)
+    return text
+
+
+def plan_feedback(plan, original, comments=(), home=None):
+    """The message that gives Claude your feedback on a plan (a path): what
+    you changed in it (a diff from original, Claude's version; None when that
+    isn't known) and your comments [{"from", "to", "quote", "text"}] on its
+    lines; "" when there's nothing to say."""
+    import difflib
+    with open(plan, encoding="utf-8", errors="replace") as f:
+        current = f.read()
+    where = short_folder(str(plan), home)
+    parts = []
+    if original is not None and original != current:
+        diff = "".join(difflib.unified_diff(original.splitlines(True), current.splitlines(True),
+                                            "the plan as you wrote it", "the plan as I changed it", n=2))
+        if len(diff) > PLAN_FEEDBACK_MAX // 2:
+            diff = diff[:PLAN_FEEDBACK_MAX // 2] + "\n… (more changes: read the file)\n"
+        parts.append(f"I changed the plan file. My changes:\n\n```diff\n{diff.rstrip()}\n```")
+    elif original is None:
+        parts.append(f"I changed the plan file: read {where} again for my changes.")
+    for i, c in enumerate(c for c in comments if isinstance(c, dict) and str(c.get("text") or "").strip()):
+        first, last = c.get("from"), c.get("to")
+        lines = (f"line {first}" if first == last else f"lines {first}–{last}") if isinstance(first, int) else "the plan"
+        quote = "\n".join("> " + l for l in str(c.get("quote") or "").strip("\n").splitlines()[:12])
+        parts.append(f"Comment {i + 1}, on {lines}:\n" + (quote + "\n" if quote else "") + str(c["text"]).strip())
+    if not parts:
+        return ""
+    head = (f"Here is my feedback on your plan ({where}). Revise the plan with it, and stay in plan mode: "
+            "show me the revised plan before you change anything else.")
+    return (head + "\n\n" + "\n\n".join(parts))[:PLAN_FEEDBACK_MAX]
 
 
 # ---------------------------------------------------------------- finding a chat

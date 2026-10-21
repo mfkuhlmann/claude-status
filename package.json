@@ -142,6 +142,22 @@
         "command": "claudeStatus.addAccount",
         "title": "Add Claude Account…",
         "category": "Claude Status"
+      },
+      {
+        "command": "claudeStatus.sendPlanFeedback",
+        "title": "Send Feedback to Claude",
+        "category": "Claude Status",
+        "icon": "$(send)"
+      },
+      {
+        "command": "claudeStatus.planComment.add",
+        "title": "Add Comment for Claude",
+        "enablement": "!commentIsEmpty"
+      },
+      {
+        "command": "claudeStatus.planComment.delete",
+        "title": "Delete Comment",
+        "icon": "$(trash)"
       }
     ],
     "keybindings": [
@@ -202,6 +218,37 @@
           "command": "claudeStatus.accounts",
           "when": "view == claudeStatus.view",
           "group": "more@6"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "claudeStatus.sendPlanFeedback",
+          "group": "navigation",
+          "when": "resourcePath =~ /\\/\\.claude[^/]*\\/plans\\/[^/]+\\.md$/"
+        }
+      ],
+      "comments/commentThread/context": [
+        {
+          "command": "claudeStatus.planComment.add",
+          "group": "inline",
+          "when": "commentController == claudeStatus.planFeedback"
+        }
+      ],
+      "comments/commentThread/title": [
+        {
+          "command": "claudeStatus.planComment.delete",
+          "group": "navigation",
+          "when": "commentController == claudeStatus.planFeedback && !commentThreadIsEmpty"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "claudeStatus.planComment.add",
+          "when": "false"
+        },
+        {
+          "command": "claudeStatus.planComment.delete",
+          "when": "false"
         }
       ]
     },

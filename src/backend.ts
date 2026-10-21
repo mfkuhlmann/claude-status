@@ -32,6 +32,8 @@ export interface Answer {
   message: string;
   command?: string; // jump.py --print-command: the shell command to run instead
   file?: string; // --agent-run --no-open: the file it saved
+  how?: "resumed" | "typed" | "clipboard"; // --plan-feedback: how it reaches the chat
+  text?: string; // --plan-feedback --print-command: the feedback, to paste or type in
 }
 
 // The environment for helpers: VS Code's own variables would leak into the
