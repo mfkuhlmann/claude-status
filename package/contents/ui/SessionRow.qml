@@ -421,6 +421,30 @@ RowLayout {
             visible: row.stepText !== "" || row.tasks !== null
             implicitHeight: stepRow.implicitHeight
 
+            // Under the line, so its buttons get their own clicks and tooltips
+            PlasmaCore.ToolTipArea {
+                textFormat: Text.PlainText
+                anchors.fill: parent
+                active: stepLabel.truncated || row.hasPeek
+                mainText: row.session.state === "waiting" ? i18n("What it needs")
+                          : row.session.state === "working" ? i18n("What it's doing")
+                          : row.stopped ? (row.stopped.kind === "login" ? i18n("Its login expired") : i18n("A usage limit stopped it"))
+                          : row.showsRecap ? i18n("Claude's recap")
+                          : row.showsReply ? i18n("What Claude said last") : i18n("Result")
+                subText: (stepLabel.truncated ? row.stepText + (row.hasPeek ? "\n\n" : "") : "")
+                         + (!row.hasPeek ? "" : row.showPeek ? i18n("Click to fold it up again.")
+                                                             : i18n("Click to read your last prompt, Claude's reply and the chat's tasks."))
+
+                MouseArea {
+                    id: stepMouse
+                    anchors.fill: parent
+                    enabled: row.hasPeek
+                    hoverEnabled: true
+                    cursorShape: row.hasPeek ? Qt.PointingHandCursor : Qt.ArrowCursor
+                    onClicked: root.togglePeek(row.rowKey)
+                }
+            }
+
             RowLayout {
                 id: stepRow
                 anchors.fill: parent
@@ -520,29 +544,6 @@ RowLayout {
                     Layout.preferredWidth: Kirigami.Units.iconSizes.small
                     Layout.preferredHeight: Layout.preferredWidth
                     opacity: stepMouse.containsMouse ? 0.9 : 0.4
-                }
-            }
-
-            PlasmaCore.ToolTipArea {
-                textFormat: Text.PlainText
-                anchors.fill: parent
-                active: stepLabel.truncated || row.hasPeek
-                mainText: row.session.state === "waiting" ? i18n("What it needs")
-                          : row.session.state === "working" ? i18n("What it's doing")
-                          : row.stopped ? (row.stopped.kind === "login" ? i18n("Its login expired") : i18n("A usage limit stopped it"))
-                          : row.showsRecap ? i18n("Claude's recap")
-                          : row.showsReply ? i18n("What Claude said last") : i18n("Result")
-                subText: (stepLabel.truncated ? row.stepText + (row.hasPeek ? "\n\n" : "") : "")
-                         + (!row.hasPeek ? "" : row.showPeek ? i18n("Click to fold it up again.")
-                                                             : i18n("Click to read your last prompt, Claude's reply and the chat's tasks."))
-
-                MouseArea {
-                    id: stepMouse
-                    anchors.fill: parent
-                    enabled: row.hasPeek
-                    hoverEnabled: true
-                    cursorShape: row.hasPeek ? Qt.PointingHandCursor : Qt.ArrowCursor
-                    onClicked: root.togglePeek(row.rowKey)
                 }
             }
         }
