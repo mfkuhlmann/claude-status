@@ -1079,6 +1079,10 @@ PlasmoidItem {
     // starts the chat there (startChat): in a terminal, in VS Code's Claude
     // extension (the switch above them) or, with a task, in the background.
     property string newChatGroup: ""   // group key of the account whose folders are open
+    onNewChatGroupChanged: {
+        if (newChatFolder && newChatFolder.groupKey !== newChatGroup)
+            newChatFolder = null   // (the search's folder was for that box only)
+    }
     property bool digestSeen: false
     onExpandedChanged: {
         if (!root.expanded) {
@@ -1128,6 +1132,10 @@ PlasmoidItem {
         let folders = host ? group.projects.slice() : group.projects.filter(f => f.short !== "~")
         if (host && !folders.some(f => f.short === "~"))
             folders.push({ path: "", short: "~", newChatCommand: group.homeChatCommand || "", trusted: false })
+        // a project folder the search found comes first (openFoundProject)
+        const found = !plan && newChatFolder && newChatFolder.groupKey === (host ? host + "/" : "") + group.id ? newChatFolder : null
+        if (found)
+            folders = [folders.find(f => f.path === found.path) || found].concat(folders.filter(f => f.path !== found.path))
         if (plan && plan.cwd) {
             const own = folders.find(f => f.path === plan.cwd)
             folders = [own || { path: plan.cwd, short: plan.cwdShort || plan.cwd, newChatCommand: "" }]
@@ -1967,12 +1975,21 @@ PlasmoidItem {
                                                                          && group.profileKeys.indexOf(t.profile) >= 0)
     }
 
+    // (the copy that notifies starts them; a task whose account is at its
+    // usage limit right now waits on until that resets: jump.py --requeue)
     function startDueTasks(queue) {
         if (!root.notifier)
             return
-        for (const t of queue)
-            if (t.due && !startingTasks[t.id])
+        for (const t of queue) {
+            if (!t.due || startingTasks[t.id])
+                continue
+            const group = hostGroups(t.host || "").find(g => g.profileKeys.indexOf(t.profile) >= 0)
+            const reset = group ? limitReset(group, t.host || "") : null
+            if (reset)
+                runHelper("--requeue " + shellQuote(t.id) + " --at " + Math.round(reset.at + 60000))
+            else
                 startQueued(t)
+        }
     }
 
     function startQueued(t) {
@@ -2198,12 +2215,28 @@ PlasmoidItem {
             const result = root.helperResult(data)
             root.searchResults = Object.assign({}, root.searchResults, { [asked[0]]: {
                 busy: false, results: result.ok ? result.results || [] : [], more: !!result.more,
+                projects: result.ok ? result.projects || [] : [], plans: result.ok ? result.plans || [] : [],
+                memories: result.ok ? result.memories || [] : [],
                 error: result.ok ? "" : (result.message || result.error || i18n("no answer")) } })
         }
     }
 
     function openFound(result, host) {
         openChatById(result.sessionId, result.profileDir, result.cwd, result.openCommand || "", result.groupId, host)
+    }
+
+    // A project folder the search found: the new-chat box of the account its
+    // newest chat is on opens, with that folder first
+    property var newChatFolder: null   // {groupKey, path, short, newChatCommand}
+
+    function openFoundProject(project, host) {
+        const key = (host ? host + "/" : "") + project.groupId
+        newChatFolder = { groupKey: key, path: project.folder, short: project.folderShort, newChatCommand: "" }
+        planComposer = ""
+        newChatGroup = key
+        searchOpen = false
+        searchQuery = ""
+        searchResults = ({})
     }
 
     // ---------------------------------------------------------------- plans
@@ -2219,6 +2252,12 @@ PlasmoidItem {
     }
 
     property var expandedMemories: ({})   // accounts showing their memories
+
+    // A memory's icon by its kind (claude_status.py: account_memories)
+    function memoryIcon(type) {
+        return ({ user: "user-identity", feedback: "dialog-messages", project: "folder-documents", reference: "bookmarks",
+                  account: "configure" })[type] || "note"
+    }
 
     function toggleMemories(groupKey, wasOpen) {
         expandedMemories = Object.assign({}, expandedMemories, { [groupKey]: !wasOpen })

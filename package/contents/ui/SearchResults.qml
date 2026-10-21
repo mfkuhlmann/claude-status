@@ -7,6 +7,8 @@ import org.kde.kirigami as Kirigami
 // What "Find a chat" found (main.qml: runSearch): on this computer, then on
 // each SSH host shown, newest first. Click one to bring it up where it runs,
 // or to reopen it (in a terminal or VS Code, as the switch of Recent chats says).
+// After the chats: the project folders, plans and memories with those words
+// (a folder opens the new-chat box, a plan or a memory opens to read).
 ColumnLayout {
     id: found
 
@@ -22,6 +24,10 @@ ColumnLayout {
             required property int index
             readonly property string host: found.sources[index] || ""
             readonly property var answer: root.searchResults[host] || ({ busy: false, results: [], more: false, error: "" })
+            readonly property var projects: answer.projects || []
+            readonly property var plans: answer.plans || []
+            readonly property var memories: answer.memories || []
+            readonly property bool nothing: answer.results.length + projects.length + plans.length + memories.length === 0
 
             Layout.fillWidth: true
             Layout.leftMargin: Kirigami.Units.smallSpacing
@@ -42,7 +48,10 @@ ColumnLayout {
                     Layout.fillWidth: true
                     text: (block.host || i18n("This computer"))
                           + (block.answer.busy ? "" : " · " + i18np("%1 chat", "%1 chats", block.answer.results.length)
-                                                       + (block.answer.more ? "+" : ""))
+                                                       + (block.answer.more ? "+" : "")
+                                                       + (block.projects.length ? ", " + i18np("%1 folder", "%1 folders", block.projects.length) : "")
+                                                       + (block.plans.length ? ", " + i18np("%1 plan", "%1 plans", block.plans.length) : "")
+                                                       + (block.memories.length ? ", " + i18np("%1 memory", "%1 memories", block.memories.length) : ""))
                     font.bold: true
                     opacity: 0.8
                     elide: Text.ElideRight
@@ -68,10 +77,92 @@ ColumnLayout {
             PlasmaComponents3.Label {
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
-                visible: !block.answer.busy && block.answer.error === "" && block.answer.results.length === 0
-                text: i18n("No chat with all of these words in its name, folder or your prompts.")
+                visible: !block.answer.busy && block.answer.error === "" && block.nothing
+                text: i18n("Nothing with all of these words: no chat (its name, folder or your prompts), project folder, plan or memory.")
                 opacity: 0.6
                 wrapMode: Text.Wrap
+                font: Kirigami.Theme.smallFont
+            }
+
+            // project folders: click for a new chat there
+            PlasmaComponents3.Label {
+                textFormat: Text.PlainText
+                Layout.leftMargin: Kirigami.Units.gridUnit
+                visible: block.projects.length > 0
+                text: i18n("Folders")
+                opacity: 0.6
+                font: Kirigami.Theme.smallFont
+            }
+            Repeater {
+                model: block.projects.length
+                delegate: FoundLine {
+                    required property int index
+                    readonly property var project: block.projects[index] || ({ folder: "", folderShort: "", chats: 0, lastActive: 0, account: "", groupId: "" })
+                    icon: "folder"
+                    text: project.folderShort || project.folder
+                    detail: i18np("%1 chat", "%1 chats", project.chats) + " · " + i18nc("how long ago", "%1 ago", root.duration(root.now - project.lastActive))
+                    account: root.hostGroups(block.host).length > 1 ? project.profile : ""
+                    tipTitle: project.folder
+                    tip: i18n("Click to start a new chat in this folder on %1: its new-chat box opens with this folder first.", project.account)
+                    onActivated: root.openFoundProject(project, block.host)
+                }
+            }
+
+            // plans: click to read one
+            PlasmaComponents3.Label {
+                textFormat: Text.PlainText
+                Layout.leftMargin: Kirigami.Units.gridUnit
+                visible: block.plans.length > 0
+                text: i18n("Plans")
+                opacity: 0.6
+                font: Kirigami.Theme.smallFont
+            }
+            Repeater {
+                model: block.plans.length
+                delegate: FoundLine {
+                    required property int index
+                    readonly property var plan: block.plans[index] || ({ slug: "", title: "", profileDir: "", updatedAt: 0, account: "" })
+                    icon: "view-task"
+                    text: plan.title
+                    detail: i18nc("how long ago", "%1 ago", root.duration(root.now - plan.updatedAt))
+                    account: root.hostGroups(block.host).length > 1 ? plan.profile : ""
+                    tipTitle: plan.title
+                    tip: i18n("A plan on %1. Click to read it.", plan.account)
+                    onActivated: root.openPlan(plan.slug, plan.profileDir, block.host)
+                }
+            }
+
+            // memories: click to read one
+            PlasmaComponents3.Label {
+                textFormat: Text.PlainText
+                Layout.leftMargin: Kirigami.Units.gridUnit
+                visible: block.memories.length > 0
+                text: i18n("Memories")
+                opacity: 0.6
+                font: Kirigami.Theme.smallFont
+            }
+            Repeater {
+                model: block.memories.length
+                delegate: FoundLine {
+                    required property int index
+                    readonly property var memory: block.memories[index] || ({ name: "", description: "", type: "", path: "", folderShort: "", updatedAt: 0, account: "" })
+                    icon: root.memoryIcon(memory.type)
+                    text: memory.description || memory.name
+                    detail: memory.folderShort || i18n("every folder")
+                    account: root.hostGroups(block.host).length > 1 ? memory.profile : ""
+                    tipTitle: memory.name
+                    tip: i18n("A memory on %1. Click to read it.", memory.account)
+                    enabled: !block.host || root.vscodeInstalled
+                    onActivated: root.openMemory(memory, block.host, false)
+                }
+            }
+
+            PlasmaComponents3.Label {
+                textFormat: Text.PlainText
+                Layout.leftMargin: Kirigami.Units.gridUnit
+                visible: block.answer.results.length > 0 && block.projects.length + block.plans.length + block.memories.length > 0
+                text: i18n("Chats")
+                opacity: 0.6
                 font: Kirigami.Theme.smallFont
             }
 
@@ -171,6 +262,7 @@ ColumnLayout {
                 opacity: 0.6
                 font: Kirigami.Theme.smallFont
             }
+
         }
     }
 

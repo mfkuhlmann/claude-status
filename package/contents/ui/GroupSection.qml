@@ -905,8 +905,7 @@ ColumnLayout {
             }
 
             Kirigami.Icon {
-                source: ({ user: "user-identity", feedback: "dialog-messages", project: "folder-documents", reference: "bookmarks" })[memoryLine.memory.type]
-                        || "note"
+                source: root.memoryIcon(memoryLine.memory.type)
                 Layout.preferredWidth: Kirigami.Units.iconSizes.small
                 Layout.preferredHeight: Layout.preferredWidth
                 opacity: 0.7
@@ -943,8 +942,9 @@ ColumnLayout {
             }
             PlasmaComponents3.Label {
                 textFormat: Text.PlainText
-                text: memoryLine.memory.folderShort
-                      ? i18nc("memory: folder, how long ago", "%1 · %2 ago", memoryLine.memory.folderShort, root.duration(root.now - memoryLine.memory.updatedAt))
+                text: memoryLine.memory.folderShort || memoryLine.memory.type === "account"
+                      ? i18nc("memory: folder, how long ago", "%1 · %2 ago", memoryLine.memory.folderShort || i18n("every folder"),
+                              root.duration(root.now - memoryLine.memory.updatedAt))
                       : i18nc("memory: how long ago", "%1 ago", root.duration(root.now - memoryLine.memory.updatedAt))
                 opacity: 0.6
                 font: Kirigami.Theme.smallFont

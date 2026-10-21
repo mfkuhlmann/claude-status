@@ -710,6 +710,14 @@ def finish_row(row, job, job_id, profile, ctx, alive):
         row["peek"] = chats.peek(path)
         peek = row["peek"] or {}
         row["plan"] = plan_of(profile, peek.get("slug"))
+        if row["name"].startswith(CONTINUE_PROMPT[:30]) and path is not None and getattr(ctx, "links", None) is not None:
+            # a chat that went on by itself is named after that message: its own name instead
+            try:
+                own = ctx.links.chat_info(path, path.stat())[0]
+            except OSError:
+                own = ""
+            if own and not own.startswith(CONTINUE_PROMPT[:30]):
+                row["name"] = clean_text(own, 80)
         if row["plan"] is not None:
             row["plan"]["edited"] = plan_edited(row["plan"]["updatedAt"], mtime(path) if path is not None else None)
         if peek.get("stopped") and row["state"] == "waiting" and not row["waitingFor"] \
@@ -3150,7 +3158,9 @@ def find_plan_chats(plans, ctx):
 # Claude keeps what it learns about you and your projects as memories: one
 # Markdown file each, in <cfg>/projects/<folder>/memory/ (MEMORY.md is their
 # index), with a name, a description and a type (user, feedback, project,
-# reference) at the top. Each account lists its memories, newest first.
+# reference) at the top. Each account lists its memories, newest first,
+# after its own CLAUDE.md: your instructions for every chat on it (type
+# "account"; often one file linked into each account's folder).
 
 MEMORIES_LISTED = 30
 MEMORY_HEAD_BYTES = 2048
@@ -3225,7 +3235,7 @@ def account_memories(group, ctx, limit=MEMORIES_LISTED):
             seen.add((st.st_dev, st.st_ino))
             found.append((st.st_mtime, p, f))
     found.sort(key=lambda c: -c[0])
-    folders, out = {}, []
+    folders, out = {}, account_instructions(group, ctx)
     for t, p, f in found[:limit]:
         project = f.parent.parent
         if project not in folders:
@@ -3247,17 +3257,45 @@ def account_memories(group, ctx, limit=MEMORIES_LISTED):
     return out
 
 
+def account_instructions(group, ctx):
+    """The account's CLAUDE.md (each of its profiles', once), as memories."""
+    by_key = {p.key: p for p in ctx.profiles}
+    out, seen = [], set()
+    for key in group["profileKeys"]:
+        p = by_key.get(key)
+        f = p.path / "CLAUDE.md" if p is not None else None
+        try:
+            st = f.stat() if f is not None else None
+        except OSError:
+            st = None
+        if st is None or not f.is_file() or (st.st_dev, st.st_ino) in seen:
+            continue
+        seen.add((st.st_dev, st.st_ino))
+        # (linked to a file outside the account's folder, or into another's: shared)
+        shared = f.is_symlink() or st.st_nlink > 1
+        out.append({
+            "key": f"{p.key}/CLAUDE.md/memory", "name": "CLAUDE.md",
+            "description": "Your instructions for every chat on this account" + (" (shared with other accounts)" if shared else ""),
+            "type": "account", "path": str(f), "folder": "", "folderShort": "", "profileDir": p.key,
+            "profile": p.label, "updatedAt": int(st.st_mtime * 1000),
+        })
+    return out
+
+
 def memory_file(profiles, path):
-    """path, when it's a memory file of one of the profiles (projects/*/memory/*.md), else None."""
+    """path, when it's a memory file of one of the profiles (projects/*/memory/*.md,
+    or its CLAUDE.md), else None."""
     try:
         real = Path(path).resolve()
     except (OSError, RuntimeError):
         return None
-    if real.suffix != ".md" or real.parent.name != "memory" or not real.is_file():
+    if real.suffix != ".md" or not real.is_file():
         return None
     for p in profiles:
-        if real.parent.parent.parent == p.real / "projects":
+        if real.parent.name == "memory" and real.parent.parent.parent == p.real / "projects":
             return real
+        if Path(path) in (p.path / "CLAUDE.md", p.real / "CLAUDE.md"):
+            return Path(path)  # (by its own name: it may be a link to a shared file)
     return None
 
 
@@ -3427,8 +3465,10 @@ def snippet(text, words):
 
 
 def find_chats(home, cache_root, extra_dirs, query, limit=FIND_LIMIT):
-    """{"ok", "results": [...], "more"}: the chats with every word of query in
-    their name, folder or one of your prompts, newest first."""
+    """{"ok", "results": [...], "more", "projects", "plans", "memories"}: the
+    chats with every word of query in their name, folder or one of your
+    prompts, newest first; and the project folders, plans and memories with
+    them (find_more)."""
     words = [w.casefold() for w in query.split()]
     if not words:
         return {"ok": True, "results": [], "more": False}
@@ -3487,8 +3527,79 @@ def find_chats(home, cache_root, extra_dirs, query, limit=FIND_LIMIT):
             "shared": st.st_nlink > 1,
             "match": snippet(hit, words) if hit and hit.strip() != name.strip() else "",
         })
+    found = {"ok": True, "results": results, "more": more, **find_more(ctx, words, accounts)}
     ctx.links.save()
-    return {"ok": True, "results": results, "more": more}
+    return found
+
+
+FIND_MORE_LIMIT = 10
+FIND_TEXT_BYTES = 200_000
+
+
+def find_more(ctx, words, accounts):
+    """{"projects", "plans", "memories"} with every word: the folders chats
+    ran in (by their path; the newest chat's account), the plans (title or
+    text) and Claude's memories (name, description or text), newest first."""
+    def has(*texts):
+        text = "\n".join(t for t in texts if t).casefold()
+        return all(w in text for w in words)
+
+    def body(path):
+        try:
+            with open(path, "rb") as f:
+                return f.read(FIND_TEXT_BYTES).decode("utf-8", "replace")
+        except OSError:
+            return ""
+
+    folders, seen = {}, set()
+    for t, p, f, st in all_transcripts(ctx):
+        if (st.st_dev, st.st_ino) in seen:  # (a chat shared between accounts: once)
+            continue
+        seen.add((st.st_dev, st.st_ino))
+        _, cwd, messages = ctx.links.chat_info(f, st)
+        if not cwd or not messages:
+            continue
+        entry = folders.get(cwd)
+        if entry is None:
+            if not has(short_path(cwd, ctx.home), cwd):
+                folders[cwd] = None
+                continue
+            gid, account = accounts.get(p.key, ("", p.label))
+            folders[cwd] = {"folder": cwd, "folderShort": short_path(cwd, ctx.home), "lastActive": int(t * 1000),
+                            "chats": 0, "profileDir": p.key, "profile": p.label, "groupId": gid, "account": account}
+        if folders[cwd] is not None:
+            folders[cwd]["chats"] += 1
+    projects = [e for e in folders.values() if e is not None][:FIND_MORE_LIMIT]
+
+    plans, seen = [], set()
+    for p in ctx.profiles:
+        try:
+            files = list(p.path.glob("plans/*.md"))
+        except OSError:
+            continue
+        for f in files:
+            try:
+                st = f.stat()
+            except OSError:
+                continue
+            if not PLAN_SLUG.match(f.stem) or (st.st_dev, st.st_ino) in seen:
+                continue
+            seen.add((st.st_dev, st.st_ino))
+            title = plan_title(f) or f.stem
+            if has(title, body(f)):
+                gid, account = accounts.get(p.key, ("", p.label))
+                plans.append({"key": f"{p.key}/{f.stem}/plan", "slug": f.stem, "title": title, "path": str(f),
+                              "profileDir": p.key, "profile": p.label, "groupId": gid, "account": account,
+                              "updatedAt": int(st.st_mtime * 1000)})
+    plans.sort(key=lambda x: -x["updatedAt"])
+
+    memories = []
+    for gid, members in group_profiles(ctx.profiles):
+        for m in account_memories({"profileKeys": [p.key for p in members]}, ctx, limit=1000):
+            if has(m["name"], m["description"], body(m["path"])):
+                memories.append({**m, "groupId": short_id(gid), "account": accounts.get(m["profileDir"], ("", m["profile"]))[1]})
+    memories.sort(key=lambda x: -x["updatedAt"])
+    return {"projects": projects, "plans": plans[:FIND_MORE_LIMIT], "memories": memories[:FIND_MORE_LIMIT]}
 
 
 # ---------------------------------------------------------------- opening sessions

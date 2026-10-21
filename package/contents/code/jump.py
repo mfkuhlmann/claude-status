@@ -960,6 +960,17 @@ def queue_continue(home, extra_dirs, chat_id, profile_dir, folder, text, start_a
     return True, f"Queued: it goes on at {time.strftime('%H:%M', time.localtime(start_at / 1000))}, when the limit resets"
 
 
+def requeue(home, extra_dirs, task_id, start_at):
+    """A queued task waits on, until start_at (its account is at its usage
+    limit when its time came: it starts after that resets instead)."""
+    cache_root = cs.cache_dir(home)
+    entry = cs.change_queue(cache_root, take=task_id)
+    if entry is None:
+        return True, ""
+    cs.change_queue(cache_root, put_back=dict(entry, startAt=start_at, error=""))
+    return True, f"It waits for the usage limit: it starts at {time.strftime('%H:%M', time.localtime(start_at / 1000))}"
+
+
 def unqueue(home, extra_dirs, task_id):
     taken = cs.change_queue(cs.cache_dir(home), take=task_id)
     return True, "Cancelled the queued task" if taken else "It isn't queued any more"
@@ -1700,8 +1711,9 @@ def send_plan_feedback(home, extra_dirs, slug, profile_dir, chat_id, comments=()
         if claude is None:
             return False, NO_CLAUDE, {}
         folder = cs.chat_folder(transcript)
-        command = cs.claude_command(chat_profile, ["--resume", chat_id, "--permission-mode", "plan", cs.prompt_arg(text)],
-                                    home, None, folder, claude)
+        # (a background session keeps its own options: flags would start a copy of it)
+        mode = [] if was_background(cs.discover_profiles(home, extra_dirs), chat_id) else ["--permission-mode", "plan"]
+        command = cs.claude_command(chat_profile, ["--resume", chat_id, *mode, cs.prompt_arg(text)], home, None, folder, claude)
         if print_command:
             return True, "Reopening the chat in plan mode with your feedback", {"how": "resumed",
                                                                                "command": cs.in_folder(folder, command)}
@@ -1721,6 +1733,15 @@ def send_plan_feedback(home, extra_dirs, slug, profile_dir, chat_id, comments=()
     jump(home, extra_dirs, chat_id, chat_profile.key)
     return True, f"Your feedback is in the clipboard. {hint}." if copied else hint, \
         {"how": "clipboard", "text": "" if copied else text, "copied": copied}
+
+
+def was_background(profiles, chat_id):
+    """Did the chat run as a background session (a job record names it)?"""
+    for p in profiles:
+        job = cs.read_json(p.path / "jobs" / chat_id[:8] / "state.json")
+        if isinstance(job, dict) and job.get("sessionId") == chat_id:
+            return True
+    return False
 
 
 def tmux_paste(entry, text):
@@ -1818,6 +1839,7 @@ USAGE = ("usage: jump.py [--stop [--busy] | --interrupt] SESSION_ID [--profile P
          "       jump.py --queue-continue CHAT_ID --profile PROFILE --at MS [--cwd FOLDER] [--prompt TEXT] [--name NAME]\n"
          "               [--host HOST] [--account TITLE]   (go on with a chat a usage limit stopped, at MS)\n"
          "       jump.py --unqueue|--start-queued TASK_ID\n"
+         "       jump.py --requeue TASK_ID --at MS   (it waits on until MS)\n"
          "       jump.py --share SESSION_ID\n"
          "       jump.py --remote-vscode HOST SESSION_ID [--cwd FOLDER_ON_HOST]\n"
          "       jump.py --remote-terminal HOST [--name SESSION_NAME] [--vscode-terminal PID [--cwd FOLDER_ON_HOST]]\n"
@@ -1865,6 +1887,8 @@ def main(argv=None):
             action, session_id = queue_task, args.pop(0)  # the profile
         elif arg == "--queue-continue" and args:
             action, session_id = queue_continue, args.pop(0)  # the chat
+        elif arg == "--requeue" and args:
+            action, session_id = requeue, args.pop(0)  # the task's id
         elif arg in ("--unqueue", "--start-queued") and args:
             action, session_id = (unqueue if arg == "--unqueue" else start_queued), args.pop(0)  # the task's id
         elif arg == "--at" and args and args[0].isdigit():
@@ -1967,7 +1991,7 @@ def main(argv=None):
         sys.exit(USAGE)
     if (task or background) and action not in (new_chat, "--remote-new-vscode", queue_task, queue_continue):
         sys.exit(USAGE)
-    if (action in (queue_task, queue_continue)) != (start_at is not None) \
+    if (action in (queue_task, queue_continue, requeue)) != (start_at is not None) \
             or (queue_host and action not in (queue_task, queue_continue)):
         sys.exit(USAGE)
     if action is queue_continue and (task.plan or background):
@@ -2009,6 +2033,8 @@ def main(argv=None):
                                          queue_host, account_title, name_arg)
         elif action in (unqueue, start_queued):
             ok, message = action(Path.home(), extra, session_id)
+        elif action is requeue:
+            ok, message = requeue(Path.home(), extra, session_id, start_at)
         elif action in (open_plan, edit_plan, unshare_plan):
             ok, message = action(Path.home(), extra, session_id, profile_dir)
         elif action == "--remote-edit":

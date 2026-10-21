@@ -201,6 +201,17 @@ class RowTests(Fixture):
         row = next(s for s in self.group(self.collect(with_tokens=False), "work")["sessions"] if s["sessionId"] == sid)
         self.assertEqual((row["state"], row["stopped"]), ("waiting", None))
 
+    def test_a_chat_that_went_on_by_itself_keeps_its_name(self):
+        # Claude names the background session after the message it went on with
+        w = self.home / ".claude-work"
+        sid = "e3de1242-7bc8-40a5-938f-aadb5f5aa9ee"
+        write(w / "sessions/32.json", session(sid, kind="bg", jobId="e3de1242", cwd="/tmp/x", name=cs.CONTINUE_PROMPT))
+        write(w / "jobs/e3de1242/state.json", {"state": "working", "tempo": "active", "sessionId": sid})
+        write(w / f"projects/-tmp-x/{sid}.jsonl", lines(prompt("fix the thesis build", self.now - 60), {"type": "ai-title", "aiTitle": "Thesis build fix"},
+                                                     prompt(cs.CONTINUE_PROMPT, self.now - 10)))
+        row = next(s for s in self.group(self.collect(with_tokens=False), "work")["sessions"] if s["sessionId"] == sid)
+        self.assertEqual(row["name"], "Thesis build fix")
+
     def test_working_again_isnt_stopped(self):
         w = self.home / ".claude-work"
         write(w / "projects/-x/busy.jsonl", lines(limit_error("You've hit your session limit", self.now - 60)))
@@ -306,6 +317,22 @@ class FindTests(Fixture):
         self.assertEqual([c["sessionId"] for c in self.find("PARSER srv/app")["results"]], ["aaa", "ccc"])
         self.assertEqual(self.find("nothing like this")["results"], [])
         self.assertEqual(self.find("   ")["results"], [])
+
+    def test_project_folders_plans_and_memories_too(self):
+        w = self.home / ".claude-work"
+        write(w / "plans/calm-red-owl.md", "# Release plan\n\nBump the PARSER version.\n")
+        write(w / "plans/other-plan-here.md", "# Docs\n\nNothing to see.\n")
+        write(w / "projects/-srv-app/memory/parser-flags.md",
+              "---\nname: parser-flags\ndescription: Strict mode is on\ntype: project\n---\n\nThe parser runs with --strict.\n")
+        found = self.find("parser")
+        self.assertEqual([p["slug"] for p in found["plans"]], ["calm-red-owl"])  # (by its text)
+        self.assertEqual((found["plans"][0]["title"], found["plans"][0]["account"]), ("Release plan", "work · Team"))
+        self.assertEqual([m["name"] for m in found["memories"]], ["parser-flags"])
+        self.assertEqual(found["memories"][0]["account"], "work · Team")
+        self.assertEqual(found["projects"], [])  # (no folder with "parser" in its path)
+        app = self.find("srv/app")["projects"]
+        self.assertEqual([(p["folder"], p["chats"], p["account"]) for p in app], [("/srv/app", 2, "work · Team")])
+        self.assertEqual(self.find("nothing like this")["memories"], [])
 
     def test_a_shared_chat_once_on_the_account_it_was_used_on_last(self):
         ccc = [c for c in self.find("tests")["results"] if c["sessionId"] == "ccc"]
@@ -579,6 +606,18 @@ class QueueTests(TaskFixture):
         self.assertEqual(self.queue("--unqueue", task["id"]), {"ok": True, "message": "Cancelled the queued task"})
         self.assertEqual(cs.load_queue(self.cache_root()), [])
 
+    def test_a_task_whose_account_is_at_its_limit_waits_on(self):
+        at = int(time.time() * 1000)
+        self.assertTrue(self.queue("--queue", ".claude-work", "--cwd", str(self.folder), "--at", str(at), "--prompt", "go")["ok"])
+        (task,) = cs.load_queue(self.cache_root())
+        later = at + 3600_000
+        answer = self.queue("--requeue", task["id"], "--at", str(later))
+        self.assertTrue(answer["ok"])
+        self.assertRegex(answer["message"], r"^It waits for the usage limit: it starts at \d\d:\d\d$")
+        (back,) = cs.queued_tasks(self.cache_root(), at + 1)
+        self.assertEqual((back["id"], back["startAt"], back["due"]), (task["id"], later, False))
+        self.assertEqual(self.queue("--requeue", "gone0000", "--at", str(later)), {"ok": True, "message": ""})
+
     def test_a_task_at_a_time_you_pick(self):
         at = int((time.time() + 2 * 86400) * 1000)
         answer = self.queue("--queue", ".claude-work", "--cwd", str(self.folder), "--at", str(at), "--prompt", "nightly check",
@@ -783,6 +822,13 @@ class PlanFeedbackTests(TaskFixture):
         self.assertEqual(answer["how"], "clipboard")
         self.assertIn("Rename it", answer["text"])
 
+    def test_a_former_background_session_reopens_without_options(self):
+        # (it keeps its own: an option would start a copy of it)
+        write(self.home / ".claude-work/jobs" / self.SID[:8] / "state.json", {"sessionId": self.SID, "state": "stopped"})
+        words = shlex.split(self.send_to(self.SID)["command"].split("; ", 1)[1])
+        self.assertEqual(words[-3:-1], ["--resume", self.SID])
+        self.assertNotIn("--permission-mode", words)
+
     def test_the_chat_found_by_the_plans_name(self):
         transcript = self.home / f".claude-work/projects/-repos-app/{self.SID}.jsonl"
         profile, found = cs.plan_chat(cs.discover_profiles(self.home), "calm-red-owl")
@@ -832,7 +878,17 @@ class MemoryTests(Fixture):
         write(w / "projects/-gone-folder/memory/old.md", "---\nname: old\ntype: user\n---\n")
         os.utime(w / "projects/-gone-folder/memory/old.md", (self.now - 7200, self.now - 7200))
         g = self.group(self.collect(with_tokens=False), "work")
-        self.assertEqual([m["name"] for m in g["memories"]], ["batch-releases", "plain", "old"])
+        self.assertEqual([m["name"] for m in g["memories"]], ["batch-releases", "plain", "old"])  # (no CLAUDE.md yet)
+        # the account's own CLAUDE.md, a link to one file for all accounts: first
+        write(self.home / "shared/CLAUDE.md", "# My instructions\n\nNo co-author lines.\n")
+        (w / "CLAUDE.md").symlink_to(self.home / "shared/CLAUDE.md")
+        g = self.group(self.collect(with_tokens=False), "work")
+        self.assertEqual([m["name"] for m in g["memories"]], ["CLAUDE.md", "batch-releases", "plain", "old"])
+        self.assertEqual((g["memories"][0]["type"], g["memories"][0]["path"]), ("account", str(w / "CLAUDE.md")))
+        self.assertIn("shared with other accounts", g["memories"][0]["description"])
+        self.assertEqual(cs.memory_file(cs.discover_profiles(self.home), str(w / "CLAUDE.md")), w / "CLAUDE.md")
+        self.assertIsNone(cs.memory_file(cs.discover_profiles(self.home), str(self.home / "shared/CLAUDE.md")))
+        g["memories"].pop(0)
         first = g["memories"][0]
         self.assertEqual((first["description"], first["type"], first["folder"], first["profileDir"]),
                          ('Tag "many" features at once', "feedback", str(folder), ".claude-work"))
