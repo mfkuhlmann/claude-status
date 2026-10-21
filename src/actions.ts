@@ -21,6 +21,8 @@ import {
   ago,
   allGroups,
   duration,
+  laterAt,
+  laterDays,
   limitReset,
   canEndChat,
   chatRefOf,
@@ -618,7 +620,7 @@ export class Actions {
     }
     const label = (f: Project) =>
       `$(${f.short === "~" ? "home" : "folder"}) ${f.short === "~" ? "Home folder (~)" : f.short}` + (plan && f.path === plan.cwd ? "  (the plan's)" : "");
-    type Item = vscode.QuickPickItem & { start?: "terminal" | "background" | "queue" | "panel" | "task"; folder?: Project; choose?: "dialog" | "type" };
+    type Item = vscode.QuickPickItem & { start?: "terminal" | "background" | "queue" | "schedule" | "panel" | "task"; folder?: Project; choose?: "dialog" | "type" };
     const canBrowse = !host || host === this.dash.currentHost;
     const items: Item[] = [];
     if (cli && !hasTask)
@@ -634,6 +636,7 @@ export class Actions {
       for (const f of trusted) items.push({ label: label(f), description: "no window: listed right away", start: "background", folder: f });
       if (!host) items.push({ label: "$(folder-opened) Choose folder…", description: "one Claude trusts already", start: "background", choose: "dialog" });
       if (!trusted.length && host) items.push({ label: "$(info) No folder Claude trusts there yet", description: "start a chat in one in a terminal once" });
+      if (trusted.length || !host) items.push({ label: "$(clock) Later, at a time you pick…", description: "a day and a time, then the folder", start: "schedule" });
       // The account is at a usage limit: the task can wait until it resets
       const reset = limitReset(group, Date.now());
       if (reset && (trusted.length || !host)) {
@@ -660,6 +663,45 @@ export class Actions {
       return this.newChat(group.id, host, undefined, text.trim());
     }
     if (pick.start === "panel") return this.panelChat(group, hasTask ? await this.taskText(task ?? "", plan, host) : undefined);
+    if (pick.start === "schedule") {
+      // when (a day, then a time), then where (a folder Claude trusts)
+      const day = await vscode.window.showQuickPick(
+        laterDays(new Date()).map((label, i) => ({ label, day: i })),
+        { title: "Start it later, on…", placeHolder: "the day it starts" },
+      );
+      if (!day) return;
+      const next = new Date();
+      next.setHours(next.getHours() + 1, 0, 0, 0);
+      const clock = await vscode.window.showInputBox({
+        title: `Start it later: ${day.label}, at…`,
+        prompt: "The time it starts, e.g. 14:30. It starts in the background then (or as soon as VS Code or the widget runs again).",
+        value: day.day === 0 && next.getDate() === new Date().getDate() ? `${String(next.getHours()).padStart(2, "0")}:00` : "09:00",
+        validateInput: (v) => (laterAt(day.day, v, new Date()) ? null : "A time still to come, e.g. 14:30"),
+      });
+      if (!clock) return;
+      const trusted = folders.filter((f) => f.trusted !== false && f.path);
+      type Where = vscode.QuickPickItem & { folder?: Project; choose?: boolean };
+      const where = await vscode.window.showQuickPick<Where>(
+        [...trusted.map((f) => ({ label: label(f), folder: f })), ...(host ? [] : [{ label: "$(folder-opened) Choose folder…", description: "one Claude trusts already", choose: true }])],
+        { title: `Start it ${day.day === 0 ? "today" : day.day === 1 ? "tomorrow" : `on ${day.label}`} at ${clock.trim()}, in…`, placeHolder: "the folder it starts in (one Claude trusts already)" },
+      );
+      if (!where) return;
+      let folder = where.folder?.path ?? "";
+      if (where.choose) {
+        const picked = await vscode.window.showOpenDialog({ canSelectFolders: true, canSelectFiles: false, defaultUri: vscode.Uri.file(os.homedir()), openLabel: "Queue It Here" });
+        if (!picked?.length) return;
+        folder = picked[0].fsPath;
+      }
+      const at = laterAt(day.day, clock, new Date());
+      if (!at) return this.fail("That time has passed: pick one still to come.");
+      const answer = await this.backend.action("jump.py", [
+        "--queue", group.chatProfile, "--cwd", folder || "~", "--at", String(at), "--scheduled",
+        ...(task ? ["--prompt", task] : []), ...(plan ? ["--plan", plan.slug, "--plan-profile", plan.profileDir] : []),
+        ...(host ? ["--host", host] : []), "--account", group.title, ...configDirArgs(),
+      ]);
+      if (this.report(answer, "Couldn't queue it")) this.dash.setActionInfo(answer.message);
+      return this.refresh();
+    }
     let folder = pick.folder?.path ?? "";
     if (pick.choose === "dialog") {
       const remoteHome = host ? folderOf(home) : null;

@@ -538,6 +538,34 @@ export function clockText(ms: number): string {
   return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+function dayText(d: Date): string {
+  return d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" });
+}
+
+// The days a task can start on later: today and the next six
+export function laterDays(now: Date): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < 7; i++) out.push(i === 0 ? "Today" : i === 1 ? "Tomorrow" : dayText(new Date(now.getFullYear(), now.getMonth(), now.getDate() + i)));
+  return out;
+}
+
+// When a task picked for later starts (ms): `day` days after now's date, at
+// `clock` ("9", "930", "9:30", "14:30"); 0 for no time, or one that has passed
+export function laterAt(day: number, clock: string, now: Date): number {
+  const m = /^(\d{1,2})(?::?(\d{2}))?$/.exec(clock.trim());
+  if (!m || +m[1] > 23 || +(m[2] ?? 0) > 59) return 0;
+  const at = new Date(now.getFullYear(), now.getMonth(), now.getDate() + day, +m[1], +(m[2] ?? 0)).getTime();
+  return at > now.getTime() ? at : 0;
+}
+
+// When a queued task starts, in words: "14:30" today, "tomorrow 09:00", "Fri 24 Oct 09:00"
+export function startText(ms: number, now: number): string {
+  const d = new Date(ms);
+  const t = new Date(now);
+  const days = Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() - new Date(t.getFullYear(), t.getMonth(), t.getDate()).getTime()) / 86_400_000);
+  return days <= 0 ? clockText(ms) : days === 1 ? `tomorrow ${clockText(ms)}` : `${dayText(d)} ${clockText(ms)}`;
+}
+
 // When the usage limit an account is at resets (the latest of its full
 // windows, else of the chats a limit stopped), or null
 export function limitReset(g: Pick<Group, "limits" | "sessions">, now: number): { at: number; label: string } | null {

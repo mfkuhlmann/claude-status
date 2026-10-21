@@ -7,7 +7,7 @@ import * as path from "node:path";
 import { test } from "node:test";
 import { markdownLinkFile } from "../src/agentRun";
 import { demoState } from "../src/shared/demo";
-import { goOnAt, limitReset, overlapText, queuedChat, queuedFor, queuedWhat } from "../src/shared/model";
+import { goOnAt, laterAt, laterDays, limitReset, overlapText, queuedChat, queuedFor, queuedWhat, startText } from "../src/shared/model";
 import type { Group, QueuedTask, Session } from "../src/shared/types";
 import { TransitionTracker } from "../src/transitions";
 
@@ -45,6 +45,22 @@ test("a chat a usage limit stopped can go on by itself after the reset", () => {
   assert.equal(queuedChat({ queue: [t] } as never, "c1", "lab"), t);
   assert.equal(queuedChat({ queue: [t] } as never, "c1"), null); // (that's the host's chat)
   assert.equal(queuedChat({ queue: [{ ...t, chat: null }] } as never, "c1", "lab"), null);
+});
+
+test("a task can start later, at a day and time you pick", () => {
+  const noon = new Date(2026, 9, 21, 12, 0); // a Wednesday
+  assert.deepEqual(laterDays(noon).slice(0, 2), ["Today", "Tomorrow"]);
+  assert.equal(laterDays(noon).length, 7);
+  assert.equal(laterAt(0, "14:30", noon), new Date(2026, 9, 21, 14, 30).getTime());
+  assert.equal(laterAt(0, "1430", noon), new Date(2026, 9, 21, 14, 30).getTime());
+  assert.equal(laterAt(1, "9", noon), new Date(2026, 9, 22, 9, 0).getTime());
+  assert.equal(laterAt(1, "930", noon), new Date(2026, 9, 22, 9, 30).getTime());
+  assert.equal(laterAt(0, "9:30", noon), 0); // passed
+  assert.equal(laterAt(0, "25:00", noon), 0);
+  assert.equal(laterAt(0, "soon", noon), 0);
+  assert.match(startText(new Date(2026, 9, 21, 14, 30).getTime(), noon.getTime()), /^\d\d:\d\d|^\d{1,2}:\d\d/);
+  assert.match(startText(new Date(2026, 9, 22, 9, 0).getTime(), noon.getTime()), /^tomorrow /);
+  assert.ok(!startText(new Date(2026, 9, 24, 9, 0).getTime(), noon.getTime()).startsWith("tomorrow"));
 });
 
 test("an account's queued tasks: on its machine, by its profiles", () => {

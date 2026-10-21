@@ -2877,9 +2877,10 @@ def change_queue(cache_root, add=None, take=None, put_back=None):
 
 
 def queue_entry(profile, folder, prompt, start_at, host="", account="", plan=None, plan_profile=None,
-                plan_title="", now_ms=None, chat=None, name=""):
+                plan_title="", now_ms=None, chat=None, name="", scheduled=False):
     """A task to queue (checked), or ValueError. With chat (its id), it goes
-    on with that chat (one a usage limit stopped: continue_chat), named name."""
+    on with that chat (one a usage limit stopped: continue_chat), named name.
+    scheduled: it starts at a time you picked, not when a limit resets."""
     if not isinstance(profile, str) or not profile or not isinstance(folder, str):
         raise ValueError("A queued task needs an account and a folder")
     if chat is not None and not valid_id(chat):
@@ -2897,7 +2898,7 @@ def queue_entry(profile, folder, prompt, start_at, host="", account="", plan=Non
         "id": os.urandom(4).hex(), "host": host or "", "profile": profile, "account": account or profile,
         "folder": folder, "prompt": (prompt or "").strip(), "plan": plan, "planProfile": plan_profile,
         "planTitle": plan_title or "", "startAt": start_at, "createdAt": now_ms, "error": "",
-        "chat": chat, "name": clean_text(name, 80) if chat else "",
+        "chat": chat, "name": clean_text(name, 80) if chat else "", "scheduled": bool(scheduled) and chat is None,
     }
 
 
@@ -2906,7 +2907,7 @@ def queued_tasks(cache_root, now_ms):
     has come, and it didn't fail to start) and "folderShort"."""
     out = []
     for t in load_queue(cache_root):
-        t = {"chat": None, "name": "", **t}
+        t = {"chat": None, "name": "", "scheduled": False, **t}
         t["due"] = not t.get("error") and isinstance(t.get("startAt"), (int, float)) and t["startAt"] <= now_ms
         t["folderShort"] = short_path(t["folder"], Path.home()) if not t.get("host") else t.get("folder") or "~"
         out.append(t)

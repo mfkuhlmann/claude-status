@@ -12,6 +12,12 @@
   can't start (e.g. its folder isn't trusted any more) stays, saying why.
   The queue is shared with the Plasma widget, and only one of them starts
   a task. Also for SSH hosts' accounts (they start from here, over ssh).
+- **Start a background task later:** **New Chat… → Start with a task…**
+  offers **Later, at a time you pick…**: a day (today or one of the next
+  six), a time, then the folder. The task waits under the account and
+  starts in the background then (as soon as VS Code or the widget runs, if
+  neither did then); it's listed with when it starts, to start now or
+  cancel. Also for SSH hosts' accounts.
 - **Chats go on by themselves after the limit:** a chat a usage limit
   stopped gets **⏱ Go on at 10:41** (next to **Continue on …**): a minute
   after the limit resets, it goes on in the background with *The usage

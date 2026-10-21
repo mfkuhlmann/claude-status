@@ -148,10 +148,11 @@ folders or any other, or as a Claude Code chat tab in this window. **Start
 with a task…** first asks what Claude should do: the chat starts with it (in
 a terminal at once, in a chat tab typed in for you to send), and can also run
 **in the background** (`claude --bg`: no window, listed right away; only in
-folders Claude trusts already, since it can't ask there). When the account
-is at its usage limit, **After the limit resets** queues the task instead: it
-starts in the background a minute after the limit resets (the queue is shared
-with the Plasma widget, which starts it too if VS Code isn't running). The chat
+folders Claude trusts already, since it can't ask there). **Later, at a time
+you pick…** queues it for a day and time instead, and when the account is at
+its usage limit, **After the limit resets** queues it for a minute after the
+limit resets (the queue is shared with the Plasma widget, which starts it too
+if VS Code isn't running). The chat
 tab is offered for accounts on the window's own machine (this computer, or the
 Remote-SSH host); it starts in the window's folder, on the account the Claude
 Code extension is set to, and the menu says so when that's another account.

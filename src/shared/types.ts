@@ -85,6 +85,7 @@ export interface QueuedTask {
   due: boolean;
   chat?: string | null; // goes on with this chat (one a usage limit stopped) instead
   name?: string; // that chat's name
+  scheduled?: boolean; // it starts at a time you picked, not when a limit resets
 }
 
 // The plan a chat made (claude_status.py: plan_of)

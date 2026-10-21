@@ -1,4 +1,4 @@
-import { clockText, duration, queuedFor, queuedWhat } from "../../src/shared/model";
+import { clockText, duration, queuedFor, queuedWhat, startText } from "../../src/shared/model";
 import type { Group } from "../../src/shared/types";
 import { post } from "../env";
 import { useView } from "./context";
@@ -18,8 +18,16 @@ export function QueuedTasks({ group }: { group: Group }) {
         const folder = (t.host ? `${t.host}:` : "") + (t.folder || "~");
         const how = t.chat
           ? `The chat goes on in the background in ${folder}, at ${clockText(t.startAt)}, telling Claude that the limit has reset. A session that still has it open (in a terminal, or in the background) ends first; if it went on before then, nothing happens.`
-          : `Waits for the usage limit, then starts in the background in ${folder}, at ${clockText(t.startAt)}.`;
-        const when = t.error ? "didn't start" : t.due || t.startAt <= view.now ? "starting…" : `starts in ${duration(t.startAt - view.now)}`;
+          : t.scheduled
+            ? `Starts in the background in ${folder}, at ${startText(t.startAt, view.now)}: the time you picked.`
+            : `Waits for the usage limit, then starts in the background in ${folder}, at ${clockText(t.startAt)}.`;
+        const when = t.error
+          ? "didn't start"
+          : t.due || t.startAt <= view.now
+            ? "starting…"
+            : t.startAt - view.now > 12 * 3600_000
+              ? `starts ${startText(t.startAt, view.now)}`
+              : `starts in ${duration(t.startAt - view.now)}`;
         return (
           <li key={t.id} class={"queued-item" + (t.error ? " failed" : "")}>
             <span class="queued-mark" aria-hidden="true">
@@ -29,7 +37,16 @@ export function QueuedTasks({ group }: { group: Group }) {
               {what.split("\n")[0]}
             </span>
             <div class="queued-actions">
-              <IconButton icon="play" label="Start it now" title="Start it now, in the background, without waiting for the limit to reset. While the limit lasts, Claude stops again at once." onClick={() => post({ type: "startQueued", id: t.id })} />
+              <IconButton
+                icon="play"
+                label="Start it now"
+                title={
+                  t.scheduled
+                    ? "Start it now, in the background, without waiting for its time."
+                    : "Start it now, in the background, without waiting for the limit to reset. While the limit lasts, Claude stops again at once."
+                }
+                onClick={() => post({ type: "startQueued", id: t.id })}
+              />
               <IconButton icon="close" label="Cancel it" title="Cancel it: it doesn't start." onClick={() => post({ type: "unqueue", id: t.id })} />
             </div>
             <span class="small muted queued-when" title={t.error || undefined}>
