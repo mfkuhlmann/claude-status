@@ -346,6 +346,7 @@ Item {
                     { state: "waiting", n: root.counts.waiting, text: i18np("%1 needs input", "%1 need input", root.counts.waiting) },
                     { state: "working", n: root.counts.working, text: i18n("%1 working", root.counts.working) },
                     { state: "idle", n: root.counts.idle, text: i18n("%1 idle", root.counts.idle) },
+                    { state: "limit", n: root.counts.limit, text: i18n("%1 at the usage limit", root.counts.limit) },
                     { state: "done", n: root.counts.done, text: i18n("%1 done", root.counts.done) }
                 ].filter(c => c.n > 0)
                 delegate: Row {
@@ -369,7 +370,7 @@ Item {
 
             PlasmaComponents3.Label {
                 textFormat: Text.PlainText
-                visible: root.counts.waiting + root.counts.working + root.counts.idle + root.counts.done === 0
+                visible: root.counts.waiting + root.counts.working + root.counts.idle + root.counts.done + root.counts.limit === 0
                 text: i18n("No sessions running")
                 font: Kirigami.Theme.smallFont
                 opacity: 0.7

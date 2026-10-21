@@ -119,12 +119,18 @@ PlasmoidItem {
     }
     // Everything on the dashboard: this computer's accounts, then the hosts'
     readonly property var allGroups: groups.concat(remoteGroups)
+    // (a chat a usage limit stopped waits for the limit, not for you: "limit",
+    // whether a process still has it open or not)
     readonly property var counts: {
-        const c = { waiting: 0, working: 0, idle: 0, done: 0 }
+        const c = { waiting: 0, working: 0, idle: 0, done: 0, limit: 0 }
         for (const g of allGroups)
             for (const s of g.sessions)
-                c[s.state] += 1
+                c[atLimit(s) ? "limit" : s.state] += 1
         return c
+    }
+
+    function atLimit(s) {
+        return (s.state === "idle" || s.state === "done") && !!s.stopped && s.stopped.kind === "limit" && !s.stopped.over
     }
     // What happened since you last opened the popup, for the icon: chats that
     // started needing you, and chats that finished a turn (as long as the
@@ -180,13 +186,10 @@ PlasmoidItem {
             return i18np("%1 chat needs you", "%1 chats need you", counts.waiting)
         if (counts.working)
             return i18np("%1 chat working", "%1 chats working", counts.working)
-        // (a chat a usage limit stopped waits for the limit, not for you)
-        const held = allGroups.reduce((n, g) => n + g.sessions.filter(s => s.state === "idle" && s.stopped
-                                                                         && s.stopped.kind === "limit" && !s.stopped.over).length, 0)
-        if (counts.idle > held)
-            return i18np("Your turn in %1 chat", "Your turn in %1 chats", counts.idle - held)   // Claude finished its reply
-        if (held)
-            return i18np("%1 chat waits for its usage limit", "%1 chats wait for their usage limit", held)
+        if (counts.idle)
+            return i18np("Your turn in %1 chat", "Your turn in %1 chats", counts.idle)   // Claude finished its reply
+        if (counts.limit)
+            return i18np("%1 chat waits for its usage limit", "%1 chats wait for their usage limit", counts.limit)
         if (counts.done)
             return i18np("%1 finished chat to look at", "%1 finished chats to look at", counts.done)
         return i18n("All quiet")
@@ -2419,6 +2422,7 @@ PlasmoidItem {
         case "working": return Kirigami.Theme.focusColor   // the accent (highlightColor is a pale selection tint)
         case "idle":
         case "done": return Kirigami.Theme.positiveTextColor
+        case "limit": return Kirigami.Theme.negativeTextColor
         default: return Kirigami.Theme.disabledTextColor
         }
     }
@@ -2509,6 +2513,8 @@ PlasmoidItem {
             parts.push(i18np("%1 working", "%1 working", counts.working))   // plural forms differ in other languages
         if (counts.idle)
             parts.push(i18np("%1 idle", "%1 idle", counts.idle))
+        if (counts.limit)
+            parts.push(i18np("%1 at the usage limit", "%1 at the usage limit", counts.limit))
         if (counts.done)
             parts.push(i18np("%1 done", "%1 done", counts.done))
         return parts.length ? parts.join(" · ") : i18n("No sessions running")
