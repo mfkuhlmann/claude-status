@@ -464,8 +464,10 @@ export class Actions {
     qp.matchOnDescription = true;
     qp.matchOnDetail = true;
     let asked = 0;
+    let closed = false;
     let timer: NodeJS.Timeout | undefined;
     const search = async (query: string) => {
+      if (closed) return;
       const mine = ++asked;
       if (query.trim().length < 2) {
         qp.items = [];
@@ -478,7 +480,7 @@ export class Actions {
         this.backend.find(query, undefined, configDirArgs()),
         ...hosts.map((h) => this.backend.find(query, h)),
       ]);
-      if (mine !== asked) return; // you typed on meanwhile
+      if (closed || mine !== asked) return; // closed, or you typed on meanwhile
       const items: Item[] = [];
       const now = Date.now();
       answers.forEach((answer, i) => {
@@ -512,6 +514,7 @@ export class Actions {
       qp.onDidHide(() => resolve(undefined));
       qp.show();
     });
+    closed = true;
     clearTimeout(timer);
     qp.dispose();
     if (pick?.found) await this.openFound(pick.found, pick.host);
