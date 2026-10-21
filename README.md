@@ -47,6 +47,8 @@ As an editor tab (**Claude Status: Open in Editor Tab**):
   with all the words you type in its name, folder or prompts, here and on
   the SSH hosts shown. Pick one to go to it, or to reopen it. It finds
   project folders (pick one for a new chat there), plans and memories too.
+  Each kind, and each computer, folds under its heading (the chats show at
+  first); the button in its title bar unfolds them all.
 - **Plans**: a chat that wrote a plan in plan mode gets a **plan ↗** tag
   that shows it in VS Code's Markdown preview, and a **✎** that opens its
   file to change it (as does **Open Source** in the preview). There, the

@@ -8,7 +8,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as vscode from "vscode";
 import type { AccountSwitch } from "./accountSwitch";
-import type { Answer, Backend } from "./backend";
+import type { Answer, Backend, FindAnswer } from "./backend";
 import { configDirArgs, setSshHosts, settings } from "./config";
 import { agentRunArgs } from "./agentRun";
 import { openComparison } from "./changes";
@@ -16,6 +16,7 @@ import { claudePanelAvailable, localPanelProfileKey, openPanelChat } from "./cla
 import { isAgentRunFile, openAgentRunFile, showMarkdown } from "./agentRun";
 import type { Dashboard } from "./dashboard";
 import { canRaiseWindows, isGnome } from "./desktop";
+import { allShown, foundLines, showAll } from "./found";
 import { chatRef } from "./notify";
 import {
   ago,
@@ -535,87 +536,117 @@ export class Actions {
   // Every chat with all the words you type in its name, its folder or one of
   // your prompts, here and on the SSH hosts shown (claude_status.py --find,
   // remote.py --find), newest first; the one you pick comes up, or reopens.
+  // Each kind of thing found folds under its heading (found.ts: foundLines).
   async findChat(): Promise<void> {
     if (this.demoOnly()) return;
-    type Item = vscode.QuickPickItem & { found?: FoundChat; project?: FoundProject; plan?: FoundPlan; memory?: FoundMemory; host?: string };
+    type Item = vscode.QuickPickItem & {
+      found?: FoundChat;
+      project?: FoundProject;
+      plan?: FoundPlan;
+      memory?: FoundMemory;
+      host?: string;
+      fold?: string; // a heading: picking it folds or unfolds what's under it
+      open?: boolean;
+    };
     const qp = vscode.window.createQuickPick<Item>();
     qp.title = "Find a Chat";
     qp.placeholder = "Words in a chat's name, folder or your prompts; a project folder, a plan or a memory";
     qp.matchOnDescription = true;
     qp.matchOnDetail = true;
+    // In the order given, headings included: by default VS Code sorts the
+    // lines by how well their names match what you type and drops the
+    // headings (settable, though not in the 1.90 types)
+    (qp as vscode.QuickPick<Item> & { sortByLabel: boolean }).sortByLabel = false;
+    const unfoldAll: vscode.QuickInputButton = { iconPath: new vscode.ThemeIcon("expand-all"), tooltip: "Unfold all" };
+    const foldAll: vscode.QuickInputButton = { iconPath: new vscode.ThemeIcon("collapse-all"), tooltip: "Fold all" };
     let asked = 0;
     let closed = false;
     let timer: NodeJS.Timeout | undefined;
-    const search = async (query: string) => {
-      if (closed) return;
-      const mine = ++asked;
-      if (query.trim().length < 2) {
-        qp.items = [];
-        qp.busy = false;
-        return;
-      }
-      qp.busy = true;
-      const hosts = this.dash.shownHosts();
-      const answers = await Promise.all([
-        this.backend.find(query, undefined, configDirArgs()),
-        ...hosts.map((h) => this.backend.find(query, h)),
-      ]);
-      if (closed || mine !== asked) return; // closed, or you typed on meanwhile
-      const items: Item[] = [];
+    let answers: FindAnswer[] = [];
+    let answerHosts: string[] = [];
+    let folds = new Map<string, boolean>();
+    // keep: the heading just picked, which stays where it is
+    const render = (keep?: string) => {
       const now = Date.now();
-      answers.forEach((answer, i) => {
-        const host = i ? hosts[i - 1] : undefined;
-        const heading = (what: string) => items.push({ label: hosts.length ? `${host ?? "This computer"}: ${what}` : what, kind: vscode.QuickPickItemKind.Separator });
-        if (!answer.ok) {
-          heading("Chats");
-          items.push({ label: `$(warning) ${answer.message}`, alwaysShow: true });
-        }
-        if (answer.projects.length) heading("Folders");
-        for (const p of answer.projects)
-          items.push({
+      const items = foundLines(answers, answerHosts, folds).map((line): Item => {
+        if ("fold" in line)
+          return { label: `$(${line.open ? "chevron-down" : "chevron-right"}) ${line.title}`, alwaysShow: true, fold: line.fold, open: line.open };
+        if ("note" in line) return { label: line.warning ? `$(warning) ${line.note}` : line.note, alwaysShow: true };
+        const answer = answers[line.source];
+        const host = line.source ? answerHosts[line.source - 1] : undefined;
+        if (line.kind === "projects") {
+          const p = answer.projects[line.index];
+          return {
             label: `$(folder) ${p.folderShort || p.folder}`,
             description: `${p.account} · ${p.chats === 1 ? "1 chat" : `${p.chats} chats`} · ${ago(now - p.lastActive)}`,
             detail: "New chat in this folder",
             alwaysShow: true,
             project: p,
             host,
-          });
-        if (answer.plans.length) heading("Plans");
-        for (const p of answer.plans)
-          items.push({ label: `$(checklist) ${p.title}`, description: `${p.account} · ${ago(now - p.updatedAt)}`, alwaysShow: true, plan: p, host });
-        if (answer.memories.length) heading("Memories");
-        for (const m of answer.memories)
-          items.push({
-            label: `$(note) ${m.description || m.name}`,
-            description: `${m.account} · ${m.folderShort || "every folder"}`,
-            alwaysShow: true,
-            memory: m,
-            host,
-          });
-        if (answer.results.length) heading("Chats");
-        for (const c of answer.results)
-          items.push({
-            label: (c.shared ? "$(link) " : "") + c.name,
-            description: `${c.account} · ${c.cwdShort || "~"} · ${ago(now - c.lastActive)}`,
-            detail: c.match || undefined,
-            alwaysShow: true,
-            found: c,
-            host,
-          });
-        if (answer.more) items.push({ label: "$(info) More chats have these words: add a word to narrow it down", alwaysShow: true });
+          };
+        }
+        if (line.kind === "plans") {
+          const p = answer.plans[line.index];
+          return { label: `$(checklist) ${p.title}`, description: `${p.account} · ${ago(now - p.updatedAt)}`, alwaysShow: true, plan: p, host };
+        }
+        if (line.kind === "memories") {
+          const m = answer.memories[line.index];
+          return { label: `$(note) ${m.description || m.name}`, description: `${m.account} · ${m.folderShort || "every folder"}`, alwaysShow: true, memory: m, host };
+        }
+        const c = answer.results[line.index];
+        return {
+          label: (c.shared ? "$(link) " : "") + c.name,
+          description: `${c.account} · ${c.cwdShort || "~"} · ${ago(now - c.lastActive)}`,
+          detail: c.match || undefined,
+          alwaysShow: true,
+          found: c,
+          host,
+        };
       });
-      if (!items.some((it) => it.found || it.project || it.plan || it.memory))
-        items.push({ label: "Nothing with all of these words: no chat (its name, folder or your prompts), project folder, plan or memory", alwaysShow: true });
+      qp.keepScrollPosition = keep !== undefined;
       qp.items = items;
+      qp.buttons = items.some((it) => it.fold) ? [allShown(answers, answerHosts, folds) ? foldAll : unfoldAll] : [];
+      const heading = keep === undefined ? undefined : items.find((it) => it.fold === keep);
+      if (heading) qp.activeItems = [heading];
+    };
+    const search = async (query: string) => {
+      if (closed) return;
+      const mine = ++asked;
+      if (query.trim().length < 2) {
+        answers = [];
+        render();
+        qp.busy = false;
+        return;
+      }
+      qp.busy = true;
+      const hosts = this.dash.shownHosts();
+      const found = await Promise.all([
+        this.backend.find(query, undefined, configDirArgs()),
+        ...hosts.map((h) => this.backend.find(query, h)),
+      ]);
+      if (closed || mine !== asked) return; // closed, or you typed on meanwhile
+      answers = found;
+      answerHosts = hosts;
+      render();
       qp.busy = false;
     };
     qp.onDidChangeValue((value) => {
       clearTimeout(timer);
       timer = setTimeout(() => void search(value), 300);
     });
+    qp.onDidTriggerButton((button) => {
+      folds = showAll(answers, answerHosts, folds, button === unfoldAll);
+      render();
+    });
     const pick = await new Promise<Item | undefined>((resolve) => {
       qp.onDidAccept(() => {
-        resolve(qp.selectedItems[0]);
+        const it = qp.selectedItems[0];
+        if (it?.fold) {
+          folds.set(it.fold, !it.open);
+          render(it.fold);
+          return;
+        }
+        resolve(it);
         qp.hide();
       });
       qp.onDidHide(() => resolve(undefined));

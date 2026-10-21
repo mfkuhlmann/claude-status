@@ -43,7 +43,13 @@
   line may cut it short).
 - **Finding more than chats:** **Find a Chat…** also finds project folders
   (by their path: pick one for a new chat there), plans (by their title or
-  text) and memories (by what they say), listed before the chats.
+  text) and memories (by what they say), listed before the chats. Each
+  kind folds under its heading (**Memories (9)**, **Chats (26)**: pick one
+  to fold or unfold it), and so does each computer when SSH hosts are
+  shown: the chats show at first, the rest too when no chat has the words.
+  The button in the title bar unfolds (or folds) them all.
+- **Find a Chat…** keeps its headings and lists the chats newest first
+  while you type (VS Code sorted them by how well their names matched).
 - **Each account's memories:** what Claude keeps about you and your
   projects (`<config>/projects/<folder>/memory`) is listed under each
   account (**Memories**, folded), after the account's own `CLAUDE.md` (your
