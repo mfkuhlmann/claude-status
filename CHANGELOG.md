@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.13.0
 
 - **Wait for the usage limit:** when an account is at its usage limit,
   **New Chat… → Start with a task…** offers **After the limit resets (in
