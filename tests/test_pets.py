@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parent.parent / "package/contents"
 PETS = ROOT / "pets"
 # strings in the QML that aren't pose names
 NOT_POSES = {"px", "lift", "squash", "breath", "z", "file", "chat", "bg", "interactive", "done", "failed",
-             "stopped", "reset", "waiting", "working", "idle", "none", "permission", "question",
+             "stopped", "reset", "waiting", "working", "idle", "limit", "none", "permission", "question",
              "network access", "goal approval", "claude-vscode", "five_hour", "plasma_workspace", "oops",
              "jump-error", "dialog-warning", "dialog-ok", "dialog-error", "dialog-information", "view-refresh",
              "view-visible", "internet-web-browser", "dialog-messages", "list-add", "list-remove", "user-home",

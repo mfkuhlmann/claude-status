@@ -234,6 +234,11 @@ PlasmaExtras.Representation {
                     text: i18n("No Claude Code config found")
                     explanation: i18n("Looked for ~/.claude and ~/.claude-*. Add other dirs in the widget settings.")
                 }
+
+                // (some room under the last line, scrolled to the end too)
+                Item {
+                    implicitHeight: Kirigami.Units.smallSpacing
+                }
             }
         }
     }
