@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.13.0 (2026-10-21)
 
 - **Wait for the usage limit:** when an account is at its usage limit, a task in the **+** box with **In the background** can wait: **After the limit resets** queues it under the account (in a recent folder, or **Choose folder…**), and it starts in the background a minute after the limit resets (as soon as the widget runs, if it didn't then). The account lists its queued tasks, with when they start: start one now or cancel it. One that can't start (e.g. its folder isn't trusted any more) stays, saying why. Also for SSH hosts' accounts (they start from here, over ssh).
 - **Queued tasks wait for the limit:** a task (or a chat going on by itself) whose account is at its usage limit when its time comes waits on, and starts a minute after that resets, instead of stopping at once; **Start now** still starts it right away. A chat that went on by itself keeps its name (Claude named its background session after the message it went on with).
