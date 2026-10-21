@@ -57,7 +57,12 @@ export function markdownLinkFile(
 // to report, or "" when it opened
 export async function openAgentRunFile(file: string): Promise<string> {
   // a file of this computer: in a Remote-SSH window, through vscode-local
-  const uri = vscode.env.remoteName ? vscode.Uri.from({ scheme: "vscode-local", path: file }) : vscode.Uri.file(file);
+  return showMarkdown(vscode.env.remoteName ? vscode.Uri.from({ scheme: "vscode-local", path: file }) : vscode.Uri.file(file));
+}
+
+// A Markdown file in the preview (its Open Source button edits it), else as
+// text; the error to report, or ""
+export async function showMarkdown(uri: vscode.Uri): Promise<string> {
   try {
     await vscode.commands.executeCommand("markdown.showPreview", uri);
     return "";

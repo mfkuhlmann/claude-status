@@ -13,7 +13,7 @@ import { configDirArgs, setSshHosts, settings } from "./config";
 import { agentRunArgs } from "./agentRun";
 import { openComparison } from "./changes";
 import { claudePanelAvailable, localPanelProfileKey, openPanelChat } from "./claudePanel";
-import { isAgentRunFile, openAgentRunFile } from "./agentRun";
+import { isAgentRunFile, openAgentRunFile, showMarkdown } from "./agentRun";
 import type { Dashboard } from "./dashboard";
 import { canRaiseWindows, isGnome } from "./desktop";
 import { chatRef } from "./notify";
@@ -368,9 +368,9 @@ export class Actions {
 
   // ---------------------------------------------------------------- plans
 
-  // A plan in an editor tab: yours to change, also one of the host this
-  // window is connected to. Another SSH host's comes over ssh as a copy
-  // (remote.py --plan), shown in the Markdown preview.
+  // A plan in the Markdown preview: the file itself (its Open Source button
+  // edits it), also one of the host this window is connected to. Another
+  // SSH host's comes over ssh as a copy (remote.py --plan).
   async openPlan(plan: { slug: string; path: string; profileDir: string }, host?: string): Promise<void> {
     if (this.demoOnly()) return;
     if (host && host !== this.dash.currentHost) {
@@ -383,11 +383,8 @@ export class Actions {
     }
     // (a file of this computer, in a Remote-SSH window: through vscode-local)
     const uri = !host && vscode.env.remoteName ? vscode.Uri.from({ scheme: "vscode-local", path: plan.path }) : vscode.Uri.file(plan.path);
-    try {
-      await vscode.window.showTextDocument(uri, { preview: false });
-    } catch (e) {
-      this.fail(`Couldn't open the plan: ${e instanceof Error ? e.message : String(e)}`);
-    }
+    const error = await showMarkdown(uri);
+    if (error) this.fail(`Couldn't open the plan: ${error}`);
   }
 
   // The chat that made a plan, to change the plan with Claude: its row's

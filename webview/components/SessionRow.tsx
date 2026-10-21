@@ -138,7 +138,7 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
           {s.plan ? (
             <Tag
               text="plan ↗"
-              title={`${s.plan.title}\nThe plan this chat made. Click to open it${host && host !== view.hosts.find((h) => h.current)?.name ? ` (a copy, fetched from ${host})` : ""}.`}
+              title={`${s.plan.title}\nThe plan this chat made. Click to read it in the Markdown preview${host && host !== view.hosts.find((h) => h.current)?.name ? ` (a copy, fetched from ${host})` : " (its Open Source button edits it)"}.`}
               onClick={() => post({ type: "openPlan", chat })}
             />
           ) : null}

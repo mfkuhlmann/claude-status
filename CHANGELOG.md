@@ -30,6 +30,9 @@
   the usage limit* (red), instead of counting them as idle or done.
 - **A recent chat's or a plan's tooltip** shows its whole folder (the
   line may cut it short).
+- **Plans open in the Markdown preview,** rendered, instead of as a text
+  file; the preview's **Open Source** button edits one (what you change
+  is the plan).
 - **Two chats changing the same files:** chats that are open and changed
   some of the same files get a red **⚠ same files** tag naming the other
   chat and the files (click it to go there), and a notification when it

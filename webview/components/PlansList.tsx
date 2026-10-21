@@ -9,8 +9,8 @@ import { useView } from "./context";
 import { IconButton } from "./IconButton";
 
 // The plans this account's chats wrote in plan mode (<config>/plans), newest
-// first. Folded by default. A plan opens in an editor tab (an SSH host's: a
-// copy, unless this window is connected to it); ▶ carries it out in a new
+// first. Folded by default. A plan opens in the Markdown preview (an SSH
+// host's: a copy, unless this window is connected to it); ▶ carries it out in a new
 // chat, ◀ goes back to the chat that made it, and the share button shares it
 // with the machine's other accounts.
 export function PlansList({ group }: { group: Group }) {
@@ -46,7 +46,9 @@ export function PlansList({ group }: { group: Group }) {
                 class="link recent-name"
                 title={
                   `${p.title}\n` +
-                  (copy ? `Click to open it: a copy, fetched from ${host}.` : "Click to open it in an editor tab: what you change there is the plan.") +
+                  (copy
+                    ? `Click to read it: a copy, fetched from ${host}.`
+                    : "Click to read it in the Markdown preview. Its Open Source button edits it: what you change there is the plan.") +
                   (p.cwd ? `\nFolder: ${host ? `${host}:` : ""}${p.cwd}` : "") +
                   (p.shared ? "\nShared with your other accounts." : "") +
                   (p.chatId ? "" : "\nThe chat that made it isn't here any more.")

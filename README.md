@@ -47,7 +47,8 @@ As an editor tab (**Claude Status: Open in Editor Tab**):
   with all the words you type in its name, folder or prompts, here and on
   the SSH hosts shown. Pick one to go to it, or to reopen it.
 - **Plans**: a chat that wrote a plan in plan mode gets a **plan ↗** tag
-  that opens it in an editor tab. Each account lists its plans (**Plans**):
+  that shows it in VS Code's Markdown preview (**Open Source** there edits
+  it). Each account lists its plans (**Plans**):
   open one, carry it out in a new chat (the plan is its first message, with
   what you add), go back to the chat that made it, or share it with your
   other accounts (sharing a chat shares its plan too).
