@@ -42,12 +42,12 @@ test("counts, overall state, headline and mood follow the most urgent chat", () 
   const s = demoState(NOW);
   const groups = allGroups(s.status, s.hosts);
   const counts = countStates(groups);
-  assert.deepEqual(counts, { waiting: 1, working: 2, idle: 1, done: 1 }); // (the idle one waits for its usage limit)
+  assert.deepEqual(counts, { waiting: 1, working: 2, idle: 0, done: 1, limit: 1 }); // (the idle one waits for its usage limit)
   assert.equal(overallState(groups, counts), "waiting");
   assert.equal(headlineText(s, counts), "1 chat needs you");
   assert.equal(heroMood(s, "waiting", groups), "waving");
   assert.equal(heroMood(s, "working", groups), "working-juggling"); // a demo chat runs subagents
-  assert.equal(summaryText(counts), "1 needs input · 2 working · 1 idle · 1 done");
+  assert.equal(summaryText(counts), "1 needs input · 2 working · 1 at the usage limit · 1 done");
   assert.equal(heroMood({ status: null, errorText: "" }, "none", []), "loading");
   assert.equal(heroMood({ status: null, errorText: "broken" }, "none", []), "error");
 });
@@ -93,7 +93,7 @@ function account(id: string, pct: number, updatedAt: number, extra: Partial<Grou
 }
 
 function machine(groups: Group[]): Status {
-  return { ok: true, generatedAt: NOW, overall: "none", counts: { waiting: 0, working: 0, idle: 0, done: 0 }, groups, dismissed: 0, canShare: false, errors: [] };
+  return { ok: true, generatedAt: NOW, overall: "none", counts: { waiting: 0, working: 0, idle: 0, done: 0, limit: 0 }, groups, dismissed: 0, canShare: false, errors: [] };
 }
 
 function host(name: string, groups: Group[], current = false): HostState {

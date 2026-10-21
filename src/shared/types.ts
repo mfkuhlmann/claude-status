@@ -351,6 +351,7 @@ export interface Counts {
   working: number;
   idle: number;
   done: number;
+  limit: number; // a usage limit stopped them (idle or done): they wait for it, not for you
 }
 
 export type Overall = "waiting" | "working" | "idle" | "none";

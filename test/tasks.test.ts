@@ -5,16 +5,17 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { demoState } from "../src/shared/demo";
 import {
+  countStates,
   findPlan,
   handoverTarget,
   hasPeek,
   headlineText,
-  heldByLimits,
   modeText,
   peekLine,
   planWhere,
   stateText,
   stopText,
+  summaryText,
   toLocalClock,
 } from "../src/shared/model";
 import type { Group, Session, Status, Stop } from "../src/shared/types";
@@ -58,14 +59,16 @@ test("a chat a usage limit stopped: its state, its line, when the limit resets",
   assert.match(stopText({ kind: "login", window: null, text: "", at: null }), /login expired/i);
 });
 
-test("an idle chat that waits for its limit doesn't count as your turn", () => {
-  const g = { ...demoState(NOW).status!.groups[0], sessions: [chat({ stopped: limit() }), chat({ key: "c2", chatId: "c2" })] };
-  assert.equal(heldByLimits([g]), 1);
-  const counts = { waiting: 0, working: 0, idle: 2, done: 0 };
-  assert.equal(headlineText({ status: demoState(NOW).status, errorText: "" }, counts, false, 1), "Your turn in 1 chat");
-  assert.equal(headlineText({ status: demoState(NOW).status, errorText: "" }, { ...counts, idle: 1 }, false, 1), "1 chat waits for its usage limit");
+test("a chat that waits for its limit doesn't count as your turn, nor as done", () => {
+  const stopped = chat({ stopped: limit() });
+  const g = { ...demoState(NOW).status!.groups[0], sessions: [stopped, chat({ key: "c2", chatId: "c2" }), { ...stopped, key: "c3", state: "done" as const }] };
+  const counts = countStates([g]);
+  assert.deepEqual(counts, { waiting: 0, working: 0, idle: 1, done: 0, limit: 2 });
+  assert.equal(summaryText(counts), "1 idle · 2 at the usage limit");
+  assert.equal(headlineText({ status: demoState(NOW).status, errorText: "" }, counts), "Your turn in 1 chat");
+  assert.equal(headlineText({ status: demoState(NOW).status, errorText: "" }, { ...counts, idle: 0 }), "2 chats wait for their usage limit");
   // once the limit reset, it's your turn again
-  assert.equal(heldByLimits([{ ...g, sessions: [chat({ stopped: limit(true, null) })] }]), 0);
+  assert.equal(countStates([{ ...g, sessions: [chat({ stopped: limit(true, null) })] }]).idle, 1);
 });
 
 test("Claude's recap is the line of an idle chat, after what stopped it and a job's result", () => {

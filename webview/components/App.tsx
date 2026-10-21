@@ -3,7 +3,6 @@ import {
   countStates,
   firstWaiting,
   headlineText,
-  heldByLimits,
   heroMood,
   highUsageText,
   maxFiveHour,
@@ -80,7 +79,7 @@ export function App() {
   const waiting = firstWaiting(groups);
   const hero: HeroInput = {
     mood: heroMood(state, overall, groups),
-    headline: headlineText(state, counts, groups.length > 0, heldByLimits(groups)),
+    headline: headlineText(state, counts, groups.length > 0),
     counts,
     highUsageText: highUsageText(groups),
     contextFullText: contextFullText(groups, (key) => pets.petColor(key)),

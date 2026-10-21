@@ -455,6 +455,7 @@ export class Stage implements PetStage, Animator {
       ["waiting", counts.waiting, plural(counts.waiting, "%1 needs input", "%1 need input")],
       ["working", counts.working, `${counts.working} working`],
       ["idle", counts.idle, `${counts.idle} idle`],
+      ["limit", counts.limit, `${counts.limit} at the usage limit`],
       ["done", counts.done, `${counts.done} done`],
     ];
     for (const [state, n, text] of items) {

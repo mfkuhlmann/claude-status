@@ -167,6 +167,7 @@
 .cs-dot-working { background: var(--cs-working); }
 .cs-dot-idle,
 .cs-dot-done { background: var(--cs-idle); }
+.cs-dot-limit { background: var(--cs-failed); }
 
 /* ------------------------------------------------------------ an account's stage */
 

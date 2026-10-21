@@ -189,9 +189,15 @@ export function claudeCodeReopenHint(g: Pick<Group, "host" | "vscodeHere" | "pro
 }
 
 export function countStates(groups: Group[]): Counts {
-  const c: Counts = { waiting: 0, working: 0, idle: 0, done: 0 };
-  for (const g of groups) for (const s of g.sessions) if (s.state in c) c[s.state] += 1;
+  const c: Counts = { waiting: 0, working: 0, idle: 0, done: 0, limit: 0 };
+  for (const g of groups) for (const s of g.sessions) if (atLimit(s)) c.limit += 1; else if (s.state in c) c[s.state] += 1;
   return c;
+}
+
+// A chat a usage limit stopped, until it resets (whether a process still has
+// it open or not): it waits for the limit, not for you
+export function atLimit(s: Pick<Session, "state" | "stopped">): boolean {
+  return (s.state === "idle" || s.state === "done") && s.stopped?.kind === "limit" && !s.stopped.over;
 }
 
 export function overallState(groups: Group[], counts: Counts): Overall {
@@ -209,14 +215,13 @@ export function plural(n: number, one: string, many: string): string {
 
 // The hero's headline: the most important thing on the dashboard
 // hostsAnswered: SSH hosts' chats count while this computer's status is missing
-// held: idle chats that wait for a usage limit to reset, not for you (heldByLimits)
-export function headlineText(state: Pick<ViewState, "status" | "errorText">, counts: Counts, hostsAnswered = false, held = 0): string {
+export function headlineText(state: Pick<ViewState, "status" | "errorText">, counts: Counts, hostsAnswered = false): string {
   if (!state.status && !hostsAnswered && state.errorText) return "Status unavailable";
   if (!state.status && !hostsAnswered) return "Looking for your chats…";
   if (counts.waiting) return plural(counts.waiting, "%1 chat needs you", "%1 chats need you");
   if (counts.working) return plural(counts.working, "%1 chat working", "%1 chats working");
-  if (counts.idle > held) return plural(counts.idle - held, "Your turn in %1 chat", "Your turn in %1 chats");
-  if (held) return plural(held, "%1 chat waits for its usage limit", "%1 chats wait for their usage limit");
+  if (counts.idle) return plural(counts.idle, "Your turn in %1 chat", "Your turn in %1 chats");
+  if (counts.limit) return plural(counts.limit, "%1 chat waits for its usage limit", "%1 chats wait for their usage limit");
   if (counts.done) return plural(counts.done, "%1 finished chat to look at", "%1 finished chats to look at");
   return "All quiet";
 }
@@ -226,6 +231,7 @@ export function summaryText(counts: Counts): string {
   if (counts.waiting) parts.push(plural(counts.waiting, "%1 needs input", "%1 need input"));
   if (counts.working) parts.push(`${counts.working} working`);
   if (counts.idle) parts.push(`${counts.idle} idle`);
+  if (counts.limit) parts.push(`${counts.limit} at the usage limit`);
   if (counts.done) parts.push(`${counts.done} done`);
   return parts.length ? parts.join(" · ") : "No sessions running";
 }
@@ -481,15 +487,6 @@ export function stopText(stop: Stop): string {
   if (stop.kind === "login") return "Claude's login expired. Log in again (/login), then tell it to go on.";
   if (stop.over) return "The limit it hit has reset: open it and tell Claude to go on.";
   return stop.text;
-}
-
-// Idle chats a usage limit stopped (until it resets): they wait for the
-// limit, not for you
-export function heldByLimits(groups: Group[]): number {
-  let n = 0;
-  for (const g of groups)
-    for (const s of g.sessions) if (s.state === "idle" && s.stopped?.kind === "limit" && !s.stopped.over) n += 1;
-  return n;
 }
 
 // Another account of the chat's machine with room left in the limit that

@@ -26,6 +26,8 @@
   marks it as blocked, *rate limited — wait and retry*): it now says
   **Limit · resets in …** like the others, and doesn't count as needing
   you.
+- **The summary counts chats at the usage limit apart:** *1 working · 2 at
+  the usage limit* (red), instead of counting them as idle or done.
 - **A recent chat's or a plan's tooltip** shows its whole folder (the
   line may cut it short).
 - **Two chats changing the same files:** chats that are open and changed
