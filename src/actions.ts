@@ -36,7 +36,7 @@ import {
   shareAccounts,
   shellQuote,
 } from "./shared/model";
-import type { ChatRef, FoundChat, Group, PlanItem, Project, Session } from "./shared/types";
+import type { ChatRef, FoundChat, FoundMemory, FoundPlan, FoundProject, Group, PlanItem, Project, Session } from "./shared/types";
 import { localAncestors, type Place, type Terminals } from "./terminals";
 import type { PlanReview } from "./planReview";
 
@@ -454,7 +454,7 @@ export class Actions {
   async openMemory(memory: { path: string }, host?: string, edit = false): Promise<void> {
     if (this.demoOnly()) return;
     if (host && host !== this.dash.currentHost) return this.fail(`That memory is on ${host}: open it from a VS Code window connected to ${host}.`);
-    if (!/\/projects\/[^/]+\/memory\/[^/]+\.md$/.test(memory.path)) return this.fail("That isn't one of Claude's memories.");
+    if (!/(\/projects\/[^/]+\/memory\/[^/]+\.md|\/CLAUDE\.md)$/.test(memory.path)) return this.fail("That isn't one of Claude's memories.");
     const uri = !host && vscode.env.remoteName ? vscode.Uri.from({ scheme: "vscode-local", path: memory.path }) : vscode.Uri.file(memory.path);
     if (!edit) {
       const error = await showMarkdown(uri);
@@ -537,10 +537,10 @@ export class Actions {
   // remote.py --find), newest first; the one you pick comes up, or reopens.
   async findChat(): Promise<void> {
     if (this.demoOnly()) return;
-    type Item = vscode.QuickPickItem & { found?: FoundChat; host?: string };
+    type Item = vscode.QuickPickItem & { found?: FoundChat; project?: FoundProject; plan?: FoundPlan; memory?: FoundMemory; host?: string };
     const qp = vscode.window.createQuickPick<Item>();
     qp.title = "Find a Chat";
-    qp.placeholder = "Words in its name, its folder or one of your prompts";
+    qp.placeholder = "Words in a chat's name, folder or your prompts; a project folder, a plan or a memory";
     qp.matchOnDescription = true;
     qp.matchOnDetail = true;
     let asked = 0;
@@ -565,8 +565,34 @@ export class Actions {
       const now = Date.now();
       answers.forEach((answer, i) => {
         const host = i ? hosts[i - 1] : undefined;
-        if (hosts.length) items.push({ label: host ?? "This computer", kind: vscode.QuickPickItemKind.Separator });
-        if (!answer.ok) items.push({ label: `$(warning) ${answer.message}`, alwaysShow: true });
+        const heading = (what: string) => items.push({ label: hosts.length ? `${host ?? "This computer"}: ${what}` : what, kind: vscode.QuickPickItemKind.Separator });
+        if (!answer.ok) {
+          heading("Chats");
+          items.push({ label: `$(warning) ${answer.message}`, alwaysShow: true });
+        }
+        if (answer.projects.length) heading("Folders");
+        for (const p of answer.projects)
+          items.push({
+            label: `$(folder) ${p.folderShort || p.folder}`,
+            description: `${p.account} · ${p.chats === 1 ? "1 chat" : `${p.chats} chats`} · ${ago(now - p.lastActive)}`,
+            detail: "New chat in this folder",
+            alwaysShow: true,
+            project: p,
+            host,
+          });
+        if (answer.plans.length) heading("Plans");
+        for (const p of answer.plans)
+          items.push({ label: `$(checklist) ${p.title}`, description: `${p.account} · ${ago(now - p.updatedAt)}`, alwaysShow: true, plan: p, host });
+        if (answer.memories.length) heading("Memories");
+        for (const m of answer.memories)
+          items.push({
+            label: `$(note) ${m.description || m.name}`,
+            description: `${m.account} · ${m.folderShort || "every folder"}`,
+            alwaysShow: true,
+            memory: m,
+            host,
+          });
+        if (answer.results.length) heading("Chats");
         for (const c of answer.results)
           items.push({
             label: (c.shared ? "$(link) " : "") + c.name,
@@ -578,7 +604,8 @@ export class Actions {
           });
         if (answer.more) items.push({ label: "$(info) More chats have these words: add a word to narrow it down", alwaysShow: true });
       });
-      if (!items.some((it) => it.found)) items.push({ label: "No chat with all of these words in its name, folder or your prompts", alwaysShow: true });
+      if (!items.some((it) => it.found || it.project || it.plan || it.memory))
+        items.push({ label: "Nothing with all of these words: no chat (its name, folder or your prompts), project folder, plan or memory", alwaysShow: true });
       qp.items = items;
       qp.busy = false;
     };
@@ -598,6 +625,10 @@ export class Actions {
     clearTimeout(timer);
     qp.dispose();
     if (pick?.found) await this.openFound(pick.found, pick.host);
+    else if (pick?.project)
+      await this.newChat(pick.project.groupId, pick.host, undefined, undefined, { path: pick.project.folder, short: pick.project.folderShort || pick.project.folder });
+    else if (pick?.plan) await this.openPlan(pick.plan, pick.host);
+    else if (pick?.memory) await this.openMemory(pick.memory, pick.host);
   }
 
   // A chat the search found: its row's chat when it's listed, else reopened
@@ -640,7 +671,7 @@ export class Actions {
   // then (claude --bg: no window, listed right away; only in folders Claude
   // trusts, since it can't ask there). plan: carry out that plan of the
   // account (its text is the chat's first message, with what you add).
-  async newChat(groupId?: string, host?: string, plan?: PlanItem, task?: string): Promise<void> {
+  async newChat(groupId?: string, host?: string, plan?: PlanItem, task?: string, first?: Project): Promise<void> {
     if (this.demoOnly()) return;
     const state = this.dash.state();
     const groups = allGroups(state.status, state.hosts);
@@ -686,6 +717,9 @@ export class Actions {
     if (plan?.cwd) {
       const own = folders.find((f) => f.path === plan.cwd);
       folders = [own ?? { path: plan.cwd, short: plan.cwdShort || plan.cwd }, ...folders.filter((f) => f.path !== plan.cwd)];
+    } else if (first?.path) {
+      // a project folder the search found: first
+      folders = [folders.find((f) => f.path === first.path) ?? first, ...folders.filter((f) => f.path !== first.path)];
     }
     const label = (f: Project) =>
       `$(${f.short === "~" ? "home" : "folder"}) ${f.short === "~" ? "Home folder (~)" : f.short}` + (plan && f.path === plan.cwd ? "  (the plan's)" : "");
@@ -729,7 +763,7 @@ export class Actions {
         placeHolder: "e.g. Fix the flaky test in tests/test_jump.py",
       });
       if (!text?.trim()) return;
-      return this.newChat(group.id, host, undefined, text.trim());
+      return this.newChat(group.id, host, undefined, text.trim(), first);
     }
     if (pick.start === "panel") return this.panelChat(group, hasTask ? await this.taskText(task ?? "", plan, host) : undefined);
     if (pick.start === "schedule") {

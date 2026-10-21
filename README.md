@@ -45,7 +45,8 @@ As an editor tab (**Claude Status: Open in Editor Tab**):
   **Recent chats**, click a chat's **limit** tag for the same.
 - **Find a Chat…** (the search button in the view's title bar): every chat
   with all the words you type in its name, folder or prompts, here and on
-  the SSH hosts shown. Pick one to go to it, or to reopen it.
+  the SSH hosts shown. Pick one to go to it, or to reopen it. It finds
+  project folders (pick one for a new chat there), plans and memories too.
 - **Plans**: a chat that wrote a plan in plan mode gets a **plan ↗** tag
   that shows it in VS Code's Markdown preview, and a **✎** that opens its
   file to change it (as does **Open Source** in the preview). There, the
@@ -64,7 +65,8 @@ As an editor tab (**Claude Status: Open in Editor Tab**):
   the same files get a red **⚠ same files** tag naming the other chat (and a
   notification), since two chats editing one file can overwrite each other.
 - **Memories**: each account lists what Claude remembers about you and your
-  projects (**Memories**): read one in the Markdown preview, or edit it.
+  projects (**Memories**), after its own `CLAUDE.md`: read one in the
+  Markdown preview, or edit it.
 - **What a chat changed**: its **± 3 files** tag opens VS Code's changes view
   with each file as it was before the chat and as it is now (or only the last
   turn: **Last turn** in the unfolded peek). The files come from the backups

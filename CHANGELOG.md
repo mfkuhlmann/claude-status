@@ -12,6 +12,11 @@
   can't start (e.g. its folder isn't trusted any more) stays, saying why.
   The queue is shared with the Plasma widget, and only one of them starts
   a task. Also for SSH hosts' accounts (they start from here, over ssh).
+- **Queued tasks wait for the limit:** a task (or a chat going on by
+  itself) whose account is at its usage limit when its time comes waits
+  on, and starts a minute after that resets, instead of stopping at once;
+  ▶ still starts it right away. A chat that went on by itself keeps its
+  name.
 - **Start a background task later:** **New Chat… → Start with a task…**
   offers **Later, at a time you pick…**: a day (today or one of the next
   six), a time, then the folder. The task waits under the account and
@@ -36,9 +41,13 @@
   the usage limit* (red), instead of counting them as idle or done.
 - **A recent chat's or a plan's tooltip** shows its whole folder (the
   line may cut it short).
+- **Finding more than chats:** **Find a Chat…** also finds project folders
+  (by their path: pick one for a new chat there), plans (by their title or
+  text) and memories (by what they say), listed before the chats.
 - **Each account's memories:** what Claude keeps about you and your
   projects (`<config>/projects/<folder>/memory`) is listed under each
-  account (**Memories**, folded), newest first, with the folder each is
+  account (**Memories**, folded), after the account's own `CLAUDE.md` (your
+  instructions for every chat on it), newest first, with the folder each is
   for: one opens in the Markdown preview, and the edit button opens its
   file, to change what Claude remembers.
 - **Feedback on a plan, as in a review:** in a plan's file (✎), the **+**

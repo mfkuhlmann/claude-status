@@ -6,7 +6,7 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { isComparison, type Comparison } from "./changes";
-import type { FoundChat, Status } from "./shared/types";
+import type { FoundChat, FoundMemory, FoundPlan, FoundProject, Status } from "./shared/types";
 
 export const REMOTE_MARK = "@@claude-status@@";
 const KILL_GRACE_MS = 3000;
@@ -25,6 +25,17 @@ export interface SshHost {
   user: string;
   port: string;
   jump: string;
+}
+
+// What the search found: chats, and the project folders, plans and memories with the words
+export interface FindAnswer {
+  ok: boolean;
+  results: FoundChat[];
+  more: boolean;
+  message: string;
+  projects: FoundProject[];
+  plans: FoundPlan[];
+  memories: FoundMemory[];
 }
 
 export interface Answer {
@@ -167,7 +178,7 @@ export class Backend {
 
   // The chats with every word of query (claude_status.py --find; an SSH
   // host's through remote.py, each with the command that reopens it there)
-  async find(query: string, host?: string, extra: string[] = []): Promise<{ ok: boolean; results: FoundChat[]; more: boolean; message: string }> {
+  async find(query: string, host?: string, extra: string[] = []): Promise<FindAnswer> {
     let r: Record<string, any> | null;
     if (host) r = await this.json(["remote.py", "--find", host, query], 60000);
     else {
@@ -181,8 +192,12 @@ export class Backend {
       }
       if (!r) r = { ok: false, message: run.spawnError?.message ?? (lastLine(run.stderr) || "no answer") };
     }
-    if (!r || !r.ok) return { ok: false, results: [], more: false, message: String(r?.message ?? r?.error ?? "no answer") };
-    return { ok: true, results: Array.isArray(r.results) ? (r.results as FoundChat[]) : [], more: !!r.more, message: "" };
+    const list = <T>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
+    if (!r || !r.ok) return { ok: false, results: [], more: false, message: String(r?.message ?? r?.error ?? "no answer"), projects: [], plans: [], memories: [] };
+    return {
+      ok: true, results: list<FoundChat>(r.results), more: !!r.more, message: "",
+      projects: list<FoundProject>(r.projects), plans: list<FoundPlan>(r.plans), memories: list<FoundMemory>(r.memories),
+    };
   }
 
   // jump.py / remote.py actions; they print {"ok": bool, "message": str}

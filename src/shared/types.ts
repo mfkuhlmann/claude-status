@@ -291,6 +291,32 @@ export interface FoundChat {
   openCommand?: string | null; // an SSH host's: reopens it there
 }
 
+// What the search found besides chats (claude_status.py: find_more)
+export interface FoundProject {
+  folder: string;
+  folderShort: string;
+  lastActive: number;
+  chats: number;
+  profile: string;
+  profileDir: string;
+  groupId: string;
+  account: string;
+}
+
+export interface FoundPlan {
+  key: string;
+  slug: string;
+  title: string;
+  path: string;
+  profile: string;
+  profileDir: string;
+  groupId: string;
+  account: string;
+  updatedAt: number;
+}
+
+export type FoundMemory = Memory & { groupId: string; account: string };
+
 export interface SharedPointer {
   key: string;
   sessionId: string;

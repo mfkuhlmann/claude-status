@@ -11,7 +11,7 @@ import { settings, statusArgs, configDirArgs, viewSettings } from "./config";
 import type { Notifier } from "./notify";
 import { currentRemoteHost } from "./remoteHost";
 import { demoState } from "./shared/demo";
-import { allGroups, chatsNeedingYou, queuedWhat, shareUsage, toLocalClock, trackKey, type ChatSpot } from "./shared/model";
+import { allGroups, chatsNeedingYou, limitReset, queuedWhat, shareUsage, toLocalClock, trackKey, type ChatSpot } from "./shared/model";
 import { chatRef } from "./notify";
 import type { ClaudeCodeInfo, DigestCard, HostState, PetEventKind, QueuedTask, Status, ViewState } from "./shared/types";
 import { mergeChanges, TransitionTracker, type Changes, type PetEvent } from "./transitions";
@@ -268,9 +268,27 @@ export class Dashboard implements vscode.Disposable {
   // Queued tasks whose usage limit has reset start now: from the window
   // that notifies (of several windows, and the Plasma widget, only one
   // starts each: jump.py --start-queued takes it out of the queue first)
+  // (a task whose account is at its usage limit right now waits on until
+  // that resets: jump.py --requeue)
   private startDueTasks(status: Status): void {
     if (this.demo || !this.notifier.isLeader()) return;
-    for (const t of status.queue ?? []) if (t.due && !this.starting.has(t.id)) void this.startQueued(t);
+    const groups = allGroups(status, this.state().hosts);
+    for (const t of status.queue ?? []) {
+      if (!t.due || this.starting.has(t.id)) continue;
+      const group = groups.find((g) => (g.host ?? "") === (t.host || "") && (g.profileKeys ?? []).includes(t.profile));
+      const reset = group ? limitReset(group, Date.now()) : null;
+      if (!reset) {
+        void this.startQueued(t);
+        continue;
+      }
+      this.starting.add(t.id);
+      void this.backend
+        .action("jump.py", ["--requeue", t.id, "--at", String(Math.round(reset.at + 60_000)), ...configDirArgs()])
+        .finally(() => {
+          this.starting.delete(t.id);
+          void this.refresh();
+        });
+    }
   }
 
   private starting = new Set<string>();

@@ -55,7 +55,7 @@ export function MemoriesList({ group }: { group: Group }) {
                 {m.description || m.name}
               </button>
               <span class="small muted nowrap recent-folder" title={m.folder}>
-                {m.folderShort ? `${m.folderShort} · ${ago(view.now - m.updatedAt)}` : ago(view.now - m.updatedAt)}
+                {m.folderShort || m.type === "account" ? `${m.folderShort || "every folder"} · ${ago(view.now - m.updatedAt)}` : ago(view.now - m.updatedAt)}
               </span>
               {elsewhere ? null : (
                 <div class="row-actions">
