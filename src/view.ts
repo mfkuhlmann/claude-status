@@ -181,10 +181,10 @@ export class ViewHost implements vscode.WebviewViewProvider, vscode.Disposable {
         break;
       }
       case "openPlan": {
-        if (chat?.plan) void this.actions.openPlan({ ...chat.plan, profileDir: chat.profileDir }, chat.host);
+        if (chat?.plan) void this.actions.openPlan({ ...chat.plan, profileDir: chat.profileDir }, chat.host, m.edit === true);
         else {
           const found = this.planOf(m);
-          if (found) void this.actions.openPlan(found.plan, found.group.host);
+          if (found) void this.actions.openPlan(found.plan, found.group.host, m.edit === true);
         }
         break;
       }

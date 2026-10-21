@@ -142,6 +142,13 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
               onClick={() => post({ type: "openPlan", chat })}
             />
           ) : null}
+          {s.plan && (!host || host === view.hosts.find((h) => h.current)?.name) ? (
+            <Tag
+              text="✎"
+              title={`Edit the plan: its Markdown file opens in an editor tab. What you change there is the plan.`}
+              onClick={() => post({ type: "openPlan", chat, edit: true })}
+            />
+          ) : null}
           {changes ? (
             <Tag
               text={`± ${plural(changes.count, "%1 file", "%1 files")}`}

@@ -451,7 +451,7 @@ export type WebviewMessage =
   | { type: "dismissDigest" }
   | { type: "newChat"; groupId: string; host?: string }
   | { type: "handOver"; chat: ChatRef; profile: string }
-  | { type: "openPlan"; chat?: ChatRef; groupId?: string; host?: string; plan?: string } // a chat's plan, or an account's
+  | { type: "openPlan"; chat?: ChatRef; groupId?: string; host?: string; plan?: string; edit?: boolean } // a chat's plan, or an account's (edit: its file, to change it)
   | { type: "carryOutPlan"; groupId: string; host?: string; plan: string }
   | { type: "continuePlanChat"; groupId: string; host?: string; plan: string }
   | { type: "sharePlan"; groupId: string; host?: string; plan: string }

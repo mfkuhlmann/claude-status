@@ -369,11 +369,13 @@ export class Actions {
   // ---------------------------------------------------------------- plans
 
   // A plan in the Markdown preview: the file itself (its Open Source button
-  // edits it), also one of the host this window is connected to. Another
-  // SSH host's comes over ssh as a copy (remote.py --plan).
-  async openPlan(plan: { slug: string; path: string; profileDir: string }, host?: string): Promise<void> {
+  // edits it), also one of the host this window is connected to; with edit,
+  // that file in an editor tab, to change it. Another SSH host's comes over
+  // ssh as a copy (remote.py --plan), to read.
+  async openPlan(plan: { slug: string; path: string; profileDir: string }, host?: string, edit = false): Promise<void> {
     if (this.demoOnly()) return;
     if (host && host !== this.dash.currentHost) {
+      if (edit) return this.fail(`That plan is on ${host}: change it from a VS Code window connected to ${host}.`);
       const answer = await this.backend.action("remote.py", ["--plan", host, plan.slug, plan.profileDir, "--no-open"]);
       if (!this.report(answer, "Couldn't open the plan")) return;
       if (!isAgentRunFile(answer.file)) return this.fail("Couldn't open the plan: the helper saved it somewhere unexpected");
@@ -383,6 +385,14 @@ export class Actions {
     }
     // (a file of this computer, in a Remote-SSH window: through vscode-local)
     const uri = !host && vscode.env.remoteName ? vscode.Uri.from({ scheme: "vscode-local", path: plan.path }) : vscode.Uri.file(plan.path);
+    if (edit) {
+      try {
+        await vscode.window.showTextDocument(uri, { preview: false });
+      } catch (e) {
+        this.fail(`Couldn't open the plan: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      return;
+    }
     const error = await showMarkdown(uri);
     if (error) this.fail(`Couldn't open the plan: ${error}`);
   }

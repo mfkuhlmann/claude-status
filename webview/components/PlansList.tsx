@@ -66,6 +66,14 @@ export function PlansList({ group }: { group: Group }) {
                 {planWhere(p, view.now)}
               </span>
               <div class="row-actions">
+                {copy ? null : (
+                  <IconButton
+                    icon="edit"
+                    label="Edit the plan"
+                    title="Edit the plan: its Markdown file opens in an editor tab. What you change there is the plan."
+                    onClick={() => post({ type: "openPlan", ...ref(p.key), edit: true })}
+                  />
+                )}
                 <IconButton
                   icon="play"
                   label="Carry it out…"
