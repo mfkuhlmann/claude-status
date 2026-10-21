@@ -13,7 +13,7 @@ import { currentRemoteHost } from "./remoteHost";
 import { demoState } from "./shared/demo";
 import { allGroups, chatsNeedingYou, shareUsage, toLocalClock, trackKey, type ChatSpot } from "./shared/model";
 import { chatRef } from "./notify";
-import type { ClaudeCodeInfo, DigestCard, HostState, PetEventKind, Status, ViewState } from "./shared/types";
+import type { ClaudeCodeInfo, DigestCard, HostState, PetEventKind, QueuedTask, Status, ViewState } from "./shared/types";
 import { mergeChanges, TransitionTracker, type Changes, type PetEvent } from "./transitions";
 
 const HIDDEN_POLL_MS = 10000;
@@ -202,12 +202,16 @@ export class Dashboard implements vscode.Disposable {
         this.errorText = status.errors.length ? status.errors.join("\n") : "";
         const opts = this.notifyOptions();
         const changes = mergeChanges(
-          this.tracker.track("", status.groups, status.generatedAt, undefined, opts),
-          this.tracker.limitResets("", status.groups, undefined, opts),
+          mergeChanges(
+            this.tracker.track("", status.groups, status.generatedAt, undefined, opts),
+            this.tracker.limitResets("", status.groups, undefined, opts),
+          ),
+          this.tracker.overlaps("", status.groups, undefined, opts),
         );
         const resets = this.tracker.resets("", status.groups);
         this.status = status;
         this.react(changes, resets);
+        this.startDueTasks(status);
       } else {
         this.errorText = error ?? "Status unavailable";
         this.log.warn(this.errorText);
@@ -239,8 +243,11 @@ export class Dashboard implements vscode.Disposable {
         const result = toLocalClock(answer.result, Date.now() - (answer.result.generatedAt || Date.now()));
         const opts = this.notifyOptions();
         const changes = mergeChanges(
-          this.tracker.track("ssh:" + host, result.groups, result.generatedAt, host, opts),
-          this.tracker.limitResets("ssh:" + host, result.groups, host, opts),
+          mergeChanges(
+            this.tracker.track("ssh:" + host, result.groups, result.generatedAt, host, opts),
+            this.tracker.limitResets("ssh:" + host, result.groups, host, opts),
+          ),
+          this.tracker.overlaps("ssh:" + host, result.groups, host, opts),
         );
         const resets = this.tracker.resets("ssh:" + host, result.groups);
         Object.assign(now, { loading: false, ok: true, error: "", result, updatedAt: Date.now(), login: false, loggedIn: !!answer.loggedIn });
@@ -256,6 +263,43 @@ export class Dashboard implements vscode.Disposable {
       if (h2) h2.loading = false;
       this.emit();
     }
+  }
+
+  // Queued tasks whose usage limit has reset start now: from the window
+  // that notifies (of several windows, and the Plasma widget, only one
+  // starts each: jump.py --start-queued takes it out of the queue first)
+  private startDueTasks(status: Status): void {
+    if (this.demo || !this.notifier.isLeader()) return;
+    for (const t of status.queue ?? []) if (t.due && !this.starting.has(t.id)) void this.startQueued(t);
+  }
+
+  private starting = new Set<string>();
+
+  async startQueued(t: QueuedTask): Promise<void> {
+    if (this.starting.has(t.id)) return;
+    this.starting.add(t.id);
+    this.emit();
+    try {
+      const answer = await this.backend.action("jump.py", ["--start-queued", t.id, ...configDirArgs()], 120000);
+      const what = t.planTitle ? `Carry out “${t.planTitle}”` : t.prompt.split("\n")[0];
+      if (answer.ok && answer.message) {
+        // ("": another window, or the widget, started it)
+        this.petEvent("reset", `Started: ${what}`);
+        if (settings.notifyDone() && this.notifier.isLeader())
+          void vscode.window.showInformationMessage(`Started on ${t.account}: ${what} — ${answer.message}${t.host ? ` · ${t.host}` : ""}`);
+      } else if (!answer.ok) {
+        this.setActionError(`Couldn't start the queued task: ${answer.message}`);
+        if (!this.visible) void vscode.window.showErrorMessage(`Claude Status: couldn't start the queued task “${what}”: ${answer.message}`);
+      }
+    } finally {
+      this.starting.delete(t.id);
+      void this.refresh();
+      if (t.host) void this.pollHost(t.host);
+    }
+  }
+
+  isStarting(id: string): boolean {
+    return this.starting.has(id);
   }
 
   // After Log in… (a host that wants a password): check it every few seconds

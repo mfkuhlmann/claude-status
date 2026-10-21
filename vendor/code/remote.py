@@ -391,8 +391,10 @@ def agent_run(host, chat_id, agent_id, profile=None, open_it=True):
     if not answer.get("ok") or not isinstance(answer.get("markdown"), str):
         return False, f"{host}: {answer.get('message') or 'no such subagent'}", None
     path = jump.save_run(Path.home(), answer.get("title"), agent_id, answer["markdown"])
-    if open_it and not jump.open_file(path):
-        return False, f"Saved it as {path}, but there's no xdg-open to open it with", str(path)
+    if open_it:
+        ok, why = jump.open_markdown(path)
+        if not ok:
+            return False, why, str(path)
     return True, f"{answer.get('message')} on {host}", str(path)
 
 
@@ -449,8 +451,10 @@ def open_plan(host, slug, profile=None, open_it=True):
     path = folder / f"plan-{re.sub(r'[^A-Za-z0-9_.-]', '_', host)}-{slug}.md"
     with open(path, "w", encoding="utf-8") as f:
         f.write(answer["markdown"])
-    if open_it and not jump.open_file(path):
-        return False, f"Saved it as {path}, but there's no xdg-open to open it with", str(path)
+    if open_it:
+        ok, why = jump.open_markdown(path)
+        if not ok:
+            return False, why, str(path)
     return True, f"Opened the plan {answer.get('title') or slug} from {host} (a copy)", str(path)
 
 

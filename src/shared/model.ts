@@ -1,7 +1,7 @@
 // The dashboard's derived values, shared by the extension (status bar,
 // notifications) and the webview. Ported from the widget's main.qml.
 
-import type { Agent, ChangeSummary, ChatRef, ChatStats, ClaudeCodeInfo, Counts, Group, HostState, Limits, LimitWindow, Overall, PlanItem, RecentChat, ReopenIn, Session, SharedPointer, SshUsage, StatsDay, Status, Stop, TaskProgress, UsageStats, ViewState } from "./types";
+import type { Agent, ChangeSummary, ChatRef, ChatStats, ClaudeCodeInfo, Counts, Group, HostState, Limits, LimitWindow, Overall, Overlap, PlanItem, QueuedTask, RecentChat, ReopenIn, Session, SharedPointer, SshUsage, StatsDay, Status, Stop, TaskProgress, UsageStats, ViewState } from "./types";
 
 // This computer's accounts and the hosts', for the counts, the badge and
 // what needs you. A host whose last check failed still shows what it said
@@ -515,6 +515,30 @@ export function handoverTarget(
       best = { title: g.title, shareProfile: g.shareProfile, pct, label: w ? w.label : "" };
   }
   return best;
+}
+
+// When the usage limit an account is at resets (the latest of its full
+// windows, else of the chats a limit stopped), or null
+export function limitReset(g: Pick<Group, "limits" | "sessions">, now: number): { at: number; label: string } | null {
+  let best: { at: number; label: string } | null = null;
+  for (const w of g.limits?.windows ?? []) if (w.pct >= 95 && w.resetsAt && (!best || w.resetsAt > best.at)) best = { at: w.resetsAt, label: w.label };
+  if (!best)
+    for (const s of g.sessions)
+      if (s.stopped?.kind === "limit" && !s.stopped.over && s.stopped.resetsAt && (!best || s.stopped.resetsAt > best.at))
+        best = { at: s.stopped.resetsAt, label: "" };
+  return best && best.at > now ? best : null;
+}
+
+// An account's queued tasks (on this computer, or on its SSH host)
+export function queuedFor(status: Pick<Status, "queue"> | null | undefined, g: Pick<Group, "host" | "profileKeys">): QueuedTask[] {
+  return (status?.queue ?? []).filter((t) => (t.host || "") === (g.host || "") && (g.profileKeys ?? []).includes(t.profile));
+}
+
+// "Also changed by “Renames”: src/parser.py", one line per other chat
+export function overlapText(overlaps: Overlap[]): string {
+  return overlaps
+    .map((o) => `Also changed by “${o.name}”${o.count > 1 ? ` (${o.count} files)` : ""}: ${o.files.join(", ")}${o.count > o.files.length ? " …" : ""}`)
+    .join("\n");
 }
 
 // ---------------------------------------------------------------- permission mode

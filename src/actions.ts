@@ -20,6 +20,8 @@ import { chatRef } from "./notify";
 import {
   ago,
   allGroups,
+  duration,
+  limitReset,
   canEndChat,
   chatRefOf,
   claudeCodeHere,
@@ -609,7 +611,7 @@ export class Actions {
     }
     const label = (f: Project) =>
       `$(${f.short === "~" ? "home" : "folder"}) ${f.short === "~" ? "Home folder (~)" : f.short}` + (plan && f.path === plan.cwd ? "  (the plan's)" : "");
-    type Item = vscode.QuickPickItem & { start?: "terminal" | "background" | "panel" | "task"; folder?: Project; choose?: "dialog" | "type" };
+    type Item = vscode.QuickPickItem & { start?: "terminal" | "background" | "queue" | "panel" | "task"; folder?: Project; choose?: "dialog" | "type" };
     const canBrowse = !host || host === this.dash.currentHost;
     const items: Item[] = [];
     if (cli && !hasTask)
@@ -625,6 +627,13 @@ export class Actions {
       for (const f of trusted) items.push({ label: label(f), description: "no window: listed right away", start: "background", folder: f });
       if (!host) items.push({ label: "$(folder-opened) Choose folder…", description: "one Claude trusts already", start: "background", choose: "dialog" });
       if (!trusted.length && host) items.push({ label: "$(info) No folder Claude trusts there yet", description: "start a chat in one in a terminal once" });
+      // The account is at a usage limit: the task can wait until it resets
+      const reset = limitReset(group, Date.now());
+      if (reset && trusted.length) {
+        const at = new Date(reset.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        items.push({ label: `After the limit resets (in ${duration(reset.at - Date.now())}, at ${at})`, kind: vscode.QuickPickItemKind.Separator });
+        for (const f of trusted) items.push({ label: label(f), description: "waits for the limit, then starts in the background", start: "queue", folder: f });
+      }
     }
     if (!cli) items.push({ label: "In a terminal", kind: vscode.QuickPickItemKind.Separator }, { label: "$(warning) No claude command", description: host ? `on ${host}` : "on this computer" });
     items.push(...panel.map((p) => ({ ...p, start: p.panel ? ("panel" as const) : undefined })));
@@ -660,6 +669,16 @@ export class Actions {
       folder = typed.trim();
     }
     const taskArgs = [...(task ? ["--prompt", task] : []), ...(plan ? ["--plan", plan.slug, "--plan-profile", plan.profileDir] : [])];
+    if (pick.start === "queue") {
+      const reset = limitReset(group, Date.now());
+      if (!reset) return this.fail("The usage limit has reset already: start it now instead.");
+      const answer = await this.backend.action("jump.py", [
+        "--queue", group.chatProfile, "--cwd", folder || "~", "--at", String(Math.round(reset.at + 60000)), ...taskArgs,
+        ...(host ? ["--host", host] : []), "--account", group.title, ...configDirArgs(),
+      ]);
+      if (this.report(answer, "Couldn't queue it")) this.dash.setActionInfo(answer.message);
+      return this.refresh();
+    }
     if (pick.start === "background") {
       const answer = host
         ? await this.backend.action("remote.py", ["--task", host, group.chatProfile, folder || "~", ...(task ? ["--prompt", task] : []), ...(plan ? ["--plan", plan.slug, plan.profileDir] : []), "--bg"], 120000)
@@ -684,6 +703,13 @@ export class Actions {
       command = pick.folder?.newChatCommand ?? (chat ? inFolder(folder, chat) : undefined);
     }
     if (command) await this.terminals.run(`new|${Date.now()}`, plan ? plan.title : "new chat", command, this.place(host));
+  }
+
+  // A queued task: cancelled (it doesn't start)
+  async unqueue(id: string): Promise<void> {
+    if (this.demoOnly()) return;
+    this.report(await this.backend.action("jump.py", ["--unqueue", id, ...configDirArgs()]), "Couldn't cancel it");
+    this.refresh();
   }
 
   // A task's first prompt for a Claude Code chat tab (claude_status.py:

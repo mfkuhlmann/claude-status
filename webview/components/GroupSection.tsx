@@ -9,6 +9,7 @@ import { AccountStage } from "./AccountStage";
 import { useView } from "./context";
 import { IconButton } from "./IconButton";
 import { PlansList } from "./PlansList";
+import { QueuedTasks } from "./QueuedTasks";
 import { RecentChats } from "./RecentChats";
 import { SessionRow, stateClass } from "./SessionRow";
 import { StatsPanel } from "./StatsPanel";
@@ -195,6 +196,8 @@ export function GroupSection({ group: g, accounts = 1 }: { group: Group; account
         ))}
         {g.sessions.length === 0 ? <div class="no-sessions muted">No running chats</div> : null}
       </div>
+
+      <QueuedTasks group={g} />
 
       {/* Chats shared with this account that are in use on another one:
           they're listed there, once, so here only a line points to them */}

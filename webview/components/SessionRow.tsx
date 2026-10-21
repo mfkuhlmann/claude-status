@@ -7,6 +7,7 @@ import {
   machineStatus,
   modeHint,
   modeText,
+  overlapText,
   peekLine,
   petKeyOf,
   plural,
@@ -113,6 +114,14 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
               pressed={showPeek}
               title={`${tasksTitle(tasks)}\n\nClick to ${showPeek ? "hide" : "show"} the chat's tasks and last exchange.`}
               onClick={() => togglePeek(rowKey)}
+            />
+          ) : null}
+          {s.overlaps?.length ? (
+            <Tag
+              text="⚠ same files"
+              warning
+              title={`${overlapText(s.overlaps)}\n\nTwo chats changing the same files can overwrite each other's work. Click to go to the other chat.`}
+              onClick={() => post({ type: "openOverlap", chat })}
             />
           ) : null}
           {mode ? (

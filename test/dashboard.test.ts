@@ -23,7 +23,7 @@ function withFiveHour(pct: number): Status {
 test("the status keeps updating after a reaction to a limit reset throws", async () => {
   let next = withFiveHour(80);
   const backend = { status: async () => ({ status: next }) } as unknown as Backend;
-  const notifier = { handle() {} } as unknown as Notifier;
+  const notifier = { handle() {}, isLeader: () => true } as unknown as Notifier;
   const errors: string[] = [];
   const log = { warn() {}, info() {}, error: (m: string) => errors.push(m) } as unknown as vscode.LogOutputChannel;
   const dash = new Dashboard(backend, notifier, log);
@@ -56,7 +56,7 @@ test("opening the view doesn't cancel the next try of a Python that didn't work"
       status: async () => ({ status: demoState(NOW).status! }),
     } as unknown as Backend;
     const log = { warn() {}, info() {}, error() {} } as unknown as vscode.LogOutputChannel;
-    const dash = new Dashboard(backend, { handle() {} } as unknown as Notifier, log);
+    const dash = new Dashboard(backend, { handle() {}, isLeader: () => true } as unknown as Notifier, log);
     await dash.start();
     dash.setVisible(true); // polls right away (its timer used to be the retry's too)
     mock.timers.tick(30000);

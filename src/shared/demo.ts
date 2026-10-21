@@ -280,8 +280,10 @@ function buildServer(now: number, phase: number): Status {
             },
             changes: { count: 2, files: ["configs/ranking.yaml", "train.py"] },
             stats: chatStats(now, 3, 24, [["Bash", 22], ["Read", 9], ["Edit", 4]], 9_700_000),
+            overlaps: [{ key: "demo-5", name: "Evaluate on the holdout set", sessionId: "demo-5", profileDir: ".claude", count: 1, files: ["train.py"] }],
           }),
           session(now, {
+            overlaps: [{ key: "demo-4", name: "Train the ranking model", sessionId: "demo-4", profileDir: ".claude", count: 1, files: ["train.py"] }],
             key: "demo-5",
             name: "Evaluate on the holdout set",
             state: "idle",
@@ -333,6 +335,13 @@ export function demoState(now: number, phase = 0): ViewState {
     dismissed: 0,
     canShare: false,
     errors: [],
+    queue: [
+      {
+        id: "demo-q1", host: "", profile: ".claude", account: "personal · Max", folder: "/home/alice/projects/webapp",
+        folderShort: "~/projects/webapp", prompt: "Update the dependencies and run the tests", plan: null, planProfile: null,
+        planTitle: "", startAt: now + 2 * HOUR + 15 * MIN, createdAt: now - 5 * MIN, error: "", due: false,
+      },
+    ],
   };
   const hosts: HostState[] = [
     { name: "build-server", loading: false, ok: true, error: "", result: buildServer(now, phase), updatedAt: now - 12000, current: true },

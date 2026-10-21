@@ -61,6 +61,7 @@ export function mergeChanges(a: Changes, b: Changes): Changes {
 
 export class TransitionTracker {
   private lastStops = new Map<string, Map<string, boolean>>(); // source -> chat key -> whether its limit has reset
+  private lastOverlaps = new Map<string, Set<string>>(); // source -> pairs of rows changing the same files
   private lastStates = new Map<string, Map<string, SessionState>>();
   private turnStarts = new Map<string, Map<string, number>>();
   private lastWaitingAlert = new Map<string, number>();
@@ -169,6 +170,35 @@ export class TransitionTracker {
     return changes;
   }
 
+  // Two chats with a process that started changing the same files (each
+  // row's overlaps): their pets wave, and a notice names both and the files
+  // (with the "needs you" notifications). The first poll of a source only learns.
+  overlaps(source: string, groups: Group[], host: string | undefined, opts: NotifyOptions): Changes {
+    const changes: Changes = { notices: [], petEvents: [], sound: "", finished: [] };
+    const before = this.lastOverlaps.get(source);
+    const next = new Set<string>();
+    for (const g of groups)
+      for (const s of g.sessions)
+        for (const o of s.overlaps ?? []) {
+          const pair = [s.key, o.key].sort().join("|");
+          if (next.has(pair)) continue;
+          next.add(pair);
+          if (!before || before.has(pair)) continue;
+          changes.petEvents.push({ kind: "waiting", text: `${s.name} and ${o.name} change the same files!`, key: petKeyOf(s, host) });
+          if (opts.notifyWaiting)
+            changes.notices.push({
+              key: `overlap|${source}|${pair}`,
+              kind: "waiting",
+              title: "Two chats change the same files",
+              body: `${s.name} and ${o.name}: ${o.files.join(", ")}${o.count > o.files.length ? " …" : ""}${host ? ` · ${host}` : ""}`,
+              session: s,
+              host,
+            });
+        }
+    this.lastOverlaps.set(source, next);
+    return changes;
+  }
+
   // A plan limit that dropped a lot since the last poll was reset: celebrate.
   resets(source: string, groups: Group[]): PetEvent[] {
     const events: PetEvent[] = [];
@@ -186,6 +216,7 @@ export class TransitionTracker {
   // A host that was unpicked: start over if it comes back
   forget(source: string): void {
     this.lastStops.delete(source);
+    this.lastOverlaps.delete(source);
     this.lastStates.delete(source);
     this.turnStarts.delete(source);
     const prefix = source + "|";

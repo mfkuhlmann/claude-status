@@ -206,6 +206,25 @@ export class ViewHost implements vscode.WebviewViewProvider, vscode.Disposable {
       case "findChat":
         void this.actions.findChat();
         break;
+      case "startQueued": {
+        // (a task of this computer's queue, as the extension knows it)
+        const t = this.dash.state().status?.queue?.find((q) => q.id === m.id);
+        if (t) void this.dash.startQueued(t);
+        break;
+      }
+      case "openOverlap": {
+        // (found in the extension's own state: the row, then its first overlap's row)
+        const state = this.dash.state();
+        const where = chat?.host ? state.hosts.find((h) => h.name === chat.host)?.result : state.status;
+        const row = where?.groups.flatMap((g) => g.sessions).find((s) => s.key === chat?.key);
+        const other = row?.overlaps?.[0];
+        const ref = other ? findChatRef(state.status, state.hosts, chat?.host, other.key) : null;
+        if (ref) void this.actions.open(ref);
+        break;
+      }
+      case "unqueue":
+        if (this.dash.state().status?.queue?.some((q) => q.id === m.id)) void this.actions.unqueue(m.id);
+        break;
       case "loginHost":
         if (text(m.host) && this.dash.shownHosts().includes(m.host)) void this.actions.loginHost(m.host);
         break;

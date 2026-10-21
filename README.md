@@ -48,6 +48,13 @@ As an editor tab (**Claude Status: Open in Editor Tab**):
   open one, carry it out in a new chat (the plan is its first message, with
   what you add), go back to the chat that made it, or share it with your
   other accounts (sharing a chat shares its plan too).
+- **Tasks that wait for a usage limit**: when an account is at its limit,
+  a task started in the background can wait until it resets (**After the
+  limit resets**), then starts by itself. The account lists its queued
+  tasks: start one now or cancel it.
+- **Chats changing the same files**: chats that are open and changed some of
+  the same files get a red **⚠ same files** tag naming the other chat (and a
+  notification), since two chats editing one file can overwrite each other.
 - **What a chat changed**: its **± 3 files** tag opens VS Code's changes view
   with each file as it was before the chat and as it is now (or only the last
   turn: **Last turn** in the unfolded peek). The files come from the backups
@@ -136,7 +143,10 @@ folders or any other, or as a Claude Code chat tab in this window. **Start
 with a task…** first asks what Claude should do: the chat starts with it (in
 a terminal at once, in a chat tab typed in for you to send), and can also run
 **in the background** (`claude --bg`: no window, listed right away; only in
-folders Claude trusts already, since it can't ask there). The chat
+folders Claude trusts already, since it can't ask there). When the account
+is at its usage limit, **After the limit resets** queues the task instead: it
+starts in the background a minute after the limit resets (the queue is shared
+with the Plasma widget, which starts it too if VS Code isn't running). The chat
 tab is offered for accounts on the window's own machine (this computer, or the
 Remote-SSH host); it starts in the window's folder, on the account the Claude
 Code extension is set to, and the menu says so when that's another account.
@@ -251,8 +261,9 @@ edits a file (`<config>/file-history`, to compare a chat's changes),
 the plans chats wrote (`<config>/plans`),
 the account name and plan from `.claude.json`, and the status-line copies in
 `~/.cache/claude-widget/statusline`. It writes only to
-`~/.cache/claude-widget` (caches, the list of chats you removed, copies of
-the files a comparison shows, kept for a day) and, if you
+`~/.cache/claude-widget` (caches, the list of chats you removed, the tasks
+you queue until they start, copies of the files a comparison shows, kept for
+a day) and, if you
 ask for it, the status-line change above, the links of the chats and plans
 you share (see below) and the accounts you add or remove. A task you start a
 chat with goes to Claude, which runs it like a prompt you type (with a plan

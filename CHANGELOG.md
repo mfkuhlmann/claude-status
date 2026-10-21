@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+- **Wait for the usage limit:** when an account is at its usage limit,
+  **New Chat… → Start with a task…** offers **After the limit resets (in
+  2h 15m, at 16:10)**: the task is queued under the account and starts in
+  the background a minute after the limit resets (as soon as VS Code or
+  the widget runs, if neither did then). The account lists its queued
+  tasks with when they start: start one now (▶) or cancel it (✕). One that
+  can't start (e.g. its folder isn't trusted any more) stays, saying why.
+  The queue is shared with the Plasma widget, and only one of them starts
+  a task. Also for SSH hosts' accounts (they start from here, over ssh).
+- **Two chats changing the same files:** chats that are open and changed
+  some of the same files get a red **⚠ same files** tag naming the other
+  chat and the files (click it to go there), and a notification when it
+  starts (with the "waiting" ones): two chats editing one file can
+  overwrite each other's work. Also on SSH hosts.
+- **The widget's plans and subagent runs in VS Code:** the Plasma
+  widget's **Open plans and runs in: VS Code** shows them in VS Code's
+  Markdown preview, through a `vscode://` link this extension handles (it
+  opens only plans of a Claude config folder and the widget's runs).
+- **Open the whole run** in a Remote-SSH window opens the run file of
+  this computer (it looked for it on the SSH host).
+
 ## 1.12.0
 
 - **Chats a usage limit stopped:** a chat that hit a usage limit

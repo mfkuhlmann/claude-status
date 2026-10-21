@@ -56,6 +56,35 @@ export interface Stop {
   over?: boolean; // it has reset since: the chat can go on
 }
 
+// Another chat with a process that changed some of the same files as this one
+export interface Overlap {
+  key: string; // its row
+  name: string;
+  sessionId: string;
+  profileDir: string;
+  count: number;
+  files: string[]; // relative to this chat's folder, at most 8
+}
+
+// A background task waiting for its account's usage limit to reset
+// (claude_status.py: queued_tasks); an SSH host's starts from here, over ssh
+export interface QueuedTask {
+  id: string;
+  host: string; // "" for this computer
+  profile: string;
+  account: string;
+  folder: string;
+  folderShort: string;
+  prompt: string;
+  plan: string | null;
+  planProfile: string | null;
+  planTitle: string;
+  startAt: number;
+  createdAt: number;
+  error: string; // why it didn't start (it waits for you then)
+  due: boolean;
+}
+
 // The plan a chat made (claude_status.py: plan_of)
 export interface ChatPlan {
   slug: string;
@@ -126,6 +155,8 @@ export interface Session {
   stats?: ChatStats | null;
   plan?: ChatPlan | null; // the plan it made
   stopped?: Stop | null; // a usage limit (or an expired login) stopped it
+  // other chats with a process that changed some of the same files
+  overlaps?: Overlap[] | null;
   // --remote: shell commands, run on the machine the session is on
   openCommand?: string | null;
   stopCommand?: string | null;
@@ -310,6 +341,7 @@ export interface Status {
   claude?: string;
   // Whether the claude command is on this machine (missing when unsure)
   cli?: { installed: boolean };
+  queue?: QueuedTask[]; // this computer's status only: tasks waiting for a usage limit
 }
 
 export interface Counts {
@@ -421,6 +453,9 @@ export type WebviewMessage =
   | { type: "continuePlanChat"; groupId: string; host?: string; plan: string }
   | { type: "sharePlan"; groupId: string; host?: string; plan: string }
   | { type: "findChat" }
+  | { type: "startQueued"; id: string }
+  | { type: "openOverlap"; chat: ChatRef } // the first other chat changing the same files
+  | { type: "unqueue"; id: string }
   | { type: "loginHost"; host: string }
   | { type: "disconnectHost"; host: string }
   | { type: "login"; groupId: string; host?: string }

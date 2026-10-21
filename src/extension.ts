@@ -9,7 +9,8 @@ import { AccountSwitch } from "./accountSwitch";
 import { Actions } from "./actions";
 import { Backend } from "./backend";
 import { openChangesLink } from "./changes";
-import { settings } from "./config";
+import { extraConfigDirs, settings } from "./config";
+import { markdownLinkFile, openAgentRunFile } from "./agentRun";
 import { Dashboard } from "./dashboard";
 import { Notifier } from "./notify";
 import { allGroups, countStates } from "./shared/model";
@@ -56,6 +57,17 @@ export function activate(context: vscode.ExtensionContext): void {
     // and which terminal a chat runs in (terminals.ts)
     vscode.window.registerUriHandler({
       handleUri: async (uri) => {
+        if (uri.path.replace(/\/+$/, "") === "/markdown") {
+          // a plan or a subagent's run, in the Markdown preview
+          const file = markdownLinkFile(uri, undefined, extraConfigDirs());
+          if (!file) {
+            log.warn(`Ignored a link that isn't a plan or a run of the Claude Status widget: ${uri.toString()}`);
+            return;
+          }
+          const error = await openAgentRunFile(file);
+          if (error) void vscode.window.showErrorMessage(`Claude Status: couldn't show ${file}: ${error}`);
+          return;
+        }
         const link = terminalLinkOf(uri);
         if (!link) return openChangesLink(uri, log);
         if (await terminals.showLinked(link, dash.currentHost)) return;

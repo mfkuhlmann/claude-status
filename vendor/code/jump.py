@@ -885,6 +885,68 @@ def choose_folder(title, start):
     return folder, ""
 
 
+# ---------------------------------------------------------------- tasks waiting for a usage limit
+#
+# A background task can wait until its account's usage limit resets
+# (claude_status: the queue); the widget starts it then with --start-queued.
+
+
+def queue_task(home, extra_dirs, dirname, folder, task, start_at, host="", account=""):
+    """Queue a task for a background session on the profile dirname (an SSH
+    host's with host), in folder, to start at start_at (ms)."""
+    if not task:
+        return False, "Write what Claude should do first"
+    plan_title = ""
+    if not host:
+        profiles = cs.discover_profiles(home, extra_dirs)
+        profile = next((p for p in profiles if cs.matches_profile(p, dirname)), None)
+        if profile is None:
+            return False, f"No Claude profile called {dirname}"
+        folder = folder if folder and os.path.isdir(folder) else str(home)
+        if not cs.folder_trusted(profile, folder, home):
+            return False, (f"Claude doesn't trust {cs.short_folder(folder, home)} yet, and a background session can't ask: "
+                           "start a chat there in a terminal once, or pick a project folder")
+        if task.plan:
+            path = cs.find_plan(profiles, task.plan, task.plan_profile)
+            if path is None:
+                return False, "That plan isn't there any more"
+            plan_title = cs.plan_title(path)
+    entry = cs.queue_entry(dirname, folder or "", task.text, start_at, host, account, task.plan, task.plan_profile,
+                           plan_title)
+    cs.change_queue(cs.cache_dir(home), add=entry)
+    return True, f"Queued: it starts at {time.strftime('%H:%M', time.localtime(start_at / 1000))}, when the limit resets"
+
+
+def unqueue(home, extra_dirs, task_id):
+    taken = cs.change_queue(cs.cache_dir(home), take=task_id)
+    return True, "Cancelled the queued task" if taken else "It isn't queued any more"
+
+
+def start_queued(home, extra_dirs, task_id):
+    """Start a queued task now, in the background: (ok, message). It's taken
+    out of the queue first, so of several copies of the widget only one
+    starts it (the others get an empty message); one that fails to start
+    goes back with the error, until you start or cancel it."""
+    cache_root = cs.cache_dir(home)
+    entry = cs.change_queue(cache_root, take=task_id)
+    if entry is None:
+        return True, ""
+    task = Task(entry.get("prompt") or "", entry.get("plan"), entry.get("planProfile"))
+    try:
+        if entry.get("host"):
+            import remote
+            answer = remote.task(entry["host"], entry["profile"], entry.get("folder") or "~", task.text, task.plan,
+                                 task.plan_profile, background=True)
+            ok, message = bool(answer.get("ok")), answer.get("message") or ""
+        else:
+            ok, message = new_chat_background(home, extra_dirs, entry["profile"], entry.get("folder"), task)
+    except Exception as exc:  # (it goes back to the queue, saying why)
+        ok, message = False, f"{type(exc).__name__}: {exc}"
+    if not ok:
+        cs.change_queue(cache_root, put_back=dict(entry, error=message or "It didn't start"))
+    return ok, message or "Started"
+
+
 def new_chat_choosing_folder(home, extra_dirs, dirname, start=None, task=NO_TASK):
     """Ask for a folder (the dialog opens in your home folder), then open a new
     chat on the profile there with start (new_chat, new_chat_vscode or
@@ -1360,14 +1422,79 @@ def open_file(path):
     return True
 
 
+# ---------------------------------------------------------------- Markdown files
+#
+# Plans and subagent runs are Markdown. They open to read, rendered: in
+# Okular (it shows Markdown) where it's installed, else as a page in your
+# browser (markdown_page.py, nothing but Python). The widget's setting
+# markdownApp (shared with its other copies: settings.json) can also pick
+# VS Code (its Markdown preview, through the Claude Status extension 1.13 or
+# newer; else its editor) or your own app for Markdown (often a text editor).
+
+MARKDOWN_APPS = ("auto", "okular", "browser", "vscode", "default")
+MARKDOWN_LINK = "vscode://wzaielamri.claude-status/markdown"
+STATUS_EXTENSION_MARKDOWN = (1, 13)  # its first version that opens MARKDOWN_LINK
+
+
+def markdown_app(home):
+    """What the widget's settings pick for Markdown files ("auto" when nothing)."""
+    shared = cs.shared_settings(cs.cache_dir(home)) or {}
+    app = (shared.get("values") or {}).get("markdownApp")
+    return app if app in MARKDOWN_APPS else "auto"
+
+
+def markdown_page(home, path):
+    """A Markdown file as an HTML page in the cache (runs_folder: removed
+    after a day), to read in a browser."""
+    import markdown_page as mp
+    text = Path(path).read_text(encoding="utf-8", errors="replace")
+    page = runs_folder(home) / (re.sub(r"[^A-Za-z0-9_.-]", "_", Path(path).stem)[:80] + ".html")
+    with open(page, "w", encoding="utf-8") as f:
+        f.write(mp.page(text))
+    return page
+
+
+def open_markdown(path, home=None):
+    """Open a Markdown file to read, as markdown_app says: (ok, message)."""
+    home = home or Path.home()
+    app = markdown_app(home)
+    okular = shutil.which("okular")
+    if app in ("auto", "okular") and okular:
+        start_app([okular, str(path)])
+        return True, ""
+    if app == "vscode":
+        code, _ = cs.vscode_app()
+        opener = shutil.which("xdg-open")
+        if code and opener and status_extension_since(code, STATUS_EXTENSION_MARKDOWN):
+            start_app([opener, MARKDOWN_LINK + "?" + urlencode({"path": str(path)})])
+            return True, ""
+        if code:
+            start_app([code, str(path)])
+            return True, ""
+    if app == "default":
+        if open_file(path):
+            return True, ""
+    # (also when the app picked isn't there)
+    if not shutil.which("xdg-open"):
+        return False, f"Saved it as {path}, but there's no xdg-open to show it with"
+    try:
+        page = markdown_page(home, path)
+    except OSError as exc:
+        return False, f"Couldn't make a page of {path}: {exc}"
+    open_file(page)
+    return True, ""
+
+
 def show_agent_run(home, extra_dirs, chat_id, agent_id, profile_dir=None, open_it=True):
     """Save a chat's subagent's run as Markdown and open it: (ok, message, file)."""
     ok, message, title, markdown = cs.agent_run(home, extra_dirs, chat_id, agent_id, profile_dir)
     if not ok:
         return False, message, None
     path = save_run(home, title, agent_id, markdown)
-    if open_it and not open_file(path):
-        return False, f"Saved it as {path}, but there's no xdg-open to open it with", str(path)
+    if open_it:
+        ok, why = open_markdown(path, home)
+        if not ok:
+            return False, why, str(path)
     return True, message, str(path)
 
 
@@ -1408,13 +1535,14 @@ def continue_command(home, extra_dirs, session_id, profile_dir, end_first=False)
 
 
 def open_plan(home, extra_dirs, slug, profile_dir=None):
-    """Open a plan file in your app for Markdown (xdg-open): a change you
-    make there is the plan's."""
+    """Open a plan file (open_markdown: rendered to read; with your own app
+    for Markdown, a change you make there is the plan's)."""
     path = cs.find_plan(cs.discover_profiles(home, extra_dirs), slug, profile_dir)
     if path is None:
         return False, "That plan isn't there any more"
-    if not open_file(path):
-        return False, f"There's no xdg-open to open {path} with"
+    ok, why = open_markdown(path, home)
+    if not ok:
+        return False, why
     return True, f"Opened the plan {cs.plan_title(path) or slug}"
 
 
@@ -1462,6 +1590,9 @@ USAGE = ("usage: jump.py [--stop [--busy] | --interrupt] SESSION_ID [--profile P
          "       jump.py --continue SESSION_ID --profile PROFILE [--end-first] [--print-command]\n"
          "               (share it and reopen it there, or print the command; --end-first: quit an idle session first)\n"
          "       jump.py --open-plan|--share-plan|--unshare-plan SLUG [--profile PROFILE] [--to PROFILE]\n"
+         "       jump.py --queue PROFILE --cwd FOLDER --at MS [--prompt TEXT] [--plan SLUG [--plan-profile P]]\n"
+         "               [--host HOST] [--account TITLE]   (a background task that starts at MS: a limit's reset)\n"
+         "       jump.py --unqueue|--start-queued TASK_ID\n"
          "       jump.py --share SESSION_ID\n"
          "       jump.py --remote-vscode HOST SESSION_ID [--cwd FOLDER_ON_HOST]\n"
          "       jump.py --remote-terminal HOST [--name SESSION_NAME] [--vscode-terminal PID [--cwd FOLDER_ON_HOST]]\n"
@@ -1491,6 +1622,7 @@ def main(argv=None):
     turn, listing, device, devices = False, False, None, None
     agent_id, open_it, run_file, account, vscode_terminal = None, True, None, None, None
     task, background, end_first, to = Task(), False, False, None
+    start_at, queue_host, account_title = None, "", ""
     while args:
         arg = args.pop(0)
         if arg == "--config-dir" and args:
@@ -1503,6 +1635,16 @@ def main(argv=None):
             task.plan_profile = args.pop(0)
         elif arg == "--bg":
             background = True
+        elif arg == "--queue" and args:
+            action, session_id = queue_task, args.pop(0)  # the profile
+        elif arg in ("--unqueue", "--start-queued") and args:
+            action, session_id = (unqueue if arg == "--unqueue" else start_queued), args.pop(0)  # the task's id
+        elif arg == "--at" and args and args[0].isdigit():
+            start_at = int(args.pop(0))
+        elif arg == "--host" and args:
+            queue_host = args.pop(0)
+        elif arg == "--account" and args and action is queue_task:
+            account_title = args.pop(0)
         elif arg == "--end-first":
             end_first = True
         elif arg == "--to" and args:
@@ -1578,7 +1720,9 @@ def main(argv=None):
         sys.exit(USAGE)
     if print_command and action is not continue_on:
         sys.exit(USAGE)
-    if (task or background) and action not in (new_chat, "--remote-new-vscode"):
+    if (task or background) and action not in (new_chat, "--remote-new-vscode", queue_task):
+        sys.exit(USAGE)
+    if (action is queue_task) != (start_at is not None) or (queue_host and action is not queue_task):
         sys.exit(USAGE)
     if (background and vscode) or (end_first and action is not continue_on) or (to and action is not share_plan):
         sys.exit(USAGE)
@@ -1596,6 +1740,10 @@ def main(argv=None):
             ok, message = continue_on(Path.home(), extra, session_id, profile_dir, end_first)
         elif action is share_plan:
             ok, message = share_plan(Path.home(), extra, session_id, profile_dir, to)
+        elif action is queue_task:
+            ok, message = queue_task(Path.home(), extra, session_id, folder, task, start_at, queue_host, account_title)
+        elif action in (unqueue, start_queued):
+            ok, message = action(Path.home(), extra, session_id)
         elif action in (open_plan, unshare_plan):
             ok, message = action(Path.home(), extra, session_id, profile_dir)
         elif action == "--remote-vscode":

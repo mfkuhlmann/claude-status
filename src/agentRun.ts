@@ -3,6 +3,7 @@
 // transcript as Markdown into the cache (jump.py --agent-run; remote.py
 // --agent-run fetches one from an SSH host) and this opens that file.
 
+import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import { inside } from "./changes";
@@ -29,10 +30,34 @@ export function isAgentRunFile(file: string | undefined, root = agentRunsRoot())
   return !!file && path.isAbsolute(file) && file.endsWith(".md") && inside(file, root);
 }
 
+// The widgets' link to show a plan or a subagent's run in VS Code's Markdown
+// preview (jump.py's MARKDOWN_LINK, the widget's "Open plans and runs in:
+// VS Code"): vscode://wzaielamri.claude-status/markdown?path=<file>. Only a
+// Markdown file of the widget's runs folder, or of a Claude config folder's
+// plans (~/.claude*/plans, or of one named in configDirs), since any page
+// could hand VS Code such a link: else null.
+export function markdownLinkFile(
+  uri: { path: string; query: string },
+  home = os.homedir(),
+  configDirs: string[] = [],
+  root = agentRunsRoot(),
+): string | null {
+  if (uri.path.replace(/\/+$/, "") !== "/markdown") return null;
+  const file = new URLSearchParams(uri.query).get("path") ?? "";
+  if (!path.isAbsolute(file) || !file.endsWith(".md") || path.normalize(file) !== file) return null;
+  if (isAgentRunFile(file, root)) return file;
+  const folder = path.dirname(file);
+  if (path.basename(folder) !== "plans") return null;
+  const config = path.dirname(folder);
+  const ownName = path.dirname(config) === home && /^\.claude(-[^/]+)?$/.test(path.basename(config));
+  return ownName || configDirs.includes(config) ? file : null;
+}
+
 // Opens it in the Markdown preview (as text where that's missing); the error
 // to report, or "" when it opened
 export async function openAgentRunFile(file: string): Promise<string> {
-  const uri = vscode.Uri.file(file);
+  // a file of this computer: in a Remote-SSH window, through vscode-local
+  const uri = vscode.env.remoteName ? vscode.Uri.from({ scheme: "vscode-local", path: file }) : vscode.Uri.file(file);
   try {
     await vscode.commands.executeCommand("markdown.showPreview", uri);
     return "";
