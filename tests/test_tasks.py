@@ -507,3 +507,134 @@ class HandoverTests(Fixture):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class QueueTests(TaskTests):
+    """Background tasks that wait for a usage limit to reset."""
+
+    def queue(self, *args):
+        out = io.StringIO()
+        with mock.patch.object(jump.Path, "home", return_value=self.home), \
+                mock.patch.object(jump, "claude_path", return_value=str(self.bin / "claude")), \
+                mock.patch.object(jump, "scope_prefix", return_value=[]), contextlib.redirect_stdout(out):
+            jump.main(list(args))
+        return json.loads(out.getvalue())
+
+    def test_queue_then_start_once(self):
+        at = int((time.time() + 3600) * 1000)
+        answer = self.queue("--queue", ".claude-work", "--cwd", str(self.folder), "--at", str(at), "--prompt", "fix it",
+                            "--plan", "calm-red-owl", "--plan-profile", ".claude-work", "--account", "work · Team")
+        self.assertTrue(answer["ok"], answer)
+        self.assertRegex(answer["message"], r"^Queued: it starts at \d\d:\d\d, when the limit resets$")
+        (task,) = cs.queued_tasks(self.cache_root(), int(time.time() * 1000))
+        self.assertEqual((task["prompt"], task["plan"], task["planTitle"], task["account"], task["due"]),
+                         ("fix it", "calm-red-owl", "Calm plan", "work · Team", False))
+        self.assertTrue(cs.queued_tasks(self.cache_root(), at + 1)[0]["due"])
+        # the status lists it
+        status = cs.collect(self.home, self.cache_root(), with_tokens=False, now=self.now)
+        self.assertEqual([t["id"] for t in status["queue"]], [task["id"]])
+        # starting it takes it out of the queue: a second copy starts nothing
+        self.assertEqual(self.queue("--start-queued", task["id"]), {"ok": True, "message": "Started in the background on work (1a2b3c4d)"})
+        self.assertEqual(self.queue("--start-queued", task["id"]), {"ok": True, "message": ""})
+        call, = self.calls()
+        self.assertEqual(call["argv"][0], "--bg")
+        self.assertTrue(call["argv"][1].startswith("fix it\n\nThe plan (saved as"))
+        self.assertEqual(cs.load_queue(self.cache_root()), [])
+
+    def cache_root(self):
+        return cs.cache_dir(self.home)
+
+    def test_a_task_that_fails_to_start_stays_with_the_error(self):
+        at = int(time.time() * 1000)
+        self.assertTrue(self.queue("--queue", ".claude-work", "--cwd", str(self.folder), "--at", str(at), "--prompt", "go")["ok"])
+        (task,) = cs.load_queue(self.cache_root())
+        write(self.bin / "claude", f"#!{sys.executable}\nimport sys\nprint('Workspace not trusted.', file=sys.stderr)\nsys.exit(1)\n")
+        self.assertEqual(self.queue("--start-queued", task["id"]), {"ok": False, "message": "Workspace not trusted."})
+        (back,) = cs.queued_tasks(self.cache_root(), at + 1)
+        self.assertEqual((back["id"], back["error"], back["due"]), (task["id"], "Workspace not trusted.", False))
+        self.assertEqual(self.queue("--unqueue", task["id"]), {"ok": True, "message": "Cancelled the queued task"})
+        self.assertEqual(cs.load_queue(self.cache_root()), [])
+
+    def test_only_trusted_folders_and_a_task(self):
+        at = str(int(time.time() * 1000))
+        self.assertIn("doesn't trust", self.queue("--queue", ".claude-work", "--cwd", str(self.home), "--at", at, "--prompt", "x")["message"])
+        self.assertEqual(self.queue("--queue", ".claude-work", "--cwd", str(self.folder), "--at", at),
+                         {"ok": False, "message": "Write what Claude should do first"})
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            self.queue("--queue", ".claude-work", "--cwd", str(self.folder), "--prompt", "x")  # no time
+        # an SSH host's task: checked there when it starts
+        self.assertTrue(self.queue("--queue", ".claude", "--cwd", "/srv/app", "--at", at, "--prompt", "x", "--host", "lab")["ok"])
+        self.assertEqual(cs.load_queue(self.cache_root())[0]["host"], "lab")
+
+
+class OverlapTests(Fixture):
+    def test_two_chats_with_a_process_that_changed_the_same_files(self):
+        rows = [{"key": k, "name": k.upper(), "sessionId": k, "chatId": k, "profileDir": ".claude-work", "pid": pid,
+                 "cwd": "/srv/app", "overlaps": None} for k, pid in (("a", 1), ("b", 2), ("c", None), ("d", 4))]
+        rows[3]["chatId"] = "a"   # the same chat listed twice
+        changed = {"a": {"/srv/app/x.py", "/srv/app/y.py"}, "b": {"/srv/app/y.py", "/home/me/z.md"},
+                   "c": {"/srv/app/x.py"}, "d": {"/srv/app/x.py"}}
+        cs.note_overlaps([{"sessions": rows}], changed, Path("/home/me"))
+        a, b, c, d = rows
+        self.assertEqual(a["overlaps"], [{"key": "b", "name": "B", "sessionId": "b", "profileDir": ".claude-work",
+                                          "count": 1, "files": ["y.py"]}])
+        self.assertEqual([o["key"] for o in b["overlaps"]], ["a"])
+        self.assertEqual((c["overlaps"], d["overlaps"]), (None, None))  # no process; the same chat
+
+    def test_rows_get_them_from_what_the_chats_changed(self):
+        w = self.home / ".claude-work"
+        write(w / "sessions/50.json", session("one", cwd="/srv/app"))
+        write(w / "sessions/51.json", session("two", cwd="/srv/app"))
+        edit = lambda f: {"type": "assistant", "timestamp": iso(self.now - 30), "message": {"id": "m" + f, "role": "assistant",
+                          "content": [{"type": "tool_use", "id": "t" + f, "name": "Edit", "input": {"file_path": f}}]}}
+        write(w / "projects/-srv-app/one.jsonl", lines(prompt("go", self.now - 60), edit("/srv/app/x.py")))
+        write(w / "projects/-srv-app/two.jsonl", lines(prompt("go", self.now - 60), edit("/srv/app/x.py")))
+        rows = {s["sessionId"]: s for s in self.group(self.collect(with_tokens=False), "work")["sessions"]}
+        self.assertEqual([(o["name"], o["files"]) for o in rows["one"]["overlaps"]], [(rows["two"]["name"], ["x.py"])])
+
+
+class MarkdownTests(Fixture):
+    def open(self, app, which=("okular", "xdg-open", "code")):
+        started = []
+        if app:
+            write(self.cache / "claude-widget/settings.json", {"at": 1, "by": "x", "values": {"markdownApp": app}})
+        path = self.home / "run.md"
+        write(path, "# Run\n\nDone.\n")
+        self.cache.mkdir(parents=True, exist_ok=True)
+        with mock.patch.object(jump, "start_app", lambda args, cwd=None: started.append(args)), \
+                mock.patch.object(jump.cs, "cache_dir", return_value=self.cache / "claude-widget"), \
+                mock.patch.object(jump.shutil, "which", lambda n: f"/usr/bin/{n}" if n in which else None), \
+                mock.patch.object(jump.cs, "vscode_app", return_value=("/usr/bin/code", "Code") if "code" in which else (None, None)), \
+                mock.patch.object(jump, "status_extension_since", return_value=True), \
+                mock.patch.object(jump, "runs_folder", return_value=self.cache):
+            return jump.open_markdown(path, self.home), started
+
+    def test_okular_where_installed_else_a_page_in_the_browser(self):
+        self.assertEqual(self.open(None)[1], [["/usr/bin/okular", str(self.home / "run.md")]])
+        (ok, _), started = self.open(None, which=("xdg-open",))
+        self.assertTrue(ok)
+        self.assertEqual(started, [["/usr/bin/xdg-open", str(self.cache / "run.html")]])
+        self.assertIn("<h1>Run</h1>", (self.cache / "run.html").read_text())
+        self.assertEqual(self.open("okular", which=("xdg-open",))[1][0][1], str(self.cache / "run.html"))
+        self.assertEqual(self.open("browser")[1][0][1], str(self.cache / "run.html"))
+        self.assertEqual(self.open("default")[1], [["/usr/bin/xdg-open", str(self.home / "run.md")]])
+        self.assertTrue(self.open("vscode")[1][0][1].startswith("vscode://wzaielamri.claude-status/markdown?path="))
+        self.assertEqual(self.open("auto", which=())[0][0], False)  # nothing to show it with
+
+    def test_the_page_loads_nothing_and_runs_nothing(self):
+        import markdown_page as mp
+        page = mp.page("# T\n\n<script>alert(1)</script> [x](javascript:alert(1)) [y](https://example.com/a?b=1&c=2)\n\n"
+                       "![pic](https://example.com/p.png)\n\n| a | b |\n|---|---|\n| 1 | `|` |\n\n- [x] done\n- [ ] todo\n"
+                       "  1. nested\n\n```py\n<b>code</b>\n```\n")
+        self.assertNotIn("<script>", page)
+        self.assertIn("&lt;script&gt;", page)
+        self.assertNotIn('href="javascript', page)
+        self.assertIn('<a href="https://example.com/a?b=1&amp;c=2" rel="noreferrer noopener">y</a>', page)
+        self.assertNotIn("<img", page)
+        self.assertIn("[image: pic]", page)
+        self.assertIn("default-src 'none'", page)
+        self.assertIn("<th>a</th>", page)
+        self.assertIn("☑ done", page)
+        self.assertIn("<ol>", page)
+        self.assertIn("&lt;b&gt;code&lt;/b&gt;", page)
+        self.assertIn("<ol><li>One</li>", mp.body("Steps:\n1. One\n2. Two"))

@@ -20,6 +20,7 @@ ColumnLayout {
     readonly property var recent: group.recent || []
     readonly property bool recentOpen: !!root.expandedRecent[groupKey]
     readonly property var plans: group.plans || []
+    readonly property var queued: root.queuedFor(group, remoteHost)
     readonly property bool plansOpen: !!root.expandedPlans[groupKey]
 
     readonly property var tokens: group.tokens
@@ -304,6 +305,104 @@ ColumnLayout {
         Layout.leftMargin: Kirigami.Units.smallSpacing
         text: i18n("No running sessions")
         opacity: 0.6
+    }
+
+    // Tasks waiting for this account's usage limit to reset (main.qml: the queue)
+    Repeater {
+        model: section.queued.length
+        delegate: ColumnLayout {
+            id: queuedLine
+
+            required property int index
+            readonly property var task: section.queued[index]
+                                        || ({ id: "", prompt: "", planTitle: "", folder: "", folderShort: "", startAt: 0, error: "", due: false })
+            readonly property string what: task.planTitle ? i18n("Carry out “%1”", task.planTitle) + (task.prompt ? ": " + task.prompt : "")
+                                                          : task.prompt
+
+            Layout.fillWidth: true
+            Layout.leftMargin: Kirigami.Units.smallSpacing
+            Layout.rightMargin: Kirigami.Units.smallSpacing
+            spacing: 0
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Kirigami.Units.smallSpacing
+
+                Kirigami.Icon {
+                    source: queuedLine.task.error ? "dialog-warning" : "chronometer"
+                    Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                    Layout.preferredHeight: Layout.preferredWidth
+                }
+                PlasmaComponents3.Label {
+                    id: queuedName
+                    textFormat: Text.PlainText
+                    Layout.fillWidth: true
+                    text: queuedLine.what.split("\n")[0]
+                    elide: Text.ElideRight
+
+                    PlasmaCore.ToolTipArea {
+                        textFormat: Text.PlainText
+                        anchors.fill: parent
+                        mainText: i18n("Waits for the usage limit")
+                        subText: queuedLine.what + "\n\n" + i18n("Starts in the background in %1, at %2.", queuedLine.task.folderShort || "~",
+                                                                     root.clockText(queuedLine.task.startAt))
+                    }
+                }
+                PlasmaComponents3.Label {
+                    textFormat: Text.PlainText
+                    text: queuedLine.task.error ? i18n("didn't start")
+                          : queuedLine.task.due || queuedLine.task.startAt <= root.now ? i18n("starting…")
+                          : i18nc("queued task: folder, when it starts", "%1 · starts in %2", queuedLine.task.folderShort || "~",
+                                  root.duration(queuedLine.task.startAt - root.now))
+                    color: queuedLine.task.error ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.textColor
+                    opacity: queuedLine.task.error ? 1 : 0.6
+                    font: Kirigami.Theme.smallFont
+                    elide: Text.ElideLeft
+                    Layout.maximumWidth: Kirigami.Units.gridUnit * 12
+                }
+                PlasmaComponents3.ToolButton {
+                    icon.name: "media-playback-start"
+                    display: PlasmaComponents3.AbstractButton.IconOnly
+                    text: i18n("Start it now")
+                    enabled: !root.startingTasks[queuedLine.task.id]
+                    Layout.preferredHeight: queuedName.implicitHeight
+                    Layout.preferredWidth: Layout.preferredHeight
+                    onClicked: root.startQueued(queuedLine.task)
+
+                    PlasmaCore.ToolTipArea {
+                        textFormat: Text.PlainText
+                        anchors.fill: parent
+                        mainText: i18n("Start it now")
+                        subText: i18n("In the background, without waiting for the limit to reset.")
+                    }
+                }
+                PlasmaComponents3.ToolButton {
+                    icon.name: "edit-delete-remove"
+                    display: PlasmaComponents3.AbstractButton.IconOnly
+                    text: i18n("Cancel it")
+                    Layout.preferredHeight: queuedName.implicitHeight
+                    Layout.preferredWidth: Layout.preferredHeight
+                    onClicked: root.unqueue(queuedLine.task)
+
+                    PlasmaCore.ToolTipArea {
+                        textFormat: Text.PlainText
+                        anchors.fill: parent
+                        mainText: i18n("Cancel it")
+                        subText: i18n("It doesn't start.")
+                    }
+                }
+            }
+            PlasmaComponents3.Label {
+                textFormat: Text.PlainText
+                Layout.fillWidth: true
+                Layout.leftMargin: Kirigami.Units.iconSizes.small + Kirigami.Units.smallSpacing
+                visible: queuedLine.task.error !== ""
+                text: queuedLine.task.error
+                color: Kirigami.Theme.negativeTextColor
+                wrapMode: Text.Wrap
+                font: Kirigami.Theme.smallFont
+            }
+        }
     }
 
     // Chats shared with this account that are in use on another one (they're

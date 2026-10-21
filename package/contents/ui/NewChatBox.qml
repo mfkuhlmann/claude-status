@@ -23,6 +23,9 @@ Rectangle {
     readonly property bool terminalHere: root.cliHere(remoteHost)
     readonly property bool hasTask: root.taskText.trim() !== "" || plan !== null
     readonly property bool background: root.taskBackground && hasTask
+    // The account is at a usage limit: a background task can wait until it resets
+    readonly property var reset: visible ? root.limitReset(group, remoteHost) : null
+    readonly property bool queued: background && root.taskQueued && reset !== null
 
     // A folder a chat can start in now
     function usable(folder) {
@@ -122,6 +125,21 @@ Rectangle {
             }
         }
 
+        PlasmaComponents3.CheckBox {
+            Layout.leftMargin: Kirigami.Units.gridUnit
+            visible: box.background && box.reset !== null
+            text: box.reset ? i18n("After the limit resets (in %1, at %2)", root.duration(box.reset.at - root.now), root.clockText(box.reset.at)) : ""
+            checked: root.taskQueued
+            onToggled: root.taskQueued = checked
+
+            PlasmaCore.ToolTipArea {
+                textFormat: Text.PlainText
+                anchors.fill: parent
+                mainText: i18n("Wait for the usage limit")
+                subText: i18n("This account is at its usage limit. The task waits under the account and starts in the background a minute after the limit resets, while the widget runs (or as soon as it runs again). You can start or cancel it before.")
+            }
+        }
+
         // Where it starts otherwise: Terminal | VS Code
         OpenInSwitch {
             visible: !box.background
@@ -167,7 +185,7 @@ Rectangle {
         // Any folder, picked in the folder dialog (not on an SSH host)
         PlasmaComponents3.ItemDelegate {
             visible: !box.remoteHost
-            enabled: box.background ? box.terminalHere : (box.inVscode || box.terminalHere)
+            enabled: box.queued ? false : box.background ? box.terminalHere : (box.inVscode || box.terminalHere)
             Layout.fillWidth: true
             icon.name: "folder-open"
             text: i18n("Choose folder…")

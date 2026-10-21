@@ -513,6 +513,8 @@ def make_session(profile, home, *, sid, pid, name, cwd, kind, entrypoint, state,
         "tasks": None,  # its task list: {"done", "total", "current", "items"} (task_progress)
         "stats": None,  # its recap: prompts, tool calls, tokens, time worked (stats_summary)
         "plan": None,  # the plan it made: {"slug", "title", "path", "updatedAt"} (plan_of)
+        # other chats with a process that changed some of the same files (note_overlaps)
+        "overlaps": None,
         "stopped": None,  # what stopped it: a usage limit or an expired login (stopped_by, limit_stop)
     }
 
@@ -709,7 +711,10 @@ def finish_row(row, job, job_id, profile, ctx, alive):
         row["plan"] = plan_of(profile, peek.get("slug"))
         # (one that works again, or waits for you, got past it)
         row["stopped"] = dict(peek["stopped"]) if peek.get("stopped") and row["state"] in ("idle", "done") else None
-        row["changes"] = chats.changes(path, row["cwd"], ctx.home, ctx.own_folders)
+        files = chats.changed_files(path, row["cwd"], ctx.own_folders)
+        row["changes"] = chats.changes(path, row["cwd"], ctx.home, ctx.own_folders, files)
+        if files and isinstance(getattr(ctx, "changed", None), dict):
+            ctx.changed[row["key"]] = set(files)
         row["tasks"] = task_progress(ctx.profiles, [row["sessionId"], row["chatId"], row.get("jobSessionId")])
         row["stats"] = chats.stats(path)
         if row["agents"] and path is not None:
@@ -1996,15 +2001,20 @@ class ChatCache:
         main = self.edits(path).get("stats") or new_stats()
         return stats_summary(main, [self.edits(sub).get("stats") or new_stats() for sub in subagent_transcripts(path)])
 
-    def changes(self, path, cwd, home, skip):
-        """{"count", "files"} of the files a chat changed, or None."""
+    def changed_files(self, path, cwd, skip):
+        """The absolute paths of the files a chat changed, subagents included."""
         if path is None:
-            return None
+            return []
         rec = new_edits()
         merge_edits(rec, self.edits(path))
         for sub in subagent_transcripts(path):
             merge_edits(rec, self.edits(sub))
-        paths = changed_paths(rec, cwd, skip)
+        return changed_paths(rec, cwd, skip)
+
+    def changes(self, path, cwd, home, skip, paths=None):
+        """{"count", "files"} of the files a chat changed (paths: changed_files,
+        if known), or None."""
+        paths = self.changed_files(path, cwd, skip) if paths is None else paths
         if not paths:
             return None
         labels = sorted(file_label(p, cwd, home) for p in paths)
@@ -2790,6 +2800,108 @@ def note_limit_stops(group, now_ms):
     for s in group["sessions"]:
         if s.get("stopped"):
             s["stopped"] = limit_stop(s["stopped"], group.get("limits"), now_ms)
+
+
+# ---------------------------------------------------------------- chats changing the same files
+#
+# Two chats that can still change files (each has a process) and changed
+# some of the same ones may overwrite each other's work: each row names the
+# other chat and those files (from what the widget reads of what a chat
+# changed: Claude's backups and its edit tool calls, subagents included).
+
+OVERLAP_FILES = 8  # file names a row carries per other chat
+
+
+def note_overlaps(groups, changed, home):
+    """Set "overlaps" on the rows of chats with a process that changed the
+    same files as another such chat: [{"key", "name", "sessionId",
+    "profileDir", "count", "files"}]. changed: row key -> absolute paths."""
+    rows = [s for g in groups for s in g["sessions"] if s.get("pid") is not None and changed.get(s["key"])]
+    for i, a in enumerate(rows):
+        for b in rows[i + 1:]:
+            if (a.get("chatId") or a["sessionId"]) == (b.get("chatId") or b["sessionId"]):
+                continue  # one chat listed twice
+            both = changed[a["key"]] & changed[b["key"]]
+            if not both:
+                continue
+            for row, other in ((a, b), (b, a)):
+                row["overlaps"] = (row.get("overlaps") or []) + [{
+                    "key": other["key"], "name": other["name"], "sessionId": other["sessionId"],
+                    "profileDir": other["profileDir"], "count": len(both),
+                    "files": sorted(file_label(p, row["cwd"], home) for p in both)[:OVERLAP_FILES],
+                }]
+
+
+# ---------------------------------------------------------------- tasks waiting for a usage limit
+#
+# A task for a background session can wait until the usage limit of its
+# account resets: it's kept in ~/.cache/claude-widget/queue.json (an SSH
+# host's too: they start from here, over ssh), and every status lists it
+# ("due" once its time has come). A widget (or the VS Code extension) then
+# starts it with jump.py --start-queued, which takes it out of the queue
+# first, so of several copies only one starts it.
+
+QUEUE_PROMPT_MAX = 100_000
+
+
+def load_queue(cache_root):
+    data = read_json(cache_root / "queue.json")
+    tasks = data.get("tasks") if isinstance(data, dict) else None
+    return [t for t in tasks if isinstance(t, dict) and valid_id(t.get("id"))] if isinstance(tasks, list) else []
+
+
+def change_queue(cache_root, add=None, take=None, put_back=None):
+    """Change queue.json under a lock: add a task, take one out by its id
+    (returned), or put one back (e.g. with the error it got). The task taken
+    out, or None."""
+    private_dir(cache_root)
+    with open(cache_root / "queue.lock", "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        tasks = load_queue(cache_root)
+        taken = None
+        if take is not None:
+            taken = next((t for t in tasks if t["id"] == take), None)
+            tasks = [t for t in tasks if t["id"] != take]
+        if put_back is not None:
+            tasks = [t for t in tasks if t["id"] != put_back["id"]] + [put_back]
+        if add is not None:
+            tasks.append(add)
+        if add is not None or taken is not None or put_back is not None:
+            write_json_atomic(cache_root / "queue.json", {"tasks": tasks})
+        return taken
+
+
+def queue_entry(profile, folder, prompt, start_at, host="", account="", plan=None, plan_profile=None,
+                plan_title="", now_ms=None):
+    """A task to queue (checked), or ValueError."""
+    if not isinstance(profile, str) or not profile or not isinstance(folder, str):
+        raise ValueError("A queued task needs an account and a folder")
+    if not (prompt or "").strip() and not plan:
+        raise ValueError("Write what Claude should do first")
+    if len(prompt or "") > QUEUE_PROMPT_MAX:
+        raise ValueError("That task is too long")
+    if plan is not None and not PLAN_SLUG.match(plan):
+        raise ValueError(f"Not a plan name: {plan}")
+    if not isinstance(start_at, int) or start_at <= 0:
+        raise ValueError("A queued task needs the time it starts at")
+    now_ms = int(time.time() * 1000) if now_ms is None else now_ms
+    return {
+        "id": os.urandom(4).hex(), "host": host or "", "profile": profile, "account": account or profile,
+        "folder": folder, "prompt": (prompt or "").strip(), "plan": plan, "planProfile": plan_profile,
+        "planTitle": plan_title or "", "startAt": start_at, "createdAt": now_ms, "error": "",
+    }
+
+
+def queued_tasks(cache_root, now_ms):
+    """The queued tasks as the status lists them: each with "due" (its time
+    has come, and it didn't fail to start) and "folderShort"."""
+    out = []
+    for t in load_queue(cache_root):
+        t = dict(t)
+        t["due"] = not t.get("error") and isinstance(t.get("startAt"), (int, float)) and t["startAt"] <= now_ms
+        t["folderShort"] = short_path(t["folder"], Path.home()) if not t.get("host") else t.get("folder") or "~"
+        out.append(t)
+    return out
 
 
 # ---------------------------------------------------------------- plans
@@ -4500,7 +4612,7 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
         home=home, profiles=profiles, snapshot_root=snapshot_root, now_ms=now_ms,
         keep_done_ms=int(keep_done_hours * 3600_000),
         agents=AgentCache(cache_root / "agents.json"), links=LinkCache(cache_root / "links.json"),
-        chats=ChatCache(cache_root / "chats.json"), slugs=SlugCache(cache_root / "plans.json"),
+        chats=ChatCache(cache_root / "chats.json"), slugs=SlugCache(cache_root / "plans.json"), changed={},
         own_folders=own_folders(profiles),
         prompts={real: last_prompts(entries) for real, entries in histories.items()},
         errors=errors, unknown={},
@@ -4622,6 +4734,10 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
     for g in groups:  # (after place_chats: a row moved to another account goes by that one's limits)
         note_limit_stops(g, now_ms)
     try:
+        note_overlaps(groups, ctx.changed, home)
+    except Exception as exc:
+        errors.append(f"chats changing the same files: {exc}")
+    try:
         # a finished session you removed from the list is still one of your
         # recent chats: it shows there
         recent_chats(groups, ctx, recent)
@@ -4658,10 +4774,16 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
         overall = "idle"
     else:
         overall = "none"  # finished jobs kept for the record don't count as running
+    try:
+        queue = queued_tasks(cache_root, now_ms)
+    except (OSError, ValueError) as exc:
+        errors.append(f"queued tasks: {exc}")
+        queue = []
     return {
         "ok": True,
         "generatedAt": now_ms,
         "overall": overall,
+        "queue": queue,  # tasks waiting for a usage limit to reset (queued_tasks)
         "counts": counts,
         "groups": groups,
         "dismissed": hidden,

@@ -73,6 +73,10 @@
       <min>10</min>
       <max>600</max>
     </entry>
+    <entry name="markdownApp" type="String">
+      <label>Where plans and subagent runs open: auto (Okular if installed, else your browser), okular, browser, vscode, default</label>
+      <default>auto</default>
+    </entry>
     <entry name="sshUsage" type="String">
       <label>Plan usage of SSH hosts' accounts: once (where the account is listed first, newest numbers), all, or none</label>
       <default>once</default>

@@ -99,6 +99,16 @@ RowLayout {
             root.jumpTo(session.sessionId, session.profileDir)
     }
 
+    // The first other chat that changes the same files
+    function openOverlap() {
+        const o = (session.overlaps || [])[0]
+        const other = o ? root.listedRow(o.sessionId, o.profileDir, remoteHost) : null
+        if (other && remoteHost)
+            root.remoteShow(remoteHost, other)
+        else if (other)
+            root.jumpTo(other.sessionId, other.profileDir)
+    }
+
     spacing: Kirigami.Units.smallSpacing
     Layout.leftMargin: Kirigami.Units.smallSpacing
 
@@ -217,6 +227,17 @@ RowLayout {
                 tooltipTitle: row.session.plan ? row.session.plan.title : ""
                 tooltip: row.remoteHost ? i18n("The plan this chat made. Click to open it: a copy, fetched from %1.", row.remoteHost)
                                         : i18n("The plan this chat made. Click to open it in your app for Markdown.")
+            }
+            Tag {
+                // another chat with a process changed some of the same files (claude_status.py: note_overlaps)
+                visible: !!row.session.overlaps && row.session.overlaps.length > 0
+                text: i18nc("two chats changed the same files", "⚠ same files")
+                warning: true
+                clickable: true
+                onClicked: row.openOverlap()
+                tooltipTitle: i18n("Another chat changes the same files")
+                tooltip: row.session.overlaps ? root.overlapText(row.session.overlaps) + "\n\n"
+                         + i18n("Two chats changing the same files can overwrite each other's work. Click to go to the other chat.") : ""
             }
             Tag {
                 visible: row.changes !== null

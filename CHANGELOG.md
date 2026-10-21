@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **Wait for the usage limit:** when an account is at its usage limit, a task in the **+** box with **In the background** can wait: **After the limit resets** queues it under the account, and it starts in the background a minute after the limit resets (as soon as the widget runs, if it didn't then). The account lists its queued tasks, with when they start: start one now or cancel it. One that can't start (e.g. its folder isn't trusted any more) stays, saying why. Also for SSH hosts' accounts (they start from here, over ssh).
+- **Two chats changing the same files:** chats that are open and changed some of the same files get a red **⚠ same files** tag naming the other chat and the files (click it to go there), and a notification when it starts: two chats editing one file can overwrite each other's work. Also on SSH hosts.
+- **Plans and subagent runs open rendered:** in Okular where it's installed (it shows Markdown), else as a page of their own in your web browser (made by the widget, nothing loaded from the internet), instead of your text editor. The settings' **Open plans and runs in** can pick Okular, your browser, VS Code's Markdown preview (with the Claude Status extension for VS Code 1.13 or newer) or your own app for Markdown files.
+
 ## 1.12.0 (2026-10-21)
 
 - **Chats a usage limit stopped:** a chat that hit a usage limit (*You've hit your session limit*) says so in red, with when that limit resets (from the account's plan usage, else from Claude's message), and its pet's battery runs low. Once the limit has reset, one notification per account says which chats can go on (it comes with the "finished" notifications). Meanwhile **Continue on personal** moves the chat to another account with room left in that limit: shared with it, then reopened there in a terminal. An idle Claude that still has the chat open here quits first; a chat in VS Code's Claude tab, close it there first. A chat whose login expired says so too.

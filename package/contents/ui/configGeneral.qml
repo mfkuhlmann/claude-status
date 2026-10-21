@@ -40,6 +40,7 @@ KCM.SimpleKCM {
     property alias cfg_remotePollSeconds: remotePollSeconds.value
     property string cfg_sshHosts
     property string cfg_sshUsage
+    property string cfg_markdownApp
     property alias cfg_notifySound: notifySound.checked
     property alias cfg_soundVolume: soundVolume.value
     property alias cfg_soundWaiting: soundWaiting.value
@@ -71,6 +72,7 @@ KCM.SimpleKCM {
     property int cfg_remotePollSecondsDefault
     property string cfg_sshHostsDefault
     property string cfg_sshUsageDefault
+    property string cfg_markdownAppDefault
     property bool cfg_notifySoundDefault
     property int cfg_soundVolumeDefault
     property string cfg_soundWaitingDefault
@@ -402,6 +404,24 @@ KCM.SimpleKCM {
             id: showTokens
             Kirigami.FormData.label: i18n("Popup:")
             text: i18n("Show token totals from local transcripts")
+        }
+
+        QQC2.ComboBox {
+            id: markdownApp
+            readonly property var values: ["auto", "okular", "browser", "vscode", "default"]
+            Kirigami.FormData.label: i18n("Open plans and runs in:")
+            model: [i18n("Okular if installed, else your browser"), i18n("Okular"), i18n("Your web browser"),
+                    i18n("VS Code (Markdown preview)"), i18n("Your app for Markdown files")]
+            currentIndex: Math.max(0, values.indexOf(page.cfg_markdownApp))
+            onActivated: page.cfg_markdownApp = values[currentIndex]
+        }
+
+        QQC2.Label {
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 20
+            wrapMode: Text.Wrap
+            font: Kirigami.Theme.smallFont
+            opacity: 0.7
+            text: i18n("Plans and subagent runs are Markdown. Okular shows it rendered; in your browser the widget shows it as a page of its own (it loads nothing from the internet). VS Code's preview needs the Claude Status extension for VS Code 1.13 or newer, else the file opens in its editor. Your app for Markdown files is often a text editor: a change you make there to a plan is the plan's. Whatever you pick that isn't installed, your browser shows it.")
         }
     }
 }

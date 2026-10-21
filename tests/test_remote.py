@@ -312,8 +312,8 @@ class ActionTests(FakeSSH):
             {"type": "assistant", "isSidechain": True, "message": {"content": [report]}})))
         self.mode("noisy")  # a login banner first
         import jump
-        opened, old = [], jump.open_file
-        jump.open_file = lambda path: opened.append(path) or True
+        opened, old = [], jump.open_markdown
+        jump.open_markdown = lambda path, home=None: opened.append(path) or (True, "")
         try:
             ok, message, path = remote.agent_run("lab", "abc12345", "ag1")
             self.assertEqual(self.calls()[-1], ["lab", "python3 -I - --remote --agent-run ag1 --chat abc12345"])
@@ -321,7 +321,7 @@ class ActionTests(FakeSSH):
                              (False, "lab: Can't find that subagent's transcript", None))
             self.assertEqual(self.calls()[-1], ["lab", "python3 -I - --remote --agent-run nope --chat abc12345 --profile .claude"])
         finally:
-            jump.open_file = old
+            jump.open_markdown = old
         self.assertEqual((ok, message), (True, "The run of “Check the host” on lab"))
         self.assertEqual(Path(path).parent, Path(self.env["XDG_CACHE_HOME"]) / "claude-widget/agent-runs")  # saved here
         self.assertIn(cs.REMOTE_MARK + ' {"ok": false}', Path(path).read_text())  # the marker in the run is just text
@@ -679,12 +679,12 @@ class HostTaskTests(TwoAccountHost):
 
     def test_a_plan_comes_here_and_is_shared_there(self):
         import jump
-        opened, old = [], jump.open_file
-        jump.open_file = lambda path: opened.append(path) or True
+        opened, old = [], jump.open_markdown
+        jump.open_markdown = lambda path, home=None: opened.append(path) or (True, "")
         try:
             ok, message, path = remote.open_plan("lab", "calm-red-owl", ".claude")
         finally:
-            jump.open_file = old
+            jump.open_markdown = old
         self.assertEqual((ok, message), (True, "Opened the plan Calm plan from lab (a copy)"))
         self.assertEqual(Path(path).read_text(), "# Calm plan\n\n1. Do it\n")
         self.assertEqual(opened, [Path(path)])

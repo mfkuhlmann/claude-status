@@ -40,7 +40,8 @@ PlasmoidItem {
                                            kind: "", entrypoint: "", state: "idle", reason: "", waitingFor: "",
                                            detail: "", since: null, startedAt: null, context: null, model: null,
                                            costUsd: null, agents: null, shared: null, effort: null, tmux: false,
-                                           peek: null, changes: null, tasks: null, stats: null, plan: null, stopped: null })
+                                           peek: null, changes: null, tasks: null, stats: null, plan: null, stopped: null,
+                                           overlaps: null })
     readonly property var emptyFound: ({ key: "", sessionId: "", name: "", cwd: "", cwdShort: "", lastActive: 0, profile: "",
                                          profileDir: "", groupId: "", account: "", shared: false, match: "", openCommand: "" })
     readonly property var emptyPlan: ({ key: "", slug: "", title: "", path: "", profileDir: "", profile: "", updatedAt: 0,
@@ -323,7 +324,8 @@ PlasmoidItem {
     readonly property var sharedKeys: ["pollInterval", "idlePollInterval", "extraConfigDirs", "notifyWaiting", "notifyDone",
         "notifyDoneMinSeconds", "notifySound", "soundVolume", "soundWaiting", "soundDone", "soundFailed", "recentChats",
         "sshHosts", "remotePollSeconds", "sshUsage", "keepDoneHours", "showUsageInPanel", "showPet", "chatPets", "showTokens",
-        "newChatInVscode", "iconBlink", "awayDigest", "awayMinutes", "phoneWhileAway", "phoneFinished", "phoneDevice"]
+        "newChatInVscode", "iconBlink", "awayDigest", "awayMinutes", "phoneWhileAway", "phoneFinished", "phoneDevice",
+        "markdownApp"]
     property real settingsSeenAt: 0     // the newest shared settings this copy has seen
     property string settingsSeen: ""    // its own settings as of the last check (to see changes)
 
@@ -808,6 +810,8 @@ PlasmoidItem {
         status = parsed   // first: whether this copy notifies
         trackTransitions("", parsed.groups, parsed.generatedAt, "")
         trackLimitStops("", parsed.groups, "")
+        trackOverlaps("", parsed.groups, "")
+        startDueTasks(parsed.queue || [])
         celebrateResets("", parsed.groups)
         syncSettings(parsed.sharedSettings || null)
     }
@@ -973,7 +977,7 @@ PlasmoidItem {
         const summary = kind === "digest"   // while you were away: someone waits for you, or all went well
         const pose = kind === "done" && session && session.reason === "failed" ? "sad"
                    : summary ? (session ? "oncall" : "trophy")
-                   : { waiting: "oncall", done: "trophy", reset: "trophy", error: "error" }[kind]
+                   : { waiting: "oncall", overlap: "oncall", done: "trophy", reset: "trophy", started: "trophy", error: "error" }[kind]
         const n = notificationComponent.createObject(root, {
             sessionId: session ? session.sessionId : "", profileDir: session ? session.profileDir || "" : "",
             host: host || "", openCommand: session && session.openCommand ? session.openCommand : "",
@@ -1003,7 +1007,7 @@ PlasmoidItem {
     }
 
     function openFromNotification(n) {
-        if ((n.kind === "digest" || n.kind === "error") && !n.sessionId && !n.host)
+        if (!n.sessionId && !n.host)
             root.expanded = true   // nothing waits for you, or what went wrong: show the popup
         else if (n.host && n.session)
             remoteShow(n.host, n.session)
@@ -1426,6 +1430,7 @@ PlasmoidItem {
             const result = toLocalClock(answer.result, Date.now() - (answer.result.generatedAt || Date.now()))
             trackTransitions("ssh:" + host, result.groups, result.generatedAt, host)
             trackLimitStops("ssh:" + host, result.groups, host)
+            trackOverlaps("ssh:" + host, result.groups, host)
             celebrateResets("ssh:" + host, result.groups)
             setRemote(host, { loading: false, ok: true, error: "", result: result, updatedAt: Date.now(),
                               login: false, loggedIn: !!answer.loggedIn })
@@ -1832,6 +1837,129 @@ PlasmoidItem {
         playQueuedSound()
     }
 
+    // ---------------------------------------------------------------- chats changing the same files
+    // Two chats with a process that changed some of the same files
+    // (claude_status.py: note_overlaps): a tag on both rows, and one
+    // notification per pair when it starts.
+
+    property var lastOverlaps: ({})   // source -> {pair key: true}
+
+    function trackOverlaps(source, groupList, host) {
+        const before = lastOverlaps[source]
+        const next = {}
+        for (const g of groupList)
+            for (const s of g.sessions)
+                for (const o of (s.overlaps || [])) {
+                    const pair = [s.key, o.key].sort().join("|")
+                    if (pair in next)
+                        continue
+                    next[pair] = true
+                    if (!before || pair in before)
+                        continue   // (the first check only learns)
+                    petEvent("waiting", i18n("%1 and %2 change the same files!", s.name, o.name), petKeyOf(s, host))
+                    if (root.notifier && Plasmoid.configuration.notifyWaiting && !holdingBack())
+                        notify("overlap|" + source + "|" + pair, s, "overlap", i18n("Two chats change the same files"),
+                               i18n("%1 and %2: %3", s.name, o.name, o.files.join(", ") + (o.count > o.files.length ? " …" : ""))
+                               + (host ? "\n" + host : ""), "dialog-warning", host)
+                }
+        lastOverlaps = Object.assign({}, lastOverlaps, { [source]: next })
+    }
+
+    // "Also changed by …" for a row's tag
+    function overlapText(overlaps) {
+        return overlaps.map(o => i18np("Also changed by “%2”: %3", "Also changed by “%2” (%1 files): %3", o.count, o.name,
+                                       o.files.join(", ") + (o.count > o.files.length ? " …" : ""))).join("\n")
+    }
+
+    // ---------------------------------------------------------------- tasks waiting for a usage limit
+    // A background task can wait for its account's usage limit to reset
+    // (jump.py --queue; the status lists the queue). Once one is due, the
+    // copy of the widget that notifies starts it (jump.py --start-queued,
+    // which takes it out of the queue first: one start, whoever asks).
+
+    property bool taskQueued: false    // the new-chat box: start after the limit resets
+    property var startingTasks: ({})   // task id -> true while it's being started
+
+    // When the usage limit this account is at resets ({at, label}), or null:
+    // the latest of its full windows, else of the chats a limit stopped
+    function limitReset(group, host) {
+        let best = null
+        for (const w of (group.limits ? group.limits.windows : []))
+            if (w.pct >= 95 && w.resetsAt && (!best || w.resetsAt > best.at))
+                best = { at: w.resetsAt, label: w.label }
+        if (!best)
+            for (const s of group.sessions)
+                if (s.stopped && s.stopped.kind === "limit" && !s.stopped.over && s.stopped.resetsAt
+                        && (!best || s.stopped.resetsAt > best.at))
+                    best = { at: s.stopped.resetsAt, label: "" }
+        return best && best.at > now ? best : null
+    }
+
+    function clockText(ms) {
+        return new Date(ms).toLocaleTimeString(Qt.locale(), Locale.ShortFormat)
+    }
+
+    // The account's queued tasks (here, or on host)
+    function queuedFor(group, host) {
+        return (status && status.queue ? status.queue : []).filter(t => (t.host || "") === (host || "")
+                                                                         && group.profileKeys.indexOf(t.profile) >= 0)
+    }
+
+    function startDueTasks(queue) {
+        if (!root.notifier)
+            return
+        for (const t of queue)
+            if (t.due && !startingTasks[t.id])
+                startQueued(t)
+    }
+
+    function startQueued(t) {
+        startingTasks = Object.assign({}, startingTasks, { [t.id]: true })
+        const cmd = "python3 -I " + shellQuote(codeDir + "jump.py") + " --start-queued " + shellQuote(t.id) + configDirArgs
+                    + " # " + Date.now()
+        queueRuns[cmd] = t
+        queueRunner.connectSource(cmd)
+    }
+
+    function unqueue(t) {
+        runHelper("--unqueue " + shellQuote(t.id))
+    }
+
+    property var queueRuns: ({})   // command -> the task it starts
+
+    P5Support.DataSource {
+        id: queueRunner
+        engine: "executable"
+        connectedSources: []
+        onNewData: (source, data) => {
+            disconnectSource(source)
+            const t = root.queueRuns[source]
+            delete root.queueRuns[source]
+            const result = root.helperResult(data)
+            const what = t ? (t.planTitle || t.prompt.split("\n")[0]) : ""
+            if (t) {
+                const rest = Object.assign({}, root.startingTasks)
+                delete rest[t.id]
+                root.startingTasks = rest
+            }
+            if (result.ok && result.message && t) {   // ("": another copy started it)
+                root.petEvent("reset", i18n("Started: %1", what), "")
+                if (root.notifier && Plasmoid.configuration.notifyDone && !root.holdingBack())
+                    root.notify("queued|" + t.id, null, "started", i18n("Started on %1: %2", t.account, what),
+                                result.message + (t.host ? " · " + t.host : ""), "media-playback-start", "")
+            } else if (!result.ok && t) {
+                root.actionError = i18n("Couldn't start the queued task: %1", result.message)
+                actionErrorTimer.restart()
+                if (root.notifier && !root.dashboardShown)
+                    root.notify("queued|" + t.id, null, "error", i18n("Couldn't start the queued task"),
+                                what + "\n" + result.message, "dialog-error", "")
+            }
+            root.refresh()
+            if (t && t.host)
+                root.pollHost(t.host)
+        }
+    }
+
     // The step line of a chat that something stopped
     function stopText(stopped) {
         if (stopped.kind === "login")
@@ -2138,10 +2266,22 @@ PlasmoidItem {
         const text = taskText.trim()
         const hasTask = text !== "" || !!plan
         const background = taskBackground && hasTask
+        const reset = background && taskQueued ? limitReset(group, host) : null
         newChatGroup = ""
         planComposer = ""
         taskText = ""
         taskBackground = false
+        taskQueued = false
+        if (reset) {
+            // to start a minute after the limit resets
+            taskStarter.connectSource("python3 -I " + shellQuote(codeDir + "jump.py") + " --queue " + shellQuote(group.chatProfile)
+                                      + " --cwd " + shellQuote(folder.path || (host ? "~" : "")) + " --at " + Math.round(reset.at + 60000)
+                                      + (text ? " --prompt " + shellQuote(text) : "")
+                                      + (plan ? " --plan " + shellQuote(plan.slug) + " --plan-profile " + shellQuote(plan.profileDir) : "")
+                                      + (host ? " --host " + shellQuote(host) : "") + " --account " + shellQuote(group.title)
+                                      + configDirArgs + " # " + Date.now())
+            return
+        }
         if (host) {
             if (background || (hasTask && !inVscode)) {
                 // remote.py --task HOST PROFILE FOLDER [--prompt TEXT] [--plan SLUG PROFILE] [--bg]

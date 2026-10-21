@@ -1540,7 +1540,7 @@ class AgentRunFileTests(Fixture):
 
     def test_saved_and_opened(self):
         opened = []
-        with Patch(open_file=lambda path: opened.append(path) or True):
+        with Patch(open_markdown=lambda path, home=None: opened.append(path) or (True, "")):
             ok, message, path = jump.show_agent_run(self.home, [], "chat1", "ab12cd34ef", ".claude-work")
         self.assertEqual((ok, message), (True, "The run of “Find / the parser: now!”"))
         self.assertEqual(Path(path), self.cache / "claude-widget/agent-runs/Find the parser now! (ab12cd34).md")
@@ -1551,7 +1551,7 @@ class AgentRunFileTests(Fixture):
         old = self.cache / "claude-widget/agent-runs/old (x).md"
         write(old, "x")
         os.utime(old, (time.time() - 2 * 86400,) * 2)
-        with Patch(open_file=lambda path: True):
+        with Patch(open_markdown=lambda path, home=None: (True, "")):
             jump.show_agent_run(self.home, [], "chat1", "ab12cd34ef")
         self.assertFalse(old.exists())
 
