@@ -76,6 +76,10 @@
   opens only plans of a Claude config folder and the widget's runs).
 - **Open the whole run** in a Remote-SSH window opens the run file of
   this computer (it looked for it on the SSH host).
+- A background chat shared with another account, then kept only there
+  (**Keep only on …**), came back under the account it ran on, as a
+  stopped background session, for a day (Claude keeps that account's
+  record of the session): it's now only on the account that kept it.
 
 ## 1.12.0
 
