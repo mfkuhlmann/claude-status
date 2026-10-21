@@ -254,7 +254,7 @@ class AttachCommandTests(unittest.TestCase):
 
     def test_plain_default_profile_unsets_config_dir(self):
         self.assertEqual(jump.attach_command(self.profile("/h/.claude", True), "12ab34cd"),
-                         "env -u CLAUDE_CONFIG_DIR claude attach 12ab34cd")
+                         "env -u CLAUDE_CODE_DISABLE_AGENT_VIEW -u CLAUDE_CONFIG_DIR claude attach 12ab34cd")
 
     def test_linked_profile_uses_the_link_name_when_no_service_runs(self):
         # ~/.claude -> ~/.claude-personal: no ~/.claude.json to fall back on, and
@@ -266,7 +266,7 @@ class AttachCommandTests(unittest.TestCase):
             (home / ".claude").symlink_to(real)
             for path, default in ((home / ".claude", True), (real, False)):
                 self.assertEqual(jump.attach_command(self.profile(path, default), "5ab1c0de", home),
-                                 f"CLAUDE_CONFIG_DIR={home / '.claude'} claude attach 5ab1c0de")
+                                 f"env -u CLAUDE_CODE_DISABLE_AGENT_VIEW CLAUDE_CONFIG_DIR={home / '.claude'} claude attach 5ab1c0de")
 
     def test_reuses_the_running_service_name(self):
         # the service's name is whatever CLAUDE_CONFIG_DIR it runs with (here: this test process)
@@ -304,7 +304,7 @@ class AttachCommandTests(unittest.TestCase):
             self.assertEqual(jump.resume_command(prof, "c1", home), f"CLAUDE_CONFIG_DIR={home / '.claude'} claude --resume c1")
             (home / ".claude").unlink()
             (home / ".claude").symlink_to(work)
-            self.assertEqual(jump.attach_command(prof, "j1", home), f"CLAUDE_CONFIG_DIR={home / '.claude'} claude attach j1")
+            self.assertEqual(jump.attach_command(prof, "j1", home), f"env -u CLAUDE_CODE_DISABLE_AGENT_VIEW CLAUDE_CONFIG_DIR={home / '.claude'} claude attach j1")
             self.assertEqual(jump.resume_command(prof, "c1", home), f"CLAUDE_CONFIG_DIR={personal} claude --resume c1")
             self.assertEqual(cs.new_chat_command(prof, home),
                              f"CLAUDE_CODE_DISABLE_AGENT_VIEW=1 CLAUDE_CONFIG_DIR={personal} claude")
@@ -318,11 +318,11 @@ class AttachCommandTests(unittest.TestCase):
             (home / ".claude").symlink_to(real)
             job = {"providerEnv": {"CLAUDE_CONFIG_DIR": str(real)}}
             self.assertEqual(jump.attach_command(self.profile(home / ".claude", True), "5ab1c0de", home, job),
-                             f"CLAUDE_CONFIG_DIR={real} claude attach 5ab1c0de")
+                             f"env -u CLAUDE_CODE_DISABLE_AGENT_VIEW CLAUDE_CONFIG_DIR={real} claude attach 5ab1c0de")
             # a name of some other folder is ignored
             job = {"providerEnv": {"CLAUDE_CONFIG_DIR": str(home / ".claude-work")}}
             self.assertEqual(jump.attach_command(self.profile(real, False), "5ab1c0de", home, job),
-                             f"CLAUDE_CONFIG_DIR={home / '.claude'} claude attach 5ab1c0de")
+                             f"env -u CLAUDE_CODE_DISABLE_AGENT_VIEW CLAUDE_CONFIG_DIR={home / '.claude'} claude attach 5ab1c0de")
 
     def test_explains_the_trust_question_for_untrusted_folders(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -334,16 +334,16 @@ class AttachCommandTests(unittest.TestCase):
                 str(home / "proj"): {"hasTrustDialogAccepted": True}}})
             cmd = jump.attach_command(self.profile(prof, False), "j1", home, {"cwd": str(home)})
             self.assertTrue(cmd.startswith("printf '%s\\n\\n' 'Claude will ask whether you trust ~ before"), cmd)
-            self.assertTrue(cmd.endswith(f"; CLAUDE_CONFIG_DIR={prof} claude attach j1"), cmd)
+            self.assertTrue(cmd.endswith(f"; env -u CLAUDE_CODE_DISABLE_AGENT_VIEW CLAUDE_CONFIG_DIR={prof} claude attach j1"), cmd)
             self.assertEqual(jump.attach_command(self.profile(prof, False), "j1", home, {"cwd": str(home / "proj")}),
-                             f"CLAUDE_CONFIG_DIR={prof} claude attach j1")
+                             f"env -u CLAUDE_CODE_DISABLE_AGENT_VIEW CLAUDE_CONFIG_DIR={prof} claude attach j1")
             # the note survives the shell: run it
-            out = subprocess.run(["bash", "-c", cmd.split("; CLAUDE_CONFIG_DIR")[0]], capture_output=True, text=True).stdout
+            out = subprocess.run(["bash", "-c", cmd.split("; env -u ")[0]], capture_output=True, text=True).stdout
             self.assertIn('Choose "Yes, I trust this folder" to continue', out)
 
     def test_named_profile_sets_config_dir(self):
         self.assertEqual(jump.attach_command(self.profile("/h/my claude", False), "x;rm"),
-                         "CLAUDE_CONFIG_DIR='/h/my claude' claude attach 'x;rm'")
+                         "env -u CLAUDE_CODE_DISABLE_AGENT_VIEW CLAUDE_CONFIG_DIR='/h/my claude' claude attach 'x;rm'")
 
 
 class FindSessionTests(Fixture):
@@ -384,7 +384,9 @@ class StopTests(Fixture):
                 calls.append((args, kw["env"].get("CLAUDE_CONFIG_DIR", "<unset>")))
                 return type("R", (), {"returncode": returncode, "stdout": stdout, "stderr": stderr})()
 
-        with Patch(subprocess=FakeSubprocess, shutil=type("W", (), {"which": staticmethod(lambda n: "/usr/bin/" + n)})):
+        # (claude stop runs in claude_status.stop_background)
+        with Patch(shutil=type("W", (), {"which": staticmethod(lambda n: "/usr/bin/" + n)})), \
+                mock.patch.object(subprocess, "run", FakeSubprocess.run):
             return jump.stop(self.home, [], session_id), calls
 
     def test_stops_background_session_under_its_profile(self):
@@ -665,7 +667,7 @@ class ChooseFolderTests(Fixture):
     def test_command_line(self):
         calls = []
         out = io.StringIO()
-        with Patch(new_chat_choosing_folder=lambda home, extra, dirname: calls.append((dirname, extra)) or (True, "")), \
+        with Patch(new_chat_choosing_folder=lambda home, extra, dirname, start, task: calls.append((dirname, extra)) or (True, "")), \
                 contextlib.redirect_stdout(out):
             jump.main(["--new-chat", ".claude-work", "--choose-folder", "--config-dir", "/x"])
         self.assertEqual(calls, [(".claude-work", ["/x"])])

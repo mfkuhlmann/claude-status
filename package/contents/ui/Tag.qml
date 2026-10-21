@@ -11,6 +11,7 @@ Rectangle {
     property string tooltip
     property string tooltipTitle: label.text
     property bool active: false     // outlined in the highlight colour
+    property bool warning: false    // outlined and written in the negative colour
     property bool clickable: false
     signal clicked()
 
@@ -19,14 +20,16 @@ Rectangle {
     radius: Kirigami.Units.cornerRadius
     color: "transparent"
     border.width: 1
-    border.color: active ? Kirigami.Theme.focusColor
-                         : Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.3)
+    border.color: warning ? Kirigami.Theme.negativeTextColor : active ? Kirigami.Theme.focusColor
+                  : Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.3)
 
     PlasmaComponents3.Label {
         id: label
         anchors.centerIn: parent
+        textFormat: Text.PlainText
         font: Kirigami.Theme.smallFont
-        opacity: 0.8
+        color: tag.warning ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.textColor
+        opacity: tag.warning ? 1 : 0.8
     }
 
     PlasmaCore.ToolTipArea {

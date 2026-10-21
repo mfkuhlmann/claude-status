@@ -365,9 +365,8 @@ class ActionTests(FakeSSH):
             self.assertIsNone(remote.control_dir())
 
 
-class SharingTests(FakeSSH):
-    """Sharing a chat between the host's accounts: sharing.py runs there, sent
-    with claude_status.py like the status script."""
+class TwoAccountHost(FakeSSH):
+    """A host with two Claude accounts, a chat of the first one's and claude."""
 
     CHAT = "9a8b7c6d-0000-4000-8000-000000000002"
 
@@ -385,6 +384,11 @@ class SharingTests(FakeSSH):
         self.claude.parent.mkdir(parents=True)
         self.claude.write_text("#!/bin/sh\n")
         self.claude.chmod(0o755)
+
+
+class SharingTests(TwoAccountHost):
+    """Sharing a chat between the host's accounts: sharing.py runs there, sent
+    with claude_status.py like the status script."""
 
     def open_in_a_session(self):
         proc = subprocess.Popen([sys.executable, "-c", "print('ready', flush=True); import time; time.sleep(60)"],
@@ -619,6 +623,83 @@ class AccountTests(FakeSSH):
 
     def test_only_accounts_actions(self):
         self.assertFalse(self.run_main("--accounts", "lab", "--status")["ok"])
+
+
+
+class HostTaskTests(TwoAccountHost):
+    """Finding chats, starting tasks and plans on a host (claude_status.py and
+    sharing.py there, sent over the connection)."""
+
+    def setUp(self):
+        super().setUp()
+        self.plan = self.fake_home / ".claude/plans/calm-red-owl.md"
+        self.plan.parent.mkdir(parents=True)
+        self.plan.write_text("# Calm plan\n\n1. Do it\n")
+        self.folder = self.fake_home / "srv-app"
+        self.folder.mkdir()
+        (self.fake_home / ".claude/.claude.json").write_text(json.dumps({
+            "oauthAccount": {"accountUuid": "r", "organizationType": "claude_max", "displayName": "Remote Me"},
+            "projects": {str(self.folder): {"hasTrustDialogAccepted": True}}}))
+        self.claude.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$HOME/claude-args\"\necho 'Started 1a2b3c4d'\n")
+
+    def test_find_there(self):
+        answer = remote.find("lab", "/srv/x")
+        self.assertTrue(answer["ok"], answer)
+        (found,) = answer["results"]
+        self.assertEqual(found["sessionId"], self.CHAT)
+        self.assertIn(f"--resume {self.CHAT}", found["openCommand"])
+        self.assertEqual(self.calls()[-1], ["lab", "python3 -I - --remote --find /srv/x"])
+
+    def test_a_task_in_the_background_there(self):
+        answer = remote.task("lab", ".claude", str(self.folder), "fix it", "calm-red-owl", ".claude", background=True)
+        self.assertEqual((answer["ok"], answer["id"]), (True, "1a2b3c4d"), answer)
+        args = (self.fake_home / "claude-args").read_text()
+        self.assertTrue(args.startswith("--bg\nfix it\n\nThe plan (saved as ~/.claude/plans/calm-red-owl.md):"), args)
+        # not where Claude doesn't trust the folder (its home, here)
+        answer = remote.task("lab", ".claude", "~", "fix it", background=True)
+        self.assertFalse(answer["ok"])
+        self.assertIn("doesn't trust your home folder", answer["message"])
+
+    def test_a_task_in_a_terminal_here(self):
+        import jump
+        opened, old = [], jump.open_terminal
+        jump.open_terminal = lambda cwd, cmd: opened.append(cmd) or True
+        try:
+            answer = remote.task("lab", ".claude-work", str(self.folder), "write tests")
+        finally:
+            jump.open_terminal = old
+        self.assertTrue(answer["ok"], answer)
+        (ssh_line,) = opened
+        command = shlex.split(ssh_line)[-1]
+        self.assertEqual(shlex.split(unwrapped(command))[-1], "write tests")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            remote.main(["--task", "lab", ".claude", str(self.folder), "--prompt", "go", "--print-command"])
+        self.assertTrue(json.loads(out.getvalue())["command"].endswith(" go"))
+
+    def test_a_plan_comes_here_and_is_shared_there(self):
+        import jump
+        opened, old = [], jump.open_file
+        jump.open_file = lambda path: opened.append(path) or True
+        try:
+            ok, message, path = remote.open_plan("lab", "calm-red-owl", ".claude")
+        finally:
+            jump.open_file = old
+        self.assertEqual((ok, message), (True, "Opened the plan Calm plan from lab (a copy)"))
+        self.assertEqual(Path(path).read_text(), "# Calm plan\n\n1. Do it\n")
+        self.assertEqual(opened, [Path(path)])
+        self.assertEqual(remote.plan_sharing("lab", "calm-red-owl", ".claude", True),
+                         (True, "Plan shared: it's on main, work now."))
+        self.assertTrue(os.path.samefile(self.plan, self.work / "plans/calm-red-owl.md"))
+        self.assertEqual(remote.plan_sharing("lab", "calm-red-owl", ".claude-work", False),
+                         (True, "The plan is only on work now. Removed from main."))
+        self.assertFalse(self.plan.exists())
+
+    def test_its_plans_are_listed(self):
+        group = next(g for g in remote.status("lab", tokens=False)["result"]["groups"] if g["chatProfile"] == ".claude")
+        (plan,) = group["plans"]
+        self.assertEqual((plan["slug"], plan["title"], plan["chatId"], plan["openCommand"]),
+                         ("calm-red-owl", "Calm plan", None, None))
 
 
 if __name__ == "__main__":

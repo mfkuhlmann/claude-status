@@ -14,6 +14,13 @@
     python3 -I remote.py --continue HOST CHAT_ID PROFILE [--print-command]   share it with PROFILE there if needed,
                                                     and reopen it there in a terminal (or print the command)
     python3 -I remote.py --unshare HOST CHAT_ID PROFILE    keep a shared chat only on PROFILE there
+    python3 -I remote.py --find HOST QUERY          the chats there with every word of QUERY
+    python3 -I remote.py --task HOST PROFILE FOLDER [--prompt TEXT] [--plan SLUG PLAN_PROFILE] [--bg | --print-command]
+                                                    a new chat there with a task: in the background there,
+                                                    or in a terminal here (or print its command)
+    python3 -I remote.py --plan HOST SLUG [PROFILE] [--no-open]   a plan there, as a Markdown file here
+    python3 -I remote.py --share-plan HOST SLUG PROFILE [TO]      share a plan with every account there (or TO)
+    python3 -I remote.py --unshare-plan HOST SLUG PROFILE         keep a shared plan only on PROFILE there
     python3 -I remote.py --login HOST               a terminal where you log in to HOST for the widget
     python3 -I remote.py --disconnect HOST          close the connection you logged in with
     python3 -I remote.py --vscode-account HOST CONFIG_DIR|-   VS Code's Claude on HOST runs on that account
@@ -402,11 +409,13 @@ def unshare(host, chat_id, profile):
     return answer["ok"], answer["message"]
 
 
-def continue_on(host, chat_id, profile, open_it=True):
+def continue_on(host, chat_id, profile, open_it=True, end_first=False):
     """Continue a chat of host on another account there: shared with it if
     needed, then reopened in a local terminal (ssh -t), or, without open_it,
-    the command that reopens it there: (ok, message, command)."""
-    answer = host_answer(host, ["--continue", chat_id, "--profile", profile], "sharing.py")
+    the command that reopens it there: (ok, message, command). end_first: an
+    idle session that has it open there quits first (claude_status.end_for_handover)."""
+    answer = host_answer(host, ["--continue", chat_id, "--profile", profile] + (["--end-first"] if end_first else []),
+                         "sharing.py")
     if not answer["ok"]:
         return False, answer["message"], None
     command = answer.get("command")
@@ -416,6 +425,62 @@ def continue_on(host, chat_id, profile, open_it=True):
         return True, answer["message"], command
     ok, message = open_remote(host, command)
     return ok, message, command
+
+
+def find(host, query):
+    """The chats on host with every word of query (claude_status.find_chats
+    there), each with the command that reopens it there."""
+    answer = host_answer(host, ["--find", query])
+    return {**answer, "results": answer.get("results") or [], "more": bool(answer.get("more"))}
+
+
+def plan_text(host, slug, profile=None):
+    """A plan of host: {"ok", "title", "markdown", "where"} (claude_status.plan_markdown there)."""
+    return host_answer(host, ["--plan-text", slug] + (["--profile", profile] if profile else []))
+
+
+def open_plan(host, slug, profile=None, open_it=True):
+    """A plan of host, saved here as Markdown (a copy) and opened: (ok, message, file)."""
+    import jump
+    answer = plan_text(host, slug, profile)
+    if not answer.get("ok") or not isinstance(answer.get("markdown"), str):
+        return False, answer.get("message") or f"{host} doesn't have that plan", None
+    folder = jump.runs_folder(Path.home())
+    path = folder / f"plan-{re.sub(r'[^A-Za-z0-9_.-]', '_', host)}-{slug}.md"
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(answer["markdown"])
+    if open_it and not jump.open_file(path):
+        return False, f"Saved it as {path}, but there's no xdg-open to open it with", str(path)
+    return True, f"Opened the plan {answer.get('title') or slug} from {host} (a copy)", str(path)
+
+
+def plan_sharing(host, slug, profile, share_it, to=None):
+    """Share a plan of host with its other accounts (or keep it on profile only), there."""
+    args = (["--share-plan", slug] if share_it else ["--unshare-plan", slug]) + ["--profile", profile] \
+        + (["--to", to] if to else [])
+    answer = host_answer(host, args, "sharing.py")
+    return answer["ok"], answer["message"]
+
+
+def task(host, profile, folder, text="", plan=None, plan_profile=None, background=False, open_it=True):
+    """A new chat on host's profile in folder there, with a task: in the
+    background there, or in a terminal here (ssh -t), or (without open_it)
+    the command that starts it there. {"ok", "message", "id" | "command"}."""
+    args = ["--start-task" if background else "--task-command", folder or "~", "--profile", profile]
+    if text:
+        args += ["--prompt", text]
+    if plan:
+        args += ["--plan", plan] + (["--plan-profile", plan_profile] if plan_profile else [])
+    answer = host_answer(host, args)
+    if background or not answer["ok"]:
+        return answer
+    command = answer.get("command")
+    if not isinstance(command, str) or not command:
+        return {"ok": False, "message": f"{host} didn't say how to start it"}
+    if not open_it:
+        return {"ok": True, "message": "", "command": command}
+    ok, message = open_remote(host, command)
+    return {"ok": ok, "message": message}
 
 
 ACCOUNT_ACTIONS = ("--list", "--add", "--login", "--logout", "--remove", "--command", "--no-command", "--default")
@@ -597,10 +662,35 @@ def main(argv=None):
         elif action == "--unshare" and len(args) == 3:
             ok, message = unshare(*args)
             out = {"ok": ok, "message": message}
-        elif action == "--continue" and len([a for a in args if a != "--print-command"]) == 3:
+        elif action == "--continue" and len([a for a in args if a not in ("--print-command", "--end-first")]) == 3:
             printing = "--print-command" in args
-            ok, message, command = continue_on(*[a for a in args if a != "--print-command"], open_it=not printing)
+            ok, message, command = continue_on(*[a for a in args if a not in ("--print-command", "--end-first")],
+                                               open_it=not printing, end_first="--end-first" in args)
             out = {"ok": ok, "message": message, **({"command": command} if command and printing else {})}
+        elif action == "--find" and len(args) == 2:
+            out = find(*args)
+        elif action == "--plan" and len([a for a in args if a != "--no-open"]) in (2, 3):
+            ok, message, path = open_plan(*[a for a in args if a != "--no-open"], open_it="--no-open" not in args)
+            out = {"ok": ok, "message": message, **({"file": path} if path else {})}
+        elif action in ("--share-plan", "--unshare-plan") and len(args) in (3, 4):
+            ok, message = plan_sharing(args[0], args[1], args[2], action == "--share-plan",
+                                       args[3] if len(args) == 4 else None)
+            out = {"ok": ok, "message": message}
+        elif action == "--task" and len(args) >= 3:
+            host, profile, folder, rest, kw = args[0], args[1], args[2], args[3:], {}
+            while rest:
+                arg = rest.pop(0)
+                if arg == "--prompt" and rest:
+                    kw["text"] = rest.pop(0)
+                elif arg == "--plan" and len(rest) >= 2:
+                    kw["plan"], kw["plan_profile"] = rest.pop(0), rest.pop(0)
+                elif arg == "--bg":
+                    kw["background"] = True
+                elif arg == "--print-command":
+                    kw["open_it"] = False
+                else:
+                    sys.exit(USAGE)
+            out = task(host, profile, folder, **kw)
         elif action == "--login" and len(args) == 1:
             ok, message = login(args[0])
             out = {"ok": ok, "message": message}

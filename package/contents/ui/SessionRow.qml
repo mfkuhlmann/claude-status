@@ -56,17 +56,30 @@ RowLayout {
     readonly property var changes: session.changes || null
     readonly property bool showPeek: root.expandedPeek[rowKey] === true
     readonly property var recap: session.stats || null
+    // Claude's own recap of the chat (claude_status.py: recap_of), while nothing was said after it
+    readonly property var summary: peek && peek.recap ? peek.recap : null
+    // What stopped it: a usage limit (and when that resets) or an expired login
+    readonly property var stopped: session.stopped || null
     readonly property bool hasPeek: (!!peek && (peek.prompt !== "" || peek.reply !== "")) || tasks !== null || recap !== null
+                                    || summary !== null
     // Its changes open side by side in VS Code (jump.py --changes); an SSH host's files are there
     readonly property bool canCompare: changes !== null && !remoteHost && root.vscodeInstalled && !!session.chatId
-    // The line under the folder: what it's doing, what it needs, or what Claude said last
-    readonly property bool showsReply: (session.state === "idle" || (session.state === "done" && !session.detail))
-                                       && !!peek && peek.replyLine !== ""
+    // The line under the folder: what it's doing, what it needs, what stopped
+    // it, Claude's recap, or what Claude said last
+    readonly property bool resting: session.state === "idle" || (session.state === "done" && !session.detail)
+    readonly property bool showsRecap: resting && !stopped && summary !== null
+    readonly property bool showsReply: resting && !stopped && !showsRecap && !!peek && peek.replyLine !== ""
     readonly property string stepText: session.state === "working"
                                        ? (peek && peek.activity ? peek.activity : tasks && tasks.current ? tasks.current : "")
                                        : session.state === "waiting" ? (session.detail || (peek ? peek.activity : ""))
+                                       : stopped ? root.stopText(stopped)
                                        : session.state === "done" && session.detail ? session.detail
+                                       : showsRecap ? summary.text.split("\n")[0]
                                        : showsReply ? peek.replyLine : ""
+    // Its permission mode, unless it's the default
+    readonly property string modeText: root.modeText(peek ? peek.mode : null)
+    // A usage limit stopped it: it can go on on another account with room left
+    readonly property var handover: root.handoverTarget(session, remoteHost)
     readonly property string openHint: remoteHost
                                        ? (session.entrypoint === "claude-vscode" && !session.openCommand
                                           ? i18n("Show this conversation in VS Code (connected to %1)", remoteHost)
@@ -108,7 +121,8 @@ RowLayout {
         Layout.preferredWidth: Math.round(Kirigami.Units.gridUnit * 0.6)
         Layout.preferredHeight: Layout.preferredWidth
         radius: width / 2
-        color: row.session.reason === "failed" ? Kirigami.Theme.negativeTextColor : root.stateColor(row.session.state)
+        color: row.session.reason === "failed" || (row.stopped && !row.stopped.over) ? Kirigami.Theme.negativeTextColor
+             : root.stateColor(row.session.state)
     }
 
     ColumnLayout {
@@ -187,6 +201,24 @@ RowLayout {
                                 row.showAgents ? i18n("hide") : i18n("show"))
             }
             Tag {
+                // plan mode, auto mode, …: how freely it may act
+                visible: row.modeText !== ""
+                text: row.modeText
+                warning: !!row.peek && row.peek.mode === "bypassPermissions"
+                tooltipTitle: i18n("Permission mode: %1", row.modeText)
+                tooltip: root.modeHint(row.peek ? row.peek.mode : "")
+            }
+            Tag {
+                // the plan it made (claude_status.py: plan_of)
+                visible: !!row.session.plan
+                text: i18nc("a chat's plan, click to open it", "plan ↗")
+                clickable: true
+                onClicked: root.openPlan(row.session.plan.slug, row.session.profileDir, row.remoteHost)
+                tooltipTitle: row.session.plan ? row.session.plan.title : ""
+                tooltip: row.remoteHost ? i18n("The plan this chat made. Click to open it: a copy, fetched from %1.", row.remoteHost)
+                                        : i18n("The plan this chat made. Click to open it in your app for Markdown.")
+            }
+            Tag {
                 visible: row.changes !== null
                 text: row.changes ? i18nc("number of files a chat changed", "±%1", row.changes.count) : ""
                 clickable: row.canCompare
@@ -202,8 +234,10 @@ RowLayout {
             PlasmaComponents3.Label {
                 textFormat: Text.PlainText
                 text: root.stateText(row.session)
-                color: row.session.state === "waiting" ? Kirigami.Theme.neutralTextColor : Kirigami.Theme.textColor
-                font.bold: row.session.state === "waiting"
+                color: row.session.state === "waiting" ? Kirigami.Theme.neutralTextColor
+                     : row.stopped && !row.stopped.over ? Kirigami.Theme.negativeTextColor
+                     : row.stopped ? Kirigami.Theme.positiveTextColor : Kirigami.Theme.textColor
+                font.bold: row.session.state === "waiting" || !!row.stopped
                 elide: Text.ElideRight
                 Layout.maximumWidth: Kirigami.Units.gridUnit * 11
             }
@@ -358,12 +392,40 @@ RowLayout {
                     id: stepLabel
                     Layout.fillWidth: true
                     text: (row.session.state === "working" && row.stepText ? "▸ "
+                           : row.showsRecap ? i18nc("Claude's recap of the chat", "Recap: ")
                            : row.showsReply ? i18nc("what Claude said last", "Claude: ") : "") + row.stepText
                     textFormat: Text.PlainText
-                    color: row.session.state === "waiting" ? Kirigami.Theme.neutralTextColor : Kirigami.Theme.textColor
+                    color: row.session.state === "waiting" ? Kirigami.Theme.neutralTextColor
+                         : row.stopped && !row.stopped.over && row.session.state !== "working" ? Kirigami.Theme.negativeTextColor
+                         : Kirigami.Theme.textColor
                     elide: Text.ElideRight
                     opacity: 0.8
                     font: Kirigami.Theme.smallFont
+                }
+                // A usage limit stopped it: continue on another account with room left
+                PlasmaComponents3.ToolButton {
+                    id: handoverButton
+                    visible: row.handover !== null
+                    icon.name: "system-switch-user"
+                    text: row.handover ? i18n("Continue on %1", row.handover.title) : ""
+                    font: Kirigami.Theme.smallFont
+                    Layout.preferredHeight: stepLabel.implicitHeight + Kirigami.Units.smallSpacing
+                    onClicked: root.handOver(row.session, row.remoteHost, row.handover)
+
+                    PlasmaCore.ToolTipArea {
+                        textFormat: Text.PlainText
+                        anchors.fill: parent
+                        mainText: row.handover ? i18n("Continue on %1", row.handover.title) : ""
+                        subText: !row.handover ? ""
+                                 : (row.handover.pct !== null
+                                    ? i18n("%1 has used %2% of its %3 limit.", row.handover.title, Math.round(row.handover.pct), row.handover.label)
+                                    : i18n("%1's plan usage isn't known here.", row.handover.title))
+                                   + " " + (row.session.pid !== null
+                                            ? (row.session.kind === "bg"
+                                               ? i18n("This background session is stopped first (claude stop); then the chat is shared with %1 and reopens there in a terminal.", row.handover.title)
+                                               : i18n("Claude here quits first (its terminal stays open); then the chat is shared with %1 and reopens there in a terminal.", row.handover.title))
+                                            : i18n("The chat is shared with %1 and reopens there in a terminal.", row.handover.title))
+                    }
                 }
                 Kirigami.Icon {
                     visible: row.hasPeek
@@ -380,6 +442,8 @@ RowLayout {
                 active: stepLabel.truncated || row.hasPeek
                 mainText: row.session.state === "waiting" ? i18n("What it needs")
                           : row.session.state === "working" ? i18n("What it's doing")
+                          : row.stopped ? (row.stopped.kind === "login" ? i18n("Its login expired") : i18n("A usage limit stopped it"))
+                          : row.showsRecap ? i18n("Claude's recap")
                           : row.showsReply ? i18n("What Claude said last") : i18n("Result")
                 subText: (stepLabel.truncated ? row.stepText + (row.hasPeek ? "\n\n" : "") : "")
                          + (!row.hasPeek ? "" : row.showPeek ? i18n("Click to fold it up again.")
@@ -411,6 +475,17 @@ RowLayout {
                 anchors.margins: Kirigami.Units.smallSpacing
                 spacing: Kirigami.Units.smallSpacing
 
+                // Claude's recap of the chat, written when you came back to it
+                PlasmaComponents3.Label {
+                    Layout.fillWidth: true
+                    visible: row.summary !== null
+                    text: row.summary ? i18nc("Claude's recap of the chat", "Recap: %1", row.summary.text) : ""
+                    textFormat: Text.PlainText
+                    wrapMode: Text.Wrap
+                    maximumLineCount: 8
+                    elide: Text.ElideRight
+                    font: Kirigami.Theme.smallFont
+                }
                 PlasmaComponents3.Label {
                     Layout.fillWidth: true
                     visible: !!row.peek && row.peek.prompt !== ""

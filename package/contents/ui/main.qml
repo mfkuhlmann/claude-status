@@ -35,12 +35,17 @@ PlasmoidItem {
     property bool stopConfirmBusy: false   // the chat wasn't idle when you were asked (stop it anyway)
     readonly property var emptyGroup: ({ id: "", name: "", title: "", plan: "", profiles: [], sessions: [],
                                          limits: null, tokens: null, projects: [], chatProfile: "", sharedHere: [],
-                                         recent: [] })
+                                         recent: [], plans: [] })
     readonly property var emptySession: ({ key: "", profileDir: "", sessionId: "", chatId: "", pid: null, name: "", cwd: "", cwdShort: "", profile: "",
                                            kind: "", entrypoint: "", state: "idle", reason: "", waitingFor: "",
                                            detail: "", since: null, startedAt: null, context: null, model: null,
                                            costUsd: null, agents: null, shared: null, effort: null, tmux: false,
-                                           peek: null, changes: null, tasks: null, stats: null })
+                                           peek: null, changes: null, tasks: null, stats: null, plan: null, stopped: null })
+    readonly property var emptyFound: ({ key: "", sessionId: "", name: "", cwd: "", cwdShort: "", lastActive: 0, profile: "",
+                                         profileDir: "", groupId: "", account: "", shared: false, match: "", openCommand: "" })
+    readonly property var emptyPlan: ({ key: "", slug: "", title: "", path: "", profileDir: "", profile: "", updatedAt: 0,
+                                        shared: false, chatId: null, chatProfileDir: null, cwd: "", cwdShort: "",
+                                        openCommand: null })
     readonly property var emptyTask: ({ subject: "", status: "pending" })
     readonly property var emptyDay: ({ day: "", total: 0, output: 0, messages: 0, chats: 0, prompts: 0 })
     readonly property var emptyProject: ({ name: "", path: "", total: 0, output: 0, prompts: 0 })
@@ -174,8 +179,13 @@ PlasmoidItem {
             return i18np("%1 chat needs you", "%1 chats need you", counts.waiting)
         if (counts.working)
             return i18np("%1 chat working", "%1 chats working", counts.working)
-        if (counts.idle)
-            return i18np("Your turn in %1 chat", "Your turn in %1 chats", counts.idle)   // Claude finished its reply
+        // (a chat a usage limit stopped waits for the limit, not for you)
+        const held = allGroups.reduce((n, g) => n + g.sessions.filter(s => s.state === "idle" && s.stopped
+                                                                         && s.stopped.kind === "limit" && !s.stopped.over).length, 0)
+        if (counts.idle > held)
+            return i18np("Your turn in %1 chat", "Your turn in %1 chats", counts.idle - held)   // Claude finished its reply
+        if (held)
+            return i18np("%1 chat waits for its usage limit", "%1 chats wait for their usage limit", held)
         if (counts.done)
             return i18np("%1 finished chat to look at", "%1 finished chats to look at", counts.done)
         return i18n("All quiet")
@@ -797,6 +807,7 @@ PlasmoidItem {
         now = parsed.generatedAt
         status = parsed   // first: whether this copy notifies
         trackTransitions("", parsed.groups, parsed.generatedAt, "")
+        trackLimitStops("", parsed.groups, "")
         celebrateResets("", parsed.groups)
         syncSettings(parsed.sharedSettings || null)
     }
@@ -962,7 +973,7 @@ PlasmoidItem {
         const summary = kind === "digest"   // while you were away: someone waits for you, or all went well
         const pose = kind === "done" && session && session.reason === "failed" ? "sad"
                    : summary ? (session ? "oncall" : "trophy")
-                   : { waiting: "oncall", done: "trophy", error: "error" }[kind]
+                   : { waiting: "oncall", done: "trophy", reset: "trophy", error: "error" }[kind]
         const n = notificationComponent.createObject(root, {
             sessionId: session ? session.sessionId : "", profileDir: session ? session.profileDir || "" : "",
             host: host || "", openCommand: session && session.openCommand ? session.openCommand : "",
@@ -1057,13 +1068,15 @@ PlasmoidItem {
     }
 
     // New chat: the + next to an account unfolds its folders under its name
-    // (GroupSection.qml). A folder opens a terminal with Claude there; its
-    // VS Code button starts the chat in VS Code's Claude extension instead.
+    // (NewChatBox.qml), with a field for what Claude should do. A folder
+    // starts the chat there (startChat): in a terminal, in VS Code's Claude
+    // extension (the switch above them) or, with a task, in the background.
     property string newChatGroup: ""   // group key of the account whose folders are open
     property bool digestSeen: false
     onExpandedChanged: {
         if (!root.expanded) {
             newChatGroup = ""
+            planComposer = ""   // (what you wrote in it stays: root.taskText)
             if (digestSeen)
                 awayDigest = null
             digestSeen = false
@@ -1097,15 +1110,22 @@ PlasmoidItem {
 
     function toggleNewChat(groupKey) {
         newChatGroup = newChatGroup === groupKey ? "" : groupKey
+        planComposer = ""
     }
 
     // Here: your recent folders, then any folder you pick in the folder dialog
     // (it opens in your home folder). An SSH host's folders can't be browsed
-    // from here, so its home folder stays in the list.
-    function newChatFolders(group, host) {
-        const folders = host ? group.projects.slice() : group.projects.filter(f => f.short !== "~")
+    // from here, so its home folder stays in the list. A plan's own folder
+    // (where the chat that made it ran) comes first.
+    function newChatFolders(group, host, plan) {
+        let folders = host ? group.projects.slice() : group.projects.filter(f => f.short !== "~")
         if (host && !folders.some(f => f.short === "~"))
-            folders.push({ path: "", short: "~", newChatCommand: group.homeChatCommand || "" })
+            folders.push({ path: "", short: "~", newChatCommand: group.homeChatCommand || "", trusted: false })
+        if (plan && plan.cwd) {
+            const own = folders.find(f => f.path === plan.cwd)
+            folders = [own || { path: plan.cwd, short: plan.cwdShort || plan.cwd, newChatCommand: "" }]
+                .concat(folders.filter(f => f.path !== plan.cwd))
+        }
         return folders
     }
 
@@ -1194,22 +1214,6 @@ PlasmoidItem {
         }
     }
 
-    // vscode: in VS Code's Claude extension instead of a terminal
-    function newChat(profile, folder, vscode) {
-        newChatGroup = ""
-        launcher.connectSource("python3 -I " + shellQuote(codeDir + "jump.py") + " --new-chat " + shellQuote(profile)
-                               + (folder ? " --cwd " + shellQuote(folder) : "") + (vscode ? " --vscode" : "")
-                               + configDirArgs + " # " + Date.now())
-    }
-
-    // The folder dialog takes over from the popup; cancelling it does nothing
-    function newChatChoosingFolder(profile, vscode) {
-        newChatGroup = ""
-        root.expanded = false
-        launcher.connectSource("python3 -I " + shellQuote(codeDir + "jump.py") + " --new-chat " + shellQuote(profile)
-                               + " --choose-folder" + (vscode ? " --vscode" : "") + configDirArgs + " # " + Date.now())
-    }
-
     // A recent chat, reopened in VS Code's Claude extension (in its folder)
     function resumeInVscode(sessionId, profileDir) {
         jumper.connectSource("python3 -I " + shellQuote(codeDir + "jump.py") + " --resume " + shellQuote(sessionId)
@@ -1232,11 +1236,15 @@ PlasmoidItem {
 
     // VS Code connected to an SSH host, with a new chat (in folder there, or home)
     // group: the account the chat is for, when it isn't VS Code's there yet
-    function remoteNewChatVscode(host, folder, group) {
+    // text, plan: a task to type in there (its plan comes from the host)
+    function remoteNewChatVscode(host, folder, group, text, plan) {
         newChatGroup = ""
         const account = group && !group.vscodeHere ? " --account " + shellQuote(group.configDir || "-") : ""
         const line = "python3 -I " + shellQuote(codeDir + "jump.py") + " --remote-new-vscode " + shellQuote(host)
-                     + (folder ? " --cwd " + shellQuote(folder) : "") + account + " # " + Date.now()
+                     + (folder ? " --cwd " + shellQuote(folder) : "") + account
+                     + (text ? " --prompt " + shellQuote(text) : "")
+                     + (plan ? " --plan " + shellQuote(plan.slug) + " --plan-profile " + shellQuote(plan.profileDir) : "")
+                     + " # " + Date.now()
         launcherHosts = Object.assign({}, launcherHosts, { [line]: host })
         launcher.connectSource(line)
     }
@@ -1365,12 +1373,20 @@ PlasmoidItem {
             for (const s of g.sessions || []) {
                 shift(s, ["since", "startedAt"])
                 shift(s.peek, ["at"])
+                shift(s.peek && s.peek.recap, ["at"])
+                shift(s.stopped, ["at", "resetsAt"])
+                shift(s.plan, ["updatedAt"])
                 shift(s.stats, ["startedAt", "lastAt"])
                 for (const a of (s.agents && s.agents.tree) || [])
                     shift(a, ["started", "updated"])
             }
-            for (const c of (g.recent || []).concat(g.sharedHere || []))
+            for (const c of (g.recent || []).concat(g.sharedHere || [])) {
                 shift(c, ["lastActive", "since"])
+                shift(c.recap, ["at"])
+                shift(c.stopped, ["at", "resetsAt"])
+            }
+            for (const plan of g.plans || [])
+                shift(plan, ["updatedAt"])
             if (g.limits) {
                 shift(g.limits, ["updatedAt"])
                 for (const w of g.limits.windows || []) {
@@ -1409,6 +1425,7 @@ PlasmoidItem {
         if (answer.ok && answer.result) {
             const result = toLocalClock(answer.result, Date.now() - (answer.result.generatedAt || Date.now()))
             trackTransitions("ssh:" + host, result.groups, result.generatedAt, host)
+            trackLimitStops("ssh:" + host, result.groups, host)
             celebrateResets("ssh:" + host, result.groups)
             setRemote(host, { loading: false, ok: true, error: "", result: result, updatedAt: Date.now(),
                               login: false, loggedIn: !!answer.loggedIn })
@@ -1519,9 +1536,9 @@ PlasmoidItem {
             delete root.remoteActionHosts[source]
             if (result.ok) {
                 root.actionError = ""
-                if (what === "open" || what === "run" || what === "continue" || what === "login")
+                if (what === "open" || what === "run" || what === "continue" || what === "login" || what === "plan")
                     root.expanded = false
-                else if (what === "share") {
+                else if (what === "share" || what === "task") {
                     root.actionInfo = result.message
                     actionInfoTimer.restart()
                 }
@@ -1529,6 +1546,8 @@ PlasmoidItem {
                 root.actionError = what === "open" ? i18n("Couldn't open the session: %1", result.message)
                                  : what === "stop" ? i18n("Couldn't stop the session: %1", result.message)
                                  : what === "run" ? i18n("Couldn't open the subagent's run: %1", result.message)
+                                 : what === "plan" ? i18n("Couldn't open the plan: %1", result.message)
+                                 : what === "task" ? i18n("Couldn't start it: %1", result.message)
                                  : result.message
                 actionErrorTimer.restart()
                 root.petEvent("oops", i18n("Hmm, that didn't work."), "")
@@ -1536,7 +1555,7 @@ PlasmoidItem {
                     root.notify("remote-error", null, "error", i18n("That didn't work on %1", host || i18n("the host")),
                                 root.actionError, "dialog-error")
             }
-            if (what !== "open" && what !== "run" && host)
+            if (what !== "open" && what !== "run" && what !== "plan" && host)
                 root.pollHost(host)
         }
     }
@@ -1774,6 +1793,405 @@ PlasmoidItem {
                              + profileArg(profileDir) + configDirArgs + " # " + Date.now())
     }
 
+    // ---------------------------------------------------------------- usage limits that stopped chats
+    // A chat a usage limit stopped (claude_status.py: stopped_by, limit_stop)
+    // says when the limit resets. Once it has, one notification per account
+    // says which of its chats can go on. Meanwhile one can continue on another
+    // account that still has room (handOver: shared with it, then reopened there).
+
+    property var lastStops: ({})   // source -> {chat key: whether its limit has reset}
+
+    function trackLimitStops(source, groupList, host) {
+        const before = lastStops[source]
+        const next = {}
+        for (const g of groupList) {
+            const freed = []
+            for (const s of g.sessions) {
+                if (!s.stopped || s.stopped.kind !== "limit")
+                    continue
+                const key = petKeyOf(s, host)
+                if (key in next)
+                    continue
+                next[key] = !!s.stopped.over
+                if (before && before[key] === false && s.stopped.over)
+                    freed.push(s)
+            }
+            if (!freed.length)
+                continue
+            const where = host ? i18nc("ssh host: account", "%1: %2", host, g.name) : g.name
+            for (const s of freed)
+                petEvent("reset", i18n("%1 can go on!", s.name), petKeyOf(s, host))
+            if (!root.notifier || !Plasmoid.configuration.notifyDone || holdingBack())
+                continue
+            const names = freed.slice(0, 4).map(s => s.name).join(", ") + (freed.length > 4 ? " " + i18nc("and more", "+%1", freed.length - 4) : "")
+            notify("limit-reset|" + source + "|" + g.id, freed[0], "reset", i18n("%1: the usage limit reset", where),
+                   i18np("%2 can go on.", "%1 chats can go on: %2", freed.length, names), "chronometer-reset", host)
+            queueSound("done")
+        }
+        lastStops = Object.assign({}, lastStops, { [source]: next })
+        playQueuedSound()
+    }
+
+    // The step line of a chat that something stopped
+    function stopText(stopped) {
+        if (stopped.kind === "login")
+            return i18n("Claude's login expired. Log in again (/login), then tell it to go on.")
+        if (stopped.over)
+            return i18n("The limit it hit has reset: open it and tell Claude to go on.")
+        return stopped.text
+    }
+
+    // Another account (here, or on the chat's SSH host) with room left in
+    // the limit that stopped this chat: {title, shareProfile, pct, label}, or
+    // null. Not for a chat open in VS Code's Claude, whose tab would start it
+    // again here with your next message.
+    function handoverTarget(session, host) {
+        const stop = session.stopped
+        if (!stop || stop.kind !== "limit" || stop.over || !session.chatId)
+            return null
+        // (a session continuing another chat: the one with the chat's own id would be ended, not this one)
+        if (session.pid !== null && (session.entrypoint === "claude-vscode" || session.state !== "idle"
+                                     || session.sessionId !== session.chatId))
+            return null
+        let best = null
+        for (const g of shareAccountsOf(host)) {
+            if (g.profileKeys.indexOf(session.profileDir) >= 0)
+                continue
+            const w = g.limits ? g.limits.windows.find(x => x.key === (stop.window || "five_hour")) : null
+            const pct = w ? w.pct : null
+            if (pct !== null && pct >= 95)
+                continue
+            if (!best || (pct !== null && (best.pct === null || pct < best.pct)))
+                best = { title: g.title, shareProfile: g.shareProfile, pct: pct, label: w ? w.label : "" }
+        }
+        return best
+    }
+
+    // Continue it there: an idle session that has it open here quits first
+    // (jump.py --continue --end-first; on an SSH host, remote.py there)
+    function handOver(session, host, target) {
+        const endFirst = session.pid !== null ? " --end-first" : ""
+        if (host) {
+            remoteAction("continue", host, "--continue " + shellQuote(host) + " " + shellQuote(session.chatId) + " "
+                         + shellQuote(target.shareProfile) + endFirst)
+            return
+        }
+        const cmd = "python3 -I " + shellQuote(codeDir + "jump.py") + " --continue " + shellQuote(session.chatId)
+                    + " --profile " + shellQuote(target.shareProfile) + endFirst + configDirArgs + " # " + Date.now()
+        shareKinds = Object.assign({}, shareKinds, { [cmd]: "continue" })
+        sharer.connectSource(cmd)
+    }
+
+    // A chat's permission mode (claude_status.py: mode_of), "" for the default
+    function modeText(mode) {
+        switch (mode) {
+        case "plan": return i18n("plan mode")
+        case "acceptEdits": return i18n("accept edits")
+        case "auto": return i18n("auto mode")
+        case "bypassPermissions": return i18n("bypass permissions")
+        case "dontAsk": return i18n("don't ask")
+        case "default": case "": case null: case undefined: return ""
+        default: return mode
+        }
+    }
+
+    function modeHint(mode) {
+        switch (mode) {
+        case "plan": return i18n("Plan mode: Claude looks around and writes a plan, and changes nothing until you approve it.")
+        case "acceptEdits": return i18n("Claude edits files without asking; other actions still ask you.")
+        case "auto": return i18n("Auto mode: Claude goes ahead with what it judges safe, and asks you about the rest.")
+        case "bypassPermissions": return i18n("Claude runs everything without asking.")
+        case "dontAsk": return i18n("What isn't allowed already is refused, without asking you.")
+        default: return i18n("Shift+Tab in the chat changes it.")
+        }
+    }
+
+    // ---------------------------------------------------------------- opening a chat by its id
+    // A chat found by the search, or the one that made a plan: its row when
+    // it's listed, else reopened (in a terminal or VS Code, as the switch says)
+
+    function hostGroups(host) {
+        return host ? (remote[host] && remote[host].result ? remote[host].result.groups : []) : (status ? status.groups : [])
+    }
+
+    // The listed row of a chat (here, or on host), or null: on the account
+    // given if it's there, else on any (a shared chat runs where it was opened)
+    function listedRow(chatId, profileDir, host) {
+        let other = null
+        for (const g of hostGroups(host))
+            for (const s of g.sessions)
+                if (s.chatId === chatId || s.sessionId === chatId) {
+                    if (!profileDir || g.profileKeys.indexOf(profileDir) >= 0)
+                        return s
+                    other = other || s
+                }
+        return other
+    }
+
+    function openChatById(chatId, profileDir, cwd, openCommand, groupId, host) {
+        const row = listedRow(chatId, profileDir, host)
+        if (row) {
+            if (host)
+                remoteShow(host, row)
+            else
+                jumpTo(row.sessionId, row.profileDir)
+            return
+        }
+        const groupList = hostGroups(host)
+        const group = groupList.find(g => g.id === groupId || g.profileKeys.indexOf(profileDir) >= 0) || null
+        if (group && openInVscode(group, host, true)) {
+            if (host)
+                remoteResumeVscode(host, chatId, cwd)
+            else
+                resumeInVscode(chatId, profileDir)
+        } else if (host)
+            remoteOpen(host, openCommand)
+        else
+            jumpTo(chatId, profileDir)
+    }
+
+    // ---------------------------------------------------------------- finding a chat
+    // The search at the top of the popup: every chat with all the words in its
+    // name, folder or your prompts (claude_status.py --find), here and on the
+    // SSH hosts shown (remote.py --find), newest first.
+
+    property bool searchOpen: false
+    property string searchQuery: ""
+    property var searchResults: ({})   // source ("" here, else the host) -> {busy, results, more, error}
+    property var searchAsked: ({})     // command -> [source, query]
+
+    onSearchQueryChanged: searchTimer.restart()
+
+    Timer {
+        id: searchTimer
+        interval: 350
+        onTriggered: root.runSearch()
+    }
+
+    function toggleSearch() {
+        searchOpen = !searchOpen
+        if (!searchOpen) {
+            searchQuery = ""
+            searchResults = ({})
+        }
+    }
+
+    function runSearch() {
+        const query = searchQuery.trim()
+        if (query.length < 2) {
+            searchResults = ({})
+            return
+        }
+        const next = {}
+        const ask = (source, cmd) => {
+            searchAsked[cmd] = [source, query]
+            next[source] = Object.assign({ results: [], more: false, error: "" }, searchResults[source] || {}, { busy: true })
+            finder.connectSource(cmd)
+        }
+        ask("", "python3 -I " + shellQuote(codeDir + "poll.py") + " --find " + shellQuote(query) + configDirArgs + " # " + Date.now())
+        for (const host of shownHosts)
+            ask(host, "python3 -I " + shellQuote(codeDir + "remote.py") + " --find " + shellQuote(host) + " " + shellQuote(query)
+                      + " # " + Date.now())
+        searchResults = next
+    }
+
+    P5Support.DataSource {
+        id: finder
+        engine: "executable"
+        connectedSources: []
+        onNewData: (source, data) => {
+            disconnectSource(source)
+            const asked = root.searchAsked[source]
+            delete root.searchAsked[source]
+            if (!asked || asked[1] !== root.searchQuery.trim())
+                return   // an answer to what you looked for before
+            const result = root.helperResult(data)
+            root.searchResults = Object.assign({}, root.searchResults, { [asked[0]]: {
+                busy: false, results: result.ok ? result.results || [] : [], more: !!result.more,
+                error: result.ok ? "" : (result.message || result.error || i18n("no answer")) } })
+        }
+    }
+
+    function openFound(result, host) {
+        openChatById(result.sessionId, result.profileDir, result.cwd, result.openCommand || "", result.groupId, host)
+    }
+
+    // ---------------------------------------------------------------- plans
+    // Each account's plans (<config>/plans/*.md, what chats in plan mode
+    // write): open one in your Markdown app, carry it out in a new chat,
+    // continue the chat that made it, or share it with your other accounts.
+
+    property var expandedPlans: ({})   // accounts showing their plans
+    property string planComposer: ""   // the plan whose "carry it out" box is open: [host|]plan key
+
+    function togglePlans(groupKey, wasOpen) {
+        expandedPlans = Object.assign({}, expandedPlans, { [groupKey]: !wasOpen })
+    }
+
+    function togglePlanComposer(key) {
+        planComposer = planComposer === key ? "" : key
+        newChatGroup = ""
+    }
+
+    function openPlan(slug, profileDir, host) {
+        if (host)
+            remoteAction("plan", host, "--plan " + shellQuote(host) + " " + shellQuote(slug)
+                                       + (profileDir ? " " + shellQuote(profileDir) : ""))
+        else
+            planOpener.connectSource("python3 -I " + shellQuote(codeDir + "jump.py") + " --open-plan " + shellQuote(slug)
+                                     + profileArg(profileDir) + configDirArgs + " # " + Date.now())
+    }
+
+    P5Support.DataSource {
+        id: planOpener
+        engine: "executable"
+        connectedSources: []
+        onNewData: (source, data) => {
+            disconnectSource(source)
+            const result = root.helperResult(data)
+            if (result.ok) {
+                root.actionError = ""
+                root.expanded = false
+            } else {
+                root.actionError = i18n("Couldn't open the plan: %1", result.message)
+                actionErrorTimer.restart()
+            }
+        }
+    }
+
+    function continuePlanChat(plan, group, host) {
+        openChatById(plan.chatId, plan.chatProfileDir, plan.cwd, plan.openCommand || "", group.id, host)
+    }
+
+    PlasmaExtras.Menu {
+        id: planMenu
+    }
+
+    Component {
+        id: planItem
+        PlasmaExtras.MenuItem {
+            property string kind      // share | keeponly
+            property string slug
+            property string from      // the profile whose copy it is
+            property string to        // share: only with this one ("": all); keeponly: the one it stays on
+            property string host
+            onClicked: root.planShare(kind, slug, from, to, host)
+        }
+    }
+
+    property var planItems: []
+
+    function openPlanMenu(button, plan, host) {
+        planMenu.clearMenuItems()
+        const accounts = shareAccountsOf(host)
+        const here = accounts.find(g => g.profileKeys.indexOf(plan.profileDir) >= 0) || null
+        const items = [planItem.createObject(planMenu, { section: true, text: plan.title })]
+        for (const g of accounts)
+            if (g !== here)
+                items.push(planItem.createObject(planMenu, { text: i18n("Share with %1", g.title), icon: "document-share",
+                                                            kind: "share", slug: plan.slug, from: plan.profileDir,
+                                                            to: g.shareProfile, host: host }))
+        if (accounts.length > 2)
+            items.push(planItem.createObject(planMenu, { text: i18n("Share with all accounts"), icon: "document-share",
+                                                        kind: "share", slug: plan.slug, from: plan.profileDir, to: "", host: host }))
+        if (plan.shared) {
+            items.push(planItem.createObject(planMenu, { separator: true }))
+            for (const g of accounts)
+                items.push(planItem.createObject(planMenu, { text: i18n("Keep only on %1", g.title), icon: "list-remove",
+                                                            kind: "keeponly", slug: plan.slug, from: plan.profileDir,
+                                                            to: g.shareProfile, host: host }))
+        }
+        for (const item of items)
+            planMenu.addMenuItem(item)
+        planItems = items
+        planMenu.visualParent = button
+        planMenu.openRelative()
+    }
+
+    function planShare(kind, slug, from, to, host) {
+        if (host) {
+            // remote.py --share-plan HOST SLUG PROFILE [TO] | --unshare-plan HOST SLUG PROFILE
+            remoteAction("share", host, (kind === "share" ? "--share-plan " : "--unshare-plan ") + shellQuote(host) + " "
+                         + shellQuote(slug) + " " + shellQuote(kind === "share" ? from : to)
+                         + (kind === "share" && to ? " " + shellQuote(to) : ""))
+            return
+        }
+        const cmd = "python3 -I " + shellQuote(codeDir + "jump.py")
+                    + (kind === "share" ? " --share-plan " + shellQuote(slug) + profileArg(from) + (to ? " --to " + shellQuote(to) : "")
+                                        : " --unshare-plan " + shellQuote(slug) + profileArg(to))
+                    + configDirArgs + " # " + Date.now()
+        shareKinds = Object.assign({}, shareKinds, { [cmd]: "share" })
+        sharer.connectSource(cmd)
+    }
+
+    // ---------------------------------------------------------------- new chats with a task
+    // The + box (and a plan's "carry it out" box, NewChatBox.qml) takes what
+    // Claude should do: the chat starts with it in a terminal (sent at once),
+    // in VS Code (typed in for you to send) or in the background (claude
+    // --bg: no window, listed right away). One box is open at a time, so its
+    // text lives here, kept until a chat starts.
+
+    property string taskText: ""
+    property bool taskBackground: false
+
+    function startChat(group, host, folder, inVscode, plan) {
+        const text = taskText.trim()
+        const hasTask = text !== "" || !!plan
+        const background = taskBackground && hasTask
+        newChatGroup = ""
+        planComposer = ""
+        taskText = ""
+        taskBackground = false
+        if (host) {
+            if (background || (hasTask && !inVscode)) {
+                // remote.py --task HOST PROFILE FOLDER [--prompt TEXT] [--plan SLUG PROFILE] [--bg]
+                remoteAction(background ? "task" : "open", host, "--task " + shellQuote(host) + " " + shellQuote(group.chatProfile)
+                             + " " + shellQuote(folder.path || "~") + (text ? " --prompt " + shellQuote(text) : "")
+                             + (plan ? " --plan " + shellQuote(plan.slug) + " " + shellQuote(plan.profileDir) : "")
+                             + (background ? " --bg" : ""))
+            } else if (inVscode) {
+                remoteNewChatVscode(host, folder.path, group, text, plan)
+            } else {
+                remoteNewChat(host, folder.newChatCommand)
+            }
+            return
+        }
+        const cmd = "python3 -I " + shellQuote(codeDir + "jump.py") + " --new-chat " + shellQuote(group.chatProfile)
+                    + (folder.path ? " --cwd " + shellQuote(folder.path) : " --choose-folder")
+                    + (background ? " --bg" : inVscode ? " --vscode" : "")
+                    + (text ? " --prompt " + shellQuote(text) : "")
+                    + (plan ? " --plan " + shellQuote(plan.slug) + " --plan-profile " + shellQuote(plan.profileDir) : "")
+                    + configDirArgs + " # " + Date.now()
+        if (!folder.path)
+            root.expanded = false   // the folder dialog takes over
+        if (background)
+            taskStarter.connectSource(cmd)
+        else
+            launcher.connectSource(cmd)
+    }
+
+    // A task started in the background: the popup stays, and its row comes up
+    P5Support.DataSource {
+        id: taskStarter
+        engine: "executable"
+        connectedSources: []
+        onNewData: (source, data) => {
+            disconnectSource(source)
+            const result = root.helperResult(data)
+            if (result.ok) {
+                root.actionError = ""
+                if (result.message) {
+                    root.actionInfo = result.message
+                    actionInfoTimer.restart()
+                }
+            } else {
+                root.actionError = i18n("Couldn't start it: %1", result.message)
+                actionErrorTimer.restart()
+            }
+            root.refresh()
+        }
+    }
+
     function reasonText(reason) {
         switch (reason) {
         case "permission": return i18n("Asks for permission")
@@ -1853,6 +2271,15 @@ PlasmoidItem {
     function stateText(s) {
         const since = s.since ? " · " + duration(now - s.since) : ""
         const reason = s.reason ? " · " + s.reason : ""
+        if (s.stopped && (s.state === "idle" || s.state === "done")) {
+            if (s.stopped.kind === "login")
+                return i18n("Login expired")
+            if (s.stopped.over)
+                return i18n("Limit reset · go on")
+            return s.stopped.resetsAt ? i18n("Limit · resets in %1", s.stopped.resetsAt - now < 60000
+                                             ? i18nc("less than a minute", "<1m") : duration(s.stopped.resetsAt - now))
+                                      : i18n("Hit a usage limit")
+        }
         switch (s.state) {
         case "waiting": return i18n("Needs input") + reason
         case "working": return i18n("Working") + reason + since

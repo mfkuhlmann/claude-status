@@ -19,6 +19,8 @@ ColumnLayout {
     readonly property string groupKey: (remoteHost ? remoteHost + "/" : "") + group.id
     readonly property var recent: group.recent || []
     readonly property bool recentOpen: !!root.expandedRecent[groupKey]
+    readonly property var plans: group.plans || []
+    readonly property bool plansOpen: !!root.expandedPlans[groupKey]
 
     readonly property var tokens: group.tokens
     readonly property bool hasTokens: tokens !== null && tokens !== undefined
@@ -66,9 +68,10 @@ ColumnLayout {
                 textFormat: Text.PlainText
                 anchors.fill: parent
                 mainText: i18n("New chat on %1", section.group.title)
-                subText: section.remoteHost
-                         ? i18n("Lists this account's folders on %1: start a new Claude chat in one, in a terminal (over ssh) or in VS Code.", section.remoteHost)
-                         : i18n("Lists this account's recent folders: start a new Claude chat in one, in a terminal or in VS Code.")
+                subText: (section.remoteHost
+                          ? i18n("Lists this account's folders on %1: start a new Claude chat in one, in a terminal (over ssh) or in VS Code.", section.remoteHost)
+                          : i18n("Lists this account's recent folders: start a new Claude chat in one, in a terminal or in VS Code."))
+                         + " " + i18n("Write a task first and the chat starts with it, also in the background.")
             }
         }
         Item {
@@ -83,92 +86,15 @@ ColumnLayout {
         }
     }
 
-    // New chat (the + above): the account's folders. One switch at the top
-    // says where a chat starts (OpenInSwitch.qml): a terminal with Claude in
-    // the folder you click, or VS Code's Claude extension, which runs on one
-    // account only (greyed out on the others).
-    Rectangle {
-        id: newChatBox
-        readonly property bool open: root.newChatGroup === section.groupKey
-        readonly property var folders: open ? root.newChatFolders(section.group, section.remoteHost) : []
-        readonly property bool inVscode: root.openInVscode(section.group, section.remoteHost, false)
-        readonly property bool terminalHere: root.cliHere(section.remoteHost)
-
-        visible: open
+    // New chat (the + above): what Claude should do (optional) and the
+    // account's folders (NewChatBox.qml)
+    NewChatBox {
+        visible: root.newChatGroup === section.groupKey
         Layout.fillWidth: true
         Layout.leftMargin: Kirigami.Units.smallSpacing
         Layout.rightMargin: Kirigami.Units.smallSpacing
-        implicitHeight: newChatColumn.implicitHeight + Kirigami.Units.smallSpacing * 2
-        radius: Kirigami.Units.cornerRadius
-        color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.05)
-        border.width: 1
-        border.color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.12)
-
-        ColumnLayout {
-            id: newChatColumn
-            anchors.fill: parent
-            anchors.margins: Kirigami.Units.smallSpacing
-            spacing: 0
-
-            PlasmaComponents3.Label {
-                textFormat: Text.PlainText
-                Layout.fillWidth: true
-                Layout.leftMargin: Kirigami.Units.smallSpacing
-                text: i18n("New chat on %1 in…", section.remoteHost
-                           ? i18nc("account on ssh host", "%1 on %2", section.group.title, section.remoteHost)
-                           : section.group.title)
-                font.bold: true
-                opacity: 0.8
-                elide: Text.ElideRight
-            }
-
-            // Where it starts: Terminal | VS Code, for every folder below
-            OpenInSwitch {
-                Layout.fillWidth: true
-                Layout.leftMargin: Kirigami.Units.smallSpacing
-                group: section.group
-                remoteHost: section.remoteHost
-            }
-
-            Repeater {
-                model: newChatBox.folders.length
-                delegate: PlasmaComponents3.ItemDelegate {
-                    id: folderRow
-                    required property int index
-                    readonly property var folder: newChatBox.folders[index] || ({ path: "", short: "", newChatCommand: "" })
-                    Layout.fillWidth: true
-                    icon.name: folderRow.folder.short === "~" ? "user-home" : "folder"
-                    text: folderRow.folder.short === "~" ? i18n("Home folder (~)") : folderRow.folder.short
-                    enabled: newChatBox.inVscode || (newChatBox.terminalHere && (!section.remoteHost || !!folderRow.folder.newChatCommand))
-                    onClicked: {
-                        if (section.remoteHost && newChatBox.inVscode) {
-                            root.remoteNewChatVscode(section.remoteHost, folderRow.folder.path, section.group)
-                        } else if (section.remoteHost) {
-                            root.remoteNewChat(section.remoteHost, folderRow.folder.newChatCommand)
-                        } else {
-                            root.newChat(section.group.chatProfile, folderRow.folder.path, newChatBox.inVscode)
-                        }
-                    }
-                }
-            }
-
-            Kirigami.Separator {
-                visible: !section.remoteHost && newChatBox.folders.length > 0
-                Layout.fillWidth: true
-                Layout.topMargin: Kirigami.Units.smallSpacing / 2
-                Layout.bottomMargin: Kirigami.Units.smallSpacing / 2
-            }
-
-            // Any folder, picked in the folder dialog (not on an SSH host)
-            PlasmaComponents3.ItemDelegate {
-                visible: !section.remoteHost
-                enabled: newChatBox.inVscode || newChatBox.terminalHere
-                Layout.fillWidth: true
-                icon.name: "folder-open"
-                text: i18n("Choose folder…")
-                onClicked: root.newChatChoosingFolder(section.group.chatProfile, newChatBox.inVscode)
-            }
-        }
+        group: section.group
+        remoteHost: section.remoteHost
     }
 
     // This account's chats as pets (PetStrip.qml), the ones that need you or
@@ -531,6 +457,8 @@ ColumnLayout {
                                                                               : root.terminalHint(section.remoteHost, true))
                                                      : root.terminalHint(section.remoteHost, true) + "\n" + root.vscodeHint(section.group, section.remoteHost, true))
                                  + (recentLine.chat.shared ? "\n" + i18n("Shared between accounts; last used on %1.", recentLine.chat.profile) : "")
+                                 + (recentLine.chat.stopped ? "\n\n" + root.stopText(recentLine.chat.stopped) : "")
+                                 + (recentLine.chat.recap ? "\n\n" + i18n("Recap: %1", recentLine.chat.recap.text) : "")
 
                         MouseArea {
                             id: recentMouse
@@ -547,6 +475,14 @@ ColumnLayout {
                     visible: recentLine.chat.shared
                     text: "⇄"
                     opacity: 0.6
+                }
+                // a usage limit stopped it (claude_status.py: limit_stop): until it resets
+                Tag {
+                    visible: !!recentLine.chat.stopped && recentLine.chat.stopped.kind === "limit" && !recentLine.chat.stopped.over
+                    text: i18n("limit")
+                    warning: true
+                    tooltipTitle: i18n("A usage limit stopped it")
+                    tooltip: recentLine.chat.stopped ? recentLine.chat.stopped.text : ""
                 }
                 PlasmaComponents3.Label {
                     textFormat: Text.PlainText
@@ -583,6 +519,162 @@ ColumnLayout {
             KeepOnlyMessage {
                 Layout.fillWidth: true
                 visible: root.shareConfirm.key === recentLine.rowKey
+            }
+        }
+    }
+
+    // Plans: what this account's chats in plan mode wrote (<config>/plans):
+    // open one, carry it out in a new chat, continue the chat that made it,
+    // or share it with your other accounts
+    PlasmaComponents3.ToolButton {
+        visible: section.plans.length > 0
+        Layout.leftMargin: Kirigami.Units.smallSpacing
+        flat: true
+        icon.name: section.plansOpen ? "arrow-down" : "arrow-right"
+        text: i18n("Plans (%1)", section.plans.length)
+        font: Kirigami.Theme.smallFont
+        onClicked: root.togglePlans(section.groupKey, section.plansOpen)
+
+        PlasmaCore.ToolTipArea {
+            textFormat: Text.PlainText
+            anchors.fill: parent
+            mainText: i18n("Plans")
+            subText: i18n("The plans this account's chats wrote in plan mode, newest first. Click one to open it; carry it out in a new chat, go back to the chat that made it, or share it with your other accounts.")
+        }
+    }
+
+    Repeater {
+        model: section.plansOpen ? section.plans.length : 0
+        delegate: ColumnLayout {
+            id: planLine
+
+            required property int index
+            readonly property var plan: section.plans[index] || root.emptyPlan
+            readonly property string composerKey: (section.remoteHost ? section.remoteHost + "|" : "") + plan.key
+
+            Layout.fillWidth: true
+            Layout.leftMargin: Kirigami.Units.gridUnit
+            Layout.rightMargin: Kirigami.Units.smallSpacing
+            spacing: Kirigami.Units.smallSpacing / 2
+
+            HoverHandler {
+                id: planHover
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Kirigami.Units.smallSpacing
+
+                Kirigami.Icon {
+                    source: "view-task"
+                    Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                    Layout.preferredHeight: Layout.preferredWidth
+                    opacity: 0.7
+                }
+                PlasmaComponents3.Label {
+                    id: planName
+                    textFormat: Text.PlainText
+                    text: planLine.plan.title
+                    font.underline: planMouse.containsMouse
+                    elide: Text.ElideRight
+                    Layout.fillWidth: true
+
+                    PlasmaCore.ToolTipArea {
+                        textFormat: Text.PlainText
+                        width: planName.contentWidth
+                        height: parent.height
+                        mainText: planLine.plan.title
+                        subText: (section.remoteHost ? i18n("Click to open it: a copy, fetched from %1.", section.remoteHost)
+                                                     : i18n("Click to open it in your app for Markdown: what you change there is the plan."))
+                                 + (planLine.plan.shared ? "\n" + i18n("Shared with your other accounts.") : "")
+                                 + (planLine.plan.chatId ? "" : "\n" + i18n("The chat that made it isn't here any more."))
+
+                        MouseArea {
+                            id: planMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.openPlan(planLine.plan.slug, planLine.plan.profileDir, section.remoteHost)
+                        }
+                    }
+                }
+                PlasmaComponents3.Label {
+                    textFormat: Text.PlainText
+                    visible: planLine.plan.shared
+                    text: "⇄"
+                    opacity: 0.6
+                }
+                PlasmaComponents3.Label {
+                    textFormat: Text.PlainText
+                    text: planLine.plan.cwdShort
+                          ? i18nc("plan: folder, how long ago", "%1 · %2 ago", planLine.plan.cwdShort, root.duration(root.now - planLine.plan.updatedAt))
+                          : i18nc("plan: how long ago", "%1 ago", root.duration(root.now - planLine.plan.updatedAt))
+                    opacity: 0.6
+                    font: Kirigami.Theme.smallFont
+                    elide: Text.ElideLeft
+                    Layout.maximumWidth: Kirigami.Units.gridUnit * 10
+                }
+                PlasmaComponents3.ToolButton {
+                    id: planGo
+                    icon.name: "media-playback-start"
+                    display: PlasmaComponents3.AbstractButton.IconOnly
+                    text: i18n("Carry it out…")
+                    opacity: planHover.hovered || root.planComposer === planLine.composerKey ? 1 : 0
+                    checked: root.planComposer === planLine.composerKey
+                    Layout.preferredHeight: planName.implicitHeight
+                    Layout.preferredWidth: Layout.preferredHeight
+                    onClicked: root.togglePlanComposer(planLine.composerKey)
+
+                    PlasmaCore.ToolTipArea {
+                        textFormat: Text.PlainText
+                        anchors.fill: parent
+                        mainText: i18n("Carry it out in a new chat")
+                        subText: i18n("A new chat starts with the plan as its first message: in a terminal, in VS Code or in the background, in the plan's folder or another one.")
+                    }
+                }
+                PlasmaComponents3.ToolButton {
+                    icon.name: "go-previous"
+                    visible: !!planLine.plan.chatId
+                    display: PlasmaComponents3.AbstractButton.IconOnly
+                    text: i18n("Continue the chat that made it")
+                    opacity: planHover.hovered ? 1 : 0
+                    Layout.preferredHeight: planName.implicitHeight
+                    Layout.preferredWidth: Layout.preferredHeight
+                    onClicked: root.continuePlanChat(planLine.plan, section.group, section.remoteHost)
+
+                    PlasmaCore.ToolTipArea {
+                        textFormat: Text.PlainText
+                        anchors.fill: parent
+                        mainText: i18n("Continue the chat that made it")
+                        subText: i18n("To change the plan with Claude: its chat comes up, or reopens (in a terminal or VS Code, as the switch of Recent chats says).")
+                    }
+                }
+                PlasmaComponents3.ToolButton {
+                    id: planShare
+                    visible: root.shareAccountsOf(section.remoteHost).length >= 2
+                    icon.name: "document-share"
+                    display: PlasmaComponents3.AbstractButton.IconOnly
+                    text: i18n("Share it with another account…")
+                    opacity: planHover.hovered ? 1 : 0
+                    Layout.preferredHeight: planName.implicitHeight
+                    Layout.preferredWidth: Layout.preferredHeight
+                    onClicked: root.openPlanMenu(planShare, planLine.plan, section.remoteHost)
+
+                    PlasmaCore.ToolTipArea {
+                        textFormat: Text.PlainText
+                        anchors.fill: parent
+                        mainText: i18n("Share this plan")
+                        subText: i18n("A shared plan is one file on each account: a change shows on all of them. Sharing a chat shares its plan too.")
+                    }
+                }
+            }
+
+            NewChatBox {
+                visible: root.planComposer === planLine.composerKey
+                Layout.fillWidth: true
+                group: section.group
+                remoteHost: section.remoteHost
+                plan: planLine.plan
             }
         }
     }

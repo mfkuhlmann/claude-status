@@ -230,9 +230,15 @@ class NewChatTests(unittest.TestCase):
         # defined") and no terminal opened on the host (2026-10-20). Root's
         # functions close it, after the row handed them what they need.
         section = (ROOT / "ui/GroupSection.qml").read_text()
+        box = (ROOT / "ui/NewChatBox.qml").read_text()
         main = (ROOT / "ui/main.qml").read_text()
         self.assertNotIn("newChatGroup = ", section)
-        self.assertIn("root.remoteNewChat(section.remoteHost, folderRow.folder.newChatCommand)", section)
+        rows = box[box.index("delegate: PlasmaComponents3.ItemDelegate"):box.index("Kirigami.Separator")]
+        self.assertNotIn("newChatGroup", rows)
+        self.assertNotIn("planComposer", rows)
+        self.assertIn("onClicked: root.startChat(box.group, box.remoteHost, folderRow.folder, box.inVscode, box.plan)", rows)
+        start = main[main.index("function startChat("):]
+        self.assertIn("remoteNewChat(host, folder.newChatCommand)", start[:start.index("\n    }\n")])
         self.assertIn('function remoteNewChat(host, command) {\n        newChatGroup = ""\n        remoteOpen(host, command)', main)
 
 

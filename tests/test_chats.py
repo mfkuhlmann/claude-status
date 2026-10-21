@@ -708,9 +708,9 @@ class RemoteModeTests(World):
         cd = f"cd {shlex.quote(str(folder))} 2>/dev/null; "
         trust = "printf '%s\\n\\n' 'Claude will ask whether you trust ~/proj before it reopens this session."
         self.assertTrue(rows["j1"]["openCommand"].startswith(cd + trust), rows["j1"]["openCommand"])
-        self.assertTrue(rows["j1"]["openCommand"].endswith(f"CLAUDE_CONFIG_DIR={cfg} {claude} attach j1"))
+        self.assertTrue(rows["j1"]["openCommand"].endswith(f"env -u CLAUDE_CODE_DISABLE_AGENT_VIEW CLAUDE_CONFIG_DIR={cfg} {claude} attach j1"))
         self.assertIsNone(rows["j1"]["stopCommand"])  # no process to stop
-        self.assertEqual(rows["j2"]["stopCommand"], f"CLAUDE_CONFIG_DIR={cfg} {claude} stop j2")
+        self.assertEqual(rows["j2"]["stopCommand"], f"env -u CLAUDE_CODE_DISABLE_AGENT_VIEW CLAUDE_CONFIG_DIR={cfg} {claude} stop j2")
         (recent,) = work["recent"]
         self.assertTrue(recent["openCommand"].endswith(f"CLAUDE_CONFIG_DIR={cfg} {claude} --resume old"))
         self.assertEqual(work["projects"][0]["newChatCommand"],

@@ -37,6 +37,7 @@ Item {
                                  : chat.state === "waiting" ? "waving"
                                  : chat.state === "working" ? (chat.agents && chat.agents.running > 0 ? "working-juggling"
                                                                                                        : "working-typing")
+                                 : chat.stopped && !chat.stopped.over ? "battery-low"   // a usage limit (or the login) stopped it
                                  : chat.state === "idle" ? "idle-living"       // ready for your next message
                                  : chat.reason === "failed" ? "sad"
                                  : "sleeping"                                  // done: results to look at
@@ -428,6 +429,9 @@ Item {
             else if (r < 0.32) doAction("smile", 2500)
             else if (r < 0.38) doAction("coffee", 4000)
             else if (r < 0.50) doHobby(true)
+        } else if (mood === "battery-low") {
+            if (r < 0.15)
+                burst("z", Kirigami.Theme.disabledTextColor, 1)   // waits for the limit to reset
         } else if (mood !== "sad") {
             if (r < 0.2)
                 facingLeft = !facingLeft            // busy, but glances around

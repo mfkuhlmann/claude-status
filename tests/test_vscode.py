@@ -264,7 +264,7 @@ class NewChatTests(VscodeHome):
             changes.append((jump, "choose_folder", lambda title, start: (choose, "")))
         with Patch(*changes):
             if choose is not None:
-                return jump.new_chat_choosing_folder(self.home, [], profile, vscode=True)
+                return jump.new_chat_choosing_folder(self.home, [], profile, jump.new_chat_vscode)
             return jump.new_chat_vscode(self.home, [], profile, folder)
 
     def test_opens_the_folder_then_asks_for_a_new_chat(self):
@@ -310,12 +310,12 @@ class NewChatTests(VscodeHome):
 
     def test_command_line(self):
         calls = []
-        with Patch((jump, "new_chat_vscode", lambda home, extra, name, folder: calls.append(("vscode", name, folder)) or (True, "")),
-                   (jump, "new_chat", lambda home, extra, name, folder: calls.append(("terminal", name, folder)) or (True, "")),
-                   (jump, "new_chat_remote_vscode", lambda host, folder, account=None:
+        with Patch((jump, "new_chat_vscode", lambda home, extra, name, folder, task: calls.append(("vscode", name, folder)) or (True, "")),
+                   (jump, "new_chat", lambda home, extra, name, folder, task: calls.append(("terminal", name, folder)) or (True, "")),
+                   (jump, "new_chat_remote_vscode", lambda host, folder, account=None, task=None:
                     calls.append(("ssh", host, folder, account)) or (True, "")),
-                   (jump, "new_chat_choosing_folder", lambda home, extra, name, vscode=False:
-                    calls.append(("choose", name, vscode)) or (True, ""))), \
+                   (jump, "new_chat_choosing_folder", lambda home, extra, name, start=None, task=None:
+                    calls.append(("choose", name, start is jump.new_chat_vscode)) or (True, ""))), \
                 contextlib.redirect_stdout(io.StringIO()):
             jump.main(["--new-chat", ".claude-work", "--cwd", "/p", "--vscode"])
             jump.main(["--new-chat", ".claude-work", "--cwd", "/p"])

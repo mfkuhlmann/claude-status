@@ -44,6 +44,21 @@ PlasmaExtras.Representation {
                 elide: Text.ElideRight
             }
             PlasmaComponents3.ToolButton {
+                icon.name: "edit-find"
+                checkable: true
+                checked: root.searchOpen
+                display: PlasmaComponents3.AbstractButton.IconOnly
+                text: i18n("Find a chat")
+                onClicked: root.toggleSearch()
+
+                PlasmaCore.ToolTipArea {
+                    textFormat: Text.PlainText
+                    anchors.fill: parent
+                    mainText: i18n("Find a chat")
+                    subText: i18n("Every chat of your accounts (and of the SSH hosts shown) with all the words you type in its name, its folder or your prompts.")
+                }
+            }
+            PlasmaComponents3.ToolButton {
                 id: hostsButton
                 icon.name: "network-server"
                 text: root.shownHosts.length > 0 ? String(root.shownHosts.length) : ""
@@ -90,6 +105,24 @@ PlasmaExtras.Representation {
             Layout.topMargin: Kirigami.Units.smallSpacing
             Layout.leftMargin: Kirigami.Units.smallSpacing
             Layout.rightMargin: Kirigami.Units.smallSpacing
+        }
+
+        // Find a chat (the magnifier above): its words, then what matched
+        PlasmaExtras.SearchField {
+            id: searchField
+            visible: root.searchOpen
+            Layout.fillWidth: true
+            Layout.leftMargin: Kirigami.Units.smallSpacing
+            Layout.rightMargin: Kirigami.Units.smallSpacing
+            placeholderText: i18n("Find a chat: words in its name, folder or your prompts")
+            onTextChanged: root.searchQuery = text
+            onVisibleChanged: {
+                if (visible) {
+                    text = root.searchQuery
+                    forceActiveFocus()
+                }
+            }
+            Keys.onEscapePressed: root.toggleSearch()
         }
 
         PlasmaComponents3.ScrollView {
@@ -145,6 +178,11 @@ PlasmaExtras.Representation {
                             onTriggered: root.awayDigest = null
                         }
                     ]
+                }
+
+                SearchResults {
+                    visible: root.searchOpen && root.searchQuery.trim().length >= 2
+                    Layout.fillWidth: true
                 }
 
                 PlasmaComponents3.Label {
