@@ -726,6 +726,42 @@ class MarkdownTests(Fixture):
         self.assertTrue(self.open("vscode")[1][0][1].startswith("vscode://wzaielamri.claude-status/markdown?path="))
         self.assertEqual(self.open("auto", which=())[0][0], False)  # nothing to show it with
 
+    def edit(self, app, defaults, which=("xdg-open", "gtk-launch", "code")):
+        started = []
+        write(self.cache / "claude-widget/settings.json", {"at": 1, "by": "x", "values": {"markdownApp": app or "auto"}})
+        path = self.home / "plan.md"
+        with mock.patch.object(jump, "start_app", lambda args, cwd=None: started.append(args)), \
+                mock.patch.object(jump.cs, "cache_dir", return_value=self.cache / "claude-widget"), \
+                mock.patch.object(jump.shutil, "which", lambda n: f"/usr/bin/{n}" if n in which else None), \
+                mock.patch.object(jump.cs, "vscode_app", return_value=("/usr/bin/code", "Code") if "code" in which else (None, None)), \
+                mock.patch.object(jump, "default_app", lambda mime: defaults.get(mime, "")):
+            return jump.edit_markdown(path, self.home), started
+
+    def test_a_plan_opens_itself_in_a_text_editor_to_change_it(self):
+        md = str(self.home / "plan.md")
+        kwrite = {"text/markdown": "org.kde.kwrite.desktop", "text/plain": "org.kde.kwrite.desktop"}
+        self.assertEqual(self.edit(None, kwrite)[1], [["/usr/bin/xdg-open", md]])  # your app for Markdown
+        self.assertEqual(self.edit("vscode", kwrite)[1], [["/usr/bin/code", md]])  # VS Code, picked for Markdown
+        # Okular only shows Markdown: your app for text files instead
+        okular = {"text/markdown": "okularApplication_md.desktop", "text/plain": "org.kde.kate.desktop"}
+        self.assertEqual(self.edit(None, okular)[1], [["/usr/bin/gtk-launch", "org.kde.kate.desktop", md]])
+        self.assertEqual(self.edit(None, okular, which=("xdg-open",))[1], [["/usr/bin/xdg-open", md]])
+        self.assertEqual(self.edit(None, kwrite, which=())[0][0], False)
+        # a plan by its name; an SSH host's file in VS Code
+        write(self.home / ".claude-work/plans/calm-red-owl.md", "# Calm plan\n")
+        with mock.patch.object(jump, "edit_markdown", return_value=(True, "")) as edit:
+            self.assertEqual(jump.edit_plan(self.home, [], "calm-red-owl", ".claude-work"),
+                             (True, "Opened the plan's file ~/.claude-work/plans/calm-red-owl.md"))
+        edit.assert_called_once_with(self.home / ".claude-work/plans/calm-red-owl.md", self.home)
+        self.assertEqual(jump.edit_plan(self.home, [], "gone-plan-here", None), (False, "That plan isn't there any more"))
+        started = []
+        with mock.patch.object(jump, "start_app", lambda args, cwd=None: started.append(args)), \
+                mock.patch.object(jump.cs, "vscode_app", return_value=("/usr/bin/code", "Code")):
+            self.assertTrue(jump.edit_remote_file("lab", "/home/u/.claude/plans/a b.md")[0])
+            with self.assertRaises(ValueError):
+                jump.edit_remote_file("-oProxyCommand=x", "/p.md")
+        self.assertEqual(started, [["/usr/bin/code", "--file-uri", "vscode-remote://ssh-remote+lab/home/u/.claude/plans/a%20b.md"]])
+
     def test_the_page_loads_nothing_and_runs_nothing(self):
         import markdown_page as mp
         page = mp.page("# T\n\n<script>alert(1)</script> [x](javascript:alert(1)) [y](https://example.com/a?b=1&c=2)\n\n"

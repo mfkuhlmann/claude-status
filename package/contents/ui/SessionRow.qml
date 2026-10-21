@@ -229,8 +229,20 @@ RowLayout {
                 clickable: true
                 onClicked: root.openPlan(row.session.plan.slug, row.session.profileDir, row.remoteHost)
                 tooltipTitle: row.session.plan ? row.session.plan.title : ""
-                tooltip: row.remoteHost ? i18n("The plan this chat made. Click to open it: a copy, fetched from %1.", row.remoteHost)
-                                        : i18n("The plan this chat made. Click to open it in your app for Markdown.")
+                tooltip: row.remoteHost ? i18n("The plan this chat made. Click to read it: a copy, fetched from %1.", row.remoteHost)
+                                        : i18n("The plan this chat made. Click to read it, rendered.")
+            }
+            Tag {
+                // its file itself, to change it (an SSH host's: in VS Code, over Remote-SSH)
+                visible: !!row.session.plan && (!row.remoteHost || root.vscodeInstalled)
+                text: "✎"
+                clickable: true
+                onClicked: root.editPlan({ slug: row.session.plan.slug, path: row.session.plan.path,
+                                           profileDir: row.session.profileDir }, row.remoteHost)
+                tooltipTitle: i18n("Edit the plan")
+                tooltip: row.remoteHost
+                         ? i18n("Opens its Markdown file on %1 in VS Code (Remote - SSH). What you change there is the plan.", row.remoteHost)
+                         : i18n("Opens its Markdown file in your text editor (VS Code, if the settings open plans there). What you change there is the plan.")
             }
             Tag {
                 // another chat with a process changed some of the same files (claude_status.py: note_overlaps)

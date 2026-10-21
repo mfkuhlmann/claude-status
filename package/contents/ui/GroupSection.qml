@@ -714,8 +714,9 @@ ColumnLayout {
                         width: planName.contentWidth
                         height: parent.height
                         mainText: planLine.plan.title
-                        subText: (section.remoteHost ? i18n("Click to open it: a copy, fetched from %1.", section.remoteHost)
-                                                     : i18n("Click to open it in your app for Markdown: what you change there is the plan."))
+                        subText: (section.remoteHost ? i18n("Click to read it: a copy, fetched from %1.", section.remoteHost)
+                                                     : i18n("Click to read it, rendered."))
+                                 + (!section.remoteHost || root.vscodeInstalled ? " " + i18n("To change it, the edit button next to it opens its file.") : "")
                                  + (planLine.plan.cwd ? "\n" + i18n("Folder: %1", (section.remoteHost ? section.remoteHost + ":" : "") + planLine.plan.cwd) : "")
                                  + (planLine.plan.shared ? "\n" + i18n("Shared with your other accounts.") : "")
                                  + (planLine.plan.chatId ? "" : "\n" + i18n("The chat that made it isn't here any more."))
@@ -751,6 +752,26 @@ ColumnLayout {
                         active: !!planLine.plan.cwd
                         mainText: i18n("Folder")
                         subText: (section.remoteHost ? section.remoteHost + ":" : "") + planLine.plan.cwd
+                    }
+                }
+                // the plan's Markdown file itself, to change it (an SSH host's: in VS Code, over Remote-SSH)
+                PlasmaComponents3.ToolButton {
+                    visible: !section.remoteHost || root.vscodeInstalled
+                    icon.name: "document-edit"
+                    display: PlasmaComponents3.AbstractButton.IconOnly
+                    text: i18n("Edit the plan")
+                    opacity: planHover.hovered ? 1 : 0
+                    Layout.preferredHeight: planName.implicitHeight
+                    Layout.preferredWidth: Layout.preferredHeight
+                    onClicked: root.editPlan(planLine.plan, section.remoteHost)
+
+                    PlasmaCore.ToolTipArea {
+                        textFormat: Text.PlainText
+                        anchors.fill: parent
+                        mainText: i18n("Edit the plan")
+                        subText: section.remoteHost
+                                 ? i18n("Opens its Markdown file on %1 in VS Code (Remote - SSH). What you change there is the plan.", section.remoteHost)
+                                 : i18n("Opens its Markdown file in your text editor (VS Code, if the settings open plans there). What you change there is the plan.")
                     }
                 }
                 PlasmaComponents3.ToolButton {

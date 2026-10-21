@@ -1525,6 +1525,43 @@ def open_markdown(path, home=None):
     return True, ""
 
 
+MARKDOWN_VIEWERS = ("okular",)  # apps for Markdown files that only show them
+
+
+def default_app(mime):
+    """The desktop entry of your app for a type of file (xdg-mime), or ""."""
+    tool = shutil.which("xdg-mime")
+    if tool is None:
+        return ""
+    try:
+        r = subprocess.run([tool, "query", "default", mime], stdin=subprocess.DEVNULL, capture_output=True,
+                           text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def edit_markdown(path, home=None):
+    """Open a Markdown file itself, to change it: in VS Code when the
+    settings pick it for Markdown, else in your app for Markdown files, or
+    your app for text files when that one only shows them (Okular)."""
+    home = home or Path.home()
+    if markdown_app(home) == "vscode":
+        code, _ = cs.vscode_app()
+        if code:
+            start_app([code, str(path)])
+            return True, ""
+    launcher = shutil.which("gtk-launch")
+    if launcher and any(v in default_app("text/markdown").lower() for v in MARKDOWN_VIEWERS):
+        editor = default_app("text/plain")
+        if editor and not any(v in editor.lower() for v in MARKDOWN_VIEWERS):
+            start_app([launcher, editor, str(path)])
+            return True, ""
+    if open_file(path):
+        return True, ""
+    return False, f"There's no xdg-open to open {path} with"
+
+
 def show_agent_run(home, extra_dirs, chat_id, agent_id, profile_dir=None, open_it=True):
     """Save a chat's subagent's run as Markdown and open it: (ok, message, file)."""
     ok, message, title, markdown = cs.agent_run(home, extra_dirs, chat_id, agent_id, profile_dir)
@@ -1586,6 +1623,27 @@ def open_plan(home, extra_dirs, slug, profile_dir=None):
     return True, f"Opened the plan {cs.plan_title(path) or slug}"
 
 
+def edit_plan(home, extra_dirs, slug, profile_dir=None):
+    """Open a plan's Markdown file itself, to change it (edit_markdown)."""
+    path = cs.find_plan(cs.discover_profiles(home, extra_dirs), slug, profile_dir)
+    if path is None:
+        return False, "That plan isn't there any more"
+    ok, why = edit_markdown(path, home)
+    return (True, f"Opened the plan's file {cs.short_folder(str(path), home)}") if ok else (False, why)
+
+
+def edit_remote_file(host, path):
+    """Open a file of an SSH host in VS Code (Remote-SSH), to change it."""
+    code, _ = cs.vscode_app()
+    if code is None:
+        return False, "Changing a file of an SSH host needs VS Code (with Remote - SSH)"
+    if not path.startswith("/"):
+        return False, f"Not a path on {host}: {path}"
+    import remote
+    start_app([code, "--file-uri", remote_folder_uri(remote.check_host(host), path)])
+    return True, f"Opened {path} on {host} in VS Code"
+
+
 def share_plan(home, extra_dirs, slug, profile_dir=None, to=None):
     """Share a plan (from profile_dir's copy) with every profile, or only with to."""
     return sharing.plan_sharing(cs.discover_profiles(home, extra_dirs), slug, profile_dir, True, to)
@@ -1629,7 +1687,8 @@ USAGE = ("usage: jump.py [--stop [--busy] | --interrupt] SESSION_ID [--profile P
          "       jump.py --resume|--continue|--unshare SESSION_ID --profile PROFILE\n"
          "       jump.py --continue SESSION_ID --profile PROFILE [--end-first] [--print-command]\n"
          "               (share it and reopen it there, or print the command; --end-first: quit an idle session first)\n"
-         "       jump.py --open-plan|--share-plan|--unshare-plan SLUG [--profile PROFILE] [--to PROFILE]\n"
+         "       jump.py --open-plan|--edit-plan|--share-plan|--unshare-plan SLUG [--profile PROFILE] [--to PROFILE]\n"
+         "       jump.py --remote-edit HOST PATH   (a file of an SSH host, in VS Code)\n"
          "       jump.py --queue PROFILE [--cwd FOLDER | --choose-folder] --at MS [--prompt TEXT] [--plan SLUG [--plan-profile P]]\n"
          "               [--host HOST] [--account TITLE]   (a background task that starts at MS: a limit's reset)\n"
          "       jump.py --queue-continue CHAT_ID --profile PROFILE --at MS [--cwd FOLDER] [--prompt TEXT] [--name NAME]\n"
@@ -1693,8 +1752,9 @@ def main(argv=None):
             end_first = True
         elif arg == "--to" and args:
             to = args.pop(0)
-        elif arg in ("--open-plan", "--share-plan", "--unshare-plan") and args:
-            action = {"--open-plan": open_plan, "--share-plan": share_plan, "--unshare-plan": unshare_plan}[arg]
+        elif arg in ("--open-plan", "--edit-plan", "--share-plan", "--unshare-plan") and args:
+            action = {"--open-plan": open_plan, "--edit-plan": edit_plan, "--share-plan": share_plan,
+                      "--unshare-plan": unshare_plan}[arg]
             session_id = args.pop(0)  # the plan's slug
         elif arg == "--print-command":
             print_command = True
@@ -1740,7 +1800,8 @@ def main(argv=None):
             action = dismiss
         elif arg == "--undismiss-all":
             action, session_id = undismiss_all, session_id or "-"
-        elif arg in ("--remote-vscode", "--remote-terminal", "--remote-new-vscode", "--remote-resume-vscode") and args:
+        elif arg in ("--remote-vscode", "--remote-terminal", "--remote-new-vscode", "--remote-resume-vscode",
+                     "--remote-edit") and args:
             action, remote_host = arg, args.pop(0)
         elif arg == "--name" and args:
             name_arg = args.pop(0)
@@ -1801,8 +1862,10 @@ def main(argv=None):
                                          queue_host, account_title, name_arg)
         elif action in (unqueue, start_queued):
             ok, message = action(Path.home(), extra, session_id)
-        elif action in (open_plan, unshare_plan):
+        elif action in (open_plan, edit_plan, unshare_plan):
             ok, message = action(Path.home(), extra, session_id, profile_dir)
+        elif action == "--remote-edit":
+            ok, message = edit_remote_file(remote_host, session_id)
         elif action == "--remote-vscode":
             ok, message = jump_remote_vscode(remote_host, session_id, folder or "")
         elif action == "--remote-terminal":

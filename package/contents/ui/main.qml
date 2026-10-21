@@ -2223,6 +2223,15 @@ PlasmoidItem {
         newChatGroup = ""
     }
 
+    // A plan's Markdown file itself, to change it (jump.py --edit-plan; an
+    // SSH host's in VS Code over Remote-SSH: --remote-edit)
+    function editPlan(plan, host) {
+        planOpener.connectSource("python3 -I " + shellQuote(codeDir + "jump.py")
+                                 + (host ? " --remote-edit " + shellQuote(host) + " " + shellQuote(plan.path)
+                                         : " --edit-plan " + shellQuote(plan.slug) + profileArg(plan.profileDir))
+                                 + configDirArgs + " # " + Date.now())
+    }
+
     function openPlan(slug, profileDir, host) {
         if (host)
             remoteAction("plan", host, "--plan " + shellQuote(host) + " " + shellQuote(slug)
