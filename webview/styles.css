@@ -831,6 +831,9 @@ button:focus-visible {
 
 /* Continue on another account, under a chat a usage limit stopped */
 .handover {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 12px;
   margin-top: 1px;
 }
 

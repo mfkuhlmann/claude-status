@@ -4,13 +4,30 @@
 
 - **Wait for the usage limit:** when an account is at its usage limit,
   **New Chat… → Start with a task…** offers **After the limit resets (in
-  2h 15m, at 16:10)**: the task is queued under the account and starts in
-  the background a minute after the limit resets (as soon as VS Code or
-  the widget runs, if neither did then). The account lists its queued
+  2h 15m, at 16:10)**, in a recent folder or **Choose folder…**: the task
+  is queued under the account and starts in the background a minute after
+  the limit resets (as soon as VS Code or the widget runs, if neither did
+  then). The account lists its queued
   tasks with when they start: start one now (▶) or cancel it (✕). One that
   can't start (e.g. its folder isn't trusted any more) stays, saying why.
   The queue is shared with the Plasma widget, and only one of them starts
   a task. Also for SSH hosts' accounts (they start from here, over ssh).
+- **Chats go on by themselves after the limit:** a chat a usage limit
+  stopped gets **⏱ Go on at 10:41** (next to **Continue on …**): a minute
+  after the limit resets, it goes on in the background with *The usage
+  limit has reset: go on where you stopped.* (`claude --bg --resume`: the
+  same chat). An idle Claude that still has it open quits first (a
+  background session is stopped); if the chat went on before then,
+  nothing happens. It's listed with the queued tasks (click it again, or
+  ✕, to cancel). In **Recent chats**, click a chat's red **limit** tag.
+  Only in folders Claude trusts (as for background tasks). Also on SSH
+  hosts.
+- **A background session the limit stopped** said *Needs input* (Claude
+  marks it as blocked, *rate limited — wait and retry*): it now says
+  **Limit · resets in …** like the others, and doesn't count as needing
+  you.
+- **A recent chat's or a plan's tooltip** shows its whole folder (the
+  line may cut it short).
 - **Two chats changing the same files:** chats that are open and changed
   some of the same files get a red **⚠ same files** tag naming the other
   chat and the files (click it to go there), and a notification when it

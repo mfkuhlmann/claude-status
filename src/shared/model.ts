@@ -517,6 +517,30 @@ export function handoverTarget(
   return best;
 }
 
+// When a chat a usage limit stopped can go on by itself (a minute after the
+// limit resets: jump.py --queue-continue), in ms, or 0. Not one open in
+// VS Code's Claude (its tab can't be ended), nor one at work again.
+export function goOnAt(s: { stopped?: Stop | null; chatId?: string; sessionId: string; pid?: number | null; entrypoint?: string; state?: string }): number {
+  const stop = s.stopped;
+  if (!stop || stop.kind !== "limit" || stop.over || !stop.resetsAt || !(s.chatId || s.sessionId)) return 0;
+  if (s.pid != null && (s.entrypoint === "claude-vscode" || s.state !== "idle" || s.sessionId !== s.chatId)) return 0;
+  return stop.resetsAt + 60_000;
+}
+
+// The queued task that goes on with this chat (here, or on host), or null
+export function queuedChat(status: Status | null, chatId: string, host?: string): QueuedTask | null {
+  return (status?.queue ?? []).find((t) => !!t.chat && t.chat === chatId && (t.host || "") === (host || "")) ?? null;
+}
+
+// What a queued task does, in a line
+export function queuedWhat(t: QueuedTask): string {
+  return t.chat ? `Go on with “${t.name || t.chat.slice(0, 8)}”` : t.planTitle ? `Carry out “${t.planTitle}”${t.prompt ? `: ${t.prompt}` : ""}` : t.prompt;
+}
+
+export function clockText(ms: number): string {
+  return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
 // When the usage limit an account is at resets (the latest of its full
 // windows, else of the chats a limit stopped), or null
 export function limitReset(g: Pick<Group, "limits" | "sessions">, now: number): { at: number; label: string } | null {

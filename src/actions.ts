@@ -629,10 +629,11 @@ export class Actions {
       if (!trusted.length && host) items.push({ label: "$(info) No folder Claude trusts there yet", description: "start a chat in one in a terminal once" });
       // The account is at a usage limit: the task can wait until it resets
       const reset = limitReset(group, Date.now());
-      if (reset && trusted.length) {
+      if (reset && (trusted.length || !host)) {
         const at = new Date(reset.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
         items.push({ label: `After the limit resets (in ${duration(reset.at - Date.now())}, at ${at})`, kind: vscode.QuickPickItemKind.Separator });
         for (const f of trusted) items.push({ label: label(f), description: "waits for the limit, then starts in the background", start: "queue", folder: f });
+        if (!host) items.push({ label: "$(folder-opened) Choose folder…", description: "one Claude trusts already", start: "queue", choose: "dialog" });
       }
     }
     if (!cli) items.push({ label: "In a terminal", kind: vscode.QuickPickItemKind.Separator }, { label: "$(warning) No claude command", description: host ? `on ${host}` : "on this computer" });
@@ -660,7 +661,8 @@ export class Actions {
           ? vscode.workspace.workspaceFolders[0].uri.with({ path: remoteHome })
           : undefined
         : vscode.Uri.file(os.homedir());
-      const picked = await vscode.window.showOpenDialog({ canSelectFolders: true, canSelectFiles: false, defaultUri, openLabel: "Start Chat Here" });
+      const openLabel = pick.start === "queue" ? "Queue It Here" : "Start Chat Here";
+      const picked = await vscode.window.showOpenDialog({ canSelectFolders: true, canSelectFiles: false, defaultUri, openLabel });
       if (!picked?.length) return;
       folder = host ? picked[0].path : picked[0].fsPath;
     } else if (pick.choose === "type") {
@@ -703,6 +705,20 @@ export class Actions {
       command = pick.folder?.newChatCommand ?? (chat ? inFolder(folder, chat) : undefined);
     }
     if (command) await this.terminals.run(`new|${Date.now()}`, plan ? plan.title : "new chat", command, this.place(host));
+  }
+
+  // A chat a usage limit stopped goes on by itself at `at` (a minute after
+  // the limit resets): queued, then started like a queued task (jump.py
+  // --queue-continue; an SSH host's goes on there, over ssh)
+  async queueContinue(chat: ChatRef, at: number, account: string): Promise<void> {
+    if (this.demoOnly()) return;
+    const answer = await this.backend.action("jump.py", [
+      "--queue-continue", chat.chatId || chat.sessionId, "--profile", chat.profileDir, "--at", String(Math.round(at)),
+      ...(chat.cwd ? ["--cwd", chat.cwd] : []), "--name", chat.name, ...(chat.host ? ["--host", chat.host] : []),
+      "--account", account, ...configDirArgs(),
+    ]);
+    if (this.report(answer, "Couldn't queue it")) this.dash.setActionInfo(answer.message);
+    this.refresh();
   }
 
   // A queued task: cancelled (it doesn't start)

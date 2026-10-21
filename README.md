@@ -39,7 +39,10 @@ As an editor tab (**Claude Status: Open in Editor Tab**):
 - **Chats a usage limit stopped** say so in red, with when the limit resets;
   their pet's battery runs low. Once it has reset, a notification says which
   chats can go on. Meanwhile **Continue on …** under the chat moves it to
-  another account with room left (shared with it, then reopened there).
+  another account with room left (shared with it, then reopened there), or
+  **⏱ Go on at 10:41** has it go on by itself in the background once the
+  limit resets (an idle Claude that still has it open quits first). In
+  **Recent chats**, click a chat's **limit** tag for the same.
 - **Find a Chat…** (the search button in the view's title bar): every chat
   with all the words you type in its name, folder or prompts, here and on
   the SSH hosts shown. Pick one to go to it, or to reopen it.

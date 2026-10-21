@@ -7,7 +7,7 @@ import * as vscode from "vscode";
 import type { Actions } from "./actions";
 import { setReopenIn } from "./config";
 import type { Dashboard } from "./dashboard";
-import { findChatRef, findPlan, machineStatus, shareAccounts } from "./shared/model";
+import { findChatRef, findPlan, goOnAt, machineStatus, shareAccounts } from "./shared/model";
 import type { ChatRef, Group, HostMessage, PlanItem, WebviewMessage } from "./shared/types";
 
 const AGENT_ID = /^[A-Za-z0-9_-]{1,100}$/;
@@ -225,6 +225,19 @@ export class ViewHost implements vscode.WebviewViewProvider, vscode.Disposable {
       case "unqueue":
         if (this.dash.state().status?.queue?.some((q) => q.id === m.id)) void this.actions.unqueue(m.id);
         break;
+      case "queueContinue": {
+        // (found in the extension's own state: the row or recent chat, when it can go on, and its account)
+        const state = this.dash.state();
+        const where = chat?.host ? state.hosts.find((h) => h.name === chat.host)?.result : state.status;
+        for (const g of where?.groups ?? []) {
+          const item = [...(g.sessions ?? []), ...(g.recent ?? [])].find((x) => x.key === chat?.key);
+          if (!item) continue;
+          const at = goOnAt(item);
+          if (chat && at) void this.actions.queueContinue(chat, at, g.title);
+          break;
+        }
+        break;
+      }
       case "loginHost":
         if (text(m.host) && this.dash.shownHosts().includes(m.host)) void this.actions.loginHost(m.host);
         break;

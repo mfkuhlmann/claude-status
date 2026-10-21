@@ -1,6 +1,8 @@
 import {
   canEndChat,
   changesTitle,
+  clockText,
+  goOnAt,
   handoverTarget,
   hasPeek,
   hasTurn,
@@ -11,6 +13,7 @@ import {
   peekLine,
   petKeyOf,
   plural,
+  queuedChat,
   shareAccounts,
   stateText,
   tasksTitle,
@@ -73,6 +76,11 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
   const mode = modeText(s.peek?.mode);
   // A usage limit stopped it: it can go on on another account with room left
   const handover = handoverTarget(s, shareAccounts(machineStatus(view, host)));
+  // or by itself once the limit resets (queued; again: cancelled)
+  const goOn = goOnAt(s);
+  const goingOn = goOn || s.stopped ? queuedChat(view.status, s.chatId || s.sessionId, host) : null;
+  const ending =
+    s.pid === null ? "" : s.kind === "bg" ? " This background session is stopped first (claude stop)." : " Claude here quits first (its terminal stays open).";
   const stopped = s.stopped && !s.stopped.over ? " stopped" : s.stopped ? " freed" : "";
 
   return (
@@ -191,8 +199,9 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
           )
         ) : null}
 
-        {handover ? (
+        {handover || goOn || goingOn ? (
           <div class="handover small">
+            {handover ? (
             <button
               type="button"
               class="link"
@@ -210,6 +219,26 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
             >
               Continue on {handover.title}
             </button>
+            ) : null}
+            {goingOn ? (
+              <button
+                type="button"
+                class="link"
+                title={`Goes on by itself at ${clockText(goingOn.startAt)}, in the background, telling Claude that the limit has reset.${ending} If it went on before then, nothing happens.\n\nClick to cancel it.`}
+                onClick={() => post({ type: "unqueue", id: goingOn.id })}
+              >
+                ✓ Goes on at {clockText(goingOn.startAt)}
+              </button>
+            ) : goOn ? (
+              <button
+                type="button"
+                class="link"
+                title={`At ${clockText(goOn)}, a minute after the limit resets, the chat goes on in the background, telling Claude that the limit has reset.${ending} If it went on before then, nothing happens.`}
+                onClick={() => post({ type: "queueContinue", chat })}
+              >
+                ⏱ Go on at {clockText(goOn)}
+              </button>
+            ) : null}
           </div>
         ) : null}
 

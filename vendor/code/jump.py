@@ -917,6 +917,32 @@ def queue_task(home, extra_dirs, dirname, folder, task, start_at, host="", accou
     return True, f"Queued: it starts at {time.strftime('%H:%M', time.localtime(start_at / 1000))}, when the limit resets"
 
 
+def queue_continue(home, extra_dirs, chat_id, profile_dir, folder, text, start_at, host="", account="", name=""):
+    """Queue going on with a chat a usage limit stopped, on the profile
+    profile_dir (an SSH host's with host), to start at start_at (ms): then it
+    goes on in the background, in its folder (cs.continue_chat)."""
+    if not host:
+        profile = next((p for p in cs.discover_profiles(home, extra_dirs) if cs.matches_profile(p, profile_dir)), None)
+        if profile is None:
+            return False, f"No Claude profile called {profile_dir}"
+        path = cs.transcript_path(profile, chat_id)
+        if path is None:
+            return False, "That chat isn't on this account any more"
+        if not (folder and os.path.isdir(folder)):
+            folder = cs.chat_folder(path) or str(home)
+        if not cs.folder_trusted(profile, folder, home):
+            where = "your home folder" if Path(folder) == home else cs.short_folder(folder, home)
+            return False, (f"Claude doesn't trust {where}, and a background session can't ask: this chat can't go on "
+                           "by itself there. Continue it in a terminal after the reset")
+    entry = cs.queue_entry(profile_dir, folder or "", text, start_at, host, account, chat=chat_id, name=name)
+    cache_root = cs.cache_dir(home)
+    for old in cs.load_queue(cache_root):  # (queued twice: once is enough)
+        if old.get("chat") == chat_id and (old.get("host") or "") == (host or ""):
+            cs.change_queue(cache_root, take=old["id"])
+    cs.change_queue(cache_root, add=entry)
+    return True, f"Queued: it goes on at {time.strftime('%H:%M', time.localtime(start_at / 1000))}, when the limit resets"
+
+
 def unqueue(home, extra_dirs, task_id):
     taken = cs.change_queue(cs.cache_dir(home), take=task_id)
     return True, "Cancelled the queued task" if taken else "It isn't queued any more"
@@ -925,15 +951,27 @@ def unqueue(home, extra_dirs, task_id):
 def start_queued(home, extra_dirs, task_id):
     """Start a queued task now, in the background: (ok, message). It's taken
     out of the queue first, so of several copies of the widget only one
-    starts it (the others get an empty message); one that fails to start
-    goes back with the error, until you start or cancel it."""
+    starts it (the others get an empty message, as does a chat that went on
+    already); one that fails to start goes back with the error, until you
+    start or cancel it."""
     cache_root = cs.cache_dir(home)
     entry = cs.change_queue(cache_root, take=task_id)
     if entry is None:
         return True, ""
     task = Task(entry.get("prompt") or "", entry.get("plan"), entry.get("planProfile"))
     try:
-        if entry.get("host"):
+        if entry.get("chat") and entry.get("host"):
+            import remote
+            answer = remote.continue_chat(entry["host"], entry["profile"], entry["chat"], entry.get("folder") or "",
+                                          task.text)
+            ok, message = bool(answer.get("ok")), answer.get("message") or ""
+        elif entry.get("chat"):
+            claude = claude_path(home)
+            answer = (cs.continue_chat(home, extra_dirs, entry["profile"], entry["chat"], entry.get("folder"), task.text,
+                                       claude, prefix=scope_prefix("claude"))
+                      if claude else {"ok": False, "message": NO_CLAUDE})
+            ok, message = bool(answer.get("ok")), answer.get("message") or ""
+        elif entry.get("host"):
             import remote
             answer = remote.task(entry["host"], entry["profile"], entry.get("folder") or "~", task.text, task.plan,
                                  task.plan_profile, background=True)
@@ -944,6 +982,8 @@ def start_queued(home, extra_dirs, task_id):
         ok, message = False, f"{type(exc).__name__}: {exc}"
     if not ok:
         cs.change_queue(cache_root, put_back=dict(entry, error=message or "It didn't start"))
+    elif entry.get("chat") and not message:
+        return True, ""  # it went on already: nothing to start
     return ok, message or "Started"
 
 
@@ -1590,8 +1630,10 @@ USAGE = ("usage: jump.py [--stop [--busy] | --interrupt] SESSION_ID [--profile P
          "       jump.py --continue SESSION_ID --profile PROFILE [--end-first] [--print-command]\n"
          "               (share it and reopen it there, or print the command; --end-first: quit an idle session first)\n"
          "       jump.py --open-plan|--share-plan|--unshare-plan SLUG [--profile PROFILE] [--to PROFILE]\n"
-         "       jump.py --queue PROFILE --cwd FOLDER --at MS [--prompt TEXT] [--plan SLUG [--plan-profile P]]\n"
+         "       jump.py --queue PROFILE [--cwd FOLDER | --choose-folder] --at MS [--prompt TEXT] [--plan SLUG [--plan-profile P]]\n"
          "               [--host HOST] [--account TITLE]   (a background task that starts at MS: a limit's reset)\n"
+         "       jump.py --queue-continue CHAT_ID --profile PROFILE --at MS [--cwd FOLDER] [--prompt TEXT] [--name NAME]\n"
+         "               [--host HOST] [--account TITLE]   (go on with a chat a usage limit stopped, at MS)\n"
          "       jump.py --unqueue|--start-queued TASK_ID\n"
          "       jump.py --share SESSION_ID\n"
          "       jump.py --remote-vscode HOST SESSION_ID [--cwd FOLDER_ON_HOST]\n"
@@ -1637,13 +1679,15 @@ def main(argv=None):
             background = True
         elif arg == "--queue" and args:
             action, session_id = queue_task, args.pop(0)  # the profile
+        elif arg == "--queue-continue" and args:
+            action, session_id = queue_continue, args.pop(0)  # the chat
         elif arg in ("--unqueue", "--start-queued") and args:
             action, session_id = (unqueue if arg == "--unqueue" else start_queued), args.pop(0)  # the task's id
         elif arg == "--at" and args and args[0].isdigit():
             start_at = int(args.pop(0))
         elif arg == "--host" and args:
             queue_host = args.pop(0)
-        elif arg == "--account" and args and action is queue_task:
+        elif arg == "--account" and args and action in (queue_task, queue_continue):
             account_title = args.pop(0)
         elif arg == "--end-first":
             end_first = True
@@ -1716,13 +1760,18 @@ def main(argv=None):
         session_id = session_id or "-"
     if vscode_terminal and action != "--remote-terminal":
         sys.exit(USAGE)
-    if not session_id or (action in (continue_on, unshare, unshare_plan) and not profile_dir):
+    if not session_id or (action in (continue_on, unshare, unshare_plan, queue_continue) and not profile_dir):
         sys.exit(USAGE)
     if print_command and action is not continue_on:
         sys.exit(USAGE)
-    if (task or background) and action not in (new_chat, "--remote-new-vscode", queue_task):
+    if (task or background) and action not in (new_chat, "--remote-new-vscode", queue_task, queue_continue):
         sys.exit(USAGE)
-    if (action is queue_task) != (start_at is not None) or (queue_host and action is not queue_task):
+    if (action in (queue_task, queue_continue)) != (start_at is not None) \
+            or (queue_host and action not in (queue_task, queue_continue)):
+        sys.exit(USAGE)
+    if action is queue_continue and (task.plan or background):
+        sys.exit(USAGE)
+    if choose and (action not in (new_chat, queue_task) or queue_host):
         sys.exit(USAGE)
     if (background and vscode) or (end_first and action is not continue_on) or (to and action is not share_plan):
         sys.exit(USAGE)
@@ -1740,8 +1789,16 @@ def main(argv=None):
             ok, message = continue_on(Path.home(), extra, session_id, profile_dir, end_first)
         elif action is share_plan:
             ok, message = share_plan(Path.home(), extra, session_id, profile_dir, to)
+        elif action is queue_task and choose:
+            ok, message = new_chat_choosing_folder(
+                Path.home(), extra, session_id,
+                lambda home, extra_dirs, dirname, chosen, task: queue_task(home, extra_dirs, dirname, chosen, task, start_at,
+                                                                          account=account_title), task)
         elif action is queue_task:
             ok, message = queue_task(Path.home(), extra, session_id, folder, task, start_at, queue_host, account_title)
+        elif action is queue_continue:
+            ok, message = queue_continue(Path.home(), extra, session_id, profile_dir, folder, task.text, start_at,
+                                         queue_host, account_title, name_arg)
         elif action in (unqueue, start_queued):
             ok, message = action(Path.home(), extra, session_id)
         elif action in (open_plan, unshare_plan):

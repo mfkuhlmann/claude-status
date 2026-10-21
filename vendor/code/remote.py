@@ -487,6 +487,17 @@ def task(host, profile, folder, text="", plan=None, plan_profile=None, backgroun
     return {"ok": ok, "message": message}
 
 
+def continue_chat(host, profile, chat_id, folder="", text=""):
+    """Go on with host's chat a usage limit stopped, in the background there
+    (claude_status.continue_chat): {"ok", "message", "id"}."""
+    args = ["--continue-chat", chat_id, "--profile", profile]
+    if folder:
+        args += ["--folder", folder]
+    if text:
+        args += ["--prompt", text]
+    return host_answer(host, args)
+
+
 ACCOUNT_ACTIONS = ("--list", "--add", "--login", "--logout", "--remove", "--command", "--no-command", "--default")
 
 

@@ -83,6 +83,8 @@ export interface QueuedTask {
   createdAt: number;
   error: string; // why it didn't start (it waits for you then)
   due: boolean;
+  chat?: string | null; // goes on with this chat (one a usage limit stopped) instead
+  name?: string; // that chat's name
 }
 
 // The plan a chat made (claude_status.py: plan_of)
@@ -456,6 +458,7 @@ export type WebviewMessage =
   | { type: "startQueued"; id: string }
   | { type: "openOverlap"; chat: ChatRef } // the first other chat changing the same files
   | { type: "unqueue"; id: string }
+  | { type: "queueContinue"; chat: ChatRef } // go on by itself once the limit resets
   | { type: "loginHost"; host: string }
   | { type: "disconnectHost"; host: string }
   | { type: "login"; groupId: string; host?: string }

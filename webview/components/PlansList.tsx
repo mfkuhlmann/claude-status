@@ -47,6 +47,7 @@ export function PlansList({ group }: { group: Group }) {
                 title={
                   `${p.title}\n` +
                   (copy ? `Click to open it: a copy, fetched from ${host}.` : "Click to open it in an editor tab: what you change there is the plan.") +
+                  (p.cwd ? `\nFolder: ${host ? `${host}:` : ""}${p.cwd}` : "") +
                   (p.shared ? "\nShared with your other accounts." : "") +
                   (p.chatId ? "" : "\nThe chat that made it isn't here any more.")
                 }

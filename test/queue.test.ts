@@ -7,7 +7,7 @@ import * as path from "node:path";
 import { test } from "node:test";
 import { markdownLinkFile } from "../src/agentRun";
 import { demoState } from "../src/shared/demo";
-import { limitReset, overlapText, queuedFor } from "../src/shared/model";
+import { goOnAt, limitReset, overlapText, queuedChat, queuedFor, queuedWhat } from "../src/shared/model";
 import type { Group, QueuedTask, Session } from "../src/shared/types";
 import { TransitionTracker } from "../src/transitions";
 
@@ -26,6 +26,25 @@ test("a task can wait for the limit of an account that's at it", () => {
   // no numbers, but a chat the limit stopped says when
   const s = { ...demoState(NOW).status!.groups[0].sessions[0], stopped: { kind: "limit" as const, window: "five_hour", text: "", at: NOW, resetsAt: NOW + 60000, over: false } };
   assert.equal(limitReset({ ...group(0, NOW + 1), limits: null, sessions: [s] }, NOW)!.at, NOW + 60000);
+});
+
+test("a chat a usage limit stopped can go on by itself after the reset", () => {
+  const stopped = { kind: "limit" as const, window: "five_hour", text: "", at: NOW, resetsAt: NOW + 3600000, over: false };
+  const row = { ...demoState(NOW).status!.groups[0].sessions[0], sessionId: "c1", chatId: "c1", pid: 42, state: "idle" as const, entrypoint: "cli", stopped };
+  assert.equal(goOnAt(row), NOW + 3660000); // a minute after the reset
+  assert.equal(goOnAt({ sessionId: "c1", stopped }), NOW + 3660000); // a recent chat
+  assert.equal(goOnAt({ ...row, entrypoint: "claude-vscode" }), 0); // its tab can't be ended
+  assert.equal(goOnAt({ ...row, state: "working" }), 0); // at work again
+  assert.equal(goOnAt({ ...row, stopped: { ...stopped, over: true } }), 0); // it can go on now
+  assert.equal(goOnAt({ ...row, stopped: { ...stopped, resetsAt: null } }), 0); // when isn't known
+  const t: QueuedTask = {
+    id: "q", host: "lab", profile: ".claude", account: "", folder: "/srv", folderShort: "/srv", prompt: "", plan: null,
+    planProfile: null, planTitle: "", startAt: NOW, createdAt: NOW, error: "", due: false, chat: "c1", name: "Fix it",
+  };
+  assert.equal(queuedWhat(t), "Go on with “Fix it”");
+  assert.equal(queuedChat({ queue: [t] } as never, "c1", "lab"), t);
+  assert.equal(queuedChat({ queue: [t] } as never, "c1"), null); // (that's the host's chat)
+  assert.equal(queuedChat({ queue: [{ ...t, chat: null }] } as never, "c1", "lab"), null);
 });
 
 test("an account's queued tasks: on its machine, by its profiles", () => {

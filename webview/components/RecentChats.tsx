@@ -1,9 +1,12 @@
 import {
   ago,
+  clockText,
+  goOnAt,
   claudeCodeHere,
   claudeCodeReopenHint,
   cliInstalled,
   machineStatus,
+  queuedChat,
   reopensInClaudeCode,
   stopText,
   terminalReopenHint,
@@ -78,6 +81,8 @@ export function RecentChats({ group }: { group: Group }) {
           <ul class="recent-list">
             {items.map((c) => {
               const chat = recentRef(c, group.host);
+              const goOn = goOnAt(c);
+              const goingOn = queuedChat(view.status, c.sessionId, group.host);
               return (
                 <li key={c.key} class={"recent-item" + (canOpen ? "" : " unavailable")}>
                   <button
@@ -86,6 +91,7 @@ export function RecentChats({ group }: { group: Group }) {
                     aria-disabled={!canOpen}
                     title={
                       `${c.name}\n${reopen}` +
+                      (c.cwd ? `\nFolder: ${group.host ? `${group.host}:` : ""}${c.cwd}` : "") +
                       (c.shared ? `\nShared between accounts; last used on ${c.profile}.` : "") +
                       (c.stopped ? `\n\n${stopText(c.stopped)}` : "") +
                       (c.recap?.text ? `\n\nRecap: ${c.recap.text}` : "")
@@ -99,7 +105,21 @@ export function RecentChats({ group }: { group: Group }) {
                       ⇄
                     </span>
                   ) : null}
-                  {c.stopped?.kind === "limit" && !c.stopped.over ? <Tag text="limit" warning title={`A usage limit stopped it\n${c.stopped.text}`} /> : null}
+                  {goingOn ? (
+                    <Tag
+                      text={`⏱ ${clockText(goingOn.startAt)}`}
+                      active
+                      title={`Goes on by itself at ${clockText(goingOn.startAt)}, in the background, telling Claude that the limit has reset (if it didn't go on before then).\n\nClick to cancel it.`}
+                      onClick={() => post({ type: "unqueue", id: goingOn.id })}
+                    />
+                  ) : c.stopped?.kind === "limit" && !c.stopped.over ? (
+                    <Tag
+                      text="limit"
+                      warning
+                      title={`A usage limit stopped it\n${c.stopped.text}` + (goOn ? `\n\nClick to have it go on by itself in the background at ${clockText(goOn)}, a minute after the limit resets.` : "")}
+                      onClick={goOn ? () => post({ type: "queueContinue", chat }) : undefined}
+                    />
+                  ) : null}
                   <Elided text={c.cwdShort || "~"} class="recent-folder small muted" title={c.cwd} />
                   <span class="small muted nowrap">· {ago(view.now - c.lastActive)}</span>
                   {share ? (

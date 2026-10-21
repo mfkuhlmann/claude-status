@@ -11,7 +11,7 @@ import { settings, statusArgs, configDirArgs, viewSettings } from "./config";
 import type { Notifier } from "./notify";
 import { currentRemoteHost } from "./remoteHost";
 import { demoState } from "./shared/demo";
-import { allGroups, chatsNeedingYou, shareUsage, toLocalClock, trackKey, type ChatSpot } from "./shared/model";
+import { allGroups, chatsNeedingYou, queuedWhat, shareUsage, toLocalClock, trackKey, type ChatSpot } from "./shared/model";
 import { chatRef } from "./notify";
 import type { ClaudeCodeInfo, DigestCard, HostState, PetEventKind, QueuedTask, Status, ViewState } from "./shared/types";
 import { mergeChanges, TransitionTracker, type Changes, type PetEvent } from "./transitions";
@@ -281,7 +281,7 @@ export class Dashboard implements vscode.Disposable {
     this.emit();
     try {
       const answer = await this.backend.action("jump.py", ["--start-queued", t.id, ...configDirArgs()], 120000);
-      const what = t.planTitle ? `Carry out “${t.planTitle}”` : t.prompt.split("\n")[0];
+      const what = queuedWhat(t).split("\n")[0];
       if (answer.ok && answer.message) {
         // ("": another window, or the widget, started it)
         this.petEvent("reset", `Started: ${what}`);
