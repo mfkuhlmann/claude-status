@@ -816,6 +816,39 @@ class PlanFeedbackTests(TaskFixture):
         self.assertEqual((plan()["chatId"], plan()["edited"]), (self.SID, True))
 
 
+class MemoryTests(Fixture):
+    """Each account's memories: Claude's notes in projects/<folder>/memory."""
+
+    def test_an_accounts_memories_newest_first_with_their_folder(self):
+        w = self.home / ".claude-work"
+        folder = self.home / "repos/my_app.v2"
+        folder.mkdir(parents=True)
+        mem = w / "projects" / cs.mangle(str(folder)) / "memory"
+        write(mem / "MEMORY.md", "- [Batch releases](batch-releases.md) — one tag for many features\n")
+        write(mem / "batch-releases.md", '---\nname: batch-releases\ndescription: "Tag \\"many\\" features at once"\n'
+                                         "metadata:\n  node_type: memory\n  type: feedback\n---\n\nThe user said so.\n")
+        write(mem / "plain.md", "No header here.\n")
+        os.utime(mem / "plain.md", (self.now - 3600, self.now - 3600))
+        write(w / "projects/-gone-folder/memory/old.md", "---\nname: old\ntype: user\n---\n")
+        os.utime(w / "projects/-gone-folder/memory/old.md", (self.now - 7200, self.now - 7200))
+        g = self.group(self.collect(with_tokens=False), "work")
+        self.assertEqual([m["name"] for m in g["memories"]], ["batch-releases", "plain", "old"])
+        first = g["memories"][0]
+        self.assertEqual((first["description"], first["type"], first["folder"], first["profileDir"]),
+                         ('Tag "many" features at once', "feedback", str(folder), ".claude-work"))
+        self.assertEqual((g["memories"][1]["type"], g["memories"][2]["folder"]), ("", ""))
+        # only memory files of a profile open
+        profiles = cs.discover_profiles(self.home)
+        self.assertEqual(cs.memory_file(profiles, str(mem / "plain.md")), (mem / "plain.md").resolve())
+        self.assertIsNone(cs.memory_file(profiles, str(self.home / "notes.md")))
+        with mock.patch.object(jump, "open_markdown", return_value=(True, "")) as shown, \
+                mock.patch.object(jump, "edit_markdown", return_value=(True, "")) as edited:
+            self.assertEqual(jump.open_memory(self.home, [], str(mem / "plain.md")), (True, ""))
+            self.assertEqual(jump.open_memory(self.home, [], str(mem / "plain.md"), edit=True), (True, ""))
+            self.assertFalse(jump.open_memory(self.home, [], "/etc/passwd")[0])
+        self.assertEqual((shown.call_count, edited.call_count), (1, 1))
+
+
 class OverlapTests(Fixture):
     def test_two_chats_with_a_process_that_changed_the_same_files(self):
         rows = [{"key": k, "name": k.upper(), "sessionId": k, "chatId": k, "profileDir": ".claude-work", "pid": pid,

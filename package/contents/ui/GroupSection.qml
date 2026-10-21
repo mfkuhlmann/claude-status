@@ -22,6 +22,8 @@ ColumnLayout {
     readonly property var plans: group.plans || []
     readonly property var queued: root.queuedFor(group, remoteHost)
     readonly property bool plansOpen: !!root.expandedPlans[groupKey]
+    readonly property var memories: group.memories || []
+    readonly property bool memoriesOpen: !!root.expandedMemories[groupKey]
 
     readonly property var tokens: group.tokens
     readonly property bool hasTokens: tokens !== null && tokens !== undefined
@@ -859,6 +861,112 @@ ColumnLayout {
                 group: section.group
                 remoteHost: section.remoteHost
                 plan: planLine.plan
+            }
+        }
+    }
+
+    // Memories: what Claude keeps about you and your projects on this account
+    // (<config>/projects/<folder>/memory): read one, or change it
+    PlasmaComponents3.ToolButton {
+        visible: section.memories.length > 0
+        Layout.leftMargin: Kirigami.Units.smallSpacing
+        flat: true
+        icon.name: section.memoriesOpen ? "arrow-down" : "arrow-right"
+        text: i18n("Memories (%1)", section.memories.length)
+        font: Kirigami.Theme.smallFont
+        onClicked: root.toggleMemories(section.groupKey, section.memoriesOpen)
+
+        PlasmaCore.ToolTipArea {
+            textFormat: Text.PlainText
+            anchors.fill: parent
+            mainText: i18n("Memories")
+            subText: i18n("What Claude keeps about you and your projects on this account, newest first: one note each, for the folder it was learned in. Claude reads them in new chats there. Click one to read it; the edit button changes it.")
+        }
+    }
+
+    Repeater {
+        model: section.memoriesOpen ? section.memories.length : 0
+        delegate: RowLayout {
+            id: memoryLine
+
+            required property int index
+            readonly property var memory: section.memories[index]
+                                          || ({ key: "", name: "", description: "", type: "", path: "", folder: "", folderShort: "", updatedAt: 0 })
+            // an SSH host's opens in VS Code (Remote-SSH), to change it
+            readonly property bool canOpen: !section.remoteHost || root.vscodeInstalled
+
+            Layout.fillWidth: true
+            Layout.leftMargin: Kirigami.Units.gridUnit
+            Layout.rightMargin: Kirigami.Units.smallSpacing
+            spacing: Kirigami.Units.smallSpacing
+
+            HoverHandler {
+                id: memoryHover
+            }
+
+            Kirigami.Icon {
+                source: ({ user: "user-identity", feedback: "dialog-messages", project: "folder-documents", reference: "bookmarks" })[memoryLine.memory.type]
+                        || "note"
+                Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                Layout.preferredHeight: Layout.preferredWidth
+                opacity: 0.7
+            }
+            PlasmaComponents3.Label {
+                id: memoryName
+                textFormat: Text.PlainText
+                text: memoryLine.memory.description || memoryLine.memory.name
+                font.underline: memoryMouse.containsMouse
+                opacity: memoryLine.canOpen ? 1 : 0.7
+                elide: Text.ElideRight
+                Layout.fillWidth: true
+
+                PlasmaCore.ToolTipArea {
+                    textFormat: Text.PlainText
+                    width: memoryName.contentWidth
+                    height: parent.height
+                    mainText: memoryLine.memory.name
+                    subText: (memoryLine.memory.description ? memoryLine.memory.description + "\n\n" : "")
+                             + (memoryLine.memory.type ? i18n("Kind: %1", memoryLine.memory.type) + "\n" : "")
+                             + (memoryLine.memory.folder ? i18n("Folder: %1", (section.remoteHost ? section.remoteHost + ":" : "") + memoryLine.memory.folder) + "\n" : "")
+                             + (section.remoteHost ? (memoryLine.canOpen ? i18n("Click to open it on %1 in VS Code (Remote - SSH).", section.remoteHost) : "")
+                                                   : i18n("Click to read it, rendered."))
+
+                    MouseArea {
+                        id: memoryMouse
+                        anchors.fill: parent
+                        enabled: memoryLine.canOpen
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.openMemory(memoryLine.memory, section.remoteHost, false)
+                    }
+                }
+            }
+            PlasmaComponents3.Label {
+                textFormat: Text.PlainText
+                text: memoryLine.memory.folderShort
+                      ? i18nc("memory: folder, how long ago", "%1 · %2 ago", memoryLine.memory.folderShort, root.duration(root.now - memoryLine.memory.updatedAt))
+                      : i18nc("memory: how long ago", "%1 ago", root.duration(root.now - memoryLine.memory.updatedAt))
+                opacity: 0.6
+                font: Kirigami.Theme.smallFont
+                elide: Text.ElideLeft
+                Layout.maximumWidth: Kirigami.Units.gridUnit * 10
+            }
+            PlasmaComponents3.ToolButton {
+                visible: !section.remoteHost
+                icon.name: "document-edit"
+                display: PlasmaComponents3.AbstractButton.IconOnly
+                text: i18n("Edit this memory")
+                opacity: memoryHover.hovered ? 1 : 0
+                Layout.preferredHeight: memoryName.implicitHeight
+                Layout.preferredWidth: Layout.preferredHeight
+                onClicked: root.openMemory(memoryLine.memory, section.remoteHost, true)
+
+                PlasmaCore.ToolTipArea {
+                    textFormat: Text.PlainText
+                    anchors.fill: parent
+                    mainText: i18n("Edit this memory")
+                    subText: i18n("Opens its file in your text editor (VS Code, if the settings open plans there). What you change there is what Claude remembers; Claude reads it in new chats in that folder.")
+                }
             }
         }
     }

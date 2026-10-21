@@ -2218,6 +2218,21 @@ PlasmoidItem {
         expandedPlans = Object.assign({}, expandedPlans, { [groupKey]: !wasOpen })
     }
 
+    property var expandedMemories: ({})   // accounts showing their memories
+
+    function toggleMemories(groupKey, wasOpen) {
+        expandedMemories = Object.assign({}, expandedMemories, { [groupKey]: !wasOpen })
+    }
+
+    // One of Claude's memories: rendered to read, or (edit) its file, to change
+    // it (jump.py --open-memory / --edit-memory; an SSH host's in VS Code)
+    function openMemory(memory, host, edit) {
+        planOpener.connectSource("python3 -I " + shellQuote(codeDir + "jump.py")
+                                 + (host ? " --remote-edit " + shellQuote(host) + " " + shellQuote(memory.path)
+                                         : (edit ? " --edit-memory " : " --open-memory ") + shellQuote(memory.path))
+                                 + configDirArgs + " # " + Date.now())
+    }
+
     function togglePlanComposer(key) {
         planComposer = planComposer === key ? "" : key
         newChatGroup = ""
@@ -2252,7 +2267,7 @@ PlasmoidItem {
                 root.actionError = ""
                 root.expanded = false
             } else {
-                root.actionError = i18n("Couldn't open the plan: %1", result.message)
+                root.actionError = i18n("Couldn't open it: %1", result.message)
                 actionErrorTimer.restart()
             }
         }
