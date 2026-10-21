@@ -363,6 +363,12 @@ button:focus-visible {
   border-color: var(--cs-working);
 }
 
+.tag.warning {
+  border-color: var(--cs-failed);
+  color: var(--cs-failed);
+  opacity: 1;
+}
+
 .tag.clickable {
   cursor: pointer;
 }
@@ -764,6 +770,29 @@ button:focus-visible {
 
 .st-failed {
   --st: var(--cs-failed);
+}
+
+/* A usage limit (or an expired login) stopped it: red until the limit resets */
+.session.stopped {
+  --st: var(--cs-failed);
+}
+
+.session.stopped > .session-main .state-text,
+.session.freed > .session-main .state-text {
+  font-weight: 600;
+}
+
+.pk-stopped {
+  color: var(--cs-failed);
+}
+
+.session.freed .pk-stopped {
+  color: var(--cs-idle);
+}
+
+/* Continue on another account, under a chat a usage limit stopped */
+.handover {
+  margin-top: 1px;
 }
 
 .session {

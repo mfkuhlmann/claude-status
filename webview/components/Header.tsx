@@ -43,6 +43,12 @@ export function Header(props: {
         <div class="header-actions">
           <IconButton icon="add" label="New chat…" onClick={newChat} />
           <IconButton
+            icon="search"
+            label="Find a chat…"
+            title="Find a chat: every chat with all the words you type in its name, its folder or your prompts, here and on the SSH hosts shown."
+            onClick={() => post({ type: "findChat" })}
+          />
+          <IconButton
             icon="server"
             label="SSH hosts…"
             title={

@@ -15,6 +15,12 @@ export function PeekPanel({ session: s, host, chat }: { session: Session; host?:
   const elsewhere = host ? `Its files are on ${host}: compare them there.` : "";
   return (
     <div class="peek small">
+      {peek?.recap?.text ? (
+        <div class="peek-msg" title="Claude's recap of the chat, written when you came back to it">
+          <span class="peek-who">Recap</span>
+          <div class="peek-text">{peek.recap.text}</div>
+        </div>
+      ) : null}
       {peek?.prompt ? (
         <div class="peek-msg">
           <span class="peek-who">You</span>

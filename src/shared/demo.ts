@@ -136,8 +136,11 @@ function personal(now: number, phase: number): Group {
         context: 62,
         peek:
           parserState === "working"
-            ? { activity: "Bash: npm test -- parser", prompt: "The date parser breaks on ISO weeks; fix it and add tests.", reply: "Found it: week 53 wraps to the next year. Fixing the year rollover now.", replyLine: "Found it: week 53 wraps to the next year. Fixing the year rollover now.", at: now - 20000 }
-            : { activity: "", prompt: "The date parser breaks on ISO weeks; fix it and add tests.", reply: "Fixed: ISO week 53 no longer rolls over into the next year.\n\n• parseIsoWeek() takes the year from the week's Thursday\n• 12 new tests in date.test.ts, all passing\n\nWant me to open a pull request?", replyLine: "Fixed: ISO week 53 no longer rolls over into the next year.", at: now - 60000 },
+            ? { activity: "Bash: npm test -- parser", prompt: "The date parser breaks on ISO weeks; fix it and add tests.", reply: "Found it: week 53 wraps to the next year. Fixing the year rollover now.", replyLine: "Found it: week 53 wraps to the next year. Fixing the year rollover now.", at: now - 20000, mode: "auto" }
+            : {
+                activity: "", prompt: "The date parser breaks on ISO weeks; fix it and add tests.", reply: "Fixed: ISO week 53 no longer rolls over into the next year.\n\n• parseIsoWeek() takes the year from the week's Thursday\n• 12 new tests in date.test.ts, all passing\n\nWant me to open a pull request?", replyLine: "Fixed: ISO week 53 no longer rolls over into the next year.", at: now - 60000, mode: "auto",
+                recap: { text: "You asked me to fix ISO week parsing; it's fixed, with 12 new tests that pass. Next step: tell me whether to open a pull request.", at: now - 30000 },
+              },
         changes: { count: 3, files: ["src/date/parse.ts", "src/date/week.ts", "test/date.test.ts"] },
         stats: chatStats(now, 4, 38, [["Bash", 41], ["Read", 18], ["Edit", 9], ["Grep", 6], ["Agent", 3]], 18_400_000),
         tasks: {
@@ -164,7 +167,8 @@ function personal(now: number, phase: number): Group {
         since: now - 2 * MIN,
         context: 18,
         model: "Sonnet",
-        peek: { activity: "Bash: git tag v2.0.0", prompt: "Write the release notes for 2.0 and tag it.", reply: "The notes are in CHANGELOG.md. Tagging v2.0.0 next.", replyLine: "The notes are in CHANGELOG.md. Tagging v2.0.0 next.", at: now - 2 * MIN },
+        peek: { activity: "Bash: git tag v2.0.0", prompt: "Write the release notes for 2.0 and tag it.", reply: "The notes are in CHANGELOG.md. Tagging v2.0.0 next.", replyLine: "The notes are in CHANGELOG.md. Tagging v2.0.0 next.", at: now - 2 * MIN, mode: "acceptEdits" },
+        plan: { slug: "brave-green-otter", title: "Release 2.0", path: "/home/alice/.claude/plans/brave-green-otter.md", updatedAt: now - 2 * HOUR },
         changes: { count: 1, files: ["CHANGELOG.md"] },
         stats: chatStats(now, 2, 6, [["Bash", 7], ["Read", 4], ["Write", 1]], 2_100_000),
       }),
@@ -222,6 +226,18 @@ function personal(now: number, phase: number): Group {
       { key: "demo-r1", sessionId: "demo-r1", name: "Explain the build pipeline", cwd: "/home/alice/projects/webapp", cwdShort: "~/projects/webapp", lastActive: now - 5 * HOUR, profile: "personal", profileDir: ".claude", shared: false, openCommand: "echo 'Demo mode'" },
       { key: "demo-r2", sessionId: "demo-r2", name: "Rename the config module", cwd: "/home/alice/projects/api-server", cwdShort: "~/projects/api-server", lastActive: now - 26 * HOUR, profile: "personal", profileDir: ".claude", shared: false, openCommand: "echo 'Demo mode'" },
     ],
+    plans: [
+      {
+        key: "demo-plan-1", slug: "brave-green-otter", title: "Release 2.0", path: "/home/alice/.claude/plans/brave-green-otter.md",
+        profileDir: ".claude", profile: "personal", updatedAt: now - 2 * HOUR, shared: false, chatId: "demo-2", chatProfileDir: ".claude",
+        cwd: "/home/alice/projects/api-server", cwdShort: "~/projects/api-server", openCommand: "echo 'Demo mode'",
+      },
+      {
+        key: "demo-plan-2", slug: "quiet-amber-heron", title: "Move the settings page to the new router", path: "/home/alice/.claude/plans/quiet-amber-heron.md",
+        profileDir: ".claude", profile: "personal", updatedAt: now - 3 * 24 * HOUR, shared: false, chatId: null, chatProfileDir: null,
+        cwd: "", cwdShort: "",
+      },
+    ],
     homeChatCommand: "echo 'Demo mode'",
   };
 }
@@ -264,6 +280,18 @@ function buildServer(now: number, phase: number): Status {
             },
             changes: { count: 2, files: ["configs/ranking.yaml", "train.py"] },
             stats: chatStats(now, 3, 24, [["Bash", 22], ["Read", 9], ["Edit", 4]], 9_700_000),
+          }),
+          session(now, {
+            key: "demo-5",
+            name: "Evaluate on the holdout set",
+            state: "idle",
+            cwd: "/home/alice/experiments/ranking",
+            cwdShort: "~/experiments/ranking",
+            since: now - 18 * MIN,
+            context: 41,
+            model: "Opus",
+            peek: { activity: "", prompt: "Evaluate the new model on the holdout set.", reply: "", replyLine: "", at: now - 18 * MIN },
+            stopped: { kind: "limit", window: "five_hour", text: "You've hit your session limit · resets 4:10pm", at: now - 18 * MIN, resetsAt: now + 41 * MIN, over: false },
           }),
         ],
         limits: {

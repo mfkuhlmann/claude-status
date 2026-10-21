@@ -3,7 +3,7 @@
 // source is "" for this computer and "ssh:<host>" for an SSH host; each keeps
 // its own memory, so one poll never decides for another.
 
-import { duration, petKeyOf, reasonText } from "./shared/model";
+import { duration, petKeyOf, plural, reasonText } from "./shared/model";
 import type { Group, PetEventKind, Session, SessionState } from "./shared/types";
 
 export interface Notice {
@@ -49,7 +49,18 @@ export interface NotifyOptions {
 const SOUND_RANK: Record<SoundKind, number> = { "": 0, done: 1, failed: 2, waiting: 3 };
 const WAITING_QUIET_MS = 60000;
 
+// b's notices, pet events and finished chats after a's; the more urgent sound
+export function mergeChanges(a: Changes, b: Changes): Changes {
+  return {
+    notices: [...a.notices, ...b.notices],
+    petEvents: [...a.petEvents, ...b.petEvents],
+    sound: SOUND_RANK[b.sound] > SOUND_RANK[a.sound] ? b.sound : a.sound,
+    finished: [...a.finished, ...b.finished],
+  };
+}
+
 export class TransitionTracker {
+  private lastStops = new Map<string, Map<string, boolean>>(); // source -> chat key -> whether its limit has reset
   private lastStates = new Map<string, Map<string, SessionState>>();
   private turnStarts = new Map<string, Map<string, number>>();
   private lastWaitingAlert = new Map<string, number>();
@@ -124,6 +135,40 @@ export class TransitionTracker {
     return changes;
   }
 
+  // Chats a usage limit stopped whose limit has reset since the last poll:
+  // their pets cheer, and one notice per account says which can go on (with
+  // the "finished" notifications). The first poll of a source only learns.
+  limitResets(source: string, groups: Group[], host: string | undefined, opts: NotifyOptions): Changes {
+    const changes: Changes = { notices: [], petEvents: [], sound: "", finished: [] };
+    const before = this.lastStops.get(source);
+    const next = new Map<string, boolean>();
+    for (const g of groups) {
+      const freed: Session[] = [];
+      for (const s of g.sessions) {
+        if (s.stopped?.kind !== "limit") continue;
+        const key = petKeyOf(s, host);
+        if (next.has(key)) continue;
+        next.set(key, !!s.stopped.over);
+        if (before?.get(key) === false && s.stopped.over) freed.push(s);
+      }
+      if (!freed.length) continue;
+      for (const s of freed) changes.petEvents.push({ kind: "reset", text: `${s.name} can go on!`, key: petKeyOf(s, host) });
+      if (!opts.notifyDone) continue;
+      const names = freed.slice(0, 4).map((s) => s.name).join(", ") + (freed.length > 4 ? ` +${freed.length - 4}` : "");
+      changes.notices.push({
+        key: `limit-reset|${source}|${g.id}`,
+        kind: "done",
+        title: `${host ? `${host}: ` : ""}${g.name}: the usage limit reset`,
+        body: plural(freed.length, `${names} can go on`, `%1 chats can go on: ${names}`),
+        session: freed[0],
+        host,
+      });
+      changes.sound = "done";
+    }
+    this.lastStops.set(source, next);
+    return changes;
+  }
+
   // A plan limit that dropped a lot since the last poll was reset: celebrate.
   resets(source: string, groups: Group[]): PetEvent[] {
     const events: PetEvent[] = [];
@@ -140,6 +185,7 @@ export class TransitionTracker {
 
   // A host that was unpicked: start over if it comes back
   forget(source: string): void {
+    this.lastStops.delete(source);
     this.lastStates.delete(source);
     this.turnStarts.delete(source);
     const prefix = source + "|";

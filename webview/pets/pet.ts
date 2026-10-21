@@ -322,6 +322,7 @@ export class Pet {
     if (!c) return this.leaving ? "waving" : "sleeping"; // its chat left the list: bye
     if (c.state === "waiting") return "waving";
     if (c.state === "working") return c.agents && c.agents.running > 0 ? "working-juggling" : "working-typing";
+    if (c.stopped && !c.stopped.over) return "battery-low"; // a usage limit (or the login) stopped it
     if (c.state === "idle") return "idle-living"; // ready for your next message
     if (c.reason === "failed") return "sad";
     return "sleeping"; // done: results to look at
@@ -723,6 +724,8 @@ export class Pet {
       } else if (r < 0.32) this.doAction("smile", 2500);
       else if (r < 0.38) this.doAction("coffee", 4000);
       else if (r < 0.5) this.doHobby(true);
+    } else if (mood === "battery-low") {
+      if (r < 0.15) this.burst("z", tone.disabled, 1); // waits for the limit to reset
     } else if (mood !== "sad") {
       if (r < 0.2) {
         this.facingLeft = !this.facingLeft; // busy, but glances around

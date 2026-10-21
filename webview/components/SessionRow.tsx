@@ -1,4 +1,20 @@
-import { canEndChat, changesTitle, hasPeek, hasTurn, machineStatus, peekLine, petKeyOf, plural, stateText, tasksTitle, usageLevel } from "../../src/shared/model";
+import {
+  canEndChat,
+  changesTitle,
+  handoverTarget,
+  hasPeek,
+  hasTurn,
+  machineStatus,
+  modeHint,
+  modeText,
+  peekLine,
+  petKeyOf,
+  plural,
+  shareAccounts,
+  stateText,
+  tasksTitle,
+  usageLevel,
+} from "../../src/shared/model";
 import type { Session } from "../../src/shared/types";
 import { post } from "../env";
 import { pets } from "../pets";
@@ -18,7 +34,17 @@ export function stateClass(state: string, reason: string): string {
 }
 
 function lineTitle(kind: string): string {
-  return kind === "needs" ? "What it needs: " : kind === "result" ? "Result: " : kind === "activity" ? "Doing: " : "";
+  return kind === "needs"
+    ? "What it needs: "
+    : kind === "result"
+      ? "Result: "
+      : kind === "activity"
+        ? "Doing: "
+        : kind === "stopped"
+          ? "What stopped it: "
+          : kind === "recap"
+            ? "Claude's recap of the chat, written when you came back to it:\n"
+            : "";
 }
 
 // One chat: state, name (click to open), tags, folder, model, context fill,
@@ -43,9 +69,13 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
   const share = canShare(s, machineStatus(view, host));
   const remove = canRemove(s);
   const stop = canStop(s, host);
+  const mode = modeText(s.peek?.mode);
+  // A usage limit stopped it: it can go on on another account with room left
+  const handover = handoverTarget(s, shareAccounts(machineStatus(view, host)));
+  const stopped = s.stopped && !s.stopped.over ? " stopped" : s.stopped ? " freed" : "";
 
   return (
-    <div class={`session ${stateClass(s.state, s.reason)}`}>
+    <div class={`session ${stateClass(s.state, s.reason)}${stopped}`}>
       {/* A bar in the color of the chat's pet, to spot which pet is which */}
       <span class="pet-bar" style={{ background: petColor || "transparent" }} aria-hidden="true" />
       <span class="state-dot" aria-hidden="true" />
@@ -83,6 +113,16 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
               pressed={showPeek}
               title={`${tasksTitle(tasks)}\n\nClick to ${showPeek ? "hide" : "show"} the chat's tasks and last exchange.`}
               onClick={() => togglePeek(rowKey)}
+            />
+          ) : null}
+          {mode ? (
+            <Tag text={mode} warning={s.peek?.mode === "bypassPermissions"} title={`Permission mode: ${mode}\n${modeHint(s.peek?.mode)}`} />
+          ) : null}
+          {s.plan ? (
+            <Tag
+              text="plan ↗"
+              title={`${s.plan.title}\nThe plan this chat made. Click to open it${host && host !== view.hosts.find((h) => h.current)?.name ? ` (a copy, fetched from ${host})` : ""}.`}
+              onClick={() => post({ type: "openPlan", chat })}
             />
           ) : null}
           {changes ? (
@@ -140,6 +180,28 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
               {line.text}
             </div>
           )
+        ) : null}
+
+        {handover ? (
+          <div class="handover small">
+            <button
+              type="button"
+              class="link"
+              title={
+                (handover.pct !== null
+                  ? `${handover.title} has used ${Math.round(handover.pct)}% of its ${handover.label} limit.`
+                  : `${handover.title}'s plan usage isn't known here.`) +
+                (s.pid !== null
+                  ? s.kind === "bg"
+                    ? ` This background session is stopped first (claude stop); then the chat is shared with ${handover.title} and reopens there in a terminal.`
+                    : ` Claude here quits first (its terminal stays open); then the chat is shared with ${handover.title} and reopens there in a terminal.`
+                  : ` The chat is shared with ${handover.title} and reopens there in a terminal.`)
+              }
+              onClick={() => post({ type: "handOver", chat, profile: handover.shareProfile })}
+            >
+              Continue on {handover.title}
+            </button>
+          </div>
         ) : null}
 
         {showPeek ? <PeekPanel session={s} host={host} chat={chat} /> : null}

@@ -67,6 +67,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("claudeStatus.pickHosts", () => a.pickHosts()),
     vscode.commands.registerCommand("claudeStatus.openInEditor", () => view.openInEditor()),
     vscode.commands.registerCommand("claudeStatus.newChat", () => a.newChat()),
+    vscode.commands.registerCommand("claudeStatus.findChat", () => a.findChat()),
     vscode.commands.registerCommand("claudeStatus.showRemoved", () => a.showRemoved()),
     vscode.commands.registerCommand("claudeStatus.setupUsageBars", () => setUpUsageBars(context.extensionUri)),
     vscode.commands.registerCommand("claudeStatus.removeUsageBars", () => setUpUsageBars(context.extensionUri, true)),

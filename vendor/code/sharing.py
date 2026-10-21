@@ -368,6 +368,100 @@ def keep_only(profiles, chat_id, keep, root):
     return True, message
 
 
+# ---------------------------------------------------------------- plans
+#
+# A plan (<cfg>/plans/<slug>.md, what a chat in plan mode writes) is shared
+# the same way: one file hard-linked into each profile's plans/ folder, so a
+# chat continued on another account finds its plan there, and a change shows
+# on every account (Claude writes plans in place). Sharing a chat shares its
+# plan too.
+
+
+def plan_copies(profiles, slug):
+    """[(profile, path)] of the profiles that have the plan called slug."""
+    out = []
+    for p in profiles:
+        path = cs.plan_path(p, slug)
+        if path is not None and path.is_file() and not path.is_symlink():
+            out.append((p, path))
+    return out
+
+
+def share_plan(profiles, slug, into, source=None):
+    """Link the plan called slug into the profiles `into`, from source's copy
+    (else the newest one): (ok, message)."""
+    have = plan_copies(profiles, slug)
+    if not have:
+        return False, "That plan isn't there any more"
+    src = next((path for p, path in have if source is not None and p.real == source.real), None)
+    if src is None:
+        src = max(have, key=lambda c: cs.mtime(c[1]) or 0)[1]
+    added, skipped, apart = [], [], []
+    old_umask = os.umask(0o077)
+    try:
+        for q in into:
+            dest = cs.plan_path(q, slug)
+            if present(dest):
+                if not same(dest, src):
+                    skipped.append(q.label)  # a plan of its own with that name
+                continue
+            if device(dest) != device(src):
+                apart.append(q.label)
+                continue
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            os.link(str(src), str(dest))
+            added.append(q.label)
+    except OSError as exc:
+        return False, f"Couldn't share the plan: {exc}"
+    finally:
+        os.umask(old_umask)
+    on = [p.label for p in profiles if same(cs.plan_path(p, slug), src)]
+    if not added and (skipped or apart):
+        why = (f"{', '.join(skipped)} already {'has' if len(skipped) == 1 else 'have'} another plan of that name"
+               if skipped else f"{', '.join(apart)} {'is' if len(apart) == 1 else 'are'} on another disk or partition")
+        return False, f"Not shared: {why}"
+    message = f"Plan shared: it's on {', '.join(on)} now." if added else f"This plan is on {', '.join(on)} already."
+    if skipped:
+        message += f" Not on {', '.join(skipped)}: there's another plan of that name there."
+    if apart:
+        message += f" Not on {', '.join(apart)}: another disk or partition."
+    return True, message
+
+
+def keep_plan_only(profiles, slug, keep):
+    """The plan called slug stays on keep only; the other profiles' links to
+    it go (a plan of their own with that name stays): (ok, message)."""
+    have = plan_copies(profiles, slug)
+    kept = next((path for p, path in have if p.real == keep.real), None)
+    if kept is None:
+        return False, f"{keep.label} doesn't have this plan"
+    removed = []
+    try:
+        for q, path in have:
+            if q.real != keep.real and same(path, kept) and entry(path) != entry(kept):
+                os.unlink(str(path))
+                removed.append(q.label)
+    except OSError as exc:
+        return False, f"Couldn't finish: {exc}"
+    if not removed:
+        return False, "This plan isn't shared"
+    return True, f"The plan is only on {keep.label} now. Removed from {', '.join(removed)}."
+
+
+def share_chat_plan(profiles, chat_id, into):
+    """With a chat, its plan (best effort: a chat without one, or a plan
+    that can't be linked, just stays as it is)."""
+    for p in profiles:
+        path = cs.transcript_path(p, chat_id)
+        slug = cs.transcript_slug(path, path.stat().st_size) if path is not None and path.is_file() else None
+        if slug and cs.plan_path(p, slug).is_file():
+            try:
+                share_plan(profiles, slug, into, p)
+            except OSError:
+                pass
+            return
+
+
 # ---------------------------------------------------------------- what the buttons do
 
 
@@ -384,12 +478,18 @@ def named(profiles, name):
     return next((p for p in profiles if name and cs.matches_profile(p, name)), None)
 
 
-def give_to(profiles, chat_id, name, root):
+def give_to(profiles, chat_id, name, root, end_first=False, home=None):
     """Give the profile `name` a chat, shared if it doesn't have it yet:
-    (its profile, its transcript of the chat), or (None, why not)."""
+    (its profile, its transcript of the chat), or (None, why not). With
+    end_first, a session that has it open idle (e.g. stopped by a usage
+    limit) is ended first (claude_status.end_for_handover)."""
     target = named(profiles, name)
     if target is None:
         return None, f"No Claude profile called {name}"
+    if end_first:
+        ok, message = cs.end_for_handover(home or Path.home(), profiles, chat_id)
+        if not ok:
+            return None, message
     busy = open_in(profiles, chat_id)
     if busy:
         return None, f"It's open in a session on {busy}. A chat can be open in one session at a time: exit that one first."
@@ -406,14 +506,15 @@ def give_to(profiles, chat_id, name, root):
             return None, f"It wasn't added to {target.label}: {message}"
     elif any(not os.path.samefile(there, other) for other in paths):
         return None, f"{target.label} has a different chat with the same id; left everything as it is"
+    share_chat_plan(profiles, chat_id, [target])
     return target, there
 
 
-def continue_command(profiles, chat_id, name, root, home, claude):
+def continue_command(profiles, chat_id, name, root, home, claude, end_first=False):
     """Continue a chat on the profile `name`: share it with that profile if
     needed, and hand back the shell command that reopens it there (claude:
     how to run claude): (ok, message, command or None)."""
-    target, there = give_to(profiles, chat_id, name, root)
+    target, there = give_to(profiles, chat_id, name, root, end_first, home)
     if target is None:
         return False, there, None
     folder = cs.chat_folder(there)
@@ -426,7 +527,10 @@ def share_with_all(profiles, chat_id, root, name=None):
     busy = open_in(profiles, chat_id)
     if busy:
         return False, f"It's open in a session on {busy}. Exit that session first."
-    return share(profiles, chat_id, profiles, root, named(profiles, name))
+    ok, message = share(profiles, chat_id, profiles, root, named(profiles, name))
+    if ok:
+        share_chat_plan(profiles, chat_id, profiles)
+    return ok, message
 
 
 def keep_only_on(profiles, chat_id, name, root):
@@ -440,28 +544,52 @@ def keep_only_on(profiles, chat_id, name, root):
     return keep_only(profiles, chat_id, keep, root)
 
 
-USAGE = ("usage: sharing.py (--share CHAT_ID | --continue CHAT_ID | --unshare CHAT_ID) [--profile PROFILE]\n"
-         "                  [--config-dir DIR]... [--remote]   (--continue and --unshare need --profile)")
+def plan_sharing(profiles, slug, name, share_it, to=None):
+    """--share-plan (from the profile name's copy, with every profile or only
+    to) and --unshare-plan (keep it on name only): (ok, message)."""
+    if not cs.PLAN_SLUG.match(slug or ""):
+        return False, f"Not a plan name: {slug}"
+    source = named(profiles, name) if name else None
+    if name and source is None:
+        return False, f"No Claude profile called {name}"
+    if not share_it:
+        return keep_plan_only(profiles, slug, source)
+    into = profiles
+    if to:
+        target = named(profiles, to)
+        if target is None:
+            return False, f"No Claude profile called {to}"
+        into = [target]
+    return share_plan(profiles, slug, into, source)
+
+
+USAGE = ("usage: sharing.py (--share CHAT_ID | --continue CHAT_ID [--end-first] | --unshare CHAT_ID) [--profile PROFILE]\n"
+         "       sharing.py (--share-plan SLUG [--to PROFILE] | --unshare-plan SLUG) [--profile PROFILE]\n"
+         "                  [--config-dir DIR]... [--remote]   (--continue, --unshare and --unshare-plan need --profile)")
 
 
 def main(argv=None):
     """On an SSH host (remote.py): prints {"ok", "message"} and, for
     --continue, "command"."""
     args = sys.argv[1:] if argv is None else list(argv)
-    action, chat_id, name, extra, remote = None, None, None, [], False
+    action, chat_id, name, extra, remote, end_first, to = None, None, None, [], False, False, None
     while args:
         arg = args.pop(0)
-        if arg in ("--share", "--continue", "--unshare") and args and action is None:
+        if arg in ("--share", "--continue", "--unshare", "--share-plan", "--unshare-plan") and args and action is None:
             action, chat_id = arg, args.pop(0)
         elif arg == "--profile" and args:
             name = args.pop(0)
+        elif arg == "--to" and args:
+            to = args.pop(0)
+        elif arg == "--end-first":
+            end_first = True
         elif arg == "--config-dir" and args:
             extra.append(args.pop(0))
         elif arg == "--remote":
             remote = True
         else:
             sys.exit(USAGE)
-    if action is None or (action != "--share" and not name):
+    if action is None or (action not in ("--share", "--share-plan") and not name):
         sys.exit(USAGE)
     home, command = Path.home(), None
     try:
@@ -470,10 +598,12 @@ def main(argv=None):
             ok, message = share_with_all(profiles, chat_id, root, name)
         elif action == "--unshare":
             ok, message = keep_only_on(profiles, chat_id, name, root)
+        elif action in ("--share-plan", "--unshare-plan"):
+            ok, message = plan_sharing(profiles, chat_id, name, action == "--share-plan", to)
         else:
             # A click: the login shell may be asked where claude is
             ok, message, command = continue_command(profiles, chat_id, name, root, home,
-                                                    cs.find_claude(home, ask_shell=True))
+                                                    cs.find_claude(home, ask_shell=True), end_first)
     except Exception as exc:  # report, don't crash: the widget shows the message
         ok, message = False, f"{type(exc).__name__}: {exc}"
     if remote:

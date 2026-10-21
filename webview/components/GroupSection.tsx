@@ -8,6 +8,7 @@ import { toggleStats, uiState } from "../util/ui";
 import { AccountStage } from "./AccountStage";
 import { useView } from "./context";
 import { IconButton } from "./IconButton";
+import { PlansList } from "./PlansList";
 import { RecentChats } from "./RecentChats";
 import { SessionRow, stateClass } from "./SessionRow";
 import { StatsPanel } from "./StatsPanel";
@@ -91,9 +92,10 @@ export function GroupSection({ group: g, accounts = 1 }: { group: Group; account
           icon="add"
           label={`New chat on ${g.title}`}
           title={
-            host
+            (host
               ? `New chat on ${g.title}: opens a terminal with a new Claude chat on this account on ${host} (over ssh), in the folder you pick.`
-              : `New chat on ${g.title}: opens a terminal with a new Claude chat on this account, in the folder you pick.`
+              : `New chat on ${g.title}: opens a terminal with a new Claude chat on this account, in the folder you pick.`) +
+            " Type a task first and the chat starts with it, also in the background."
           }
           onClick={() => post(host ? { type: "newChat", groupId: g.id, host } : { type: "newChat", groupId: g.id })}
         />
@@ -223,6 +225,7 @@ export function GroupSection({ group: g, accounts = 1 }: { group: Group; account
       ))}
 
       <RecentChats group={g} />
+      <PlansList group={g} />
     </section>
   );
 }

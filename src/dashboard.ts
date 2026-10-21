@@ -14,7 +14,7 @@ import { demoState } from "./shared/demo";
 import { allGroups, chatsNeedingYou, shareUsage, toLocalClock, trackKey, type ChatSpot } from "./shared/model";
 import { chatRef } from "./notify";
 import type { ClaudeCodeInfo, DigestCard, HostState, PetEventKind, Status, ViewState } from "./shared/types";
-import { TransitionTracker, type Changes, type PetEvent } from "./transitions";
+import { mergeChanges, TransitionTracker, type Changes, type PetEvent } from "./transitions";
 
 const HIDDEN_POLL_MS = 10000;
 const VIEW_ID = "claudeStatus.view";
@@ -200,7 +200,11 @@ export class Dashboard implements vscode.Disposable {
       const { status, error } = await this.backend.status([...configDirArgs(), ...statusArgs()]);
       if (status) {
         this.errorText = status.errors.length ? status.errors.join("\n") : "";
-        const changes = this.tracker.track("", status.groups, status.generatedAt, undefined, this.notifyOptions());
+        const opts = this.notifyOptions();
+        const changes = mergeChanges(
+          this.tracker.track("", status.groups, status.generatedAt, undefined, opts),
+          this.tracker.limitResets("", status.groups, undefined, opts),
+        );
         const resets = this.tracker.resets("", status.groups);
         this.status = status;
         this.react(changes, resets);
@@ -233,13 +237,17 @@ export class Dashboard implements vscode.Disposable {
       if (answer.ok && answer.result) {
         // on this computer's clock: the host's may be off
         const result = toLocalClock(answer.result, Date.now() - (answer.result.generatedAt || Date.now()));
-        const changes = this.tracker.track("ssh:" + host, result.groups, result.generatedAt, host, this.notifyOptions());
+        const opts = this.notifyOptions();
+        const changes = mergeChanges(
+          this.tracker.track("ssh:" + host, result.groups, result.generatedAt, host, opts),
+          this.tracker.limitResets("ssh:" + host, result.groups, host, opts),
+        );
         const resets = this.tracker.resets("ssh:" + host, result.groups);
-        Object.assign(now, { loading: false, ok: true, error: "", result, updatedAt: Date.now() });
+        Object.assign(now, { loading: false, ok: true, error: "", result, updatedAt: Date.now(), login: false, loggedIn: !!answer.loggedIn });
         this.react(changes, resets);
       } else {
         // keep the last answer to show (dimmed) with the error
-        Object.assign(now, { loading: false, ok: false, error: answer.error || "no answer" });
+        Object.assign(now, { loading: false, ok: false, error: answer.error || "no answer", login: !!answer.login, loggedIn: false });
         this.log.warn(`${host}: ${now.error}`);
       }
     } finally {
@@ -248,6 +256,19 @@ export class Dashboard implements vscode.Disposable {
       if (h2) h2.loading = false;
       this.emit();
     }
+  }
+
+  // After Log in… (a host that wants a password): check it every few seconds
+  // until it answers, for up to three minutes
+  watchLogin(host: string): void {
+    const until = Date.now() + 180000;
+    const tick = () => {
+      const h = this.hosts.get(host);
+      if (this.disposed || !h || h.ok || Date.now() > until) return;
+      void this.pollHost(host);
+      setTimeout(tick, 3000);
+    };
+    setTimeout(tick, 3000);
   }
 
   private notifyOptions() {

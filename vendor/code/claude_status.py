@@ -512,6 +512,8 @@ def make_session(profile, home, *, sid, pid, name, cwd, kind, entrypoint, state,
         "changes": None,  # the files it changed: {"count", "files"} (ChatCache.changes)
         "tasks": None,  # its task list: {"done", "total", "current", "items"} (task_progress)
         "stats": None,  # its recap: prompts, tool calls, tokens, time worked (stats_summary)
+        "plan": None,  # the plan it made: {"slug", "title", "path", "updatedAt"} (plan_of)
+        "stopped": None,  # what stopped it: a usage limit or an expired login (stopped_by, limit_stop)
     }
 
 
@@ -703,6 +705,10 @@ def finish_row(row, job, job_id, profile, ctx, alive):
     if chats is not None:
         path = transcript_path(profile, row["chatId"])
         row["peek"] = chats.peek(path)
+        peek = row["peek"] or {}
+        row["plan"] = plan_of(profile, peek.get("slug"))
+        # (one that works again, or waits for you, got past it)
+        row["stopped"] = dict(peek["stopped"]) if peek.get("stopped") and row["state"] in ("idle", "done") else None
         row["changes"] = chats.changes(path, row["cwd"], ctx.home, ctx.own_folders)
         row["tasks"] = task_progress(ctx.profiles, [row["sessionId"], row["chatId"], row.get("jobSessionId")])
         row["stats"] = chats.stats(path)
@@ -1355,7 +1361,18 @@ def agent_run(home, extra_dirs, chat_id, agent_id, profile_key=None):
 # A peek at a chat without switching to it, from the end of its transcript:
 # its newest step (a tool call, thinking, writing), your last prompt and
 # Claude's last reply. Each content block of a reply is an entry of its own,
-# all with the reply's message id.
+# all with the reply's message id. Also from there (as Claude Code 2.1.304
+# writes them):
+#   - Claude's recap of the chat: a `system` record of subtype `away_summary`,
+#     written when you come back to a chat after a while ("You asked …; Next
+#     step: …"; /config turns them off). It counts while nothing was said
+#     after it.
+#   - the permission mode (default, plan, auto, acceptEdits, …): the newest
+#     `permission-mode` record, or the one your last prompt carries.
+#   - the chat's slug: its plan, if it made one, is <cfg>/plans/<slug>.md.
+#   - what stopped it: a reply that is an API error saying a usage limit was
+#     hit ("You've hit your session limit · resets 7:10pm (Europe/Berlin)",
+#     the limit named as Claude names each plan window) or the login expired.
 #
 # The files it changed: before a chat first edits a file, Claude backs it up
 # as <cfg>/file-history/<session id>/<name>@v<n> and records that in the
@@ -1372,6 +1389,17 @@ PEEK_TAIL_MAX = 4 << 20  # the last lines can be big tool results
 PEEK_REPLY_CHARS = 1500
 PEEK_PROMPT_CHARS = 300
 PEEK_LINE = re.compile(rb'"type":\s*"(?:user|assistant|last-prompt)"')
+PEEK_MORE_LINE = re.compile(rb'"type":\s*"(?:user|assistant|last-prompt|system|permission-mode)"')
+PEEK_ADDED = ("recap", "mode", "slug", "stopped")  # a cached peek without them (an older copy's) is read again
+RECAP_NOTE = re.compile(r"\s*\(disable recaps in /config\)\s*$")
+# Claude's names for the plan windows in "You've hit your … limit" (its
+# rate-limit types: five_hour is the session limit)
+LIMIT_NAMES = (("session limit", "five_hour"), ("weekly limit", "seven_day"), ("Opus limit", "seven_day_opus"),
+               ("Sonnet limit", "seven_day_sonnet"), ("Fable limit", "seven_day_overage_included"))
+LIMIT_STARTS = ("You've hit your ", "You've reached your ")
+OUT_OF_USAGE = ("You're out of usage credits", "Your org is out of usage")
+LOGIN_ENDED = ("Login expired", "OAuth token revoked", "Anthropic profile login expired")
+PLAN_SLUG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")  # a plan's file name (<slug>.md)
 EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 EDIT_LINE = re.compile(rb'"name":\s*"(?:Edit|Write|MultiEdit|NotebookEdit)"')
 SESSION_ID_FIELD = re.compile(rb'"sessionId":\s*"([0-9A-Za-z_-]{1,80})"')
@@ -1413,9 +1441,9 @@ def blocks_of(e):
     return msg, [c for c in content if isinstance(c, dict)] if isinstance(content, list) else []
 
 
-def tail_entries(path, size, nbytes):
+def tail_entries(path, size, nbytes, more=False):
     """Conversation entries (and last-prompt records) from the last nbytes
-    of a transcript, newest first."""
+    of a transcript, newest first; more: system and permission-mode records too."""
     try:
         with open(path, "rb") as f:
             f.seek(max(0, size - nbytes))
@@ -1424,15 +1452,17 @@ def tail_entries(path, size, nbytes):
         return []
     if size > nbytes:
         lines = lines[1:]  # probably cut in the middle
+    pattern = PEEK_MORE_LINE if more else PEEK_LINE
+    kinds = ("user", "assistant", "last-prompt") + (("system", "permission-mode") if more else ())
     entries = []
     for line in reversed(lines):
-        if not PEEK_LINE.search(line):
+        if not pattern.search(line):
             continue
         try:
             e = json.loads(line)
         except ValueError:
             continue
-        if isinstance(e, dict) and e.get("type") in ("user", "assistant", "last-prompt"):
+        if isinstance(e, dict) and e.get("type") in kinds:
             entries.append(e)
     return entries
 
@@ -1505,26 +1535,75 @@ def peek_from(entries):
             parts[:0] = texts  # older blocks of the same reply come first
     reply = tidy_text(plain_text("\n\n".join(parts)), PEEK_REPLY_CHARS)
     asked = prompt if prompt is not None else last_prompt
+    # The newest turn: a prompt of yours or a reply (not tool results or notes)
+    turn = next((e for e in convo if e["type"] == "assistant" or human_prompt(e) is not None), None)
     peek = {
         "activity": step_text(convo) if convo else "",
         "prompt": short_text(asked, PEEK_PROMPT_CHARS) if asked.strip() else "",
         "reply": reply,
         "replyLine": report_line(reply, 160) if reply else "",
         "at": to_ms(convo[0].get("timestamp")) if convo else None,
+        "recap": recap_of(entries),
+        "mode": mode_of(entries),
+        "slug": next((e["slug"] for e in entries if isinstance(e.get("slug"), str) and PLAN_SLUG.match(e["slug"])), None),
+        "stopped": stopped_by(turn) if turn is not None else None,
     }
     return peek, prompt is not None or (bool(parts) and bool(last_prompt))
 
 
+def mode_of(entries):
+    """The chat's permission mode (newest first entries), e.g. "plan", or None."""
+    for e in entries:
+        if e["type"] == "permission-mode" or human_prompt(e) is not None:
+            if isinstance(e.get("permissionMode"), str) and e["permissionMode"]:
+                return e["permissionMode"]
+    return None
+
+
+def recap_of(entries):
+    """{"text", "at"} of Claude's recap of the chat (newest first entries), if
+    nothing was said after it: a prompt of yours or a reply makes it old."""
+    for e in entries:
+        if e["type"] == "system" and e.get("subtype") == "away_summary":
+            text = RECAP_NOTE.sub("", e["content"]).strip() if isinstance(e.get("content"), str) else ""
+            return {"text": tidy_text(text, PEEK_REPLY_CHARS), "at": to_ms(e.get("timestamp"))} if text else None
+        if (e["type"] == "assistant" and not e.get("isSidechain")) or human_prompt(e) is not None:
+            return None
+    return None
+
+
+def stopped_by(e):
+    """What stopped a chat whose newest turn is the entry e: {"kind": "limit"
+    (a usage limit; window: the plan window, e.g. "five_hour", if Claude
+    named it) or "login" (it expired), "text": Claude's message, "at"}, or None."""
+    if e.get("type") != "assistant" or e.get("isApiErrorMessage") is not True:
+        return None
+    text = " ".join(message_text(e.get("message")).split())
+    kind, window = None, None
+    start = next((s for s in LIMIT_STARTS if text.startswith(s)), None)
+    if start is not None:
+        rest = text[len(start):]
+        kind, window = "limit", next((w for name, w in LIMIT_NAMES if rest.startswith(name)), None)
+    elif text.startswith(OUT_OF_USAGE):
+        kind = "limit"
+    elif text.startswith(LOGIN_ENDED):
+        kind = "login"
+    if kind is None:
+        return None
+    return {"kind": kind, "window": window, "text": short_text(text, 160), "at": to_ms(e.get("timestamp"))}
+
+
 def chat_peek(path):
-    """{"activity", "prompt", "reply", "replyLine", "at"} of a chat, read
-    from the end of its transcript (more of it while that isn't enough)."""
+    """{"activity", "prompt", "reply", "replyLine", "at", "recap", "mode",
+    "slug", "stopped"} of a chat, read from the end of its transcript (more
+    of it while that isn't enough)."""
     try:
         size = path.stat().st_size
     except (OSError, AttributeError):
         return None
     nbytes = PEEK_TAIL_BYTES
     while True:
-        peek, complete = peek_from(tail_entries(path, size, nbytes))
+        peek, complete = peek_from(tail_entries(path, size, nbytes, more=True))
         if complete or nbytes >= size or nbytes >= PEEK_TAIL_MAX:
             return peek
         nbytes *= 4
@@ -1873,7 +1952,9 @@ class ChatCache:
             return None
         key = file_key(st)
         old = self._old("peeks", key)
-        if isinstance(old, list) and len(old) == 3 and old[0] == st.st_size and old[1] == st.st_mtime_ns:
+        # (an older copy of this script reads no recap, mode, slug or stop: read it again)
+        if isinstance(old, list) and len(old) == 3 and old[0] == st.st_size and old[1] == st.st_mtime_ns \
+                and (not isinstance(old[2], dict) or all(k in old[2] for k in PEEK_ADDED)):
             self.data["peeks"][key] = old
             return old[2]
         peek = chat_peek(path)
@@ -2585,24 +2666,7 @@ def recent_chats(groups, ctx, limit=RECENT_CHATS):
     listed |= getattr(ctx, "moved_on", set())
     by_key = {p.key: p for p in ctx.profiles}
     group_of = {key: g for g in groups for key in g["profileKeys"]}
-    candidates = []
-    for p in ctx.profiles:
-        if p.key not in group_of:
-            continue
-        try:
-            files = list(p.path.glob("projects/*/*.jsonl"))
-        except OSError:
-            continue
-        for f in files:
-            sid = f.stem
-            if not valid_id(sid) or "." in sid or sid in listed:
-                continue
-            try:
-                st = f.stat()
-            except OSError:
-                continue
-            candidates.append((st.st_mtime, p, f, st))
-    candidates.sort(key=lambda c: -c[0])
+    candidates = [c for c in all_transcripts(ctx) if c[1].key in group_of and c[2].stem not in listed]
     for g in groups:
         g["recent"] = []
     if limit <= 0:
@@ -2654,7 +2718,384 @@ def recent_chats(groups, ctx, limit=RECENT_CHATS):
             "profile": home.label,
             "profileDir": home.key,
             "shared": bool(shared),
+            **recent_extras(ctx, f, g),
         })
+
+
+def recent_extras(ctx, path, group):
+    """A recent chat's recap and what stopped it, from the end of its transcript."""
+    chats = getattr(ctx, "chats", None)
+    peek = (chats.peek(path) if chats is not None else None) or {}
+    stopped = peek.get("stopped")
+    return {"recap": peek.get("recap"),
+            "stopped": limit_stop(stopped, group.get("limits"), ctx.now_ms) if stopped else None}
+
+
+# ---------------------------------------------------------------- usage limits that stopped chats
+
+
+RESET_IN_TEXT = re.compile(r"\bresets (\d{1,2})(?::(\d{2}))?\s*([ap]m)\b", re.IGNORECASE)
+
+
+def reset_from_text(text, at_ms):
+    """When "… · resets 7:10pm (Europe/Berlin)" in Claude's message is (taken
+    as this machine's local time), after at_ms; None if it names no time of day."""
+    m = RESET_IN_TEXT.search(text or "")
+    if not m or not at_ms:
+        return None
+    hour = int(m.group(1)) % 12 + (12 if m.group(3).lower() == "pm" else 0)
+    minute = int(m.group(2) or 0)
+    if minute > 59:
+        return None
+    then = datetime.fromtimestamp(at_ms / 1000)
+    reset = then.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if reset <= then:
+        reset += timedelta(days=1)
+    return int(reset.timestamp() * 1000)
+
+
+def limit_stop(stopped, limits, now_ms):
+    """A copy of what stopped a chat (stopped_by), with when the usage limit
+    it hit resets ("resetsAt") or whether it has since ("over"): from the
+    account's plan window of that limit (a window that started after the
+    chat stopped is a new one), else from the time in Claude's message."""
+    s = dict(stopped, resetsAt=None, over=False)
+    if s.get("kind") != "limit":
+        return s
+    at = s.get("at") or 0
+    w = next((w for w in (limits or {}).get("windows", []) if w.get("key") == s.get("window")), None) \
+        if s.get("window") else None
+    known = False
+    if w is not None and w.get("reset"):
+        ended = w.get("endedAt")
+        if ended is None or at < ended:  # (else that window was over before the chat stopped: says nothing)
+            s["over"], known = True, True
+    elif w is not None and w.get("resetsAt"):
+        hours = window_hours(w["key"])
+        if hours and at < w["resetsAt"] - hours * 3600_000:
+            s["over"] = True
+        else:
+            s["resetsAt"] = w["resetsAt"]
+        known = True
+    if not known:
+        guess = reset_from_text(s.get("text"), at)
+        if guess is not None:
+            s["over"] = guess <= now_ms
+            s["resetsAt"] = None if s["over"] else guess
+    return s
+
+
+def note_limit_stops(group, now_ms):
+    """The account's chats that a usage limit stopped: when it resets."""
+    for s in group["sessions"]:
+        if s.get("stopped"):
+            s["stopped"] = limit_stop(s["stopped"], group.get("limits"), now_ms)
+
+
+# ---------------------------------------------------------------- plans
+#
+# A chat in plan mode writes its plan to <cfg>/plans/<slug>.md, the slug
+# being the chat's (its transcript's entries carry it). Claude writes the
+# file in place, so a plan hard-linked into several profiles (shared, like a
+# chat: sharing.py) stays one file. Each account lists its plans, newest
+# first, with the chat that made each one where it's still there.
+
+PLANS_LISTED = 8
+PLAN_TITLE_BYTES = 4096
+
+
+def plan_path(profile, slug):
+    return profile.path / "plans" / f"{slug}.md" if isinstance(slug, str) and PLAN_SLUG.match(slug) else None
+
+
+def plan_title(path):
+    """A plan's first heading (in its first 4 KB), else ''."""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(PLAN_TITLE_BYTES)
+    except OSError:
+        return ""
+    for line in head.decode("utf-8", "replace").splitlines():
+        line = line.strip()
+        if line.startswith("#"):
+            return clean_text(line.lstrip("#").strip(), 120)
+    return ""
+
+
+def plan_of(profile, slug):
+    """{"slug", "title", "path", "updatedAt"} of the plan a chat made on this
+    profile, or None."""
+    path = plan_path(profile, slug)
+    try:
+        st = path.stat() if path is not None else None
+    except OSError:
+        st = None
+    if st is None or not path.is_file():
+        return None
+    return {"slug": slug, "title": plan_title(path) or slug, "path": str(path), "updatedAt": int(st.st_mtime * 1000)}
+
+
+class SlugCache:
+    """Each transcript's slug (the name of the plan it would write), read from
+    its end and kept in plans.json until the transcript grows."""
+
+    VERSION = 1
+
+    def __init__(self, path):
+        self.path = path
+        data = read_json(path)
+        ok = isinstance(data, dict) and data.get("version") == self.VERSION
+        self.old = data if ok else {}
+        self.data = {"version": self.VERSION, "slugs": {}}
+        self.changed = not ok
+
+    def slug(self, path, st):
+        """The transcript's newest slug, reading only what was appended since last time."""
+        key = file_key(st)
+        cached = self.data["slugs"].get(key, self.old.get("slugs", {}).get(key))
+        size, slug = 0, ""
+        if isinstance(cached, list) and len(cached) == 2 and isinstance(cached[0], int) \
+                and 0 <= cached[0] <= st.st_size and isinstance(cached[1], str):
+            size, slug = cached
+        if size < st.st_size:
+            slug = transcript_slug(path, st.st_size, size) or slug
+            self.changed = True
+        self.data["slugs"][key] = [st.st_size, slug]
+        return slug or None
+
+    def save(self):
+        kept = keep_unused(self.old, self.data, ("slugs",), time.time())
+        if self.changed or kept or set(self.data["slugs"]) != set(self.old.get("slugs", {})):
+            try:
+                write_json_atomic(self.path, self.data)
+            except OSError:
+                pass
+
+
+SLUG_LINE = re.compile(rb'"slug":\s*"([A-Za-z0-9][A-Za-z0-9_-]{0,127})"')
+
+
+def transcript_slug(path, size, start=0):
+    """The newest slug in a transcript's lines after byte start, looking at
+    its last 64 KB first, then more (up to 1 MB) while there's none; None if
+    there's none."""
+    nbytes = 65536
+    while True:
+        begin = max(start, size - nbytes)
+        try:
+            with open(path, "rb") as f:
+                f.seek(begin)
+                chunk = f.read(size - begin)
+        except OSError:
+            return None
+        found = SLUG_LINE.findall(chunk)
+        if found:
+            return found[-1].decode()
+        if begin <= start or nbytes >= 1 << 20:
+            return None
+        nbytes *= 4
+
+
+def all_transcripts(ctx):
+    """[(mtime, profile, path, stat)] of every chat transcript, newest first
+    (once per check)."""
+    found = getattr(ctx, "transcripts", None)
+    if found is not None:
+        return found
+    found = []
+    for p in ctx.profiles:
+        try:
+            files = list(p.path.glob("projects/*/*.jsonl"))
+        except OSError:
+            continue
+        for f in files:
+            if not valid_id(f.stem) or "." in f.stem:
+                continue
+            try:
+                st = f.stat()
+            except OSError:
+                continue
+            found.append((st.st_mtime, p, f, st))
+    found.sort(key=lambda c: -c[0])
+    ctx.transcripts = found
+    return found
+
+
+def account_plans(group, ctx, limit=PLANS_LISTED):
+    """The plans of an account's profiles, newest first: [{"key", "slug",
+    "title", "path", "profileDir", "profile", "updatedAt", "shared", "chatId",
+    "cwd", "cwdShort"}], the chat being the one that made it (where it's
+    still there; None else)."""
+    by_key = {p.key: p for p in ctx.profiles}
+    found, seen = [], set()
+    for key in group["profileKeys"]:
+        p = by_key.get(key)
+        try:
+            files = list(p.path.glob("plans/*.md")) if p is not None else []
+        except OSError:
+            continue
+        for f in files:
+            try:
+                st = f.stat()
+            except OSError:
+                continue
+            if not PLAN_SLUG.match(f.stem) or not f.is_file() or (st.st_dev, st.st_ino) in seen:
+                continue
+            seen.add((st.st_dev, st.st_ino))
+            found.append((st.st_mtime, p, f, st))
+    found.sort(key=lambda c: -c[0])
+    found = found[:limit]
+    plans = []
+    for t, p, f, st in found:
+        plans.append({
+            "key": f"{p.key}/{f.stem}/plan",
+            "slug": f.stem,
+            "title": plan_title(f) or f.stem,
+            "path": str(f),
+            "profileDir": p.key,
+            "profile": p.label,
+            "updatedAt": int(t * 1000),
+            # linked into another profile's plans too (sharing.py)
+            "shared": st.st_nlink > 1 and any(q.real != p.real and same_file(plan_path(q, f.stem), st)
+                                              for q in ctx.profiles),
+            "chatId": None, "chatProfileDir": None, "cwd": "", "cwdShort": "",
+        })
+    if plans:
+        find_plan_chats(plans, ctx)
+    return plans
+
+
+def same_file(path, st):
+    try:
+        other = path.stat() if path is not None else None
+    except OSError:
+        return False
+    return other is not None and (other.st_dev, other.st_ino) == (st.st_dev, st.st_ino)
+
+
+def find_plan_chats(plans, ctx):
+    """The chat that made each plan: the newest transcript with its slug. It
+    was active when the plan was written, so only transcripts changed since
+    the oldest plan's time are looked at."""
+    slugs = getattr(ctx, "slugs", None)
+    if slugs is None:
+        return
+    wanted = {pl["slug"]: pl for pl in plans}
+    oldest = min(pl["updatedAt"] for pl in plans) / 1000 - 60
+    for t, p, f, st in all_transcripts(ctx):
+        if t < oldest or not wanted:
+            break
+        slug = slugs.slug(f, st)
+        pl = wanted.pop(slug, None) if slug else None
+        if pl is None:
+            continue
+        _, cwd, _ = ctx.links.chat_info(f, st)
+        pl["chatId"], pl["chatProfileDir"] = f.stem, p.key
+        pl["cwd"], pl["cwdShort"] = cwd, short_path(cwd, ctx.home) if cwd else ""
+
+
+# ---------------------------------------------------------------- finding a chat
+#
+# Every chat whose name, folder or one of your prompts (history.jsonl) has
+# all the words you look for, newest first. Transcripts are only read for
+# their names (kept in links.json), so this is quick after the first time.
+
+FIND_LIMIT = 30
+HISTORY_ALL_BYTES = 16 << 20
+SNIPPET_CHARS = 140
+
+
+def history_all(profile):
+    """The entries of a profile's prompt history (its last 16 MB)."""
+    path = profile.path / "history.jsonl"
+    try:
+        size = path.stat().st_size
+        with open(path, "rb") as f:
+            f.seek(max(0, size - HISTORY_ALL_BYTES))
+            lines = f.read().splitlines()
+    except OSError:
+        return []
+    if size > HISTORY_ALL_BYTES:
+        lines = lines[1:]
+    entries = []
+    for line in lines:
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(e, dict):
+            entries.append(e)
+    return entries
+
+
+def snippet(text, words):
+    """The part of text around the first of words it has, on one line."""
+    flat = " ".join(text.split())
+    low = flat.casefold()
+    at = min((i for i in (low.find(w) for w in words) if i >= 0), default=0)
+    start = max(0, at - SNIPPET_CHARS // 3)
+    part = flat[start:start + SNIPPET_CHARS]
+    return ("…" if start > 0 else "") + part + ("…" if start + SNIPPET_CHARS < len(flat) else "")
+
+
+def find_chats(home, cache_root, extra_dirs, query, limit=FIND_LIMIT):
+    """{"ok", "results": [...], "more"}: the chats with every word of query in
+    their name, folder or one of your prompts, newest first."""
+    words = [w.casefold() for w in query.split()]
+    if not words:
+        return {"ok": True, "results": [], "more": False}
+    profiles = discover_profiles(home, extra_dirs)
+    ctx = Context(home=home, profiles=profiles, links=LinkCache(cache_root / "links.json"))
+    prompts, used = {}, {}
+    for p in profiles:
+        for e in history_all(p):
+            sid, text = e.get("sessionId"), e.get("display")
+            if valid_id(sid) and isinstance(text, str) and text.strip():
+                prompts.setdefault(sid, []).append(text)
+                used[(p.real, sid)] = max(used.get((p.real, sid), 0), number(e.get("timestamp")) or 0)
+    accounts = {}
+    for gid, members in group_profiles(profiles):
+        named = next((p for p in members if not p.is_default), members[0])
+        plan = next((p.plan for p in members if p.plan), None)
+        for p in members:
+            accounts[p.key] = (short_id(gid), f"{named.label} · {plan}" if plan else named.label)
+    results, seen, more = [], set(), False
+    for t, p, f, st in all_transcripts(ctx):
+        inode = (st.st_dev, st.st_ino)
+        if inode in seen:
+            continue
+        seen.add(inode)
+        sid = f.stem
+        said = prompts.get(sid, [])
+        name, cwd, messages = ctx.links.chat_info(f, st)
+        if not messages or not all(w in "\n".join([name, cwd, *said]).casefold() for w in words):
+            continue
+        if len(results) >= limit:
+            more = True
+            break
+        home_p = p
+        if st.st_nlink > 1:  # a shared chat: under the account it was used on last
+            holders = [q for q in profiles if same_file(transcript_path(q, sid), st)]
+            home_p = max(holders or [p], key=lambda q: used.get((q.real, sid), 0))
+        hit = next((s for s in reversed(said) if all(w in s.casefold() for w in words)), None) \
+            or next((s for s in reversed(said) if any(w in s.casefold() for w in words)), None)
+        gid, account = accounts.get(home_p.key, ("", home_p.label))
+        results.append({
+            "key": f"{home_p.key}/{sid}/found",
+            "sessionId": sid,
+            "name": name or sid[:8],
+            "cwd": cwd,
+            "cwdShort": short_path(cwd, home),
+            "lastActive": int(t * 1000),
+            "profile": home_p.label,
+            "profileDir": home_p.key,
+            "groupId": gid,
+            "account": account,
+            "shared": st.st_nlink > 1,
+            "match": snippet(hit, words) if hit and hit.strip() != name.strip() else "",
+        })
+    ctx.links.save()
+    return {"ok": True, "results": results, "more": more}
 
 
 # ---------------------------------------------------------------- opening sessions
@@ -2738,22 +3179,58 @@ def config_dir_value(profile, home=None, job=None, for_job=False):
     return path
 
 
-def folder_trusted(profile, folder, home=None):
-    """Has Claude's "do you trust this folder?" question been answered yes for
-    folder (in this profile's account file)? Claude never saves it for the
-    home folder, so it asks there every time."""
+def trusted_folders(profile, home=None):
+    """The folders Claude's "do you trust this folder?" question was answered
+    yes for (in this profile's account file)."""
     home = home or Path.home()
     data = read_json(profile.path / ".claude.json")
     if profile.is_default and not profile.path.is_symlink() and not (data or {}).get("projects"):
         data = read_json(home / ".claude.json")
     projects = (data or {}).get("projects")
-    entry = projects.get(str(folder)) if isinstance(projects, dict) else None
-    return isinstance(entry, dict) and entry.get("hasTrustDialogAccepted") is True
+    if not isinstance(projects, dict):
+        return set()
+    return {k for k, v in projects.items() if isinstance(v, dict) and v.get("hasTrustDialogAccepted") is True}
+
+
+def git_root(folder):
+    for q in (folder, *folder.parents):
+        if (q / ".git").exists():
+            return q
+    return None
+
+
+def folder_trusted(profile, folder, home=None, trusted=None):
+    """Has Claude's trust question been answered yes for folder, or (as
+    Claude looks) for a folder above it, within its git repository if it's in
+    one? Claude never saves it for the home folder, so it asks there every
+    time. trusted: trusted_folders(profile), if read already."""
+    trusted = trusted_folders(profile, home) if trusted is None else trusted
+    if not trusted or not isinstance(folder, str) or not folder.startswith("/"):
+        return False
+    path = Path(folder)
+    if path == (home or Path.home()):
+        return False
+    root = git_root(path)
+    for q in (path, *path.parents):
+        if str(q) in trusted:
+            return True
+        if q == root:
+            return False
+    return False
+
+
+# Claude refuses attach, stop, logs, rm and --bg ("'attach' is disabled by
+# CLAUDE_CODE_DISABLE_AGENT_VIEW") while this is set: a desktop may have it
+# for every program, and new chats in terminals get it (new_chat_command)
+NO_AGENT_VIEW = "CLAUDE_CODE_DISABLE_AGENT_VIEW"
 
 
 def config_env(profile, home=None, job=None, for_job=False):
-    """Shell words that set (or unset) CLAUDE_CONFIG_DIR for this profile."""
+    """Shell words that set (or unset) CLAUDE_CONFIG_DIR for this profile;
+    for a background session's command (for_job), without NO_AGENT_VIEW."""
     value = config_dir_value(profile, home, job, for_job)
+    if for_job:
+        return f"env -u {NO_AGENT_VIEW} " + ("-u CLAUDE_CONFIG_DIR" if value is None else f"CLAUDE_CONFIG_DIR={shlex.quote(value)}")
     return "env -u CLAUDE_CONFIG_DIR" if value is None else f"CLAUDE_CONFIG_DIR={shlex.quote(value)}"
 
 
@@ -2813,6 +3290,146 @@ def stop_command(profile, job_id, home=None, job=None, claude="claude"):
 def short_folder(folder, home=None):
     home = str(home or Path.home())
     return "~" + folder[len(home):] if folder == home or folder.startswith(home + "/") else folder
+
+
+# ---------------------------------------------------------------- starting a task
+#
+# A new chat can start with a task, its first prompt (maybe about one of the
+# account's plans): in a terminal (`claude "<task>"`, which sends it at once),
+# or in the background (`claude --bg "<task>"`: Claude's background service
+# runs it and it's listed right away). The background needs the folder
+# trusted already: Claude refuses otherwise ("Workspace not trusted"), and
+# always in the home folder.
+
+TASK_PLAN_MAX = 100_000  # bytes of a plan that go into a prompt (one argument can be 128 KB)
+BACKGROUND_WAIT = 60  # seconds `claude --bg` gets (it may start Claude's background service first)
+# What a Claude session puts into the environment of what it runs: a claude
+# started with them would count as part of that session
+SESSION_ENV = ("CLAUDECODE", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_EXECPATH",
+               "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN", "CLAUDE_CODE_SESSION_ATTENDED",
+               "CLAUDE_CODE_SESSION_ID", "CLAUDE_EFFORT", "CLAUDE_PID", "CLAUDE_JOB_DIR")
+SHORT_ID = re.compile(r"\b([0-9a-f]{8})\b")
+
+
+def find_plan(profiles, slug, profile_key=None):
+    """The plan file <cfg>/plans/<slug>.md (on the profile profile_key, else
+    any), or None."""
+    for p in profiles:
+        if profile_key and not matches_profile(p, profile_key):
+            continue
+        path = plan_path(p, slug)
+        if path is not None and path.is_file():
+            return path
+    return None
+
+
+def task_prompt(text, plan=None, home=None):
+    """A task's first prompt: what you wrote, and the plan (a path) it's about."""
+    text = (text or "").strip()
+    if plan is None:
+        return text
+    with open(plan, "rb") as f:
+        body = f.read(TASK_PLAN_MAX).decode("utf-8", "replace")
+    return plan_prompt(text, body, short_folder(str(plan), home))
+
+
+def plan_prompt(text, body, where):
+    """A first prompt about a plan: your text (else "Implement this plan."),
+    then the plan, which is saved as where."""
+    return f"{(text or '').strip() or 'Implement this plan.'}\n\nThe plan (saved as {where}):\n\n{body.strip()}\n"
+
+
+def prompt_arg(prompt):
+    """The prompt as an argument claude takes as its prompt, not an option."""
+    return " " + prompt if prompt.startswith("-") else prompt
+
+
+def prompt_word(prompt):
+    return shlex.quote(prompt_arg(prompt))
+
+
+def task_command(profile, prompt, home=None, claude="claude"):
+    """Shell command starting a chat on this profile with prompt sent as its first message."""
+    return f"{new_chat_command(profile, home, claude)} {prompt_word(prompt)}"
+
+
+def start_background(profile, folder, prompt, home=None, claude="claude", wait=BACKGROUND_WAIT, prefix=()):
+    """Start a background session on this profile in folder, with prompt:
+    (ok, message, its short id or None). prefix: words claude runs behind,
+    e.g. systemd-run's, so a background service it starts lives on its own
+    (not in the widget's group of processes, which a restart of the desktop
+    shell ends: jump.scope_prefix)."""
+    import subprocess
+    home = home or Path.home()
+    if not prompt.strip():
+        return False, "Write what Claude should do first", None
+    if not os.path.isdir(folder):
+        return False, f"The folder {short_folder(folder, home)} isn't there", None
+    if not folder_trusted(profile, folder, home):
+        where = "your home folder" if Path(folder) == home else short_folder(folder, home)
+        return False, (f"Claude doesn't trust {where} yet, and a background session can't ask: start a chat there "
+                       "in a terminal once (Claude asks whether you trust it), or pick a project folder"), None
+    env = {k: v for k, v in os.environ.items() if k not in SESSION_ENV and k != NO_AGENT_VIEW}
+    value = config_dir_value(profile, home, for_job=True)  # through the service's own name
+    if value is None:
+        env.pop("CLAUDE_CONFIG_DIR", None)
+    else:
+        env["CLAUDE_CONFIG_DIR"] = value
+    folder_bin = os.path.dirname(claude)
+    if folder_bin and os.path.isfile(os.path.join(folder_bin, "node")):
+        env["PATH"] = folder_bin + os.pathsep + env.get("PATH", "")
+    argv = [*prefix, claude, "--bg", prompt_arg(prompt)]
+    try:
+        r = subprocess.run(argv, cwd=folder, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE, timeout=wait)
+    except OSError as exc:
+        return False, f"Couldn't run claude: {exc}", None
+    except subprocess.TimeoutExpired:
+        return False, f"claude --bg didn't answer within {wait} s", None
+    out = (r.stdout or b"").decode("utf-8", "replace")
+    err = (r.stderr or b"").decode("utf-8", "replace")
+    if r.returncode != 0:
+        lines = [l.strip() for l in (err + "\n" + out).splitlines() if l.strip()]
+        return False, lines[-1] if lines else f"claude --bg failed (exit code {r.returncode})", None
+    found = SHORT_ID.findall(out)
+    job = found[-1] if found else None
+    return True, (f"Started in the background on {profile.label}" + (f" ({job})" if job else "")), job
+
+
+def run_task(home, extra_dirs, background, folder, profile_key, text, plan_slug=None, plan_profile=None,
+             claude=None):
+    """A task on the profile profile_key in folder (here or on an SSH host,
+    --start-task / --task-command): started in the background, or the shell
+    command that starts it in a terminal. {"ok", "message", "id" | "command"}."""
+    profiles = discover_profiles(home, extra_dirs)
+    profile = next((p for p in profiles if matches_profile(p, profile_key)), None)
+    if profile is None:
+        return {"ok": False, "message": f"No Claude profile called {profile_key}"}
+    plan = None
+    if plan_slug:
+        plan = find_plan(profiles, plan_slug, plan_profile)
+        if plan is None:
+            return {"ok": False, "message": "That plan isn't there any more"}
+    prompt = task_prompt(text, plan, home)
+    folder = folder if isinstance(folder, str) and folder.startswith("/") else str(home)
+    claude = claude or find_claude(home, ask_shell=True)
+    if background:
+        ok, message, job = start_background(profile, folder, prompt, home, claude)
+        return {"ok": ok, "message": message, "id": job}
+    command = task_command(profile, prompt, home, claude) if prompt else new_chat_command(profile, home, claude)
+    return {"ok": True, "message": "", "command": in_folder(folder, command)}
+
+
+def plan_markdown(home, extra_dirs, slug, profile_key=None):
+    """{"ok", "title", "markdown", "path"} of a plan (--plan-text, for an SSH
+    host's plan opened here)."""
+    path = find_plan(discover_profiles(home, extra_dirs), slug, profile_key)
+    if path is None:
+        return {"ok": False, "message": "That plan isn't there any more"}
+    with open(path, "rb") as f:
+        markdown = f.read(TASK_PLAN_MAX * 10).decode("utf-8", "replace")
+    return {"ok": True, "message": "", "title": plan_title(path) or slug, "markdown": markdown, "path": str(path),
+            "where": short_folder(str(path), home)}
 
 
 # ---------------------------------------------------------------- stopping and interrupting chats
@@ -3040,6 +3657,54 @@ def interrupt_chat_by_id(home, extra_dirs, session_id, profile_key=None):
     return interrupt_chat(entry) if entry else (False, "That session isn't running any more")
 
 
+def stop_background(profile, job_id, job=None, home=None, claude=None):
+    """Stop a background session with `claude stop` (its conversation is
+    kept): (ok, message)."""
+    import subprocess
+    home = home or Path.home()
+    claude = claude or find_claude(home, ask_shell=True)
+    env = {k: v for k, v in os.environ.items() if k != NO_AGENT_VIEW}
+    value = config_dir_value(profile, home, job, for_job=True)
+    if value is None:
+        env.pop("CLAUDE_CONFIG_DIR", None)
+    else:
+        env["CLAUDE_CONFIG_DIR"] = value
+    folder = os.path.dirname(claude)
+    if folder and os.path.isfile(os.path.join(folder, "node")):  # an npm install under nvm needs its node
+        env["PATH"] = os.pathsep.join([folder, env.get("PATH", "")])
+    try:
+        r = subprocess.run([claude, "stop", job_id], env=env, cwd=str(home), stdin=subprocess.DEVNULL,
+                           capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, f"claude stop didn't finish: {exc}"
+    lines = [l.strip() for l in (r.stdout + "\n" + r.stderr).splitlines() if l.strip()]
+    if r.returncode != 0:
+        return False, lines[-1] if lines else f"claude stop failed (exit {r.returncode})"
+    return True, lines[-1] if lines else "Stopped"
+
+
+def end_for_handover(home, profiles, chat_id, claude=None):
+    """Before a chat continues on another account (say a usage limit stopped
+    it here): end the session that has it open, if it's idle. A chat in a
+    terminal quits as with the stop button, a background session is stopped
+    (claude stop); one in VS Code's Claude isn't touched (its tab would start
+    it again with your next message). (ok, message); ok if none has it open."""
+    for entry, runs_on, _holder in live_entries_all(profiles):
+        if entry.get("sessionId") != chat_id or entry.get("kind") not in SESSION_KINDS or entry.get("spare"):
+            continue
+        if entry.get("entrypoint") == "claude-vscode":
+            return False, "It's open in VS Code's Claude: close its tab there first"
+        if session_state(entry) != "idle":
+            return False, "It's at work again, so it stays where it is"
+        job_id = entry.get("jobId")
+        if entry.get("kind") == "bg" and valid_id(job_id):
+            return stop_background(runs_on, job_id, read_job([runs_on], job_id), home, claude)
+        if entry.get("kind") == "interactive":
+            return stop_chat(entry)
+        return False, "It's open in a session the widget can't end"
+    return True, "Nothing had it open"
+
+
 # ---------------------------------------------------------------- several widgets at once
 #
 # The Plasma widget can run twice, e.g. on a panel and in the system tray.
@@ -3221,6 +3886,7 @@ def limit_window(key, pct, resets_at, now_ms):
         "pct": 0.0 if reset else float(pct),
         "resetsAt": None if reset else resets,
         "reset": reset,
+        "endedAt": resets if reset else None,  # when the window that's over ended
     }
 
 
@@ -3812,7 +4478,7 @@ class Context:
 
 
 def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_done_hours=KEEP_DONE_HOURS,
-            recent=RECENT_CHATS):
+            recent=RECENT_CHATS, plans=PLANS_LISTED):
     now = time.time() if now is None else now
     now_ms = int(now * 1000)
     snapshot_root = cache_root / "statusline"
@@ -3829,7 +4495,8 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
         home=home, profiles=profiles, snapshot_root=snapshot_root, now_ms=now_ms,
         keep_done_ms=int(keep_done_hours * 3600_000),
         agents=AgentCache(cache_root / "agents.json"), links=LinkCache(cache_root / "links.json"),
-        chats=ChatCache(cache_root / "chats.json"), own_folders=own_folders(profiles),
+        chats=ChatCache(cache_root / "chats.json"), slugs=SlugCache(cache_root / "plans.json"),
+        own_folders=own_folders(profiles),
         prompts={real: last_prompts(entries) for real, entries in histories.items()},
         errors=errors, unknown={},
     )
@@ -3898,6 +4565,10 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
                 "shareProfile": named.key,
                 "projects": recent_projects([histories[p.real] for p in members], home),
             }
+            # (a task can start in the background only where Claude trusts the folder)
+            trusted = trusted_folders(named, home)
+            for project in group["projects"]:
+                project["trusted"] = folder_trusted(named, project["path"], home, trusted)
             try:
                 # a logged-out account's last status lines are no one's plan usage now
                 group["limits"] = None if group["loggedOut"] else plan_limits(snapshot_root, members, now_ms)
@@ -3908,6 +4579,7 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
                         w["forecast"] = usage_forecast(w, usage.points(group["id"], w), now_ms)
             except Exception as exc:
                 errors.append(f"{group['title']}: limits: {exc}")
+            note_limit_stops(group, now_ms)
             if with_tokens:
                 try:
                     caches = [load_token_cache(cache_root, p, now, lock.held) for p in members]
@@ -3952,11 +4624,18 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
         for g in groups:
             g.setdefault("recent", [])
     for g in groups:
+        try:
+            g["plans"] = account_plans(g, ctx, plans)
+        except Exception as exc:
+            errors.append(f"{g['title']}: plans: {exc}")
+            g["plans"] = []
+    for g in groups:
         for s in g["sessions"]:
             counts[s["state"]] += 1
     ctx.agents.save()
     ctx.links.save()
     ctx.chats.save()
+    ctx.slugs.save()
     if forget:
         try:
             change_dismissed(cache_root, forget=forget)
@@ -4486,6 +5165,10 @@ def add_remote_commands(result, home, extra_dirs=(), claude=None):
         for c in g.get("recent", []):
             p = profiles.get(c["profileDir"])
             c["openCommand"] = in_folder(c["cwd"], resume_command(p, c["sessionId"], home, c["cwd"], claude)) if p else None
+        for pl in g.get("plans", []):  # its chat, reopened
+            p = profiles.get(pl.get("chatProfileDir"))
+            pl["openCommand"] = (in_folder(pl["cwd"], resume_command(p, pl["chatId"], home, pl["cwd"], claude))
+                                 if p is not None and pl.get("chatId") else None)
     rows = {s["key"]: s for g in result.get("groups", []) for s in g["sessions"]}
     for g in result.get("groups", []):
         for h in g.get("sharedHere", []):  # a link opens the chat's own row
@@ -4493,15 +5176,33 @@ def add_remote_commands(result, home, extra_dirs=(), claude=None):
             h["openCommand"] = target["openCommand"] if target else None
 
 
-USAGE = """usage: claude_status.py [--config-dir DIR]... [--done-hours H] [--recent N] [--no-tokens] [--pretty] [--remote [--local]]
+def add_found_commands(result, home, extra_dirs=()):
+    """The commands reopening the chats --find found on this host."""
+    claude = find_claude(home)
+    profiles = {p.key: p for p in discover_profiles(home, extra_dirs)}
+    for c in result.get("results", []):
+        p = profiles.get(c["profileDir"])
+        c["openCommand"] = in_folder(c["cwd"], resume_command(p, c["sessionId"], home, c["cwd"], claude)) if p else None
+
+
+USAGE = """usage: claude_status.py [--config-dir DIR]... [--done-hours H] [--recent N] [--plans N] [--no-tokens] [--pretty] [--remote [--local]]
        claude_status.py --dismiss SESSION_ID | --undismiss-all
        claude_status.py --end SESSION_ID [--profile PROFILE] [--busy] [--config-dir DIR]...
        claude_status.py --interrupt SESSION_ID [--profile PROFILE] [--config-dir DIR]...
        claude_status.py --agent-run AGENT_ID --chat CHAT_ID [--profile PROFILE] [--config-dir DIR]...
        claude_status.py --vscode-account CONFIG_DIR|- [--vscode-server FOLDER]
+       claude_status.py --find QUERY [--limit N] [--remote]
+       claude_status.py --start-task|--task-command FOLDER --profile PROFILE [--prompt TEXT]
+                        [--plan SLUG [--plan-profile PROFILE]] [--remote]
+       claude_status.py --plan-text SLUG [--profile PROFILE] [--remote]
   --config-dir DIR  extra Claude config dir (repeatable)
   --done-hours H    keep finished background jobs listed for H hours (default 24, 0 = never)
   --recent N        list each account's N latest other chats (default 5, 0 = none)
+  --plans N         list each account's N latest plans (default 8, 0 = none)
+  --find QUERY      the chats with every word of QUERY in their name, folder or your prompts
+  --start-task F    start a background session in folder F with the prompt (and plan)
+  --task-command F  the shell command that starts a chat in folder F with the prompt (and plan)
+  --plan-text SLUG  a plan's Markdown
   --no-tokens       skip transcript token totals
   --pretty          indent the JSON output
   --remote          for the widget on another machine: add the shell commands that open
@@ -4526,7 +5227,8 @@ def main(argv=None):
     config_dirs, with_tokens, pretty, done_hours = [], True, False, KEEP_DONE_HOURS
     recent, remote, local, dismiss, undismiss = RECENT_CHATS, False, False, None, False
     end, interrupt, profile_key, busy, instance, interval_ms = None, None, None, False, None, 2000
-    agent_run_id, chat_id = None, None
+    agent_run_id, chat_id, plans, find, find_limit = None, None, PLANS_LISTED, None, FIND_LIMIT
+    task_folder, task_action, prompt, plan_slug, plan_profile, plan_text = None, None, "", None, None, None
     vscode_account, vscode_server = None, VSCODE_SERVERS["Code"]
     while args:
         arg = args.pop(0)
@@ -4540,6 +5242,18 @@ def main(argv=None):
             agent_run_id = args.pop(0)
         elif arg == "--chat" and args:
             chat_id = args.pop(0)
+        elif arg == "--find" and args:
+            find = args.pop(0)
+        elif arg in ("--start-task", "--task-command") and args:
+            task_action, task_folder = arg, args.pop(0)
+        elif arg == "--prompt" and args:
+            prompt = args.pop(0)
+        elif arg == "--plan" and args:
+            plan_slug = args.pop(0)
+        elif arg == "--plan-profile" and args:
+            plan_profile = args.pop(0)
+        elif arg == "--plan-text" and args:
+            plan_text = args.pop(0)
         elif arg == "--busy":
             busy = True
         elif arg == "--vscode-account" and args:
@@ -4560,11 +5274,17 @@ def main(argv=None):
                 done_hours = max(0.0, float(args.pop(0)))
             except ValueError:
                 sys.exit(USAGE)
-        elif arg == "--recent" and args:
+        elif arg in ("--recent", "--plans", "--limit") and args:
             try:
-                recent = max(0, int(args.pop(0)))
+                n = max(0, int(args.pop(0)))
             except ValueError:
                 sys.exit(USAGE)
+            if arg == "--recent":
+                recent = n
+            elif arg == "--plans":
+                plans = n
+            else:
+                find_limit = max(1, n)
         elif arg == "--remote":
             remote = True
         elif arg == "--local":
@@ -4586,7 +5306,27 @@ def main(argv=None):
     cache_root = cache_dir(home)
     if (agent_run_id is None) != (chat_id is None):
         sys.exit(USAGE)
-    if agent_run_id is not None:
+    if task_action is not None and not profile_key:
+        sys.exit(USAGE)
+    if find is not None:
+        try:
+            result = find_chats(home, cache_root, config_dirs, find, find_limit)
+            if remote:
+                add_found_commands(result, home, config_dirs)
+        except Exception as exc:
+            result = {"ok": False, "message": f"{type(exc).__name__}: {exc}"}
+    elif plan_text is not None:
+        try:
+            result = plan_markdown(home, config_dirs, plan_text, profile_key)
+        except Exception as exc:
+            result = {"ok": False, "message": f"{type(exc).__name__}: {exc}"}
+    elif task_action is not None:
+        try:
+            result = run_task(home, config_dirs, task_action == "--start-task", task_folder, profile_key, prompt,
+                              plan_slug, plan_profile)
+        except Exception as exc:
+            result = {"ok": False, "message": f"{type(exc).__name__}: {exc}"}
+    elif agent_run_id is not None:
         try:
             ok, message, title, markdown = agent_run(home, config_dirs, chat_id, agent_run_id, profile_key)
         except Exception as exc:
@@ -4612,7 +5352,7 @@ def main(argv=None):
     else:
         try:
             result = collect(home, cache_root, config_dirs, with_tokens=with_tokens, keep_done_hours=done_hours,
-                             recent=recent)
+                             recent=recent, plans=plans)
             try:
                 add_vscode(result, home, config_dirs, remote and not local, cache_root)
             except Exception as exc:

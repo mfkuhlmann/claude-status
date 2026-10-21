@@ -6,7 +6,7 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { isComparison, type Comparison } from "./changes";
-import type { Status } from "./shared/types";
+import type { FoundChat, Status } from "./shared/types";
 
 export const REMOTE_MARK = "@@claude-status@@";
 const KILL_GRACE_MS = 3000;
@@ -154,11 +154,33 @@ export class Backend {
     return r && r.ok && Array.isArray(r.hosts) ? (r.hosts as SshHost[]) : [];
   }
 
-  async hostStatus(host: string, args: string[]): Promise<{ ok: boolean; result?: Status; error?: string }> {
+  // login: the host wants a password (or a passphrase, a code, its host key
+  // confirmed); loggedIn: the check went through a connection you logged in with
+  async hostStatus(host: string, args: string[]): Promise<{ ok: boolean; result?: Status; error?: string; login?: boolean; loggedIn?: boolean }> {
     const r = await this.json(["remote.py", "--status", host, ...args], 70000);
     if (!r) return { ok: false, error: `${host}: no answer from the SSH helper` };
-    if (r.ok && r.result) return { ok: true, result: r.result as Status };
-    return { ok: false, error: String(r.error || r.message || "no answer") };
+    if (r.ok && r.result) return { ok: true, result: r.result as Status, loggedIn: !!r.loggedIn };
+    return { ok: false, error: String(r.error || r.message || "no answer"), login: !!r.login };
+  }
+
+  // The chats with every word of query (claude_status.py --find; an SSH
+  // host's through remote.py, each with the command that reopens it there)
+  async find(query: string, host?: string, extra: string[] = []): Promise<{ ok: boolean; results: FoundChat[]; more: boolean; message: string }> {
+    let r: Record<string, any> | null;
+    if (host) r = await this.json(["remote.py", "--find", host, query], 60000);
+    else {
+      // --remote: each with the command that reopens it, as for the status
+      const run = await runProcess(this.python(), ["-I", this.pollScript(), "--find", query, "--remote", ...extra], { timeoutMs: 60000 });
+      const mark = run.stdout.lastIndexOf("\n" + REMOTE_MARK);
+      try {
+        r = mark < 0 ? null : JSON.parse(run.stdout.slice(mark + 1 + REMOTE_MARK.length));
+      } catch {
+        r = null;
+      }
+      if (!r) r = { ok: false, message: run.spawnError?.message ?? (lastLine(run.stderr) || "no answer") };
+    }
+    if (!r || !r.ok) return { ok: false, results: [], more: false, message: String(r?.message ?? r?.error ?? "no answer") };
+    return { ok: true, results: Array.isArray(r.results) ? (r.results as FoundChat[]) : [], more: !!r.more, message: "" };
   }
 
   // jump.py / remote.py actions; they print {"ok": bool, "message": str}

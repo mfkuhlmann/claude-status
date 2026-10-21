@@ -85,6 +85,12 @@
         "icon": "$(add)"
       },
       {
+        "command": "claudeStatus.findChat",
+        "title": "Find a Chat…",
+        "category": "Claude Status",
+        "icon": "$(search)"
+      },
+      {
         "command": "claudeStatus.nextChat",
         "title": "Go to the Chat That Needs You",
         "category": "Claude Status",
@@ -153,14 +159,19 @@
           "group": "navigation@1"
         },
         {
-          "command": "claudeStatus.pickHosts",
+          "command": "claudeStatus.findChat",
           "when": "view == claudeStatus.view",
           "group": "navigation@2"
         },
         {
-          "command": "claudeStatus.refresh",
+          "command": "claudeStatus.pickHosts",
           "when": "view == claudeStatus.view",
           "group": "navigation@3"
+        },
+        {
+          "command": "claudeStatus.refresh",
+          "when": "view == claudeStatus.view",
+          "group": "navigation@4"
         },
         {
           "command": "claudeStatus.openInEditor",

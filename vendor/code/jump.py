@@ -785,24 +785,7 @@ def stop(home, extra_dirs, session_id, profile_dir=None, busy=False):
     claude = claude_path(home)
     if not claude:
         return False, NO_CLAUDE
-    env = dict(os.environ)
-    value = config_dir_value(profile, home, job, for_job=True)
-    if value is None:
-        env.pop("CLAUDE_CONFIG_DIR", None)
-    else:
-        env["CLAUDE_CONFIG_DIR"] = value
-    folder = os.path.dirname(claude)
-    if os.path.isfile(os.path.join(folder, "node")):  # an npm install under nvm needs its node
-        env["PATH"] = os.pathsep.join([folder, env.get("PATH", "")])
-    try:
-        r = subprocess.run([claude, "stop", job_id], env=env, cwd=str(home), stdin=subprocess.DEVNULL,
-                           capture_output=True, text=True, timeout=60)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return False, f"claude stop didn't finish: {exc}"
-    lines = [l.strip() for l in (r.stdout + "\n" + r.stderr).splitlines() if l.strip()]
-    if r.returncode != 0:
-        return False, lines[-1] if lines else f"claude stop failed (exit {r.returncode})"
-    return True, lines[-1] if lines else "Stopped"
+    return cs.stop_background(profile, job_id, job, home, claude)
 
 
 def interrupt(home, extra_dirs, session_id, profile_dir=None):
@@ -826,18 +809,64 @@ def save_settings(home, values_json, by, unless_default=False):
     return cs.save_shared_settings(cs.cache_dir(home), by, values, int(time.time() * 1000), unless_default)
 
 
-def new_chat(home, extra_dirs, dirname, folder=None):
-    """Open a terminal with a new interactive chat on one profile (e.g. .claude-work)."""
-    profile = next((p for p in cs.discover_profiles(home, extra_dirs) if cs.matches_profile(p, dirname)), None)
+class Task:
+    """What a new chat starts with: your text and the plan it's about (the
+    account's plan called slug), if any."""
+
+    def __init__(self, text="", plan=None, plan_profile=None):
+        self.text, self.plan, self.plan_profile = text or "", plan, plan_profile
+
+    def __bool__(self):
+        return bool(self.text.strip() or self.plan)
+
+    def prompt(self, home, profiles):
+        """Its first prompt; ValueError if its plan is gone."""
+        path = None
+        if self.plan:
+            path = cs.find_plan(profiles, self.plan, self.plan_profile)
+            if path is None:
+                raise ValueError("That plan isn't there any more")
+        return cs.task_prompt(self.text, path, home)
+
+
+NO_TASK = Task()
+
+
+def new_chat(home, extra_dirs, dirname, folder=None, task=NO_TASK):
+    """Open a terminal with a new interactive chat on one profile (e.g.
+    .claude-work); with a task, that's its first prompt, sent at once."""
+    profiles = cs.discover_profiles(home, extra_dirs)
+    profile = next((p for p in profiles if cs.matches_profile(p, dirname)), None)
     if profile is None:
         return False, f"No Claude profile called {dirname}"
     claude = claude_in_terminal(home)
     if claude is None:
         return False, NO_CLAUDE
     folder = folder if folder and os.path.isdir(folder) else str(home)
-    if not open_terminal(folder, cs.new_chat_command(profile, home, claude)):
+    prompt = task.prompt(home, profiles) if task else ""
+    command = cs.task_command(profile, prompt, home, claude) if prompt else cs.new_chat_command(profile, home, claude)
+    if not open_terminal(folder, command):
         return False, "No terminal found to open the chat in"
     return True, f"Opened a new {profile.label} chat in {cs.short_path(folder, home)}"
+
+
+def new_chat_background(home, extra_dirs, dirname, folder=None, task=NO_TASK):
+    """Start a task as a background session on one profile, in folder."""
+    profiles = cs.discover_profiles(home, extra_dirs)
+    profile = next((p for p in profiles if cs.matches_profile(p, dirname)), None)
+    if profile is None:
+        return False, f"No Claude profile called {dirname}"
+    claude = claude_path(home)
+    if claude is None:
+        return False, NO_CLAUDE
+    if not task:
+        return False, "Write what Claude should do first"
+    folder = folder if folder and os.path.isdir(folder) else str(home)
+    # in a systemd scope of its own: Claude's background service may start
+    # with it, and must outlive a restart of the desktop shell (start_app)
+    ok, message, _job = cs.start_background(profile, folder, task.prompt(home, profiles), home, claude,
+                                            prefix=scope_prefix("claude"))
+    return ok, message
 
 
 def choose_folder(title, start):
@@ -856,21 +885,22 @@ def choose_folder(title, start):
     return folder, ""
 
 
-def new_chat_choosing_folder(home, extra_dirs, dirname, vscode=False):
+def new_chat_choosing_folder(home, extra_dirs, dirname, start=None, task=NO_TASK):
     """Ask for a folder (the dialog opens in your home folder), then open a new
-    chat on the profile there, in a terminal or in VS Code. Cancelling the
-    dialog does nothing."""
+    chat on the profile there with start (new_chat, new_chat_vscode or
+    new_chat_background). Cancelling the dialog does nothing."""
+    start = start or new_chat
     profile = next((p for p in cs.discover_profiles(home, extra_dirs) if cs.matches_profile(p, dirname)), None)
     if profile is None:
         return False, f"No Claude profile called {dirname}"
-    if not vscode and claude_in_terminal(home) is None:
+    if start is not new_chat_vscode and claude_in_terminal(home) is None:
         return False, NO_CLAUDE
     folder, error = choose_folder(f"New Claude chat on {profile.label} in…", home)
     if folder is None:
         return (False, error) if error else (True, "")
     if not os.path.isdir(folder):
         return False, f"Not a folder: {folder}"
-    return (new_chat_vscode if vscode else new_chat)(home, extra_dirs, dirname, folder)
+    return start(home, extra_dirs, dirname, folder, task)
 
 
 # ---------------------------------------------------------------- new chats in VS Code
@@ -947,14 +977,21 @@ def start_vscode_chat(code, folder, link=VSCODE_NEW_CHAT):
     later(lambda: open_vscode_chat(os.path.basename(folder.rstrip("/")) or folder, wait, link=link))
 
 
-def new_chat_vscode(home, extra_dirs, dirname, folder=None):
+def vscode_task_link(prompt):
+    """The Claude extension's link to a new conversation with prompt typed in
+    (you send it), or to an empty one."""
+    return VSCODE_NEW_CHAT + "?" + urlencode({"prompt": prompt}) if prompt else VSCODE_NEW_CHAT
+
+
+def new_chat_vscode(home, extra_dirs, dirname, folder=None, task=NO_TASK):
     """Open folder in VS Code and a new chat in its Claude extension, when
-    that runs on this profile (vscode_for)."""
+    that runs on this profile (vscode_for); a task is typed into it."""
     code, profile = vscode_for(home, extra_dirs, dirname)
     if code is None:
         return False, profile
+    prompt = task.prompt(home, cs.discover_profiles(home, extra_dirs)) if task else ""
     folder = folder if folder and os.path.isdir(folder) else str(home)
-    start_vscode_chat(code, folder)
+    start_vscode_chat(code, folder, vscode_task_link(prompt))
     return True, f"Opening a new {profile.label} chat in VS Code ({cs.short_path(folder, home)})"
 
 
@@ -991,17 +1028,24 @@ def remote_vscode(host, folder, link, what):
     return True, f"Opening VS Code on {host}; {what} once it's connected"
 
 
-def new_chat_remote_vscode(host, folder="", account=None):
-    """A new chat in VS Code connected to an SSH host (remote_vscode). With
-    account (a CLAUDE_CONFIG_DIR on the host, "-" for none), VS Code's Claude
-    there first switches to that account, and stays on it: nothing opens
-    when it can't (the chat would start on the other account)."""
+def new_chat_remote_vscode(host, folder="", account=None, task=NO_TASK):
+    """A new chat in VS Code connected to an SSH host (remote_vscode), with a
+    task typed in (its plan fetched from the host). With account (a
+    CLAUDE_CONFIG_DIR on the host, "-" for none), VS Code's Claude there
+    first switches to that account, and stays on it: nothing opens when it
+    can't (the chat would start on the other account)."""
+    import remote
+    prompt = task.text.strip()
+    if task.plan:
+        answer = remote.plan_text(host, task.plan, task.plan_profile)
+        if not answer.get("ok"):
+            return False, answer.get("message") or f"Couldn't get the plan from {host}"
+        prompt = cs.plan_prompt(task.text, answer.get("markdown") or "", answer.get("where") or task.plan)
     if account is not None:
-        import remote
         ok, message = remote.vscode_account(host, None if account == "-" else account)
         if not ok:
             return False, f"Couldn't switch VS Code's Claude on {host}: {message}"
-    return remote_vscode(host, folder, VSCODE_NEW_CHAT, "the new chat starts")
+    return remote_vscode(host, folder, vscode_task_link(prompt), "the new chat starts")
 
 
 def resume_remote_vscode(host, session_id, folder=""):
@@ -1338,17 +1382,18 @@ def resume(home, extra_dirs, session_id, profile_dir=None):
     return resume_chat(profile, path, session_id, home)
 
 
-def continue_on(home, extra_dirs, session_id, profile_dir):
+def continue_on(home, extra_dirs, session_id, profile_dir, end_first=False):
     """Continue a chat on another account: share it with that account if it
-    doesn't have it yet, then reopen it there in a terminal."""
+    doesn't have it yet, then reopen it there in a terminal. end_first: a
+    session that has it open idle here (one a usage limit stopped) quits first."""
     target, there = sharing.give_to(cs.discover_profiles(home, extra_dirs), session_id, profile_dir,
-                                    sharing.store_root(home))
+                                    sharing.store_root(home), end_first, home)
     if target is None:
         return False, there
     return resume_chat(target, there, session_id, home)
 
 
-def continue_command(home, extra_dirs, session_id, profile_dir):
+def continue_command(home, extra_dirs, session_id, profile_dir, end_first=False):
     """The same, but hand back the command that reopens it there instead of
     opening a terminal (the VS Code extension runs it in one of its own):
     (ok, message, command or None)."""
@@ -1356,7 +1401,31 @@ def continue_command(home, extra_dirs, session_id, profile_dir):
     if claude is None:
         return False, NO_CLAUDE, None
     return sharing.continue_command(cs.discover_profiles(home, extra_dirs), session_id, profile_dir,
-                                    sharing.store_root(home), home, claude)
+                                    sharing.store_root(home), home, claude, end_first)
+
+
+# ---------------------------------------------------------------- plans
+
+
+def open_plan(home, extra_dirs, slug, profile_dir=None):
+    """Open a plan file in your app for Markdown (xdg-open): a change you
+    make there is the plan's."""
+    path = cs.find_plan(cs.discover_profiles(home, extra_dirs), slug, profile_dir)
+    if path is None:
+        return False, "That plan isn't there any more"
+    if not open_file(path):
+        return False, f"There's no xdg-open to open {path} with"
+    return True, f"Opened the plan {cs.plan_title(path) or slug}"
+
+
+def share_plan(home, extra_dirs, slug, profile_dir=None, to=None):
+    """Share a plan (from profile_dir's copy) with every profile, or only with to."""
+    return sharing.plan_sharing(cs.discover_profiles(home, extra_dirs), slug, profile_dir, True, to)
+
+
+def unshare_plan(home, extra_dirs, slug, profile_dir):
+    """Keep a shared plan on profile_dir only."""
+    return sharing.plan_sharing(cs.discover_profiles(home, extra_dirs), slug, profile_dir, False)
 
 
 def share(home, extra_dirs, session_id, profile_dir=None):
@@ -1387,13 +1456,17 @@ def undismiss_all(home, extra_dirs, _session_id=None):
 
 USAGE = ("usage: jump.py [--stop [--busy] | --interrupt] SESSION_ID [--profile PROFILE] [--config-dir DIR]...\n"
          "       jump.py --save-settings JSON --by WIDGET [--unless-default]\n"
-         "       jump.py --new-chat PROFILE_DIRNAME [--cwd FOLDER | --choose-folder] [--vscode] [--config-dir DIR]...\n"
+         "       jump.py --new-chat PROFILE_DIRNAME [--cwd FOLDER | --choose-folder] [--vscode | --bg]\n"
+         "               [--prompt TEXT] [--plan SLUG [--plan-profile PROFILE]] [--config-dir DIR]...\n"
          "       jump.py --resume|--continue|--unshare SESSION_ID --profile PROFILE\n"
-         "       jump.py --continue SESSION_ID --profile PROFILE --print-command   (share it; print the command, no terminal)\n"
+         "       jump.py --continue SESSION_ID --profile PROFILE [--end-first] [--print-command]\n"
+         "               (share it and reopen it there, or print the command; --end-first: quit an idle session first)\n"
+         "       jump.py --open-plan|--share-plan|--unshare-plan SLUG [--profile PROFILE] [--to PROFILE]\n"
          "       jump.py --share SESSION_ID\n"
          "       jump.py --remote-vscode HOST SESSION_ID [--cwd FOLDER_ON_HOST]\n"
          "       jump.py --remote-terminal HOST [--name SESSION_NAME] [--vscode-terminal PID [--cwd FOLDER_ON_HOST]]\n"
          "       jump.py --remote-new-vscode HOST [--cwd FOLDER_ON_HOST] [--account CONFIG_DIR|-]\n"
+         "               [--prompt TEXT] [--plan SLUG [--plan-profile PROFILE]]\n"
          "       jump.py --resume SESSION_ID --profile PROFILE --vscode\n"
          "       jump.py --remote-resume-vscode HOST SESSION_ID [--cwd FOLDER_ON_HOST]\n"
          "       jump.py --changes CHAT_ID [--profile PROFILE] [--turn] [--list]\n"
@@ -1417,10 +1490,26 @@ def main(argv=None):
     busy, settings_json, settings_by, unless_default = False, None, "", False
     turn, listing, device, devices = False, False, None, None
     agent_id, open_it, run_file, account, vscode_terminal = None, True, None, None, None
+    task, background, end_first, to = Task(), False, False, None
     while args:
         arg = args.pop(0)
         if arg == "--config-dir" and args:
             extra.append(args.pop(0))
+        elif arg == "--prompt" and args:
+            task.text = args.pop(0)
+        elif arg == "--plan" and args:
+            task.plan = args.pop(0)
+        elif arg == "--plan-profile" and args:
+            task.plan_profile = args.pop(0)
+        elif arg == "--bg":
+            background = True
+        elif arg == "--end-first":
+            end_first = True
+        elif arg == "--to" and args:
+            to = args.pop(0)
+        elif arg in ("--open-plan", "--share-plan", "--unshare-plan") and args:
+            action = {"--open-plan": open_plan, "--share-plan": share_plan, "--unshare-plan": unshare_plan}[arg]
+            session_id = args.pop(0)  # the plan's slug
         elif arg == "--print-command":
             print_command = True
         elif arg == "--profile" and args:
@@ -1485,9 +1574,13 @@ def main(argv=None):
         session_id = session_id or "-"
     if vscode_terminal and action != "--remote-terminal":
         sys.exit(USAGE)
-    if not session_id or (action in (continue_on, unshare) and not profile_dir):
+    if not session_id or (action in (continue_on, unshare, unshare_plan) and not profile_dir):
         sys.exit(USAGE)
     if print_command and action is not continue_on:
+        sys.exit(USAGE)
+    if (task or background) and action not in (new_chat, "--remote-new-vscode"):
+        sys.exit(USAGE)
+    if (background and vscode) or (end_first and action is not continue_on) or (to and action is not share_plan):
         sys.exit(USAGE)
     if vscode and action is resume and not profile_dir:
         sys.exit(USAGE)
@@ -1498,13 +1591,19 @@ def main(argv=None):
     command, comparison = None, None
     try:
         if print_command:
-            ok, message, command = continue_command(Path.home(), extra, session_id, profile_dir)
+            ok, message, command = continue_command(Path.home(), extra, session_id, profile_dir, end_first)
+        elif action is continue_on:
+            ok, message = continue_on(Path.home(), extra, session_id, profile_dir, end_first)
+        elif action is share_plan:
+            ok, message = share_plan(Path.home(), extra, session_id, profile_dir, to)
+        elif action in (open_plan, unshare_plan):
+            ok, message = action(Path.home(), extra, session_id, profile_dir)
         elif action == "--remote-vscode":
             ok, message = jump_remote_vscode(remote_host, session_id, folder or "")
         elif action == "--remote-terminal":
             ok, message = jump_remote_terminal(remote_host, name_arg, vscode_terminal, folder or "")
         elif action == "--remote-new-vscode":
-            ok, message = new_chat_remote_vscode(remote_host, folder or "", account)
+            ok, message = new_chat_remote_vscode(remote_host, folder or "", account, task)
         elif action == "--remote-resume-vscode":
             ok, message = resume_remote_vscode(remote_host, session_id, folder or "")
         elif action is resume and vscode:
@@ -1523,15 +1622,16 @@ def main(argv=None):
             ok, message = show_changes(Path.home(), extra, session_id, profile_dir, turn)
         elif action is save_settings:
             ok, message = save_settings(Path.home(), settings_json, settings_by, unless_default)
-        elif action is new_chat and choose:
-            ok, message = (new_chat_choosing_folder(Path.home(), extra, session_id, vscode=True) if vscode
-                           else new_chat_choosing_folder(Path.home(), extra, session_id))
         elif action is new_chat:
-            ok, message = (new_chat_vscode if vscode else new_chat)(Path.home(), extra, session_id, folder)
+            start = new_chat_vscode if vscode else new_chat_background if background else new_chat
+            ok, message = (new_chat_choosing_folder(Path.home(), extra, session_id, start, task) if choose
+                           else start(Path.home(), extra, session_id, folder, task))
         elif action in (jump, interrupt, resume, continue_on, share, unshare):
             ok, message = action(Path.home(), extra, session_id, profile_dir)
         else:
             ok, message = action(Path.home(), extra, session_id)
+    except ValueError as exc:  # e.g. a task's plan that's gone: says why
+        ok, message = False, str(exc)
     except Exception as exc:  # report, don't crash: the widget shows the message
         ok, message = False, f"{type(exc).__name__}: {exc}"
     print(json.dumps({"ok": ok, "message": message, **({"command": command} if command else {}),

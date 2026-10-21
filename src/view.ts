@@ -7,8 +7,8 @@ import * as vscode from "vscode";
 import type { Actions } from "./actions";
 import { setReopenIn } from "./config";
 import type { Dashboard } from "./dashboard";
-import { findChatRef } from "./shared/model";
-import type { ChatRef, HostMessage, WebviewMessage } from "./shared/types";
+import { findChatRef, findPlan, machineStatus, shareAccounts } from "./shared/model";
+import type { ChatRef, Group, HostMessage, PlanItem, WebviewMessage } from "./shared/types";
 
 const AGENT_ID = /^[A-Za-z0-9_-]{1,100}$/;
 
@@ -127,6 +127,12 @@ export class ViewHost implements vscode.WebviewViewProvider, vscode.Disposable {
     return ref ? findChatRef(state.status, state.hosts, ref.host, ref.key) : null;
   }
 
+  // One of an account's plans the page names, as the extension knows it now
+  private planOf(m: { groupId?: unknown; host?: unknown; plan?: unknown }): { plan: PlanItem; group: Group } | null {
+    const state = this.dash.state();
+    return findPlan(state.status, state.hosts, m.host, m.groupId, m.plan);
+  }
+
   private receive(webview: vscode.Webview, raw: unknown): void {
     if (!raw || typeof raw !== "object" || typeof (raw as { type?: unknown }).type !== "string") return;
     const m = raw as WebviewMessage;
@@ -166,6 +172,45 @@ export class ViewHost implements vscode.WebviewViewProvider, vscode.Disposable {
         break;
       case "newChat":
         void this.actions.newChat(text(m.groupId), text(m.host));
+        break;
+      case "handOver": {
+        // only to one of the chat's machine's accounts, as the extension knows them
+        const state = this.dash.state();
+        const to = shareAccounts(machineStatus(state, chat?.host)).find((g) => g.shareProfile === m.profile);
+        if (chat && to?.shareProfile) void this.actions.handOver(chat, to.shareProfile);
+        break;
+      }
+      case "openPlan": {
+        if (chat?.plan) void this.actions.openPlan({ ...chat.plan, profileDir: chat.profileDir }, chat.host);
+        else {
+          const found = this.planOf(m);
+          if (found) void this.actions.openPlan(found.plan, found.group.host);
+        }
+        break;
+      }
+      case "carryOutPlan": {
+        const found = this.planOf(m);
+        if (found) void this.actions.newChat(found.group.id, found.group.host, found.plan);
+        break;
+      }
+      case "continuePlanChat": {
+        const found = this.planOf(m);
+        if (found) void this.actions.continuePlanChat(found.plan, found.group);
+        break;
+      }
+      case "sharePlan": {
+        const found = this.planOf(m);
+        if (found) void this.actions.sharePlan(found.plan, found.group);
+        break;
+      }
+      case "findChat":
+        void this.actions.findChat();
+        break;
+      case "loginHost":
+        if (text(m.host) && this.dash.shownHosts().includes(m.host)) void this.actions.loginHost(m.host);
+        break;
+      case "disconnectHost":
+        if (text(m.host) && this.dash.shownHosts().includes(m.host)) void this.actions.disconnectHost(m.host);
         break;
       case "login":
         void this.actions.login(text(m.groupId), text(m.host));

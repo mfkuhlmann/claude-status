@@ -4,19 +4,35 @@
 // way (jump.py / remote.py: your desktop's terminal app; window raising on
 // KDE, and on GNOME with the widget's GNOME Shell extension).
 
+import * as fs from "node:fs";
 import * as os from "node:os";
 import * as vscode from "vscode";
 import type { AccountSwitch } from "./accountSwitch";
 import type { Answer, Backend } from "./backend";
 import { configDirArgs, setSshHosts, settings } from "./config";
-import { agentRunArgs, isAgentRunFile, openAgentRunFile } from "./agentRun";
+import { agentRunArgs } from "./agentRun";
 import { openComparison } from "./changes";
 import { claudePanelAvailable, localPanelProfileKey, openPanelChat } from "./claudePanel";
+import { isAgentRunFile, openAgentRunFile } from "./agentRun";
 import type { Dashboard } from "./dashboard";
 import { canRaiseWindows, isGnome } from "./desktop";
 import { chatRef } from "./notify";
-import { allGroups, canEndChat, cliInstalled, groupLabel, hasTurn, machineStatus, nextChatIndex, shareAccounts, shellQuote } from "./shared/model";
-import type { ChatRef, Group } from "./shared/types";
+import {
+  ago,
+  allGroups,
+  canEndChat,
+  chatRefOf,
+  claudeCodeHere,
+  cliInstalled,
+  groupLabel,
+  hasTurn,
+  machineStatus,
+  nextChatIndex,
+  reopensInClaudeCode,
+  shareAccounts,
+  shellQuote,
+} from "./shared/model";
+import type { ChatRef, FoundChat, Group, PlanItem, Project, Session } from "./shared/types";
 import { localAncestors, type Place, type Terminals } from "./terminals";
 
 const CHAT_LINK = "vscode://anthropic.claude-code/open?session=";
@@ -328,9 +344,220 @@ export class Actions {
     this.refresh(host);
   }
 
+  // ---------------------------------------------------------------- chats a usage limit stopped
+
+  // Continue a chat a usage limit stopped on another account of its machine
+  // (profile: that account's shareProfile): it's shared with that account and
+  // reopened there, in VS Code's terminal (the desktop's with openIn
+  // "system"). An idle Claude that has it open here quits first (--end-first).
+  async handOver(chat: ChatRef, profile: string): Promise<void> {
+    if (this.demoOnly()) return;
+    const host = chat.host;
+    const id = chat.chatId || chat.sessionId;
+    const endFirst = chat.pid != null ? ["--end-first"] : [];
+    const print = settings.openIn() !== "system" ? ["--print-command"] : [];
+    const answer = host
+      ? await this.backend.action("remote.py", ["--continue", host, id, profile, ...endFirst, ...print])
+      : await this.backend.action("jump.py", ["--continue", id, "--profile", profile, ...endFirst, ...print, ...configDirArgs()]);
+    if (this.report(answer, "Couldn't continue it there") && answer.command)
+      await this.terminals.run(`${host ?? ""}|${id}|${profile}`, chat.name, answer.command, this.place(host));
+    this.refresh(host);
+  }
+
+  // ---------------------------------------------------------------- plans
+
+  // A plan in an editor tab: yours to change, also one of the host this
+  // window is connected to. Another SSH host's comes over ssh as a copy
+  // (remote.py --plan), shown in the Markdown preview.
+  async openPlan(plan: { slug: string; path: string; profileDir: string }, host?: string): Promise<void> {
+    if (this.demoOnly()) return;
+    if (host && host !== this.dash.currentHost) {
+      const answer = await this.backend.action("remote.py", ["--plan", host, plan.slug, plan.profileDir, "--no-open"]);
+      if (!this.report(answer, "Couldn't open the plan")) return;
+      if (!isAgentRunFile(answer.file)) return this.fail("Couldn't open the plan: the helper saved it somewhere unexpected");
+      const error = await openAgentRunFile(answer.file);
+      if (error) this.fail(`Couldn't open the plan: ${error}`);
+      return;
+    }
+    // (a file of this computer, in a Remote-SSH window: through vscode-local)
+    const uri = !host && vscode.env.remoteName ? vscode.Uri.from({ scheme: "vscode-local", path: plan.path }) : vscode.Uri.file(plan.path);
+    try {
+      await vscode.window.showTextDocument(uri, { preview: false });
+    } catch (e) {
+      this.fail(`Couldn't open the plan: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  // The chat that made a plan, to change the plan with Claude: its row's
+  // chat comes up, or it reopens (in a terminal or a Claude Code tab, as the
+  // switch of Recent chats says)
+  async continuePlanChat(plan: PlanItem, group: Group): Promise<void> {
+    if (this.demoOnly() || !plan.chatId) return;
+    const host = group.host;
+    const machine = machineStatus(this.dash.state(), host);
+    for (const g of machine?.groups ?? [])
+      for (const s of g.sessions)
+        if (s.chatId === plan.chatId || s.sessionId === plan.chatId) return this.open(chatRefOf(s, host));
+    const chat: ChatRef = {
+      host,
+      key: plan.key,
+      sessionId: plan.chatId,
+      chatId: plan.chatId,
+      profileDir: plan.chatProfileDir ?? plan.profileDir,
+      name: plan.title,
+      cwd: plan.cwd,
+      kind: "chat",
+      pid: null,
+      openCommand: plan.openCommand ?? null,
+    };
+    const codeHere = claudeCodeHere(group, this.dash.claudeCodeInfo());
+    if (reopensInClaudeCode(settings.reopenIn(), this.cliOn(host), codeHere)) return this.openInClaudeCode(chat);
+    if (!chat.openCommand && !host) {
+      // (an older status has no command for it: the widget's jump.py reopens it)
+      const answer = await this.backend.action("jump.py", [plan.chatId, "--profile", chat.profileDir, ...configDirArgs()]);
+      this.report(answer, "Couldn't reopen the chat");
+      return;
+    }
+    return this.open(chat);
+  }
+
+  // Share a plan with the machine's other accounts, or keep it on one: one
+  // file on each of them (the widget's sharing.py; an SSH host's there)
+  async sharePlan(plan: PlanItem, group: Group): Promise<void> {
+    if (this.demoOnly()) return;
+    const host = group.host;
+    const accounts = shareAccounts(machineStatus(this.dash.state(), host));
+    const here = accounts.find((g) => g.profileKeys.includes(plan.profileDir));
+    type Item = vscode.QuickPickItem & { to?: string; keep?: string };
+    const items: Item[] = [];
+    for (const g of accounts) if (g !== here && g.shareProfile) items.push({ label: `Share with ${g.title}`, to: g.shareProfile });
+    if (accounts.length > 2) items.push({ label: "Share with all accounts", to: "" });
+    if (plan.shared) {
+      items.push({ label: "", kind: vscode.QuickPickItemKind.Separator });
+      for (const g of accounts) if (g.shareProfile) items.push({ label: `Keep only on ${g.title}`, keep: g.shareProfile });
+    }
+    const pick = await vscode.window.showQuickPick(items, { placeHolder: host ? `${plan.title} on ${host}` : plan.title });
+    if (!pick || (pick.to === undefined && pick.keep === undefined)) return;
+    const answer =
+      pick.keep !== undefined
+        ? host
+          ? await this.backend.action("remote.py", ["--unshare-plan", host, plan.slug, pick.keep])
+          : await this.backend.action("jump.py", ["--unshare-plan", plan.slug, "--profile", pick.keep, ...configDirArgs()])
+        : host
+          ? await this.backend.action("remote.py", ["--share-plan", host, plan.slug, plan.profileDir, ...(pick.to ? [pick.to] : [])])
+          : await this.backend.action("jump.py", ["--share-plan", plan.slug, "--profile", plan.profileDir, ...(pick.to ? ["--to", pick.to] : []), ...configDirArgs()]);
+    if (this.report(answer, "Couldn't share the plan")) this.dash.setActionInfo(answer.message);
+    this.refresh(host);
+  }
+
+  // ---------------------------------------------------------------- finding a chat
+
+  // Every chat with all the words you type in its name, its folder or one of
+  // your prompts, here and on the SSH hosts shown (claude_status.py --find,
+  // remote.py --find), newest first; the one you pick comes up, or reopens.
+  async findChat(): Promise<void> {
+    if (this.demoOnly()) return;
+    type Item = vscode.QuickPickItem & { found?: FoundChat; host?: string };
+    const qp = vscode.window.createQuickPick<Item>();
+    qp.title = "Find a Chat";
+    qp.placeholder = "Words in its name, its folder or one of your prompts";
+    qp.matchOnDescription = true;
+    qp.matchOnDetail = true;
+    let asked = 0;
+    let timer: NodeJS.Timeout | undefined;
+    const search = async (query: string) => {
+      const mine = ++asked;
+      if (query.trim().length < 2) {
+        qp.items = [];
+        qp.busy = false;
+        return;
+      }
+      qp.busy = true;
+      const hosts = this.dash.shownHosts();
+      const answers = await Promise.all([
+        this.backend.find(query, undefined, configDirArgs()),
+        ...hosts.map((h) => this.backend.find(query, h)),
+      ]);
+      if (mine !== asked) return; // you typed on meanwhile
+      const items: Item[] = [];
+      const now = Date.now();
+      answers.forEach((answer, i) => {
+        const host = i ? hosts[i - 1] : undefined;
+        if (hosts.length) items.push({ label: host ?? "This computer", kind: vscode.QuickPickItemKind.Separator });
+        if (!answer.ok) items.push({ label: `$(warning) ${answer.message}`, alwaysShow: true });
+        for (const c of answer.results)
+          items.push({
+            label: (c.shared ? "$(link) " : "") + c.name,
+            description: `${c.account} · ${c.cwdShort || "~"} · ${ago(now - c.lastActive)}`,
+            detail: c.match || undefined,
+            alwaysShow: true,
+            found: c,
+            host,
+          });
+        if (answer.more) items.push({ label: "$(info) More chats have these words: add a word to narrow it down", alwaysShow: true });
+      });
+      if (!items.some((it) => it.found)) items.push({ label: "No chat with all of these words in its name, folder or your prompts", alwaysShow: true });
+      qp.items = items;
+      qp.busy = false;
+    };
+    qp.onDidChangeValue((value) => {
+      clearTimeout(timer);
+      timer = setTimeout(() => void search(value), 300);
+    });
+    const pick = await new Promise<Item | undefined>((resolve) => {
+      qp.onDidAccept(() => {
+        resolve(qp.selectedItems[0]);
+        qp.hide();
+      });
+      qp.onDidHide(() => resolve(undefined));
+      qp.show();
+    });
+    clearTimeout(timer);
+    qp.dispose();
+    if (pick?.found) await this.openFound(pick.found, pick.host);
+  }
+
+  // A chat the search found: its row's chat when it's listed, else reopened
+  // (in a terminal or a Claude Code tab, as the switch of Recent chats says)
+  private async openFound(found: FoundChat, host?: string): Promise<void> {
+    const machine = machineStatus(this.dash.state(), host);
+    let other: { s: Session } | null = null;
+    for (const g of machine?.groups ?? [])
+      for (const s of g.sessions)
+        if (s.chatId === found.sessionId || s.sessionId === found.sessionId) {
+          if ((g.profileKeys ?? []).includes(found.profileDir)) return this.open(chatRefOf(s, host));
+          other = other ?? { s };
+        }
+    if (other) return this.open(chatRefOf(other.s, host));
+    const group = (machine?.groups ?? []).find((g) => g.id === found.groupId || (g.profileKeys ?? []).includes(found.profileDir));
+    const chat: ChatRef = {
+      host,
+      key: found.key,
+      sessionId: found.sessionId,
+      chatId: found.sessionId,
+      profileDir: found.profileDir,
+      name: found.name,
+      cwd: found.cwd,
+      kind: "chat",
+      pid: null,
+      openCommand: found.openCommand ?? null,
+      shared: found.shared,
+    };
+    if (group && reopensInClaudeCode(settings.reopenIn(), this.cliOn(host), claudeCodeHere({ ...group, host }, this.dash.claudeCodeInfo())))
+      return this.openInClaudeCode(chat);
+    return this.open(chat);
+  }
+
   // ---------------------------------------------------------------- new chat
 
-  async newChat(groupId?: string, host?: string): Promise<void> {
+  // A new chat on an account, in one of its folders (or one you pick), in a
+  // terminal, or in the Claude Code chat tab. "Start with a task…" asks what
+  // Claude should do first: the chat starts with it (in a terminal at once,
+  // in a chat tab typed in for you to send), and can run in the background
+  // then (claude --bg: no window, listed right away; only in folders Claude
+  // trusts, since it can't ask there). plan: carry out that plan of the
+  // account (its text is the chat's first message, with what you add).
+  async newChat(groupId?: string, host?: string, plan?: PlanItem, task?: string): Promise<void> {
     if (this.demoOnly()) return;
     const state = this.dash.state();
     const groups = allGroups(state.status, state.hosts);
@@ -349,31 +576,71 @@ export class Actions {
       if (!group) return;
     }
     host = group.host;
-    if (!this.cliOn(host)) return this.newChatWithoutCli(group);
-    if (settings.openIn() === "system" && !host) return this.newChatSystem(group);
+    const where = host ? `${group.title} on ${host}` : group.title;
+    if (plan && task === undefined) {
+      task = await vscode.window.showInputBox({
+        title: `Carry out “${plan.title}” on ${where}`,
+        prompt: "The plan is the chat's first message. Anything to add? (optional)",
+        placeHolder: "e.g. Only steps 1 and 2 for now",
+      });
+      if (task === undefined) return;
+      task = task.trim();
+    }
+    const hasTask = !!task || !!plan;
+    const cli = this.cliOn(host);
+    const panel = await this.panelChoice(group);
+    if (!cli && !panel.length) {
+      const why = `Claude Code's claude command isn't installed ${host ? `on ${host}` : "on this computer"}: it isn't on PATH, in ~/.local/bin, npm's or nvm's folders, nor on the login shell's PATH.`;
+      return this.fail(`Can't start a chat in a terminal: ${why}`);
+    }
     const home = group.homeChatCommand ?? "";
     const chat = chatCommandOf(home);
-    if (!home || !chat) return this.fail(`Can't start a chat on ${groupLabel(group)} from here.`);
+    if (cli && (!home || !chat) && !hasTask) return this.fail(`Can't start a chat on ${groupLabel(group)} from here.`);
     // Here: recent folders, then any folder you pick. A host's folders can't be
     // browsed unless this window is connected to it: its home folder is listed.
-    const folders = host ? group.projects.slice() : group.projects.filter((f) => f.short !== "~");
-    if (host && !folders.some((f) => f.short === "~")) folders.push({ path: "", short: "~", newChatCommand: home });
-    type Item = vscode.QuickPickItem & { command?: string; choose?: "dialog" | "type"; panel?: true };
-    const items: Item[] = folders.map((f) => ({
-      label: `$(${f.short === "~" ? "home" : "folder"}) ${f.short === "~" ? "Home folder (~)" : f.short}`,
-      command: f.newChatCommand ?? inFolder(f.path, chat),
-    }));
-    items.push({ label: "", kind: vscode.QuickPickItemKind.Separator });
+    let folders: Project[] = host ? group.projects.slice() : group.projects.filter((f) => f.short !== "~");
+    if (host && !folders.some((f) => f.short === "~")) folders.push({ path: "", short: "~", newChatCommand: home, trusted: false });
+    if (plan?.cwd) {
+      const own = folders.find((f) => f.path === plan.cwd);
+      folders = [own ?? { path: plan.cwd, short: plan.cwdShort || plan.cwd }, ...folders.filter((f) => f.path !== plan.cwd)];
+    }
+    const label = (f: Project) =>
+      `$(${f.short === "~" ? "home" : "folder"}) ${f.short === "~" ? "Home folder (~)" : f.short}` + (plan && f.path === plan.cwd ? "  (the plan's)" : "");
+    type Item = vscode.QuickPickItem & { start?: "terminal" | "background" | "panel" | "task"; folder?: Project; choose?: "dialog" | "type" };
     const canBrowse = !host || host === this.dash.currentHost;
-    items.push(canBrowse ? { label: "$(folder-opened) Choose folder…", choose: "dialog" } : { label: "$(edit) Type a folder…", choose: "type" });
-    const panel = await this.panelChoice(group);
-    if (panel.length) items.unshift({ label: "In a terminal", kind: vscode.QuickPickItemKind.Separator });
-    items.push(...panel);
-    const where = host ? `${group.title} on ${host}` : group.title;
-    const pick = await vscode.window.showQuickPick(items, { placeHolder: `New chat on ${where} in…` });
-    if (!pick) return;
-    if (pick.panel) return this.panelChat(group);
-    let command = pick.command;
+    const items: Item[] = [];
+    if (cli && !hasTask)
+      items.push({ label: "$(sparkle) Start with a task…", description: "say what Claude should do: it starts right away, also in the background", start: "task" });
+    if (cli) {
+      items.push({ label: "In a terminal", kind: vscode.QuickPickItemKind.Separator });
+      for (const f of folders) items.push({ label: label(f), start: "terminal", folder: f });
+      items.push(canBrowse ? { label: "$(folder-opened) Choose folder…", start: "terminal", choose: "dialog" } : { label: "$(edit) Type a folder…", start: "terminal", choose: "type" });
+    }
+    if (cli && hasTask) {
+      items.push({ label: "In the background", kind: vscode.QuickPickItemKind.Separator });
+      const trusted = folders.filter((f) => f.trusted !== false && f.path);
+      for (const f of trusted) items.push({ label: label(f), description: "no window: listed right away", start: "background", folder: f });
+      if (!host) items.push({ label: "$(folder-opened) Choose folder…", description: "one Claude trusts already", start: "background", choose: "dialog" });
+      if (!trusted.length && host) items.push({ label: "$(info) No folder Claude trusts there yet", description: "start a chat in one in a terminal once" });
+    }
+    if (!cli) items.push({ label: "In a terminal", kind: vscode.QuickPickItemKind.Separator }, { label: "$(warning) No claude command", description: host ? `on ${host}` : "on this computer" });
+    items.push(...panel.map((p) => ({ ...p, start: p.panel ? ("panel" as const) : undefined })));
+    const pick = await vscode.window.showQuickPick(items, {
+      title: plan ? `Carry out “${plan.title}” on ${where}` : task ? `“${task.length > 60 ? task.slice(0, 59) + "…" : task}” on ${where}` : undefined,
+      placeHolder: plan || task ? "Start it in…" : `New chat on ${where} in…`,
+    });
+    if (!pick?.start) return;
+    if (pick.start === "task") {
+      const text = await vscode.window.showInputBox({
+        title: `New chat on ${where}`,
+        prompt: "What should Claude do? The chat starts with it.",
+        placeHolder: "e.g. Fix the flaky test in tests/test_jump.py",
+      });
+      if (!text?.trim()) return;
+      return this.newChat(group.id, host, undefined, text.trim());
+    }
+    if (pick.start === "panel") return this.panelChat(group, hasTask ? await this.taskText(task ?? "", plan, host) : undefined);
+    let folder = pick.folder?.path ?? "";
     if (pick.choose === "dialog") {
       const remoteHome = host ? folderOf(home) : null;
       const defaultUri = host
@@ -383,13 +650,59 @@ export class Actions {
         : vscode.Uri.file(os.homedir());
       const picked = await vscode.window.showOpenDialog({ canSelectFolders: true, canSelectFiles: false, defaultUri, openLabel: "Start Chat Here" });
       if (!picked?.length) return;
-      command = inFolder(host ? picked[0].path : picked[0].fsPath, chat);
+      folder = host ? picked[0].path : picked[0].fsPath;
     } else if (pick.choose === "type") {
-      const folder = await vscode.window.showInputBox({ prompt: `Folder on ${host}`, placeHolder: "/home/you/project" });
-      if (!folder) return;
-      command = inFolder(folder.trim(), chat);
+      const typed = await vscode.window.showInputBox({ prompt: `Folder on ${host}`, placeHolder: "/home/you/project" });
+      if (!typed) return;
+      folder = typed.trim();
     }
-    if (command) await this.terminals.run(`new|${Date.now()}`, "new chat", command, this.place(host));
+    const taskArgs = [...(task ? ["--prompt", task] : []), ...(plan ? ["--plan", plan.slug, "--plan-profile", plan.profileDir] : [])];
+    if (pick.start === "background") {
+      const answer = host
+        ? await this.backend.action("remote.py", ["--task", host, group.chatProfile, folder || "~", ...(task ? ["--prompt", task] : []), ...(plan ? ["--plan", plan.slug, plan.profileDir] : []), "--bg"], 120000)
+        : await this.backend.action("jump.py", ["--new-chat", group.chatProfile, ...(folder ? ["--cwd", folder] : []), "--bg", ...taskArgs, ...configDirArgs()], 120000);
+      if (this.report(answer, "Couldn't start it in the background")) this.dash.setActionInfo(answer.message);
+      return this.refresh(host);
+    }
+    // In a terminal: the widget's way (your desktop's terminal), or VS Code's
+    if (settings.openIn() === "system" && !host) {
+      const args = ["--new-chat", group.chatProfile, ...(folder ? ["--cwd", folder] : ["--choose-folder"]), ...taskArgs, ...configDirArgs()];
+      this.report(await this.backend.action("jump.py", args, 600000), "Couldn't open a new chat");
+      return;
+    }
+    let command: string | undefined;
+    if (hasTask) {
+      const answer = host
+        ? await this.backend.action("remote.py", ["--task", host, group.chatProfile, folder || "~", ...(task ? ["--prompt", task] : []), ...(plan ? ["--plan", plan.slug, plan.profileDir] : []), "--print-command"])
+        : await this.backend.action("claude_status.py", ["--task-command", folder || os.homedir(), "--profile", group.chatProfile, ...taskArgs, ...configDirArgs()]);
+      if (!this.report(answer, "Couldn't start it")) return;
+      command = answer.command;
+    } else {
+      command = pick.folder?.newChatCommand ?? (chat ? inFolder(folder, chat) : undefined);
+    }
+    if (command) await this.terminals.run(`new|${Date.now()}`, plan ? plan.title : "new chat", command, this.place(host));
+  }
+
+  // A task's first prompt for a Claude Code chat tab (claude_status.py:
+  // plan_prompt): what you wrote, and the plan's text (an SSH host's fetched
+  // over ssh)
+  private async taskText(task: string, plan?: PlanItem, host?: string): Promise<string> {
+    if (!plan) return task;
+    let file = plan.path;
+    if (host) {
+      const answer = await this.backend.action("remote.py", ["--plan", host, plan.slug, plan.profileDir, "--no-open"]);
+      if (!answer.ok || !isAgentRunFile(answer.file)) return `${task || "Implement this plan."}\n\n(The plan is ${plan.path} on ${host}.)`;
+      file = answer.file;
+    }
+    let body = "";
+    try {
+      body = fs.readFileSync(file, "utf8").slice(0, 100000);
+    } catch {
+      return `${task || "Implement this plan."}\n\n(The plan is ${plan.path}.)`;
+    }
+    const home = os.homedir();
+    const where = !host && plan.path.startsWith(home + "/") ? "~" + plan.path.slice(home.length) : plan.path;
+    return `${task || "Implement this plan."}\n\nThe plan (saved as ${where}):\n\n${body.trim()}\n`;
   }
 
   // Claude's own login for an account that isn't logged in (its loginCommand:
@@ -406,39 +719,6 @@ export class Actions {
   private cliOn(host?: string): boolean {
     const state = this.dash.state();
     return cliInstalled(host ? state.hosts.find((h) => h.name === host)?.result : state.status);
-  }
-
-  // No claude command there: a terminal can't start one, so the menu says so
-  // and offers the Claude Code chat tab where that works
-  private async newChatWithoutCli(group: Group): Promise<void> {
-    const where = group.host ? `on ${group.host}` : "on this computer";
-    const why = `Claude Code's claude command isn't installed ${where}: it isn't on PATH, in ~/.local/bin, npm's or nvm's folders, nor on the login shell's PATH.`;
-    const panel = await this.panelChoice(group);
-    if (!panel.length) return this.fail(`Can't start a chat in a terminal: ${why}`);
-    type Item = vscode.QuickPickItem & { panel?: true };
-    const items: Item[] = [
-      { label: "In a terminal", kind: vscode.QuickPickItemKind.Separator },
-      { label: "$(warning) No claude command", description: where, detail: why },
-      ...panel,
-    ];
-    const pick = await vscode.window.showQuickPick(items, { placeHolder: `New chat on ${group.title} in…` });
-    if (pick?.panel) return this.panelChat(group);
-  }
-
-  private async newChatSystem(group: Group): Promise<void> {
-    type Item = vscode.QuickPickItem & { folder?: string | null; panel?: true };
-    const items: Item[] = [
-      ...group.projects.filter((f) => f.short !== "~").map((f) => ({ label: `$(folder) ${f.short}`, folder: f.path as string | null })),
-      { label: "$(folder-opened) Choose folder…", folder: null },
-    ];
-    const panel = await this.panelChoice(group);
-    if (panel.length) items.unshift({ label: "In a terminal", kind: vscode.QuickPickItemKind.Separator });
-    items.push(...panel);
-    const pick = await vscode.window.showQuickPick(items, { placeHolder: `New chat on ${group.title} in…` });
-    if (!pick) return;
-    if (pick.panel) return this.panelChat(group);
-    const args = ["--new-chat", group.chatProfile, ...(pick.folder ? ["--cwd", pick.folder] : ["--choose-folder"]), ...configDirArgs()];
-    this.report(await this.backend.action("jump.py", args, 600000), "Couldn't open a new chat");
   }
 
   // The Claude Code extension's chat, offered for an account on this window's
@@ -468,7 +748,8 @@ export class Actions {
     ];
   }
 
-  private async panelChat(group?: Group): Promise<void> {
+  // prompt: typed into the new chat, for you to send
+  private async panelChat(group?: Group, prompt?: string): Promise<void> {
     // On this window's SSH host, for another account than Claude Code's
     // there: it switches to that one first, and stays on it
     if (group?.host && !group.vscodeHere && group.configDir !== undefined) {
@@ -476,13 +757,33 @@ export class Actions {
       await new Promise((r) => setTimeout(r, 1500)); // (the Claude extension follows the setting within a second)
     }
     try {
-      await openPanelChat();
+      await openPanelChat(prompt);
     } catch (e) {
       this.fail(`Couldn't open a Claude Code chat: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
   // ---------------------------------------------------------------- SSH hosts
+
+  // A host that wants a password (or a passphrase, a code, its host key
+  // confirmed): a terminal here where ssh asks for it itself, so the
+  // extension never sees it (the widget's remote.py --login-here). The
+  // connection it opens is the one the checks share then, until 30 minutes
+  // after their last use, logging out, or Disconnect.
+  async loginHost(host: string): Promise<void> {
+    if (this.demoOnly()) return;
+    const line = [settings.python(), "-I", `${this.backend.codeDir}/remote.py`, "--login-here", host].map(shellQuote).join(" ");
+    // (closes once you're in; stays when it didn't work)
+    await this.terminals.run(`ssh-login|${host}`, `log in to ${host}`, `${line} && exit`, { kind: "local" }, { private: true });
+    this.dash.watchLogin(host);
+  }
+
+  async disconnectHost(host: string): Promise<void> {
+    if (this.demoOnly()) return;
+    const answer = await this.backend.action("remote.py", ["--disconnect", host], 30000);
+    if (this.report(answer, `Couldn't disconnect from ${host}`)) this.dash.setActionInfo(answer.message);
+    this.refresh(host);
+  }
 
   async pickHosts(): Promise<void> {
     const known = await this.backend.sshHosts();

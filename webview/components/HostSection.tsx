@@ -49,6 +49,14 @@ export function HostSection({ host: h, groups }: { host: HostState; groups: Grou
             onClick={() => post({ type: "showRemoved", host: h.name })}
           />
         ) : null}
+        {h.loggedIn ? (
+          <IconButton
+            icon="logout"
+            label={`Disconnect from ${h.name}`}
+            title={`Disconnect from ${h.name}: closes the connection you logged in with. To check ${h.name} again, log in again.`}
+            onClick={() => post({ type: "disconnectHost", host: h.name })}
+          />
+        ) : null}
         <IconButton
           icon="refresh"
           label={`Refresh ${h.name}`}
@@ -70,6 +78,19 @@ export function HostSection({ host: h, groups }: { host: HostState; groups: Grou
           {stale && h.updatedAt
             ? `${h.error}${/[.!?]$/.test(h.error) ? "" : "."} Showing what it said ${duration(now - h.updatedAt)} ago.`
             : h.error}
+          {h.login ? (
+            <>
+              {" "}
+              <button
+                type="button"
+                class="link"
+                title={`Opens a terminal where ssh asks for ${h.name}'s password (or passphrase, one-time code, new host key): the extension never sees it. The checks then go through the connection that login opened, until 30 minutes after their last check, until you log out, or until you disconnect.`}
+                onClick={() => post({ type: "loginHost", host: h.name })}
+              >
+                Log in…
+              </button>
+            </>
+          ) : null}
         </div>
       ) : null}
 

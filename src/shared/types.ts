@@ -37,6 +37,44 @@ export interface Peek {
   reply: string; // Claude's last reply (up to 1500 characters, several lines)
   replyLine: string; // its first line
   at: number | null;
+  // Claude's recap of the chat, while nothing was said after it (Claude Code
+  // writes one when you come back to a chat after a while). Older backends leave it out.
+  recap?: { text: string; at: number | null } | null;
+  mode?: string | null; // its permission mode: default, plan, auto, acceptEdits, bypassPermissions, dontAsk
+  slug?: string | null; // its plan's name, <config>/plans/<slug>.md
+  stopped?: Stop | null; // (as read; the row's own `stopped` says when the limit resets)
+}
+
+// What stopped a chat: a usage limit (window: the plan window it hit, e.g.
+// "five_hour", when Claude named it) or an expired login
+export interface Stop {
+  kind: "limit" | "login";
+  window: string | null;
+  text: string; // Claude's message, e.g. "You've hit your session limit · resets 7:10pm (Europe/Berlin)"
+  at: number | null;
+  resetsAt?: number | null; // when that limit resets
+  over?: boolean; // it has reset since: the chat can go on
+}
+
+// The plan a chat made (claude_status.py: plan_of)
+export interface ChatPlan {
+  slug: string;
+  title: string;
+  path: string; // on the machine the chat is on
+  updatedAt: number;
+}
+
+// One of an account's plans (claude_status.py: account_plans)
+export interface PlanItem extends ChatPlan {
+  key: string;
+  profileDir: string; // the profile whose plans/ it's in
+  profile: string;
+  shared: boolean; // linked into another profile's plans/ too
+  chatId: string | null; // the chat that made it, where it's still there
+  chatProfileDir: string | null;
+  cwd: string; // that chat's folder
+  cwdShort: string;
+  openCommand?: string | null; // --remote: reopens that chat there
 }
 
 // The files a chat changed (labels relative to its folder)
@@ -86,6 +124,8 @@ export interface Session {
   changes?: ChangeSummary | null;
   tasks?: TaskProgress | null;
   stats?: ChatStats | null;
+  plan?: ChatPlan | null; // the plan it made
+  stopped?: Stop | null; // a usage limit (or an expired login) stopped it
   // --remote: shell commands, run on the machine the session is on
   openCommand?: string | null;
   stopCommand?: string | null;
@@ -166,6 +206,7 @@ export interface Project {
   path: string;
   short: string;
   newChatCommand?: string;
+  trusted?: boolean; // Claude trusts the folder: a task can start there in the background
 }
 
 export interface RecentChat {
@@ -179,6 +220,25 @@ export interface RecentChat {
   profileDir: string;
   shared: boolean;
   openCommand?: string | null;
+  recap?: { text: string; at: number | null } | null;
+  stopped?: Stop | null;
+}
+
+// A chat "Find a Chat" found (claude_status.py: find_chats)
+export interface FoundChat {
+  key: string;
+  sessionId: string;
+  name: string;
+  cwd: string;
+  cwdShort: string;
+  lastActive: number;
+  profile: string;
+  profileDir: string;
+  groupId: string;
+  account: string; // e.g. "work · Team"
+  shared: boolean;
+  match: string; // the prompt of yours that has the words, around them ("" when the name or folder did)
+  openCommand?: string | null; // an SSH host's: reopens it there
 }
 
 export interface SharedPointer {
@@ -212,6 +272,7 @@ export interface Group {
   projects: Project[];
   sharedHere: SharedPointer[];
   recent: RecentChat[];
+  plans?: PlanItem[]; // newest first. Older backends leave it out.
   homeChatCommand?: string;
   // VS Code's Claude runs on this account (the backend's view of it; an SSH
   // host's: what its VS Code server's settings say, else its ~/.claude)
@@ -269,6 +330,10 @@ export interface HostState {
   result: Status | null; // the last good answer, kept (dimmed) after an error
   updatedAt: number;
   current: boolean; // the host this VS Code window is connected to
+  // It wants a password (or a passphrase, a code, its host key confirmed):
+  // Log in… opens a terminal where ssh asks for it (remote.py --login-here)
+  login?: boolean;
+  loggedIn?: boolean; // the checks go through a connection you logged in with: Disconnect closes it
 }
 
 export interface ViewSettings {
@@ -334,6 +399,7 @@ export interface ChatRef {
   stopCommand?: string | null;
   vscodeTerminal?: number | null;
   shared?: boolean;
+  plan?: { slug: string; path: string } | null; // the plan it made
 }
 
 // webview -> extension
@@ -349,6 +415,14 @@ export type WebviewMessage =
   | { type: "openAgentRun"; chat: ChatRef; agentId: string }
   | { type: "dismissDigest" }
   | { type: "newChat"; groupId: string; host?: string }
+  | { type: "handOver"; chat: ChatRef; profile: string }
+  | { type: "openPlan"; chat?: ChatRef; groupId?: string; host?: string; plan?: string } // a chat's plan, or an account's
+  | { type: "carryOutPlan"; groupId: string; host?: string; plan: string }
+  | { type: "continuePlanChat"; groupId: string; host?: string; plan: string }
+  | { type: "sharePlan"; groupId: string; host?: string; plan: string }
+  | { type: "findChat" }
+  | { type: "loginHost"; host: string }
+  | { type: "disconnectHost"; host: string }
   | { type: "login"; groupId: string; host?: string }
   | { type: "refresh"; host?: string }
   | { type: "showRemoved"; host?: string }

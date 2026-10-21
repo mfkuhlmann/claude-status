@@ -1,7 +1,7 @@
 // The dashboard's derived values, shared by the extension (status bar,
 // notifications) and the webview. Ported from the widget's main.qml.
 
-import type { Agent, ChangeSummary, ChatRef, ChatStats, ClaudeCodeInfo, Counts, Group, HostState, Limits, LimitWindow, Overall, RecentChat, ReopenIn, Session, SharedPointer, SshUsage, StatsDay, Status, TaskProgress, UsageStats, ViewState } from "./types";
+import type { Agent, ChangeSummary, ChatRef, ChatStats, ClaudeCodeInfo, Counts, Group, HostState, Limits, LimitWindow, Overall, PlanItem, RecentChat, ReopenIn, Session, SharedPointer, SshUsage, StatsDay, Status, Stop, TaskProgress, UsageStats, ViewState } from "./types";
 
 // This computer's accounts and the hosts', for the counts, the badge and
 // what needs you. A host whose last check failed still shows what it said
@@ -37,6 +37,7 @@ export function chatRefOf(s: Session, host?: string): ChatRef {
     vscodeTerminal: s.vscodeTerminal ?? null,
     // a fork of a shared chat is a chat of its own
     shared: !!s.shared && !s.shared.forkOf,
+    plan: s.plan ? { slug: s.plan.slug, path: s.plan.path } : null,
   };
 }
 
@@ -97,10 +98,19 @@ export function toLocalClock(result: Status, offset: number): Status {
     for (const s of g.sessions ?? []) {
       shift(s as unknown as Record<string, unknown>, ["since", "startedAt"]);
       shift(s.peek as unknown as Record<string, unknown>, ["at"]);
+      shift(s.peek?.recap as unknown as Record<string, unknown>, ["at"]);
+      shift(s.stopped as unknown as Record<string, unknown>, ["at", "resetsAt"]);
+      shift(s.plan as unknown as Record<string, unknown>, ["updatedAt"]);
       shift(s.stats as unknown as Record<string, unknown>, ["startedAt", "lastAt"]);
       for (const a of s.agents?.tree ?? []) shift(a as unknown as Record<string, unknown>, ["started", "updated"]);
     }
-    for (const c of [...(g.recent ?? []), ...(g.sharedHere ?? [])]) shift(c as unknown as Record<string, unknown>, ["lastActive", "since"]);
+    for (const c of g.recent ?? []) {
+      shift(c as unknown as Record<string, unknown>, ["lastActive"]);
+      shift(c.recap as unknown as Record<string, unknown>, ["at"]);
+      shift(c.stopped as unknown as Record<string, unknown>, ["at", "resetsAt"]);
+    }
+    for (const c of g.sharedHere ?? []) shift(c as unknown as Record<string, unknown>, ["lastActive", "since"]);
+    for (const p of g.plans ?? []) shift(p as unknown as Record<string, unknown>, ["updatedAt"]);
     if (g.limits) {
       shift(g.limits as unknown as Record<string, unknown>, ["updatedAt"]);
       for (const w of g.limits.windows ?? []) {
@@ -199,12 +209,14 @@ export function plural(n: number, one: string, many: string): string {
 
 // The hero's headline: the most important thing on the dashboard
 // hostsAnswered: SSH hosts' chats count while this computer's status is missing
-export function headlineText(state: Pick<ViewState, "status" | "errorText">, counts: Counts, hostsAnswered = false): string {
+// held: idle chats that wait for a usage limit to reset, not for you (heldByLimits)
+export function headlineText(state: Pick<ViewState, "status" | "errorText">, counts: Counts, hostsAnswered = false, held = 0): string {
   if (!state.status && !hostsAnswered && state.errorText) return "Status unavailable";
   if (!state.status && !hostsAnswered) return "Looking for your chats…";
   if (counts.waiting) return plural(counts.waiting, "%1 chat needs you", "%1 chats need you");
   if (counts.working) return plural(counts.working, "%1 chat working", "%1 chats working");
-  if (counts.idle) return plural(counts.idle, "Your turn in %1 chat", "Your turn in %1 chats");
+  if (counts.idle > held) return plural(counts.idle - held, "Your turn in %1 chat", "Your turn in %1 chats");
+  if (held) return plural(held, "%1 chat waits for its usage limit", "%1 chats wait for their usage limit");
   if (counts.done) return plural(counts.done, "%1 finished chat to look at", "%1 finished chats to look at");
   return "All quiet";
 }
@@ -374,9 +386,16 @@ export function resetText(w: LimitWindow, now: number): string {
   return `resets in ${w.resetsAt - now < 60000 ? "<1m" : duration(w.resetsAt - now)}`;
 }
 
-export function stateText(s: Pick<Session, "state" | "reason" | "since">, now: number): string {
+export function stateText(s: Pick<Session, "state" | "reason" | "since"> & { stopped?: Stop | null }, now: number): string {
   const since = s.since ? ` · ${duration(now - s.since)}` : "";
   const reason = s.reason ? ` · ${s.reason}` : "";
+  if (s.stopped && (s.state === "idle" || s.state === "done")) {
+    if (s.stopped.kind === "login") return "Login expired";
+    if (s.stopped.over) return "Limit reset · go on";
+    return s.stopped.resetsAt
+      ? `Limit · resets in ${s.stopped.resetsAt - now < 60000 ? "<1m" : duration(s.stopped.resetsAt - now)}`
+      : "Hit a usage limit";
+  }
   switch (s.state) {
     case "waiting":
       return "Needs input" + reason;
@@ -434,21 +453,127 @@ export function tooltipLines(groups: Group[], counts: Counts, hosts: HostState[]
 // (waiting), its result (a finished background session) or what Claude said
 // last (your turn, done)
 export function peekLine(
-  s: Pick<Session, "state" | "detail" | "reason" | "peek" | "tasks">,
-): { kind: "activity" | "needs" | "result" | "reply"; text: string } | null {
+  s: Pick<Session, "state" | "detail" | "reason" | "peek" | "tasks"> & { stopped?: Stop | null },
+): { kind: "activity" | "needs" | "result" | "reply" | "recap" | "stopped"; text: string } | null {
   const peek = s.peek;
   if (s.state === "working") {
     const what = peek?.activity || s.tasks?.current || "";
     return what ? { kind: "activity", text: `▸ ${what}` } : null;
   }
   if (s.state === "waiting") return { kind: "needs", text: s.detail || peek?.activity || reasonText(s.reason) };
+  // what stopped it (a usage limit), then a background session's result,
+  // Claude's recap of the chat, what Claude said last
+  if (s.stopped) return { kind: "stopped", text: stopText(s.stopped) };
   if (s.state === "done" && s.detail) return { kind: "result", text: s.detail };
+  if (peek?.recap?.text) return { kind: "recap", text: `Recap: ${peek.recap.text.split("\n")[0]}` };
   return peek?.replyLine ? { kind: "reply", text: `Claude: ${peek.replyLine}` } : null;
 }
 
 // Something to unfold under the row: the last exchange, tasks or changed files
 export function hasPeek(s: Pick<Session, "peek" | "tasks" | "changes"> & { stats?: Session["stats"] }): boolean {
-  return !!(s.peek && (s.peek.prompt || s.peek.reply)) || !!s.tasks?.items.length || !!s.changes || !!s.stats;
+  return !!(s.peek && (s.peek.prompt || s.peek.reply || s.peek.recap)) || !!s.tasks?.items.length || !!s.changes || !!s.stats;
+}
+
+// ---------------------------------------------------------------- what stopped a chat
+
+// The line under a chat that something stopped
+export function stopText(stop: Stop): string {
+  if (stop.kind === "login") return "Claude's login expired. Log in again (/login), then tell it to go on.";
+  if (stop.over) return "The limit it hit has reset: open it and tell Claude to go on.";
+  return stop.text;
+}
+
+// Idle chats a usage limit stopped (until it resets): they wait for the
+// limit, not for you
+export function heldByLimits(groups: Group[]): number {
+  let n = 0;
+  for (const g of groups)
+    for (const s of g.sessions) if (s.state === "idle" && s.stopped?.kind === "limit" && !s.stopped.over) n += 1;
+  return n;
+}
+
+// Another account of the chat's machine with room left in the limit that
+// stopped it (the most, where known), to continue it there; null when there's
+// none, or the chat can't move now. Not for a chat open in a Claude Code tab
+// (the tab would start it again here with your next message), one that's at
+// work again, or a session that continues another chat (the one with the
+// chat's own id would be ended, not this one).
+export function handoverTarget(
+  s: Pick<Session, "stopped" | "chatId" | "sessionId" | "pid" | "entrypoint" | "state" | "profileDir">,
+  accounts: Group[],
+): { title: string; shareProfile: string; pct: number | null; label: string } | null {
+  const stop = s.stopped;
+  if (!stop || stop.kind !== "limit" || stop.over || !s.chatId) return null;
+  if (s.pid !== null && (s.entrypoint === "claude-vscode" || s.state !== "idle" || s.sessionId !== s.chatId)) return null;
+  let best: { title: string; shareProfile: string; pct: number | null; label: string } | null = null;
+  for (const g of accounts) {
+    if (!g.shareProfile || (g.profileKeys ?? []).includes(s.profileDir)) continue;
+    const w = g.limits?.windows.find((x) => x.key === (stop.window || "five_hour"));
+    const pct = w ? w.pct : null;
+    if (pct !== null && pct >= 95) continue;
+    if (!best || (pct !== null && (best.pct === null || pct < best.pct)))
+      best = { title: g.title, shareProfile: g.shareProfile, pct, label: w ? w.label : "" };
+  }
+  return best;
+}
+
+// ---------------------------------------------------------------- permission mode
+
+// A chat's permission mode as its tag says it ("" for the default)
+export function modeText(mode: string | null | undefined): string {
+  switch (mode) {
+    case "plan":
+      return "plan mode";
+    case "acceptEdits":
+      return "accept edits";
+    case "auto":
+      return "auto mode";
+    case "bypassPermissions":
+      return "bypass permissions";
+    case "dontAsk":
+      return "don't ask";
+    case "default":
+    case "":
+    case null:
+    case undefined:
+      return "";
+    default:
+      return mode;
+  }
+}
+
+export function modeHint(mode: string | null | undefined): string {
+  switch (mode) {
+    case "plan":
+      return "Plan mode: Claude looks around and writes a plan, and changes nothing until you approve it.";
+    case "acceptEdits":
+      return "Claude edits files without asking; other actions still ask you.";
+    case "auto":
+      return "Auto mode: Claude goes ahead with what it judges safe, and asks you about the rest.";
+    case "bypassPermissions":
+      return "Claude runs everything without asking.";
+    case "dontAsk":
+      return "What isn't allowed already is refused, without asking you.";
+    default:
+      return "Shift+Tab in the chat changes it.";
+  }
+}
+
+// ---------------------------------------------------------------- plans
+
+// One of an account's plans, found by its key, as the extension knows it now
+// (never what the page sent): {plan, group}, or null when it's gone
+export function findPlan(status: Status | null, hosts: HostState[], host: unknown, groupId: unknown, key: unknown): { plan: PlanItem; group: Group } | null {
+  if (typeof key !== "string" || !key || typeof groupId !== "string" || (host !== undefined && host !== null && typeof host !== "string")) return null;
+  const where = host ? hosts.find((h) => h.name === host)?.result : status;
+  const group = where?.groups.find((g) => g.id === groupId);
+  const plan = group?.plans?.find((p) => p.key === key);
+  return plan && group ? { plan, group: host ? { ...group, host: host as string } : group } : null;
+}
+
+// "~/repos/app · 2d ago"
+export function planWhere(p: Pick<PlanItem, "cwdShort" | "updatedAt">, now: number): string {
+  return p.cwdShort ? `${p.cwdShort} · ${ago(now - p.updatedAt)}` : ago(now - p.updatedAt);
 }
 
 export function taskMark(status: string): string {

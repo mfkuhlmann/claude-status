@@ -10,6 +10,7 @@ interface UiState {
   agentDetail: Record<string, true>; // by agentDetailKey(): row key + "|" + agent id
   peek: Record<string, true>;
   recent: Record<string, true>;
+  plans: Record<string, true>;
   stats: Record<string, true>;
 }
 
@@ -25,6 +26,7 @@ function load(): UiState {
     agentDetail: { ...(saved?.agentDetail ?? {}) },
     peek: { ...(saved?.peek ?? {}) },
     recent: { ...(saved?.recent ?? {}) },
+    plans: { ...(saved?.plans ?? {}) },
     stats: { ...(saved?.stats ?? {}) },
   };
 }
@@ -63,6 +65,11 @@ export function togglePeek(rowKey: string): void {
 export function toggleRecent(groupKey: string): void {
   const s = uiState.get();
   persist({ ...s, recent: toggled(s.recent, groupKey) });
+}
+
+export function togglePlans(groupKey: string): void {
+  const s = uiState.get();
+  persist({ ...s, plans: toggled(s.plans, groupKey) });
 }
 
 export function toggleStats(groupKey: string): void {

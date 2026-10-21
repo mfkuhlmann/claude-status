@@ -5,6 +5,7 @@ import {
   cliInstalled,
   machineStatus,
   reopensInClaudeCode,
+  stopText,
   terminalReopenHint,
 } from "../../src/shared/model";
 import type { Group, ReopenIn } from "../../src/shared/types";
@@ -16,6 +17,7 @@ import { toggleRecent, uiState } from "../util/ui";
 import { useView } from "./context";
 import { Elided } from "./Elided";
 import { IconButton } from "./IconButton";
+import { Tag } from "./Tag";
 
 // The account's latest other chats, to pick one up again. Folded by default:
 // the running chats come first. A switch above them says where they reopen:
@@ -82,7 +84,12 @@ export function RecentChats({ group }: { group: Group }) {
                     type="button"
                     class="link recent-name"
                     aria-disabled={!canOpen}
-                    title={`${c.name}\n${reopen}` + (c.shared ? `\nShared between accounts; last used on ${c.profile}.` : "")}
+                    title={
+                      `${c.name}\n${reopen}` +
+                      (c.shared ? `\nShared between accounts; last used on ${c.profile}.` : "") +
+                      (c.stopped ? `\n\n${stopText(c.stopped)}` : "") +
+                      (c.recap?.text ? `\n\nRecap: ${c.recap.text}` : "")
+                    }
                     onClick={() => canOpen && post(inCode ? { type: "openInClaudeCode", chat } : { type: "open", chat })}
                   >
                     {c.name}
@@ -92,6 +99,7 @@ export function RecentChats({ group }: { group: Group }) {
                       ⇄
                     </span>
                   ) : null}
+                  {c.stopped?.kind === "limit" && !c.stopped.over ? <Tag text="limit" warning title={`A usage limit stopped it\n${c.stopped.text}`} /> : null}
                   <Elided text={c.cwdShort || "~"} class="recent-folder small muted" title={c.cwd} />
                   <span class="small muted nowrap">· {ago(view.now - c.lastActive)}</span>
                   {share ? (

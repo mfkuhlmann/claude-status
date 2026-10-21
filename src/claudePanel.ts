@@ -43,6 +43,9 @@ export function localPanelProfileKey(): string {
   return profileKey(panelConfigDir(vscode.workspace.getConfiguration("claudeCode").get("environmentVariables")));
 }
 
-export async function openPanelChat(): Promise<void> {
-  await vscode.commands.executeCommand(NEW_CHAT_TAB);
+// prompt: typed into the new chat's input, for you to send (the Claude
+// Code extension's own command takes a session id, then a prompt)
+export async function openPanelChat(prompt?: string): Promise<void> {
+  if (prompt) await vscode.commands.executeCommand(NEW_CHAT_TAB, undefined, prompt);
+  else await vscode.commands.executeCommand(NEW_CHAT_TAB);
 }

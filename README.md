@@ -29,10 +29,25 @@ As an editor tab (**Claude Status: Open in Editor Tab**):
   can't open a subagent from outside, so the run is rendered from its
   transcript; an SSH host's is fetched over ssh.
 - **What a chat is doing, without switching to it**: a line under each chat
-  says what it's on right now (*▸ Bash: npm test*), what it needs, or the
-  first line of Claude's last reply. Click it for your last prompt, Claude's
-  whole reply, the chat's task list and its changed files. A chat with a task
-  list gets a **2/4** tag that fills up as tasks get done.
+  says what it's on right now (*▸ Bash: npm test*), what it needs, Claude's
+  recap of it (when you come back to a chat after a while, Claude Code writes
+  one: *You asked …; Next step: …*), or the first line of Claude's last
+  reply. Click it for your last prompt, Claude's whole reply, the chat's task
+  list and its changed files. A chat with a task list gets a **2/4** tag that
+  fills up as tasks get done; a chat in plan mode, auto mode, accept edits or
+  don't ask says so, and one that bypasses permissions says so in red.
+- **Chats a usage limit stopped** say so in red, with when the limit resets;
+  their pet's battery runs low. Once it has reset, a notification says which
+  chats can go on. Meanwhile **Continue on …** under the chat moves it to
+  another account with room left (shared with it, then reopened there).
+- **Find a Chat…** (the search button in the view's title bar): every chat
+  with all the words you type in its name, folder or prompts, here and on
+  the SSH hosts shown. Pick one to go to it, or to reopen it.
+- **Plans**: a chat that wrote a plan in plan mode gets a **plan ↗** tag
+  that opens it in an editor tab. Each account lists its plans (**Plans**):
+  open one, carry it out in a new chat (the plan is its first message, with
+  what you add), go back to the chat that made it, or share it with your
+  other accounts (sharing a chat shares its plan too).
 - **What a chat changed**: its **± 3 files** tag opens VS Code's changes view
   with each file as it was before the chat and as it is now (or only the last
   turn: **Last turn** in the unfolded peek). The files come from the backups
@@ -59,7 +74,10 @@ As an editor tab (**Claude Status: Open in Editor Tab**):
   chats that need you, finished or failed, limits that reset. Meanwhile,
   notifications of finished chats wait for it.
 - **SSH hosts**: the chats on the hosts you pick, side by side with this
-  computer's.
+  computer's. A host that wants a password shows **Log in…**: a terminal
+  where `ssh` asks for it, so the extension never sees it; the checks then
+  use that connection (until 30 minutes after their last use, logging out,
+  or the host's **Disconnect** button).
 - **Notifications** (and a sound) when a chat needs you or finishes a long turn.
 - **The status bar**: how many chats need you, the 5-hour usage, and with
   two or more accounts which one VS Code's Claude runs on (**Claude: work**):
@@ -114,7 +132,11 @@ running in one of this window's terminals is brought to the front; a chat of
 the Claude Code extension is revealed in it.
 
 **New chat** (＋) asks where: in a terminal, in one of the account's recent
-folders or any other, or as a Claude Code chat tab in this window. The chat
+folders or any other, or as a Claude Code chat tab in this window. **Start
+with a task…** first asks what Claude should do: the chat starts with it (in
+a terminal at once, in a chat tab typed in for you to send), and can also run
+**in the background** (`claude --bg`: no window, listed right away; only in
+folders Claude trusts already, since it can't ask there). The chat
 tab is offered for accounts on the window's own machine (this computer, or the
 Remote-SSH host); it starts in the window's folder, on the account the Claude
 Code extension is set to, and the menu says so when that's another account.
@@ -225,13 +247,16 @@ What it reads, all of it written by Claude Code itself: the session registry
 token totals, chat titles, subagents, what a chat is doing and which files it
 changed), task lists (`<config>/tasks`), the backups Claude makes before it
 edits a file (`<config>/file-history`, to compare a chat's changes),
-`history.jsonl` (recent folders),
+`history.jsonl` (recent folders, and your prompts for **Find a Chat…**),
+the plans chats wrote (`<config>/plans`),
 the account name and plan from `.claude.json`, and the status-line copies in
 `~/.cache/claude-widget/statusline`. It writes only to
 `~/.cache/claude-widget` (caches, the list of chats you removed, copies of
 the files a comparison shows, kept for a day) and, if you
-ask for it, the status-line change above, the links of the chats you share
-(see below) and the accounts you add or remove.
+ask for it, the status-line change above, the links of the chats and plans
+you share (see below) and the accounts you add or remove. A task you start a
+chat with goes to Claude, which runs it like a prompt you type (with a plan
+you carry out, the plan's text is part of it).
 
 **Logins stay Claude's.** Logging in and out is Claude Code's own command
 (`claude auth login` in a terminal, where you sign in on Claude's pages in

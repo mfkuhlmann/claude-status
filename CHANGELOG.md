@@ -1,5 +1,54 @@
 # Changelog
 
+## Unreleased
+
+- **Chats a usage limit stopped:** a chat that hit a usage limit
+  (*You've hit your session limit*) says so in red, with when that limit
+  resets (from the account's plan usage, else from Claude's message), and
+  its pet's battery runs low. Once the limit has reset, a notification
+  per account says which chats can go on (with the "finished"
+  notifications). Meanwhile **Continue on personal** under the chat moves
+  it to another account with room left in that limit: shared with it,
+  then reopened there in VS Code's terminal. An idle Claude that still has
+  it open quits first; one in a Claude Code tab, close the tab first. A
+  chat whose login expired says so too.
+- **Claude's recap:** when you come back to a chat after a while, Claude
+  Code writes a short recap of it (*You asked …; Next step: …*). While
+  nothing was said after it, it's the line under the chat (instead of
+  Claude's last words) and the first thing in its peek; recent chats show
+  theirs in their tooltip.
+- **Start a chat with a task, also in the background:** **New Chat…**
+  offers **Start with a task…**: say what Claude should do, then pick
+  where. In a terminal it's sent right away, in a Claude Code chat tab it's
+  typed in for you to send, and **In the background** runs it as a
+  background session (`claude --bg`): no window opens, and it's listed
+  right away. The background only works in folders Claude trusts already
+  (it can't ask there), so never in your home folder. Also on SSH hosts.
+- **Find a Chat…** (the search button in the view's title bar): every
+  chat with all the words you type in its name, its folder or one of your
+  prompts, on this computer and on the SSH hosts shown, newest first. Pick
+  one to go to it, or to reopen it.
+- **Plans:** a chat that wrote a plan in plan mode gets a **plan ↗** tag
+  that opens it in an editor tab (yours to change; an SSH host's that this
+  window isn't connected to opens as a copy). Each account lists its plans
+  (**Plans**, folded): open one, **carry it out** in a new chat (the plan
+  is the chat's first message, with what you add, in a terminal, the
+  background or a Claude Code tab), go back to the chat that made it, or
+  share it with your other accounts (one file on all of them; **Keep only
+  on …** undoes it). Sharing a chat shares its plan too.
+- **Permission mode:** a chat in plan mode, auto mode, accept edits or
+  don't ask says so next to its name; one that bypasses permissions says
+  so in red.
+- **SSH hosts that want a password:** such a host shows **Log in…**, which
+  opens a terminal where `ssh` itself asks for the password (or
+  passphrase, one-time code, new host key): the extension never sees it.
+  The checks then go through the connection that login opened, until 30
+  minutes after their last check, until you log out, or until you click
+  the host's **Disconnect** button.
+- The backend is the widget's 1.12.0: background sessions open, stop and
+  start even with `CLAUDE_CODE_DISABLE_AGENT_VIEW` set for your whole
+  desktop.
+
 ## 1.11.0
 
 - **Accounts:** **Claude Status: Claude Accounts…**
