@@ -7,7 +7,7 @@ import * as path from "node:path";
 import { test } from "node:test";
 import { markdownLinkFile } from "../src/agentRun";
 import { demoState } from "../src/shared/demo";
-import { goOnAt, laterAt, laterDays, limitReset, overlapText, queuedChat, queuedFor, queuedWhat, startText } from "../src/shared/model";
+import { findMemory, goOnAt, laterAt, laterDays, limitReset, overlapText, queuedChat, queuedFor, queuedWhat, startText } from "../src/shared/model";
 import type { Group, QueuedTask, Session } from "../src/shared/types";
 import { TransitionTracker } from "../src/transitions";
 import { planPath } from "../src/planReview";
@@ -46,6 +46,14 @@ test("a chat a usage limit stopped can go on by itself after the reset", () => {
   assert.equal(queuedChat({ queue: [t] } as never, "c1", "lab"), t);
   assert.equal(queuedChat({ queue: [t] } as never, "c1"), null); // (that's the host's chat)
   assert.equal(queuedChat({ queue: [{ ...t, chat: null }] } as never, "c1", "lab"), null);
+});
+
+test("an account's memories are found by their key", () => {
+  const s = demoState(NOW);
+  const g = s.status!.groups[0];
+  assert.equal(findMemory(s.status, s.hosts, undefined, g.id, "demo-mem-1")?.memory.name, "test-command");
+  assert.equal(findMemory(s.status, s.hosts, undefined, g.id, "nope"), null);
+  assert.equal(findMemory(s.status, s.hosts, 42, g.id, "demo-mem-1"), null);
 });
 
 test("feedback goes with the plan files of Claude's config folders", () => {

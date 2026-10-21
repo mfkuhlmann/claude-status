@@ -1649,6 +1649,16 @@ def edit_plan(home, extra_dirs, slug, profile_dir=None):
     return (True, f"Opened the plan's file {cs.short_folder(str(path), home)}") if ok else (False, why)
 
 
+def open_memory(home, extra_dirs, path, edit=False):
+    """One of Claude's memories (a file of a profile's projects/*/memory):
+    rendered to read, or (edit) itself, to change it."""
+    found = cs.memory_file(cs.discover_profiles(home, extra_dirs), path)
+    if found is None:
+        return False, "That isn't one of Claude's memories (any more)"
+    ok, why = (edit_markdown if edit else open_markdown)(found, home)
+    return (True, "") if ok else (False, why)
+
+
 def edit_remote_file(host, path):
     """Open a file of an SSH host in VS Code (Remote-SSH), to change it."""
     code, _ = cs.vscode_app()
@@ -1799,6 +1809,7 @@ USAGE = ("usage: jump.py [--stop [--busy] | --interrupt] SESSION_ID [--profile P
          "               (share it and reopen it there, or print the command; --end-first: quit an idle session first)\n"
          "       jump.py --open-plan|--edit-plan|--share-plan|--unshare-plan SLUG [--profile PROFILE] [--to PROFILE]\n"
          "       jump.py --remote-edit HOST PATH   (a file of an SSH host, in VS Code)\n"
+         "       jump.py --open-memory|--edit-memory PATH\n"
          "       jump.py --plan-feedback SLUG --profile PROFILE --chat CHAT_ID|- [--comments JSON] [--print-command]\n"
          "               (- : the chat whose slug it is)\n"
          "       jump.py --queue PROFILE [--cwd FOLDER | --choose-folder] --at MS [--prompt TEXT] [--plan SLUG [--plan-profile P]]\n"
@@ -1860,6 +1871,8 @@ def main(argv=None):
             start_at = int(args.pop(0))
         elif arg == "--scheduled":
             scheduled = True
+        elif arg in ("--open-memory", "--edit-memory") and args:
+            action, session_id = arg, args.pop(0)  # the memory's file
         elif arg == "--plan-feedback" and args:
             action, feedback_plan = send_plan_feedback, args.pop(0)
         elif arg == "--comments" and args:
@@ -2000,6 +2013,8 @@ def main(argv=None):
             ok, message = action(Path.home(), extra, session_id, profile_dir)
         elif action == "--remote-edit":
             ok, message = edit_remote_file(remote_host, session_id)
+        elif action in ("--open-memory", "--edit-memory"):
+            ok, message = open_memory(Path.home(), extra, session_id, action == "--edit-memory")
         elif action == "--remote-vscode":
             ok, message = jump_remote_vscode(remote_host, session_id, folder or "")
         elif action == "--remote-terminal":

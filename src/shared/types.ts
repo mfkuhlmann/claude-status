@@ -110,6 +110,21 @@ export interface PlanItem extends ChatPlan {
   openCommand?: string | null; // --remote: reopens that chat there
 }
 
+// One of Claude's memories on an account (claude_status.py: account_memories):
+// a note it keeps in <config>/projects/<folder>/memory
+export interface Memory {
+  key: string;
+  name: string;
+  description: string;
+  type: string; // user, feedback, project, reference ("" when it doesn't say)
+  path: string; // on the machine the account is on
+  folder: string; // the project folder it's for ("" when that's gone)
+  folderShort: string;
+  profileDir: string;
+  profile: string;
+  updatedAt: number;
+}
+
 // The files a chat changed (labels relative to its folder)
 export interface ChangeSummary {
   count: number;
@@ -308,6 +323,7 @@ export interface Group {
   sharedHere: SharedPointer[];
   recent: RecentChat[];
   plans?: PlanItem[]; // newest first. Older backends leave it out.
+  memories?: Memory[]; // newest first. Older backends leave it out.
   homeChatCommand?: string;
   // VS Code's Claude runs on this account (the backend's view of it; an SSH
   // host's: what its VS Code server's settings say, else its ~/.claude)
@@ -455,6 +471,7 @@ export type WebviewMessage =
   | { type: "handOver"; chat: ChatRef; profile: string }
   | { type: "openPlan"; chat?: ChatRef; groupId?: string; host?: string; plan?: string; edit?: boolean } // a chat's plan, or an account's (edit: its file, to change it)
   | { type: "sendPlanFeedback"; chat?: ChatRef; groupId?: string; host?: string; plan?: string } // your changes and comments, to the chat that made it
+  | { type: "openMemory"; groupId: string; host?: string; memory: string; edit?: boolean } // to read, or (edit) its file
   | { type: "carryOutPlan"; groupId: string; host?: string; plan: string }
   | { type: "continuePlanChat"; groupId: string; host?: string; plan: string }
   | { type: "sharePlan"; groupId: string; host?: string; plan: string }

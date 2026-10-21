@@ -3145,6 +3145,122 @@ def find_plan_chats(plans, ctx):
         pl["edited"] = plan_edited(pl["updatedAt"], t)
 
 
+# ---------------------------------------------------------------- memories
+#
+# Claude keeps what it learns about you and your projects as memories: one
+# Markdown file each, in <cfg>/projects/<folder>/memory/ (MEMORY.md is their
+# index), with a name, a description and a type (user, feedback, project,
+# reference) at the top. Each account lists its memories, newest first.
+
+MEMORIES_LISTED = 30
+MEMORY_HEAD_BYTES = 2048
+MEMORY_FIELD = re.compile(r"^\s*(name|description|type):\s*(.*?)\s*$")
+
+
+def memory_head(path):
+    """{"name", "description", "type"} from the top of a memory file."""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(MEMORY_HEAD_BYTES).decode("utf-8", "replace")
+    except OSError:
+        return {}
+    lines = head.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return {}
+    out = {}
+    for line in lines[1:]:
+        if line.strip() == "---":
+            break
+        m = MEMORY_FIELD.match(line)
+        if m and m.group(1) not in out:
+            value = m.group(2)
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                value = value[1:-1].replace('\\"', '"').replace("\\\\", "\\")
+            out[m.group(1)] = value
+    return out
+
+
+def project_folder_of(project):
+    """The folder a projects/<key> folder is for: Claude names it after the
+    folder, every character but letters and digits made a "-", so it's
+    found step by step on disk (the longest name that fits first); "" when
+    it isn't there any more."""
+    rest, path = project.name[1:] if project.name.startswith("-") else project.name, "/"
+    while rest:
+        try:
+            names = sorted(os.listdir(path), key=len, reverse=True)
+        except OSError:
+            return ""
+        step = next((n for n in names if (rest == mangle(n) or rest.startswith(mangle(n) + "-"))
+                     and os.path.isdir(os.path.join(path, n))), None)
+        if step is None:
+            return ""
+        path, rest = os.path.join(path, step), rest[len(mangle(step)) + 1:]
+    return path
+
+
+def mangle(name):
+    return re.sub(r"[^A-Za-z0-9]", "-", name)
+
+
+def account_memories(group, ctx, limit=MEMORIES_LISTED):
+    """The memories of an account's profiles, newest first: [{"key", "name",
+    "description", "type", "path", "folder", "folderShort", "profileDir",
+    "profile", "updatedAt"}]."""
+    by_key = {p.key: p for p in ctx.profiles}
+    found, seen = [], set()
+    for key in group["profileKeys"]:
+        p = by_key.get(key)
+        try:
+            files = list(p.path.glob("projects/*/memory/*.md")) if p is not None else []
+        except OSError:
+            continue
+        for f in files:
+            try:
+                st = f.stat()
+            except OSError:
+                continue
+            if f.name == "MEMORY.md" or not f.is_file() or (st.st_dev, st.st_ino) in seen:
+                continue
+            seen.add((st.st_dev, st.st_ino))
+            found.append((st.st_mtime, p, f))
+    found.sort(key=lambda c: -c[0])
+    folders, out = {}, []
+    for t, p, f in found[:limit]:
+        project = f.parent.parent
+        if project not in folders:
+            folders[project] = project_folder_of(project)
+        head = memory_head(f)
+        folder = folders[project]
+        out.append({
+            "key": f"{p.key}/{project.name}/{f.stem}/memory",
+            "name": clean_text(head.get("name") or f.stem, 120),
+            "description": clean_text(head.get("description"), 300),
+            "type": head.get("type") if head.get("type") in ("user", "feedback", "project", "reference") else "",
+            "path": str(f),
+            "folder": folder,
+            "folderShort": short_path(folder, ctx.home) if folder else "",
+            "profileDir": p.key,
+            "profile": p.label,
+            "updatedAt": int(t * 1000),
+        })
+    return out
+
+
+def memory_file(profiles, path):
+    """path, when it's a memory file of one of the profiles (projects/*/memory/*.md), else None."""
+    try:
+        real = Path(path).resolve()
+    except (OSError, RuntimeError):
+        return None
+    if real.suffix != ".md" or real.parent.name != "memory" or not real.is_file():
+        return None
+    for p in profiles:
+        if real.parent.parent.parent == p.real / "projects":
+            return real
+    return None
+
+
 # ---------------------------------------------------------------- feedback on a plan
 #
 # You change a plan (its file) or comment on its lines (VS Code), then send
@@ -4951,6 +5067,11 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
         except Exception as exc:
             errors.append(f"{g['title']}: plans: {exc}")
             g["plans"] = []
+        try:
+            g["memories"] = account_memories(g, ctx)
+        except Exception as exc:
+            errors.append(f"{g['title']}: memories: {exc}")
+            g["memories"] = []
     for g in groups:
         for s in g["sessions"]:
             counts[s["state"]] += 1

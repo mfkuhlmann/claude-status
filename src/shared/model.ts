@@ -1,7 +1,7 @@
 // The dashboard's derived values, shared by the extension (status bar,
 // notifications) and the webview. Ported from the widget's main.qml.
 
-import type { Agent, ChangeSummary, ChatRef, ChatStats, ClaudeCodeInfo, Counts, Group, HostState, Limits, LimitWindow, Overall, Overlap, PlanItem, QueuedTask, RecentChat, ReopenIn, Session, SharedPointer, SshUsage, StatsDay, Status, Stop, TaskProgress, UsageStats, ViewState } from "./types";
+import type { Agent, ChangeSummary, ChatRef, ChatStats, ClaudeCodeInfo, Counts, Group, HostState, Limits, LimitWindow, Memory, Overall, Overlap, PlanItem, QueuedTask, RecentChat, ReopenIn, Session, SharedPointer, SshUsage, StatsDay, Status, Stop, TaskProgress, UsageStats, ViewState } from "./types";
 
 // This computer's accounts and the hosts', for the counts, the badge and
 // what needs you. A host whose last check failed still shows what it said
@@ -642,6 +642,15 @@ export function findPlan(status: Status | null, hosts: HostState[], host: unknow
   const group = where?.groups.find((g) => g.id === groupId);
   const plan = group?.plans?.find((p) => p.key === key);
   return plan && group ? { plan, group: host ? { ...group, host: host as string } : group } : null;
+}
+
+// One of an account's memories, by its key, as the extension knows it
+export function findMemory(status: Status | null, hosts: HostState[], host: unknown, groupId: unknown, key: unknown): { memory: Memory; group: Group } | null {
+  if (typeof key !== "string" || !key || typeof groupId !== "string" || (host !== undefined && host !== null && typeof host !== "string")) return null;
+  const where = host ? hosts.find((h) => h.name === host)?.result : status;
+  const group = where?.groups.find((g) => g.id === groupId);
+  const memory = group?.memories?.find((m) => m.key === key);
+  return memory && group ? { memory, group: host ? { ...group, host: host as string } : group } : null;
 }
 
 // "~/repos/app · 2d ago"

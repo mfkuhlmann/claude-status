@@ -36,6 +36,11 @@
   the usage limit* (red), instead of counting them as idle or done.
 - **A recent chat's or a plan's tooltip** shows its whole folder (the
   line may cut it short).
+- **Each account's memories:** what Claude keeps about you and your
+  projects (`<config>/projects/<folder>/memory`) is listed under each
+  account (**Memories**, folded), newest first, with the folder each is
+  for: one opens in the Markdown preview, and the edit button opens its
+  file, to change what Claude remembers.
 - **Feedback on a plan, as in a review:** in a plan's file (✎), the **+**
   next to a line adds a comment for Claude; change the file itself too if
   you like. **Send Feedback to Claude** (the send button in the editor's

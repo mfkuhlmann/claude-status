@@ -8,6 +8,7 @@ import { toggleStats, uiState } from "../util/ui";
 import { AccountStage } from "./AccountStage";
 import { useView } from "./context";
 import { IconButton } from "./IconButton";
+import { MemoriesList } from "./MemoriesList";
 import { PlansList } from "./PlansList";
 import { QueuedTasks } from "./QueuedTasks";
 import { RecentChats } from "./RecentChats";
@@ -229,6 +230,7 @@ export function GroupSection({ group: g, accounts = 1 }: { group: Group; account
 
       <RecentChats group={g} />
       <PlansList group={g} />
+      <MemoriesList group={g} />
     </section>
   );
 }

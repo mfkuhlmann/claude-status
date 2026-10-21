@@ -11,6 +11,7 @@ interface UiState {
   peek: Record<string, true>;
   recent: Record<string, true>;
   plans: Record<string, true>;
+  memories: Record<string, true>;
   stats: Record<string, true>;
 }
 
@@ -27,6 +28,7 @@ function load(): UiState {
     peek: { ...(saved?.peek ?? {}) },
     recent: { ...(saved?.recent ?? {}) },
     plans: { ...(saved?.plans ?? {}) },
+    memories: { ...(saved?.memories ?? {}) },
     stats: { ...(saved?.stats ?? {}) },
   };
 }
@@ -70,6 +72,11 @@ export function toggleRecent(groupKey: string): void {
 export function togglePlans(groupKey: string): void {
   const s = uiState.get();
   persist({ ...s, plans: toggled(s.plans, groupKey) });
+}
+
+export function toggleMemories(groupKey: string): void {
+  const s = uiState.get();
+  persist({ ...s, memories: toggled(s.memories, groupKey) });
 }
 
 export function toggleStats(groupKey: string): void {

@@ -63,6 +63,8 @@ As an editor tab (**Claude Status: Open in Editor Tab**):
 - **Chats changing the same files**: chats that are open and changed some of
   the same files get a red **⚠ same files** tag naming the other chat (and a
   notification), since two chats editing one file can overwrite each other.
+- **Memories**: each account lists what Claude remembers about you and your
+  projects (**Memories**): read one in the Markdown preview, or edit it.
 - **What a chat changed**: its **± 3 files** tag opens VS Code's changes view
   with each file as it was before the chat and as it is now (or only the last
   turn: **Last turn** in the unfolded peek). The files come from the backups
@@ -276,7 +278,9 @@ a day) and, if you
 ask for it, the status-line change above, the links of the chats and plans
 you share (see below) and the accounts you add or remove. A task you start a
 chat with goes to Claude, which runs it like a prompt you type (with a plan
-you carry out, the plan's text is part of it).
+you carry out, the plan's text is part of it); so does feedback on a plan you
+send (your comments and what you changed), which goes on your clipboard when
+the extension can't type it in.
 
 **Logins stay Claude's.** Logging in and out is Claude Code's own command
 (`claude auth login` in a terminal, where you sign in on Claude's pages in

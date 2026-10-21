@@ -7,7 +7,7 @@ import * as vscode from "vscode";
 import type { Actions } from "./actions";
 import { setReopenIn } from "./config";
 import type { Dashboard } from "./dashboard";
-import { findChatRef, findPlan, goOnAt, machineStatus, shareAccounts } from "./shared/model";
+import { findChatRef, findMemory, findPlan, goOnAt, machineStatus, shareAccounts } from "./shared/model";
 import type { ChatRef, Group, HostMessage, PlanItem, WebviewMessage } from "./shared/types";
 
 const AGENT_ID = /^[A-Za-z0-9_-]{1,100}$/;
@@ -195,6 +195,12 @@ export class ViewHost implements vscode.WebviewViewProvider, vscode.Disposable {
           const found = this.planOf(m);
           if (found && !found.group.host) void this.actions.sendPlanFeedback(found.plan);
         }
+        break;
+      }
+      case "openMemory": {
+        const state = this.dash.state();
+        const found = findMemory(state.status, state.hosts, m.host, m.groupId, m.memory);
+        if (found) void this.actions.openMemory(found.memory, found.group.host, m.edit === true);
         break;
       }
       case "carryOutPlan": {

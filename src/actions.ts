@@ -448,6 +448,26 @@ export class Actions {
     this.refresh();
   }
 
+  // One of Claude's memories in the Markdown preview, or (edit) its file in
+  // an editor tab, to change it; also one of the host this window is
+  // connected to (another host's isn't offered)
+  async openMemory(memory: { path: string }, host?: string, edit = false): Promise<void> {
+    if (this.demoOnly()) return;
+    if (host && host !== this.dash.currentHost) return this.fail(`That memory is on ${host}: open it from a VS Code window connected to ${host}.`);
+    if (!/\/projects\/[^/]+\/memory\/[^/]+\.md$/.test(memory.path)) return this.fail("That isn't one of Claude's memories.");
+    const uri = !host && vscode.env.remoteName ? vscode.Uri.from({ scheme: "vscode-local", path: memory.path }) : vscode.Uri.file(memory.path);
+    if (!edit) {
+      const error = await showMarkdown(uri);
+      if (error) this.fail(`Couldn't open the memory: ${error}`);
+      return;
+    }
+    try {
+      await vscode.window.showTextDocument(uri, { preview: false });
+    } catch (e) {
+      this.fail(`Couldn't open the memory: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
   // The chat that made a plan, to change the plan with Claude: its row's
   // chat comes up, or it reopens (in a terminal or a Claude Code tab, as the
   // switch of Recent chats says)
