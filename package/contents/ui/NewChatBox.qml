@@ -26,9 +26,15 @@ Rectangle {
     // The account is at a usage limit: a background task can wait until it resets
     readonly property var reset: visible ? root.limitReset(group, remoteHost) : null
     readonly property bool queued: background && root.taskQueued && reset !== null
+    // or later, at a time you pick (0: none yet, or it has passed)
+    readonly property var days: visible ? root.laterDays() : []
+    readonly property bool later: background && root.taskLater
+    readonly property real laterAt: later ? root.laterAt(root.taskLaterDay, root.taskLaterTime) + 0 * root.now : 0   // (checked again as time goes by)
 
     // A folder a chat can start in now
     function usable(folder) {
+        if (later && !laterAt)
+            return false
         if (background)
             return terminalHere && folder.trusted !== false
         return inVscode || (terminalHere && (!remoteHost || !!folder.newChatCommand || hasTask))
@@ -130,13 +136,85 @@ Rectangle {
             visible: box.background && box.reset !== null
             text: box.reset ? i18n("After the limit resets (in %1, at %2)", root.duration(box.reset.at - root.now), root.clockText(box.reset.at)) : ""
             checked: root.taskQueued
-            onToggled: root.taskQueued = checked
+            onToggled: {
+                root.taskQueued = checked
+                if (checked)
+                    root.taskLater = false
+            }
 
             PlasmaCore.ToolTipArea {
                 textFormat: Text.PlainText
                 anchors.fill: parent
                 mainText: i18n("Wait for the usage limit")
                 subText: i18n("This account is at its usage limit. The task waits under the account and starts in the background a minute after the limit resets, while the widget runs (or as soon as it runs again). You can start or cancel it before.")
+            }
+        }
+
+        // or later, on a day at a time (the default: right away)
+        RowLayout {
+            Layout.leftMargin: Kirigami.Units.gridUnit
+            Layout.fillWidth: true
+            visible: box.background
+            spacing: Kirigami.Units.smallSpacing
+
+            PlasmaComponents3.CheckBox {
+                text: i18n("Later:")
+                checked: root.taskLater
+                onToggled: root.pickLater(checked)
+
+                PlasmaCore.ToolTipArea {
+                    textFormat: Text.PlainText
+                    anchors.fill: parent
+                    mainText: i18n("Start it later")
+                    subText: i18n("The task waits under the account and starts in the background on the day and at the time you pick, while the widget runs (or as soon as it runs again). You can start or cancel it before.")
+                }
+            }
+            // the day: today and the next six
+            PlasmaComponents3.ToolButton {
+                enabled: root.taskLater && root.taskLaterDay > 0
+                icon.name: "go-previous"
+                display: PlasmaComponents3.AbstractButton.IconOnly
+                text: i18n("A day earlier")
+                Layout.preferredHeight: laterTime.implicitHeight
+                Layout.preferredWidth: Layout.preferredHeight
+                onClicked: root.taskLaterDay -= 1
+            }
+            PlasmaComponents3.Label {
+                textFormat: Text.PlainText
+                enabled: root.taskLater
+                text: box.days[root.taskLaterDay] || ""
+                horizontalAlignment: Text.AlignHCenter
+                Layout.preferredWidth: Kirigami.Units.gridUnit * 5
+            }
+            PlasmaComponents3.ToolButton {
+                enabled: root.taskLater && root.taskLaterDay < box.days.length - 1
+                icon.name: "go-next"
+                display: PlasmaComponents3.AbstractButton.IconOnly
+                text: i18n("A day later")
+                Layout.preferredHeight: laterTime.implicitHeight
+                Layout.preferredWidth: Layout.preferredHeight
+                onClicked: root.taskLaterDay += 1
+            }
+            PlasmaComponents3.TextField {
+                id: laterTime
+                enabled: root.taskLater
+                text: root.taskLaterTime
+                placeholderText: i18nc("a time to type", "HH:MM")
+                inputMethodHints: Qt.ImhPreferNumbers
+                horizontalAlignment: TextInput.AlignHCenter
+                onTextEdited: root.taskLaterTime = text
+                Layout.preferredWidth: Kirigami.Units.gridUnit * 3.5
+            }
+            PlasmaComponents3.Label {
+                textFormat: Text.PlainText
+                visible: root.taskLater
+                Layout.fillWidth: true
+                text: box.laterAt ? i18n("in %1", root.duration(box.laterAt - root.now))
+                                  : root.taskLaterTime.trim() ? i18n("that time has passed") : i18n("e.g. 14:30")
+                color: box.laterAt || !root.taskLaterTime.trim() ? Kirigami.Theme.textColor : Kirigami.Theme.negativeTextColor
+                opacity: box.laterAt ? 0.7 : 1
+                font: Kirigami.Theme.smallFont
+                elide: Text.ElideRight
             }
         }
 
@@ -185,7 +263,7 @@ Rectangle {
         // Any folder, picked in the folder dialog (not on an SSH host)
         PlasmaComponents3.ItemDelegate {
             visible: !box.remoteHost
-            enabled: box.background ? box.terminalHere : (box.inVscode || box.terminalHere)
+            enabled: box.later && !box.laterAt ? false : box.background ? box.terminalHere : (box.inVscode || box.terminalHere)
             Layout.fillWidth: true
             icon.name: "folder-open"
             text: i18n("Choose folder…")

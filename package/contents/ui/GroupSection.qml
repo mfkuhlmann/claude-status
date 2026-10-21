@@ -308,7 +308,7 @@ ColumnLayout {
         opacity: 0.6
     }
 
-    // Tasks waiting for this account's usage limit to reset (main.qml: the queue)
+    // Tasks waiting for this account's usage limit to reset, or for the time you picked (main.qml: the queue)
     Repeater {
         model: section.queued.length
         delegate: ColumnLayout {
@@ -345,18 +345,22 @@ ColumnLayout {
                     PlasmaCore.ToolTipArea {
                         textFormat: Text.PlainText
                         anchors.fill: parent
-                        mainText: i18n("Waits for the usage limit")
+                        mainText: queuedLine.task.scheduled ? i18n("Starts later") : queuedLine.task.chat ? i18n("Goes on after the usage limit")
+                                                            : i18n("Waits for the usage limit")
                         subText: queuedLine.what + "\n\n"
                                  + (queuedLine.task.chat
                                     ? i18n("The chat goes on in the background in %1, at %2, telling Claude that the limit has reset. A session that still has it open (in a terminal, or in the background) ends first; if it went on before then, nothing happens.",
                                            queuedLine.folder, root.clockText(queuedLine.task.startAt))
-                                    : i18n("Starts in the background in %1, at %2.", queuedLine.folder, root.clockText(queuedLine.task.startAt)))
+                                    : i18n("Starts in the background in %1, at %2.", queuedLine.folder, root.startText(queuedLine.task.startAt)))
                     }
                 }
                 PlasmaComponents3.Label {
                     textFormat: Text.PlainText
                     text: queuedLine.task.error ? i18n("didn't start")
                           : queuedLine.task.due || queuedLine.task.startAt <= root.now ? i18n("starting…")
+                          : queuedLine.task.startAt - root.now > 12 * 3600000
+                          ? i18nc("queued task: folder, when it starts", "%1 · starts %2", queuedLine.task.folderShort || "~",
+                                  root.startText(queuedLine.task.startAt))
                           : i18nc("queued task: folder, when it starts", "%1 · starts in %2", queuedLine.task.folderShort || "~",
                                   root.duration(queuedLine.task.startAt - root.now))
                     color: queuedLine.task.error ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.textColor
@@ -378,7 +382,8 @@ ColumnLayout {
                         textFormat: Text.PlainText
                         anchors.fill: parent
                         mainText: i18n("Start it now")
-                        subText: i18n("In the background, without waiting for the limit to reset. While the limit lasts, Claude stops again at once.")
+                        subText: queuedLine.task.scheduled ? i18n("In the background, without waiting for its time.")
+                                 : i18n("In the background, without waiting for the limit to reset. While the limit lasts, Claude stops again at once.")
                     }
                 }
                 PlasmaComponents3.ToolButton {

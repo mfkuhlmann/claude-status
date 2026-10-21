@@ -54,6 +54,7 @@ D-Bus). Prints one JSON line, {"ok": bool, "message": str}.
 """
 
 import ast
+import datetime
 import json
 import os
 import re
@@ -891,9 +892,10 @@ def choose_folder(title, start):
 # (claude_status: the queue); the widget starts it then with --start-queued.
 
 
-def queue_task(home, extra_dirs, dirname, folder, task, start_at, host="", account=""):
+def queue_task(home, extra_dirs, dirname, folder, task, start_at, host="", account="", scheduled=False):
     """Queue a task for a background session on the profile dirname (an SSH
-    host's with host), in folder, to start at start_at (ms)."""
+    host's with host), in folder, to start at start_at (ms): when a usage
+    limit resets, or (scheduled) at a time you picked."""
     if not task:
         return False, "Write what Claude should do first"
     plan_title = ""
@@ -912,9 +914,24 @@ def queue_task(home, extra_dirs, dirname, folder, task, start_at, host="", accou
                 return False, "That plan isn't there any more"
             plan_title = cs.plan_title(path)
     entry = cs.queue_entry(dirname, folder or "", task.text, start_at, host, account, task.plan, task.plan_profile,
-                           plan_title)
+                           plan_title, scheduled=scheduled)
     cs.change_queue(cs.cache_dir(home), add=entry)
+    if scheduled:
+        return True, f"Queued: it starts {start_time(start_at)}"
     return True, f"Queued: it starts at {time.strftime('%H:%M', time.localtime(start_at / 1000))}, when the limit resets"
+
+
+def start_time(at_ms, now=None):
+    """When a queued task starts, in words: "at 14:30" today, "tomorrow at
+    09:00", else its day ("on Fri 24 Oct at 09:00")."""
+    at = datetime.datetime.fromtimestamp(at_ms / 1000)
+    days = (at.date() - datetime.datetime.fromtimestamp(time.time() if now is None else now).date()).days
+    clock = at.strftime("%H:%M")
+    if days <= 0:
+        return f"at {clock}"
+    if days == 1:
+        return f"tomorrow at {clock}"
+    return f"on {at.strftime('%a %d %b')} at {clock}"
 
 
 def queue_continue(home, extra_dirs, chat_id, profile_dir, folder, text, start_at, host="", account="", name=""):
@@ -1690,7 +1707,8 @@ USAGE = ("usage: jump.py [--stop [--busy] | --interrupt] SESSION_ID [--profile P
          "       jump.py --open-plan|--edit-plan|--share-plan|--unshare-plan SLUG [--profile PROFILE] [--to PROFILE]\n"
          "       jump.py --remote-edit HOST PATH   (a file of an SSH host, in VS Code)\n"
          "       jump.py --queue PROFILE [--cwd FOLDER | --choose-folder] --at MS [--prompt TEXT] [--plan SLUG [--plan-profile P]]\n"
-         "               [--host HOST] [--account TITLE]   (a background task that starts at MS: a limit's reset)\n"
+         "               [--host HOST] [--account TITLE] [--scheduled]\n"
+         "               (a background task that starts at MS: a limit's reset, or --scheduled: a time you picked)\n"
          "       jump.py --queue-continue CHAT_ID --profile PROFILE --at MS [--cwd FOLDER] [--prompt TEXT] [--name NAME]\n"
          "               [--host HOST] [--account TITLE]   (go on with a chat a usage limit stopped, at MS)\n"
          "       jump.py --unqueue|--start-queued TASK_ID\n"
@@ -1723,7 +1741,7 @@ def main(argv=None):
     turn, listing, device, devices = False, False, None, None
     agent_id, open_it, run_file, account, vscode_terminal = None, True, None, None, None
     task, background, end_first, to = Task(), False, False, None
-    start_at, queue_host, account_title = None, "", ""
+    start_at, queue_host, account_title, scheduled = None, "", "", False
     while args:
         arg = args.pop(0)
         if arg == "--config-dir" and args:
@@ -1744,6 +1762,8 @@ def main(argv=None):
             action, session_id = (unqueue if arg == "--unqueue" else start_queued), args.pop(0)  # the task's id
         elif arg == "--at" and args and args[0].isdigit():
             start_at = int(args.pop(0))
+        elif arg == "--scheduled":
+            scheduled = True
         elif arg == "--host" and args:
             queue_host = args.pop(0)
         elif arg == "--account" and args and action in (queue_task, queue_continue):
@@ -1832,6 +1852,8 @@ def main(argv=None):
         sys.exit(USAGE)
     if action is queue_continue and (task.plan or background):
         sys.exit(USAGE)
+    if scheduled and action is not queue_task:
+        sys.exit(USAGE)
     if choose and (action not in (new_chat, queue_task) or queue_host):
         sys.exit(USAGE)
     if (background and vscode) or (end_first and action is not continue_on) or (to and action is not share_plan):
@@ -1854,9 +1876,10 @@ def main(argv=None):
             ok, message = new_chat_choosing_folder(
                 Path.home(), extra, session_id,
                 lambda home, extra_dirs, dirname, chosen, task: queue_task(home, extra_dirs, dirname, chosen, task, start_at,
-                                                                          account=account_title), task)
+                                                                          account=account_title, scheduled=scheduled), task)
         elif action is queue_task:
-            ok, message = queue_task(Path.home(), extra, session_id, folder, task, start_at, queue_host, account_title)
+            ok, message = queue_task(Path.home(), extra, session_id, folder, task, start_at, queue_host, account_title,
+                                     scheduled)
         elif action is queue_continue:
             ok, message = queue_continue(Path.home(), extra, session_id, profile_dir, folder, task.text, start_at,
                                          queue_host, account_title, name_arg)

@@ -2332,24 +2332,82 @@ PlasmoidItem {
 
     property string taskText: ""
     property bool taskBackground: false
+    // or later: on a day (0 today, 1 tomorrow, …) at a time ("14:30")
+    property bool taskLater: false
+    property int taskLaterDay: 0
+    property string taskLaterTime: ""
+
+    // The days a task can start on: today and the next six
+    function laterDays() {
+        const out = []
+        for (let i = 0; i < 7; i++) {
+            const d = new Date()
+            d.setDate(d.getDate() + i)
+            out.push(i === 0 ? i18n("Today") : i === 1 ? i18n("Tomorrow") : Qt.locale().toString(d, "ddd d MMM"))
+        }
+        return out
+    }
+
+    // When a task picked for later starts (ms): on day at clock ("9", "930",
+    // "9:30", "14:30"); 0 for no time, or one that has passed
+    function laterAt(day, clock) {
+        const m = /^(\d{1,2})(?::?(\d{2}))?$/.exec((clock || "").trim())
+        if (!m || +m[1] > 23 || +(m[2] || 0) > 59)
+            return 0
+        const d = new Date()
+        d.setDate(d.getDate() + day)
+        d.setHours(+m[1], +(m[2] || 0), 0, 0)
+        return d.getTime() > Date.now() ? d.getTime() : 0
+    }
+
+    // Ticking "Later, at": the next full hour, to change
+    function pickLater(on) {
+        taskLater = on
+        if (!on)
+            return
+        taskQueued = false
+        if (laterAt(taskLaterDay, taskLaterTime))
+            return
+        const d = new Date()
+        d.setHours(d.getHours() + 1, 0, 0, 0)
+        taskLaterDay = d.getDate() === new Date().getDate() ? 0 : 1
+        taskLaterTime = Qt.locale("C").toString(d, "HH:mm")
+    }
+
+    // When a queued task starts, in words: "14:30" today, "tomorrow 09:00", "Fri 24 Oct 09:00"
+    function startText(ms) {
+        const d = new Date(ms), today = new Date()
+        const days = Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate())
+                                 - new Date(today.getFullYear(), today.getMonth(), today.getDate())) / 86400000)
+        return days <= 0 ? clockText(ms)
+             : days === 1 ? i18nc("a time tomorrow", "tomorrow %1", clockText(ms))
+             : Qt.locale().toString(d, "ddd d MMM") + " " + clockText(ms)
+    }
 
     function startChat(group, host, folder, inVscode, plan) {
         const text = taskText.trim()
         const hasTask = text !== "" || !!plan
         const background = taskBackground && hasTask
         const reset = background && taskQueued ? limitReset(group, host) : null
+        const later = background && taskLater ? laterAt(taskLaterDay, taskLaterTime) : 0
+        if (background && taskLater && !later) {
+            actionError = i18n("Pick a time that's still to come, e.g. 14:30.")
+            actionErrorTimer.restart()
+            return
+        }
         newChatGroup = ""
         planComposer = ""
         taskText = ""
         taskBackground = false
         taskQueued = false
-        if (reset) {
-            // to start a minute after the limit resets
+        taskLater = false
+        if (reset || later) {
+            // to start a minute after the limit resets, or at the time picked
             if (!folder.path && !host)
                 root.expanded = false   // the folder dialog takes over
             queuer.connectSource("python3 -I " + shellQuote(codeDir + "jump.py") + " --queue " + shellQuote(group.chatProfile)
                                       + (folder.path || host ? " --cwd " + shellQuote(folder.path || "~") : " --choose-folder")
-                                      + " --at " + Math.round(reset.at + 60000)
+                                      + " --at " + (later || Math.round(reset.at + 60000)) + (later ? " --scheduled" : "")
                                       + (text ? " --prompt " + shellQuote(text) : "")
                                       + (plan ? " --plan " + shellQuote(plan.slug) + " --plan-profile " + shellQuote(plan.profileDir) : "")
                                       + (host ? " --host " + shellQuote(host) : "") + " --account " + shellQuote(group.title)

@@ -575,6 +575,21 @@ class QueueTests(TaskTests):
         self.assertEqual(self.queue("--unqueue", task["id"]), {"ok": True, "message": "Cancelled the queued task"})
         self.assertEqual(cs.load_queue(self.cache_root()), [])
 
+    def test_a_task_at_a_time_you_pick(self):
+        at = int((time.time() + 2 * 86400) * 1000)
+        answer = self.queue("--queue", ".claude-work", "--cwd", str(self.folder), "--at", str(at), "--prompt", "nightly check",
+                            "--scheduled")
+        self.assertTrue(answer["ok"], answer)
+        self.assertRegex(answer["message"], r"^Queued: it starts on \w{3} \d\d \w{3} at \d\d:\d\d$")
+        (task,) = cs.queued_tasks(self.cache_root(), int(time.time() * 1000))
+        self.assertEqual((task["scheduled"], task["chat"], task["due"]), (True, None, False))
+        self.assertTrue(cs.queued_tasks(self.cache_root(), at)[0]["due"])  # it starts like the others then
+        now = time.mktime(time.localtime()[:3] + (12, 0, 0, 0, 0, -1))  # (noon: an hour later is today)
+        self.assertEqual(jump.start_time(int((now + 3600) * 1000), now), "at 13:00")
+        self.assertTrue(jump.start_time(int((now + 86400) * 1000), now).startswith("tomorrow at "))
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            self.queue("--new-chat", ".claude-work", "--cwd", str(self.folder), "--prompt", "x", "--scheduled")
+
     def test_only_trusted_folders_and_a_task(self):
         at = str(int(time.time() * 1000))
         self.assertIn("doesn't trust", self.queue("--queue", ".claude-work", "--cwd", str(self.home), "--at", at, "--prompt", "x")["message"])
