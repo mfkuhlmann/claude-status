@@ -7,6 +7,26 @@ out. The VS Code companion of the
 [Claude Status widget](https://github.com/wzaielamri/claude-status)
 for KDE Plasma and GNOME; all of them use the same backend.
 
+## TL;DR
+
+- **What**: every Claude Code chat you have running, on this computer and on
+  your SSH hosts, in one VS Code view: which need you, which are working,
+  which are done, with each account's plan usage.
+- **Why**: click a chat to go to it (its terminal, VS Code's Claude tab or
+  its background job), get a notification when one needs you or finishes,
+  and see what each chat is doing and what it changed without switching
+  to it.
+- **Also**: subagent runs, plans, memories, Find a Chat, tasks that start
+  once a limit resets, moving a chat to another account, and Clawd acting it
+  all out.
+- **Install**: download `claude-status-<version>.vsix` from the
+  [latest release](https://github.com/wzaielamri/claude-status-vscode/releases/latest),
+  then `code --install-extension claude-status-<version>.vsix`. Needs
+  Linux, Python 3.7+ and Claude Code; `jq` for the plan usage bars.
+- **On your desktop**: the
+  [Claude Status widget](https://github.com/wzaielamri/claude-status) for
+  KDE Plasma and GNOME.
+
 <!-- Screenshots show demo data only (Claude Status: Toggle Demo Data, or dev/harness.html), never real chats. -->
 <p>
   <img src="docs/screenshots/view-dark.png" alt="The Claude Status view in a dark theme: Clawd waves above &quot;1 chat needs you&quot;, an account with three chats, its pets and plan usage bars, and an SSH host" width="300">
@@ -59,10 +79,11 @@ As an editor tab (**Claude Status: Open in Editor Tab**):
   open one, carry it out in a new chat (the plan is its first message, with
   what you add), go back to the chat that made it, or share it with your
   other accounts (sharing a chat shares its plan too).
-- **Tasks that wait for a usage limit**: when an account is at its limit,
-  a task started in the background can wait until it resets (**After the
-  limit resets**), then starts by itself. The account lists its queued
-  tasks: start one now or cancel it.
+- **Queued tasks**: a task started in the background can wait for a day
+  and time you pick (**Later, at a time you pick…**), or, when the account
+  is at its limit, until the limit resets (**After the limit resets**),
+  then starts by itself. The account lists its queued tasks with when they
+  start: start one now or cancel it.
 - **Chats changing the same files**: chats that are open and changed some of
   the same files get a red **⚠ same files** tag naming the other chat (and a
   notification), since two chats editing one file can overwrite each other.
@@ -273,7 +294,8 @@ token totals, chat titles, subagents, what a chat is doing and which files it
 changed), task lists (`<config>/tasks`), the backups Claude makes before it
 edits a file (`<config>/file-history`, to compare a chat's changes),
 `history.jsonl` (recent folders, and your prompts for **Find a Chat…**),
-the plans chats wrote (`<config>/plans`),
+the plans chats wrote (`<config>/plans`), Claude's memories
+(`<config>/projects/<folder>/memory`) and each account's `CLAUDE.md`,
 the account name and plan from `.claude.json`, and the status-line copies in
 `~/.cache/claude-widget/statusline`. It writes only to
 `~/.cache/claude-widget` (caches, the list of chats you removed, the tasks
@@ -303,9 +325,12 @@ you paste goes straight to Claude on the host.
 - Every VS Code window runs its own copy; only the window you used last
   shows notifications and plays sounds. "Away" means no VS Code window was in
   use, so switching between windows isn't an absence.
-- The Plasma widget and the GNOME extension open a chat's changes in this
-  extension's changes view (through its `vscode://wzaielamri.claude-status/changes`
-  link); without it they open one diff per file.
+- The Plasma widget and the GNOME extension use this extension through its
+  `vscode://wzaielamri.claude-status/…` links: a chat's changes open in its
+  changes view (without it, one diff per file), a chat in one of VS Code's
+  terminals brings up that terminal, and the Plasma widget's plans and
+  subagent runs open in the Markdown preview (**Open plans and runs in: VS
+  Code**).
 - With the Plasma widget or the GNOME extension running too, both notify:
   turn notifications off in one of them.
 - On KDE Plasma, a chat running in a terminal outside VS Code is brought to
