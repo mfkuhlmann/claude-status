@@ -5,6 +5,10 @@
 - A plan or memory in a long folder lost the end of its time ("5d 22h a")
   at the row's end, whatever the panel's width: the folder is now cut in
   the middle, as in **Recent chats**, and the time always shows.
+- The chart of an account's last days drew a grey bar on days without any
+  tokens, and the bars of days with no weekday under them reached down into
+  the weekdays, taller than they should be: a day without tokens now has no
+  bar, and all bars stand on the same line.
 
 ## 1.13.0
 

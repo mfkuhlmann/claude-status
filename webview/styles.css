@@ -678,10 +678,6 @@ button:focus-visible {
   background: color-mix(in srgb, var(--cs-fg) 35%, transparent);
 }
 
-.stats-bar.empty {
-  height: 0;
-}
-
 .stats-day.today .stats-bar {
   background: var(--cs-working);
 }

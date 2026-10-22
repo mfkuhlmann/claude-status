@@ -15,9 +15,10 @@ export function StatsPanel({ stats: s }: { stats: UsageStats }) {
         {s.days.map((d, i) => (
           <div key={d.day} class={"stats-day" + (i === last ? " today" : "")} title={dayTitle(d)}>
             <div class="stats-bar-area">
-              <div class={"stats-bar" + (d.total ? "" : " empty")} style={{ height: d.total ? `${Math.max(4, (100 * d.total) / peak)}%` : undefined }} />
+              {d.total ? <div class="stats-bar" style={{ height: `${Math.max(4, (100 * d.total) / peak)}%` }} /> : null}
             </div>
-            <span class="stats-weekday muted">{labeledBar(i, s.days.length) ? (i === last ? "today" : weekdayShort(d.day)) : " "}</span>
+            {/* A no-break space: a plain one leaves the line empty, and that day's bar area grows into it */}
+            <span class="stats-weekday muted">{labeledBar(i, s.days.length) ? (i === last ? "today" : weekdayShort(d.day)) : "\u00a0"}</span>
           </div>
         ))}
       </div>
