@@ -29,7 +29,7 @@ for KDE Plasma and GNOME; all of them use the same backend.
 
 <!-- Screenshots show demo data only (Claude Status: Toggle Demo Data, or dev/harness.html), never real chats. -->
 <p>
-  <img src="docs/screenshots/view-dark.png" alt="The Claude Status view in a dark theme: Clawd waves above &quot;1 chat needs you&quot;, an account with three chats, its pets and plan usage bars, and an SSH host" width="300">
+  <img src="docs/screenshots/view-dark.png" alt="The Claude Status view in a dark theme: Clawd under &quot;1 chat needs you&quot;, an account with three chats, their pets, plan usage bars and a queued task, and an SSH host with a chat a usage limit stopped" width="300">
   <img src="docs/screenshots/view-light.png" alt="The same view in a light theme" width="300">
 </p>
 

@@ -30,6 +30,8 @@ function sendState(): void {
   if (params.get("default") === "1" && groups.length)
     groups.splice(1, 0, { ...groups[0], id: "demo-second", name: "work", title: "work · Team", plan: "Team", defaultHere: false, sessions: [] }),
       (groups[0] = { ...groups[0], defaultHere: true });
+  // ?banner=0: without the "Demo data" line, for the README's screenshots
+  if (params.get("banner") === "0") state.demo = false;
   send({ type: "state", state });
 }
 
