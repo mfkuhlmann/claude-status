@@ -7,6 +7,7 @@
 Which chats are working, which need you and how much of your plan is left,
 across all your accounts and SSH hosts, one click away on your panel.
 On GNOME (Ubuntu 26.04 and newer) it lives in the top bar: see [On GNOME](#on-gnome).
+In VS Code, [Claude Status for VS Code](https://github.com/wzaielamri/claude-status-vscode) shows the same in a view of its own.
 
 [![Tests](https://github.com/wzaielamri/claude-status/actions/workflows/tests.yml/badge.svg)](https://github.com/wzaielamri/claude-status/actions/workflows/tests.yml)
 [![KDE Plasma 6](https://img.shields.io/badge/KDE_Plasma-6-1d99f3?logo=kde&logoColor=white)](https://kde.org/plasma-desktop/)
@@ -17,6 +18,14 @@ On GNOME (Ubuntu 26.04 and newer) it lives in the top bar: see [On GNOME](#on-gn
 <img src="docs/screenshots/popup-light.png" alt="The Claude Status popup: a big Clawd says one chat needs you; below, each account shows its chats as pets, plan usage bars, token totals and its sessions" width="48%">&nbsp;<img src="docs/screenshots/popup-dark.png" alt="The same popup in a dark theme" width="48%">
 
 </div>
+
+## TL;DR
+
+- **What:** every Claude Code chat you have running, in your panel: which need you, which are working, which are done, with the plan usage of each account. All your accounts, and your SSH hosts too.
+- **Why:** one click takes you to the chat that needs you (its Konsole tab, tmux pane, VS Code tab or background job), notifications tell you when one needs you or finishes, and the usage bars show where your pace leads before you hit a limit.
+- **Also:** start chats (with a task, in the background, or once a limit resets), find any chat, read and edit plans and memories, move a chat to another account, and a pet that acts out each chat.
+- **Install:** `git clone https://github.com/wzaielamri/claude-status.git && cd claude-status && ./install.sh`, then add **Claude Status** to your panel. Needs KDE Plasma 6 (or GNOME Shell 49+), Claude Code, python3 and jq.
+- **In VS Code:** [Claude Status for VS Code](https://github.com/wzaielamri/claude-status-vscode).
 
 > [!NOTE]
 > An independent project: not affiliated with or endorsed by Anthropic, and written with AI assistance. See [About this project](#about-this-project).
@@ -112,6 +121,7 @@ On GNOME (Ubuntu 26.04 and newer) it lives in the top bar: see [On GNOME](#on-gn
   - **Qt 6.10 or newer with the QtQuick.VectorImage module**, for animated pets. Without it the pets are still images that walk, hop and react all the same.
   - **PipeWire** (`pw-play`) or PulseAudio (`paplay`) for sounds.
   - **kdialog** (usually installed with KDE) for *Choose folder…*; `zenity` works too.
+  - **Okular**, to read plans, memories and subagent runs rendered. Without it they open as a page in your web browser.
   - **gdbus** (`libglib2.0-bin` on Debian and Kubuntu, `glib2-tools` on openSUSE; Fedora and Arch have it) for switching Konsole tabs and raising windows, and **xdg-open** (`xdg-utils`) for opening chats in VS Code.
   - tmux; VS Code with the Claude Code extension.
 
@@ -137,6 +147,8 @@ Then right-click your panel → **Add Widgets…**, search for **Claude Status**
 You can add it more than once, e.g. on the panel and on each screen's desktop: the copies share one check and their settings, and only one of them notifies. On the desktop, the pets rest while a window covers the whole widget.
 
 Each [release](https://github.com/wzaielamri/claude-status/releases) also has the widget as a `.plasmoid` file and the GNOME extension as a `.zip`, for installing without the repository (its notes say how). `./install.sh` is still the easiest way: it also adds the status-line snippet.
+
+For VS Code, [Claude Status for VS Code](https://github.com/wzaielamri/claude-status-vscode) is an extension of its own, installed from its [releases](https://github.com/wzaielamri/claude-status-vscode/releases/latest) (a `.vsix`). It brings its own copy of the backend, so it doesn't need the widget, and it works alongside it.
 
 `install.sh` does two things:
 
@@ -188,6 +200,7 @@ The same dashboard as a GNOME Shell extension: the ✳ in the top bar, the popup
 
 **What's different from Plasma:**
 
+- Not on GNOME yet: chats a usage limit stopped (and their **Continue on …** and **Go on at …**), Claude's recaps and permission modes, starting a chat with a task or in the background, queued tasks, finding a chat, plans, memories and **⚠ same files**. Nor are the share button on an SSH host's chats, **Log in…** for an SSH host that wants a password, and the *Phone* setting.
 - Jumping to a session brings its window to the front. Konsole and tmux also switch to the right tab or pane; in Ptyxis and GNOME Terminal the window comes up, but not the tab. New chats open in your default terminal (`xdg-terminal-exec`, else Ptyxis, GNOME Terminal or Console).
 - The pets are still poses: they walk, hop, breathe and react, but don't move their arms. You can't pick them up.
 - The menu at the bottom of the popup replaces the right-click menu; a middle click on the ✳ refreshes.
@@ -220,8 +233,13 @@ The same dashboard as a GNOME Shell extension: the ✳ in the top bar, the popup
 | *Plans* | Unfolds the account's plans: click one to open it. Hovering one: ▶ carries it out in a new chat, ◀ goes back to the chat that made it, and the share button shares it with your other accounts. |
 | **plan ↗** next to a session | Opens the plan that chat wrote, to read. |
 | **✎** next to it, or in a plan's row | Opens the plan's Markdown file to change it (your text editor; VS Code if the settings open plans there). |
+| **↩ send to Claude** next to a session | You changed its plan: sends your changes to the chat, which revises the plan. |
+| *Memories* | Unfolds the account's `CLAUDE.md` and what Claude remembers: click one to read it, ✎ to change it. |
 | **Continue on …** under a session | A usage limit stopped it: continues it on that account, which has room left. |
-| Magnifier at the top | Finds a chat by the words in its name, folder or your prompts. |
+| **Go on at …** under a session | A usage limit stopped it: it goes on by itself in the background once the limit resets (click again to cancel). In *Recent chats*, its **limit** tag does the same. |
+| A queued task under an account | Starts it now, or cancels it. |
+| **⚠ same files** next to a session | Goes to the other chat that changes the same files. |
+| Magnifier at the top | Finds a chat by the words in its name, folder or your prompts, and project folders, plans and memories with those words. |
 | Server button at the top | Picks the SSH hosts to show. |
 | **Log in…** at an account | An account that isn't logged in (a new one, or one you logged out of): a terminal opens with Claude's own login. |
 
@@ -353,7 +371,8 @@ Issues and ideas are welcome on the [issue tracker](https://github.com/wzaielamr
 - **What a chat is doing** comes from the end of its transcript: its newest step (a tool call, thinking, writing), your last prompt and Claude's reply since (markdown read as plain text). Its **tasks** are Claude's own task list, `tasks/<session>/<n>.json`. The **files it changed** come from the transcript's `file-history-delta` and `file-history-snapshot` records (each prompt's snapshot is where that turn started), plus its edit tool calls; only what was appended since the last check is read (`~/.cache/claude-widget/chats.json`).
 - **Recaps, modes and limits** come from the end of each listed chat's transcript, like what it's doing: Claude's recap is a `system` record of subtype `away_summary` (it counts while no prompt or reply came after it), the permission mode the newest `permission-mode` record (or the one your last prompt carries), and a chat stopped by a usage limit ends with Claude's API error message naming the limit (*You've hit your session limit · resets …*). When that limit resets comes from the account's plan window of that limit (a window that started after the chat stopped means it's over), else from the time in the message.
 - **Plans** are the Markdown files a chat in plan mode writes, `<config>/plans/<slug>.md`; the chat's transcript carries its slug (read from its end, kept in `~/.cache/claude-widget/plans.json`), which is how a plan is matched to the chat that made it. **Carry it out** starts a chat with the plan's text (up to 100 KB) as its first message. A shared plan is one file hard-linked into each profile's `plans/` (Claude writes plans in place, so it stays one file).
-- **Finding a chat** reads each transcript's name and folder (from its first and last 64 KB, kept in `~/.cache/claude-widget/links.json`) and your prompts from each profile's `history.jsonl`; it runs when you search, not with the checks.
+- **Finding a chat** reads each transcript's name and folder (from its first and last 64 KB, kept in `~/.cache/claude-widget/links.json`) and your prompts from each profile's `history.jsonl`; it runs when you search, not with the checks. The folders it finds are the ones chats ran in; plans are matched by their title and text, memories by their name, description and text.
+- **Memories** are Claude's own notes, `<config>/projects/<folder>/memory/*.md` (the name, description and kind at the top of each), listed newest first after the account's `CLAUDE.md`. The folder a memory is for is found from the `projects/` folder's name, which Claude makes from the folder's path.
 - **Queued tasks** are kept in `~/.cache/claude-widget/queue.json` (an SSH host's too: they start from here, over ssh). The widget that notifies starts one once its time has come (`jump.py --start-queued`), which takes it out of the queue first, so of several copies (and the VS Code extension) only one starts it. A chat that goes on by itself is checked first: if its newest turn isn't the limit's message any more, it went on already and nothing happens. Else an idle session that has it open ends (as for **Continue on …**), and `claude --bg --resume <chat> "The usage limit has reset: go on where you stopped."` goes on with the same chat in the background (only in a folder Claude trusts, as for background tasks).
 - **Chats changing the same files:** two listed chats that each have a process (they can still change files) and changed some of the same files, as the widget reads what a chat changed (Claude's backups and edit tool calls, subagents included; not shell commands).
 - **Markdown pages:** without Okular, `package/contents/code/markdown_page.py` turns a plan or run into an HTML page (standard library only: headings, lists, code, tables, quotes, links), written to `~/.cache/claude-widget/agent-runs` and opened in your browser. Everything is escaped, only http(s) links are links, images aren't loaded, and the page's Content-Security-Policy blocks scripts and any loading.
@@ -371,9 +390,9 @@ Issues and ideas are welcome on the [issue tracker](https://github.com/wzaielamr
 
 - The widget reads the files Claude Code writes, on your computer and on the SSH hosts you pick (through your own SSH login). It never handles your SSH password: you type it into `ssh` itself, in a terminal, and nothing of it is stored. On an SSH host it also reads which account VS Code's Claude uses there (the VS Code server's settings), and changes only that one setting (`claudeCode.environmentVariables`' `CLAUDE_CONFIG_DIR`), when you start a VS Code chat there on another account. Besides those it reads only your `~/.ssh/config` host list, the desktop settings it needs (default terminal, sound theme, Do Not Disturb) and process and window info (`/proc`, Konsole, tmux, KWin) to find where a session runs (and, for a widget on the desktop, where your windows are, to rest the pets while one covers it); of a Claude process's environment it keeps only `CLAUDE_CONFIG_DIR` and `HOME`. To know which account VS Code's Claude uses, it reads `CLAUDE_CONFIG_DIR` from VS Code's settings (`claudeCode.environmentVariables`) or from VS Code's environment, nothing else. It never opens Claude's credentials (`.credentials.json`, the system keyring); of `.claude.json` it reads only what's listed above. When `claude` isn't on the desktop's PATH or in the usual install folders, a click on a chat runs your login shell once (`$SHELL -l -i -c env`) to read the PATH it sets up, nothing else.
 - It doesn't call any Anthropic API and sends no data anywhere. *Open Usage Page on claude.ai* just opens that page in your browser. A task you start a chat with goes to Claude, which runs it like a prompt you type (with a plan you carry out, the plan's text is part of it); so does feedback on a plan you send (what you changed in it), which the widget puts on your clipboard when it can't type it in. The one exception is the *Phone* setting (off unless you turn it on): then a chat's name, what it needs and its folder go to your phone through KDE Connect.
-- Everything it stores lives in `~/.cache/claude-widget`, plus shared chats' folders in `~/.local/share/claude-status/shared-chats`; only your user can read either (mode 0700). SSH connection sockets go to `$XDG_RUNTIME_DIR/claude-status-ssh`, which is cleared when you log out. Its JSON output replaces account ids with a one-way hash.
+- Everything it stores lives in `~/.cache/claude-widget` (tasks you queue too, with their text, until they start), plus shared chats' folders in `~/.local/share/claude-status/shared-chats`; only your user can read either (mode 0700). SSH connection sockets go to `$XDG_RUNTIME_DIR/claude-status-ssh`, which is cleared when you log out. Its JSON output replaces account ids with a one-way hash.
 - It changes Claude Code's files only when you share a chat or a plan (here, or between an SSH host's accounts on that host): it links the chat (with its plan) or the plan into your other profiles, or out of them again; and when you add or remove an account in its settings (see [Accounts](#accounts)): it makes the `~/.claude-NAME` folder (its `.profile-name` and the links to the settings you share) and the `~/.local/bin/claude-NAME` command, or moves the folder to the Trash. **Make Default** changes the `~/.claude` link (when it is one) and one entry of VS Code's settings (`claudeCode.environmentVariables`' `CLAUDE_CONFIG_DIR`; on an SSH host, its VS Code server's), nothing else of them. The same happens on an SSH host when you manage its accounts. Logging in and out is Claude's own `claude auth login` / `logout`; the Accounts page asks `claude auth status` whom each account is logged in as, and shows its email address only there. Before a removed folder goes to the Trash, the widget deletes its `.credentials.json` without opening it, so no login ends up in the Trash.
-- To show what a chat changed, it reads Claude's backups of the chat's files (`file-history/`) and the files themselves, runs `git show HEAD:<file>` for a file with no backup, and puts copies of the earlier versions in `~/.cache/claude-widget/changes` for VS Code to show; they're removed after a day. A subagent's run you open is written to `~/.cache/claude-widget/agent-runs` (an SSH host's comes over your ssh connection) and opened with `xdg-open`; it's removed after a day too. It also reads Claude's task lists (`tasks/`) and plans (`plans/`; an SSH host's plan you open comes over your ssh connection and is written to `~/.cache/claude-widget/agent-runs`, removed after a day), and asks the screen saver over D-Bus whether the screen is locked.
+- To show what a chat changed, it reads Claude's backups of the chat's files (`file-history/`) and the files themselves, runs `git show HEAD:<file>` for a file with no backup, and puts copies of the earlier versions in `~/.cache/claude-widget/changes` for VS Code to show; they're removed after a day. A subagent's run you open is written to `~/.cache/claude-widget/agent-runs` (an SSH host's comes over your ssh connection) and opened with `xdg-open`; it's removed after a day too. It also reads Claude's task lists (`tasks/`), plans (`plans/`; an SSH host's plan you open comes over your ssh connection and is written to `~/.cache/claude-widget/agent-runs`, removed after a day) and memories (`projects/<folder>/memory/`), and each account's `CLAUDE.md`; it changes none of them itself (✎ opens the file in your editor). It asks the screen saver over D-Bus whether the screen is locked.
 
 ## Limitations
 
@@ -409,7 +428,7 @@ package/                  the widget (what install.sh installs)
     │                     SessionRow.qml, PetStrip.qml + Pet.qml (pets), hub/Hub.qml (checks shared by all copies), …
     ├── code/             Python: claude_status.py (status; poll.py runs it for each check, compiled code cached),
     │                     jump.py (actions), sharing.py (shared chats), accounts.py (accounts), remote.py (SSH),
-    │                     notify_sound.py
+    │                     markdown_page.py (plans and runs as a web page), notify_sound.py
     ├── config/           settings schema and pages
     └── pets/             Clawd artwork (clawd-pet, MIT)
 gnome/                    the GNOME Shell extension: extension/ (GJS: indicator.js, logic.js, ui/, prefs.js), build.sh, tests/
@@ -430,7 +449,7 @@ I built this widget to make my own day-to-day work with Claude Code easier. With
 
 This is an independent, personal project. It is not affiliated with, endorsed by, sponsored by or otherwise connected to Anthropic, PBC, and building it does not make me a representative of Anthropic in any way. "Claude" and "Claude Code" are trademarks of Anthropic, PBC; they appear here only to describe what the widget works with.
 
-The widget only reads files that Claude Code writes on your own computer, and changes them only when you share a chat between your accounts or add or remove an account. It does not call any Anthropic API, and it sends no data anywhere: logging in and out is Claude Code's own command. The *Open Usage Page on claude.ai* menu entry just opens that page in your browser.
+The widget only reads files that Claude Code writes on your own computer, and changes them only when you share a chat between your accounts, or add, remove or pick the default account. It does not call any Anthropic API, and it sends no data anywhere: logging in and out is Claude Code's own command. The *Open Usage Page on claude.ai* menu entry just opens that page in your browser.
 
 ### AI-assisted development
 
