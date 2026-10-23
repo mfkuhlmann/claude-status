@@ -1,7 +1,7 @@
 {
   "name": "claude-status",
   "displayName": "Claude Status",
-  "description": "Every Claude Code chat on this computer and your SSH hosts in one view: who needs you, plan usage, subagents, and animated Clawd pets. Runs on your side, also in Remote-SSH windows.",
+  "description": "Every Claude Code chat on this computer and your SSH hosts in one view: who needs you, plan usage, subagents, and Talpa, the animated pet. Runs on your side, also in Remote-SSH windows.",
   "version": "1.13.0",
   "publisher": "wzaielamri",
   "author": {
@@ -46,7 +46,7 @@
         {
           "id": "claudeStatus",
           "title": "Claude Status",
-          "icon": "media/spark.svg"
+          "icon": "media/talpa.svg"
         }
       ]
     },
@@ -410,7 +410,7 @@
         "claudeStatus.showPet": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Show Clawd, the animated pet.",
+          "markdownDescription": "Show Talpa, the animated pet.",
           "order": 20
         },
         "claudeStatus.chatPets": {

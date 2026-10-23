@@ -1,25 +1,27 @@
 // A stage where pets (pet.ts) live, ported from the widget's PetStrip.qml.
 // Two kinds:
 //
-// hero: the big Clawd at the top of the view, on a little stage whose light
+// hero: the big Talpa at the top of the view, on a little stage whose light
 // follows the whole dashboard (warm when a chat needs you, blue while chats
 // work, green when they wait for your next message, a starry night once
-// everything is done), with a headline and the session counts beside him.
+// everything is done), with a headline and the session counts beside it.
 //
 // an account's stage: one pet per chat of that account in the list, up to a
 // few. A pet wears the chat's name on a tag in the chat's color (the chat's
 // row gets a bar in the same color), acts the chat out, opens it when
 // clicked, and stays the same pet, on the same spot, until the chat leaves the
-// list; then it waves and walks off.
+// list; then it waves and digs away.
 //
 // Everything stops while a stage isn't shown: no animation frame, no timer,
 // paused CSS animations.
 
 import { editorTab, isDark } from "../env";
 import { plural } from "../../src/shared/model";
+import type { TalpaTheme } from "../../vendor/talpa/talpa.mjs";
 import type { AccountInput, HeroInput, PetStage, StageCallbacks, StageChat } from "./api";
 import type { ChatRef, Counts } from "../../src/shared/types";
 import { PALETTE, allPetColors, freeColor, setPetColors } from "./colors";
+import { BOX, FLOOR } from "../../vendor/talpa/talpa.mjs";
 import { Clock, Timer, Tween, cssEase, reducedMotion, type Animator } from "./motion";
 import { Pet, SMALL } from "./pet";
 
@@ -27,12 +29,15 @@ export const allStages = new Set<Stage>();
 
 const world = {
   dark: isDark(),
-  shownOnce: false, // pets have been on screen: from now on newcomers walk in
+  shownOnce: false, // pets have been on screen: from now on the hero digs its way up too
 };
 
 export function setDarkAll(dark: boolean): void {
   world.dark = dark;
-  for (const s of allStages) s.root.classList.toggle("cs-dark", dark);
+  for (const s of allStages) {
+    s.root.classList.toggle("cs-dark", dark);
+    for (const p of s.pets) p.themeChanged();
+  }
 }
 
 function pageVisible(): boolean {
@@ -56,9 +61,9 @@ const STAR_SPOTS = [[0.55, 0.14], [0.64, 0.36], [0.71, 0.1], [0.8, 0.3], [0.88, 
 
 // The hero's light: what the whole dashboard is up to
 function lightOf(mood: string): string {
-  return mood === "waving" ? "waiting"
-    : mood.startsWith("working") ? "working"
-    : mood === "idle-living" ? "idle"
+  return mood === "needs" ? "waiting"
+    : mood === "working" || mood === "agents" ? "working"
+    : mood === "idle" ? "idle"
     : mood === "error" ? "error"
     : "night";
 }
@@ -69,7 +74,6 @@ export class Stage implements PetStage, Animator {
   readonly clock = new Clock();
   readonly root: HTMLDivElement;
   readonly petLayer: HTMLDivElement;
-  private readonly fxLayer: HTMLDivElement;
   private readonly bubbleEl: HTMLDivElement;
   private readonly floorEl: HTMLDivElement | null = null;
   private readonly moreEl: HTMLDivElement | null = null;
@@ -80,10 +84,14 @@ export class Stage implements PetStage, Animator {
   private readonly textEl: HTMLDivElement | null = null;
   private readonly cb: StageCallbacks;
 
-  // All pets share the viewBox -15 -25 45 45: the character is the middle
-  // third of the image, ~11 of its 45 units tall
+  // Each Talpa is drawn in a 64-unit box on a canvas with room around it
+  // (box*1.6 by box*1.5, the box 0.3 and 0.45 boxes in): its body is 38 units
+  // wide and stands about 31 units out of its burrow, whose floor is 57 down
   readonly gu: number;
-  readonly imageSize: number;
+  readonly box: number;
+  readonly canvasW: number;
+  readonly canvasH: number;
+  readonly floorY: number; // the floor, from the canvas top
   readonly bodyWidth: number;
   readonly bodyHeight: number;
   private readonly tagHeight: number;
@@ -109,7 +117,6 @@ export class Stage implements PetStage, Animator {
   private frame = 0;
   private renderQueued = false;
   private readonly tweens = new Set<Tween>();
-  private readonly waapi = new Set<Animation>(); // particles: paused with the stage
   private starAnims: Animation[] = [];
   private hoverClientX = -1;
   private bubbleOwner: Pet | null = null;
@@ -133,9 +140,12 @@ export class Stage implements PetStage, Animator {
 
     const gu = parseFloat(getComputedStyle(this.root).getPropertyValue("--cs-gu"));
     this.gu = gu > 0 ? gu : 16;
-    this.imageSize = this.gu * (hero ? 10 : 6.2);
-    this.bodyWidth = this.imageSize / 3;
-    this.bodyHeight = (this.imageSize * 11) / 45;
+    this.box = this.gu * (hero ? 5.6 : 3.8);
+    this.canvasW = this.box * 1.6;
+    this.canvasH = this.box * 1.5;
+    this.floorY = this.box * 0.45 + (this.box * FLOOR) / BOX;
+    this.bodyWidth = (this.box * 38) / 64;
+    this.bodyHeight = (this.box * 31) / 64;
     this.tagHeight = this.gu * 1.05;
     this.margin = this.bodyWidth * 0.8;
     this.tagWidth = this.gu * 3.5;
@@ -154,7 +164,7 @@ export class Stage implements PetStage, Animator {
         this.stars.push(star);
       });
       // The headline (what needs you, what works) and the session counts,
-      // left of where he stands
+      // left of where it stands
       this.textEl = el("div", "cs-hero-text", this.root);
       this.headlineEl = el("div", "cs-hero-headline", this.textEl);
       this.headlineEl.addEventListener("click", () => this.openCalling());
@@ -173,8 +183,6 @@ export class Stage implements PetStage, Animator {
     }
     this.petLayer = el("div", "cs-stage-pets", this.root);
     this.petLayer.setAttribute("aria-hidden", "true");
-    this.fxLayer = el("div", "cs-stage-fx", this.root);
-    this.fxLayer.setAttribute("aria-hidden", "true");
     this.bubbleEl = el("div", "cs-bubble", this.root);
     this.bubbleEl.hidden = true;
 
@@ -182,7 +190,7 @@ export class Stage implements PetStage, Animator {
       this.bubbleOwner = null;
       this.bubbleEl.hidden = true;
     });
-    // Shown and laid out: from now on pets walk where they go
+    // Shown and laid out: from now on a new hero digs its way up too
     this.firstShownTimer = new Timer(this.clock, 500, () => (world.shownOnce = true));
 
     this.root.addEventListener("pointerenter", (e) => this.hover(e.clientX));
@@ -232,8 +240,6 @@ export class Stage implements PetStage, Animator {
     this.frame = 0;
     this.clock.dispose();
     this.tweens.clear();
-    for (const a of this.waapi) a.cancel();
-    this.waapi.clear();
     for (const a of this.starAnims) a.cancel();
     for (const p of this.pets) p.destroy();
     this.pets = [];
@@ -261,10 +267,6 @@ export class Stage implements PetStage, Animator {
       if (this.frame) cancelAnimationFrame(this.frame);
       this.frame = 0;
     }
-    for (const a of this.waapi) {
-      if (live) a.play();
-      else a.pause();
-    }
     this.updateStars();
     for (const p of [...this.pets]) p.liveChanged(offFor);
     this.invalidate();
@@ -276,8 +278,9 @@ export class Stage implements PetStage, Animator {
 
   // ------------------------------------------------------------ geometry
 
+  // (the name tag goes under the burrow's mound)
   get chatGround(): number {
-    return this.height - this.tagHeight - SMALL;
+    return this.height - this.tagHeight - (this.box * 6) / 64 - SMALL;
   }
 
   get loneGround(): number {
@@ -289,7 +292,7 @@ export class Stage implements PetStage, Animator {
     return Math.max(0, Math.min(this.gu * 7.5, (this.width - 2 * this.margin) / Math.max(1, n)));
   }
 
-  // Where a pet stands: the hero on the right of his stage (under the stars),
+  // Where a pet stands: the hero on the right of its stage (under the stars),
   // a chat's pet on its spot in the row
   slotX(key: string): number {
     if (key === "") return this.width * 0.76;
@@ -375,7 +378,7 @@ export class Stage implements PetStage, Animator {
     this.invalidate();
   }
 
-  // A leaving pet walked off the stage
+  // A leaving pet dug away
   removePet(pet: Pet): void {
     if (!pet.leaving) return;
     this.pets = this.pets.filter((p) => p !== pet);
@@ -417,13 +420,13 @@ export class Stage implements PetStage, Animator {
     const mood = input.mood || "loading";
     this.root.dataset.light = lightOf(mood);
     // The light pulses while a chat needs you
-    this.root.classList.toggle("cs-glowing", mood === "waving");
+    this.root.classList.toggle("cs-glowing", mood === "needs");
     this.updateStars();
 
     const h = this.headlineEl!;
     if (h.textContent !== input.headline) h.textContent = input.headline;
     const calling = input.waiting;
-    h.classList.toggle("cs-calling", mood === "waving");
+    h.classList.toggle("cs-calling", mood === "needs");
     h.classList.toggle("cs-clickable", !!calling);
     // "1 chat needs you": click to go there
     const title = calling ? `Open ${calling.name}${calling.host ? `\n${calling.host}` : ""}` : "";
@@ -475,7 +478,7 @@ export class Stage implements PetStage, Animator {
   // A starry night once everything is done
   private updateStars(): void {
     if (!this.starsEl) return;
-    const night = this.heroInput?.mood === "sleeping";
+    const night = this.heroInput?.mood === "done";
     this.starsEl.hidden = !night;
     const twinkle = night && !reducedMotion();
     if (twinkle && !this.starAnims.length) {
@@ -505,7 +508,14 @@ export class Stage implements PetStage, Animator {
 
   // ------------------------------------------------------------ shared by the pets
 
-  // Speech bubble above whoever speaks, or beside him when there's no room above
+  // The pets' particles and words in the theme's text color
+  theme(): TalpaTheme {
+    const m = /rgba?\(([^)]*)\)/.exec(getComputedStyle(this.root).color);
+    const [r, g, b] = m ? m[1].split(",").map((v) => parseFloat(v)) : [128, 128, 128];
+    return { fx: `rgba(${r}, ${g}, ${b}, 0.5)`, text: `rgb(${r}, ${g}, ${b})` };
+  }
+
+  // Speech bubble above whoever speaks, or beside it when there's no room above
   say(pet: Pet, text: string): void {
     if (this.destroyed || !text) return;
     this.bubbleOwner = pet;
@@ -515,42 +525,6 @@ export class Stage implements PetStage, Animator {
     this.bubbleAt = "";
     this.bubbleTimer.restart();
     this.invalidate();
-  }
-
-  // Floating hearts, notes, sparkles and z's
-  burst(pet: Pet, symbol: string, color: string, count: number): void {
-    if (this.destroyed || !this.live || reducedMotion()) return; // (unseen, they'd pile up until it is shown)
-    const gu = this.gu;
-    for (let i = 0; i < count; i++) {
-      const x = pet.px - gu * 0.4 + (Math.random() - 0.5) * this.bodyWidth;
-      const y = pet.ground - pet.lift - this.bodyHeight - gu * 0.6 - Math.random() * gu * 0.5;
-      const drift = (Math.random() - 0.5) * gu * 2;
-      const bit = el("span", "cs-particle", this.fxLayer);
-      bit.style.color = color;
-      bit.style.transform = `translate(${x}px, ${y}px)`;
-      const glyph = el("span", "cs-particle-glyph", bit);
-      glyph.textContent = symbol;
-      const timing = { duration: 1500, fill: "forwards" as FillMode };
-      const anims = [
-        bit.animate([{ transform: `translate(${x}px, ${y}px)` }, { transform: `translate(${x + drift}px, ${y}px)` }], timing),
-        glyph.animate([{ transform: "translateY(0)" }, { transform: `translateY(${-gu * 2.4}px)` }], {
-          ...timing,
-          easing: cssEase.outQuad,
-        }),
-        glyph.animate([{ opacity: 1 }, { opacity: 0 }], { ...timing, easing: cssEase.inQuad }),
-      ];
-      for (const a of anims) {
-        this.waapi.add(a);
-        if (!this.live) a.pause();
-      }
-      anims[2].onfinish = () => {
-        for (const a of anims) {
-          this.waapi.delete(a);
-          a.cancel();
-        }
-        bit.remove();
-      };
-    }
   }
 
   // ------------------------------------------------------------ frames
@@ -579,14 +553,14 @@ export class Stage implements PetStage, Animator {
     }
   }
 
-  // One loop per live stage, running only while something moves
+  // One loop per live stage with pets (they're always up to something)
   private readonly loop = (): void => {
     this.frame = 0;
     if (!this.live || this.destroyed) return;
     const now = this.clock.now();
     for (const t of [...this.tweens]) t.step(now);
     this.render();
-    if (this.tweens.size && !this.frame) this.frame = requestAnimationFrame(this.loop);
+    if ((this.tweens.size || this.pets.length) && !this.frame) this.frame = requestAnimationFrame(this.loop);
   };
 
   private render(): void {

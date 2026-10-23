@@ -2,7 +2,7 @@
 
 Every Claude Code chat you have running, on this computer and on your SSH
 hosts, in one VS Code view: which ones need you, which are working, plan
-usage, subagents, recent chats, and Clawd, the animated pet who acts it all
+usage, subagents, recent chats, and Talpa, the animated pet who acts it all
 out. The VS Code companion of the
 [Claude Status widget](https://github.com/wzaielamri/claude-status)
 for KDE Plasma and GNOME; all of them use the same backend.
@@ -17,7 +17,7 @@ for KDE Plasma and GNOME; all of them use the same backend.
   and see what each chat is doing and what it changed without switching
   to it.
 - **Also**: subagent runs, plans, memories, Find a Chat, tasks that start
-  once a limit resets, moving a chat to another account, and Clawd acting it
+  once a limit resets, moving a chat to another account, and Talpa acting it
   all out.
 - **Install**: download `claude-status-<version>.vsix` from the
   [latest release](https://github.com/wzaielamri/claude-status-vscode/releases/latest),
@@ -29,7 +29,7 @@ for KDE Plasma and GNOME; all of them use the same backend.
 
 <!-- Screenshots show demo data only (Claude Status: Toggle Demo Data, or dev/harness.html), never real chats. -->
 <p>
-  <img src="docs/screenshots/view-dark.png" alt="The Claude Status view in a dark theme: Clawd under &quot;1 chat needs you&quot;, an account with three chats, their pets, plan usage bars and a queued task, and an SSH host with a chat a usage limit stopped" width="300">
+  <img src="docs/screenshots/view-dark.png" alt="The Claude Status view in a dark theme: Talpa under &quot;1 chat needs you&quot;, an account with three chats, their pets, plan usage bars and a queued task, and an SSH host with a chat a usage limit stopped" width="300">
   <img src="docs/screenshots/view-light.png" alt="The same view in a light theme" width="300">
 </p>
 
@@ -124,9 +124,11 @@ As an editor tab (**Claude Status: Open in Editor Tab**):
 - **The status bar**: how many chats need you, the 5-hour usage, and with
   two or more accounts which one VS Code's Claude runs on (**Claude: work**):
   click it to change the default account.
-- **Clawd**: one pet for the whole dashboard, one per chat, each acting out
-  its chat. Click a pet to open its chat, drag one around, double-click the
-  big one.
+- **Talpa**: one pet for the whole dashboard, one per chat, each acting out
+  its chat. Talpa lives in a burrow: it digs over to another spot instead of
+  walking, a new chat's pet digs up out of the ground, and one whose chat
+  leaves the list waves and digs away. Click a pet to open its chat, drag
+  one out of its burrow, double-click the big one.
 - **Shared chats**: with two or more Claude accounts on this computer (or
   on an SSH host), a finished chat's share button continues it on another
   account (say, when one hits its limit), shares it with all of them, or
@@ -279,7 +281,7 @@ code --install-extension claude-status-*.vsix
 | `claudeStatus.notifyDoneMinSeconds` | `30` | Shortest turn that gets a "finished" notification |
 | `claudeStatus.awayDigest` / `awayMinutes` | `true` / `5` | The "while you were away" summary, after this many minutes without using VS Code (with notifications off, only its card in the view) |
 | `claudeStatus.notifySound`, `soundVolume`, `soundWaiting`, `soundDone`, `soundFailed` | | Sounds (sound-theme names or files) |
-| `claudeStatus.showPet` / `chatPets` | `true` / `5` | Clawd, and pets per account |
+| `claudeStatus.showPet` / `chatPets` | `true` / `5` | Talpa, and pets per account |
 | `claudeStatus.showTokens`, `showUsageInStatusBar`, `recentChats`, `keepDoneHours` | | What the view shows |
 | `claudeStatus.pythonPath` | `python3` | Python on this computer |
 
@@ -393,8 +395,9 @@ npm run watch          # rebuild on change; F5 in VS Code starts a test window
 node esbuild.mjs --harness   # dev pages: look at the view with demo data in a browser
 ```
 
-`vendor/` is the widget's backend and pet art, copied by
-`scripts/sync-widget.sh` from a widget commit; change them there.
+`vendor/` is the widget's backend and Talpa (the pet's drawing, moods and
+actions, shared with the widget), copied by `scripts/sync-widget.sh` from a
+widget commit; change them there.
 
 To release: raise `version` in `package.json`, add a `## <version>` section to
 `CHANGELOG.md`, commit, then push a tag. The Release workflow checks, tests and
@@ -414,8 +417,6 @@ git config core.hooksPath .githooks
 
 ## Credits
 
-- Clawd pet art: [clawd-pet](https://github.com/abderrahimghazali/clawd-pet),
-  MIT © Abderrahim Ghazali (`vendor/pets/LICENSE`).
 - Backend: the [Claude Status widget](https://github.com/wzaielamri/claude-status) for KDE Plasma and GNOME.
 
 Not affiliated with Anthropic. Claude and Claude Code are Anthropic's.

@@ -181,28 +181,12 @@ code {
   gap: 2px;
 }
 
-.spark {
+.talpa-icon {
   flex: none;
   display: block;
+  width: 16px;
+  height: 16px;
   color: var(--ov, var(--cs-disabled));
-}
-
-.spark line {
-  stroke: currentColor;
-  stroke-width: 4;
-  stroke-linecap: round;
-}
-
-/* Stepped like the widget's timer: 4 steps of 11.25° every 0.12 s; the
-   glyph looks the same after 45°, so the loop doesn't show */
-.spark.spinning {
-  animation: cs-spark 0.48s steps(4, end) infinite;
-}
-
-@keyframes cs-spark {
-  to {
-    transform: rotate(45deg);
-  }
 }
 
 .ov-waiting {

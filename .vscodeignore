@@ -1,4 +1,5 @@
-# Only dist/, media/, the vendored backend and pets, README, CHANGELOG and LICENSE go into the .vsix (README images load from GitHub)
+# Only dist/, media/, the vendored backend, README, CHANGELOG and LICENSE go into the .vsix (README images load from
+# GitHub; Talpa, the pet, is bundled into dist/webview.js)
 **
 !dist/extension.js
 !dist/webview.js
@@ -7,7 +8,6 @@
 # vendor/ by name: in vsce a ! pattern wins over any later exclusion, so with
 # !vendor/** a __pycache__ left by a test run would ship (with this machine's paths)
 !vendor/code/*.py
-!vendor/pets/**
 !vendor/statusline-snippet.sh
 !README.md
 !CHANGELOG.md

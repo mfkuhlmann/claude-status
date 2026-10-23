@@ -10,7 +10,7 @@ interface VsCodeApi {
 
 declare global {
   interface Window {
-    CLAUDE_STATUS: { petsBase: string; editorTab: boolean };
+    CLAUDE_STATUS: { editorTab: boolean };
   }
   function acquireVsCodeApi(): VsCodeApi;
 }
@@ -21,7 +21,6 @@ export function post(message: WebviewMessage): void {
   api.postMessage(message);
 }
 
-export const petsBase: string = window.CLAUDE_STATUS.petsBase.replace(/\/$/, "");
 export const editorTab: boolean = window.CLAUDE_STATUS.editorTab;
 
 export function isDark(): boolean {

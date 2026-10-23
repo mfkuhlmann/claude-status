@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Copy the Claude Status widget's backend and pets into vendor/.
+# Copy the Claude Status widget's backend and Talpa (the pet) into vendor/.
 #
 #   scripts/sync-widget.sh PATH_TO_WIDGET_CHECKOUT [COMMIT]
 #
 # The widget (github.com/wzaielamri/claude-status) is the one source
-# of the Python backend and the pet art. Only committed files are copied
+# of the Python backend and of Talpa. Only committed files are copied
 # (git archive), never a working tree's uncommitted changes or __pycache__,
 # and vendor/WIDGET_COMMIT records which commit they came from.
 set -euo pipefail
@@ -21,12 +21,12 @@ commit=$(git -C "$src" rev-parse --verify "$rev^{commit}")
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
-git -C "$src" archive "$commit" package/contents/code package/contents/pets statusline-snippet.sh | tar -x -C "$work"
+git -C "$src" archive "$commit" package/contents/code package/contents/ui/talpa statusline-snippet.sh | tar -x -C "$work"
 
-rm -rf "$here/vendor/code" "$here/vendor/pets"
+rm -rf "$here/vendor/code" "$here/vendor/pets" "$here/vendor/talpa"
 mkdir -p "$here/vendor"
 cp -r "$work/package/contents/code" "$here/vendor/code"
-cp -r "$work/package/contents/pets" "$here/vendor/pets"
+cp -r "$work/package/contents/ui/talpa" "$here/vendor/talpa"
 cp "$work/statusline-snippet.sh" "$here/vendor/statusline-snippet.sh"
 echo "$commit" > "$here/vendor/WIDGET_COMMIT"
 echo "vendor/ now holds the widget at ${commit:0:12}."

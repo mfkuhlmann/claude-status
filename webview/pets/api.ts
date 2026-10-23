@@ -1,6 +1,6 @@
 // The contract between the webview's UI (webview/components) and the pets
 // (webview/pets). The UI owns the layout and the data; the pets own their
-// stages: the hero (big Clawd with the headline and counts) and one stage per
+// stages: the hero (big Talpa with the headline and counts) and one stage per
 // account (a pet per chat). Ported from the widget's PetStrip.qml + Pet.qml.
 
 import type { ChatRef, Counts, Session } from "../../src/shared/types";
@@ -13,12 +13,12 @@ export interface StageChat {
 }
 
 export interface HeroInput {
-  mood: string; // heroMood(): error | loading | waving | working-juggling | working-typing | idle-living | sleeping
+  mood: string; // heroMood(): error | loading | needs | agents | working | idle | done
   headline: string; // headlineText()
   counts: Counts;
   highUsageText: string; // "work: 95% of the 5-hour limit!" or ""; said now and then
   contextFullText: string; // "fix parser: context 91% full" or ""; said now and then
-  maxFiveHour: number; // highest 5-hour usage %, for the over-limit poses
+  maxFiveHour: number; // highest 5-hour usage %: at 100 the hero is out of steam
   waiting: ChatRef | null; // the chat that needs you (clicking the headline opens it)
 }
 

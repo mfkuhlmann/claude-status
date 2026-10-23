@@ -47,8 +47,8 @@ test("counts, overall state, headline and mood follow the most urgent chat", () 
   assert.deepEqual(counts, { waiting: 1, working: 2, idle: 0, done: 1, limit: 1 }); // (the idle one waits for its usage limit)
   assert.equal(overallState(groups, counts), "waiting");
   assert.equal(headlineText(s, counts), "1 chat needs you");
-  assert.equal(heroMood(s, "waiting", groups), "waving");
-  assert.equal(heroMood(s, "working", groups), "working-juggling"); // a demo chat runs subagents
+  assert.equal(heroMood(s, "waiting", groups), "needs");
+  assert.equal(heroMood(s, "working", groups), "agents"); // a demo chat runs subagents
   assert.equal(summaryText(counts), "1 needs input · 2 working · 1 at the usage limit · 1 done");
   assert.equal(heroMood({ status: null, errorText: "" }, "none", []), "loading");
   assert.equal(heroMood({ status: null, errorText: "broken" }, "none", []), "error");

@@ -66,7 +66,7 @@ export class ViewHost implements vscode.WebviewViewProvider, vscode.Disposable {
       retainContextWhenHidden: true,
       localResourceRoots: this.roots(),
     });
-    panel.iconPath = vscode.Uri.joinPath(this.extensionUri, "media", "spark.svg");
+    panel.iconPath = vscode.Uri.joinPath(this.extensionUri, "media", "talpa.svg");
     this.panel = panel;
     this.setUp(panel.webview, true);
     let visible = panel.visible;
@@ -287,10 +287,10 @@ export class ViewHost implements vscode.WebviewViewProvider, vscode.Disposable {
   private html(webview: vscode.Webview, editorTab: boolean): string {
     const nonce = crypto.randomBytes(16).toString("base64");
     const asset = (...p: string[]) => webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, ...p)).toString();
-    const config = JSON.stringify({ petsBase: asset("vendor", "pets"), editorTab });
+    const config = JSON.stringify({ editorTab });
     // Scripts run only with the nonce, and nothing loads from outside the
     // extension. Styles may also be set inline (the pets move by element
-    // styles; their SVGs' own styles go into constructed stylesheets).
+    // styles).
     const csp = [
       "default-src 'none'",
       "base-uri 'none'",
@@ -298,7 +298,6 @@ export class ViewHost implements vscode.WebviewViewProvider, vscode.Disposable {
       `img-src ${webview.cspSource} data:`,
       `style-src ${webview.cspSource} 'unsafe-inline'`,
       `font-src ${webview.cspSource}`,
-      `connect-src ${webview.cspSource}`,
       `script-src 'nonce-${nonce}'`,
     ].join("; ");
     return `<!DOCTYPE html>

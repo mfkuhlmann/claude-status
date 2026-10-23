@@ -106,11 +106,11 @@ test("agent ids, hosts and accounts in a message are checked", () => {
   assert.deepEqual(names(), []);
 });
 
-test("the page only runs its own script, and what goes into it can't end the script tag", () => {
+test("the page only runs its own script", () => {
   const { html } = setup();
   const webview = {
     cspSource: "https://example.vscode-cdn.net",
-    asWebviewUri: (uri: vscode.Uri) => ({ toString: () => "https://example.vscode-cdn.net" + uri.path + (uri.path.endsWith("/pets") ? "/</script><img src=x>" : "") }),
+    asWebviewUri: (uri: vscode.Uri) => ({ toString: () => "https://example.vscode-cdn.net" + uri.path }),
   };
   const page = html(webview, true);
   const csp = /http-equiv="Content-Security-Policy" content="([^"]+)"/.exec(page)![1];
@@ -123,8 +123,8 @@ test("the page only runs its own script, and what goes into it can't end the scr
   const scripts = page.match(/<script\b[^>]*>/g)!;
   assert.equal(scripts.length, 2);
   for (const tag of scripts) assert.ok(tag.includes(`nonce="${nonce}"`), tag);
-  assert.equal(page.match(/<\/script>/g)!.length, 2); // the pets' address stayed inside its string
-  assert.match(page, /window\.CLAUDE_STATUS = \{"petsBase":"[^"]*\\u003c\/script>[^"]*","editorTab":true\};/);
+  assert.equal(page.match(/<\/script>/g)!.length, 2);
+  assert.match(page, /window\.CLAUDE_STATUS = \{"editorTab":true\};/);
   // a nonce for each page
   assert.notEqual(/'nonce-([^']+)'/.exec(html(webview))![1], nonce);
 });

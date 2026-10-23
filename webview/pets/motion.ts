@@ -22,7 +22,7 @@ export const cssEase = {
 
 const motionQuery = typeof matchMedia === "function" ? matchMedia("(prefers-reduced-motion: reduce)") : null;
 
-// No wandering, hopping or particles for people who asked for less motion
+// No digging about for people who asked for less motion
 export function reducedMotion(): boolean {
   return motionQuery?.matches ?? false;
 }

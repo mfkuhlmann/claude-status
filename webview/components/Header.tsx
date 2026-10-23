@@ -3,11 +3,11 @@ import type { Counts, Group, HostState, Overall } from "../../src/shared/types";
 import { editorTab, post } from "../env";
 import { useViewVisible } from "../util/petStage";
 import { IconButton } from "./IconButton";
-import { SparkIcon } from "./SparkIcon";
+import { TalpaIcon } from "./TalpaIcon";
 
-// The spark and the summary. In the sidebar the view's title bar has the
+// The icon and the summary. In the sidebar the view's title bar has the
 // buttons; opened as an editor tab there's no title bar, so they're here.
-// With the big Clawd shown the summary is left out: his headline says it.
+// With the big Talpa shown the summary is left out: its headline says it.
 export function Header(props: {
   overall: Overall;
   counts: Counts;
@@ -32,7 +32,7 @@ export function Header(props: {
 
   return (
     <header class="header">
-      <SparkIcon state={overall} spinning={overall === "working" && visible} />
+      <TalpaIcon state={overall} moving={visible} />
       <h1 class="title" title={tooltipLines(groups, counts, hosts).join("\n")}>
         Claude Code
       </h1>

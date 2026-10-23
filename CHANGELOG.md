@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Talpa, a new pet of its own:** Clawd is gone. Talpa lives in a burrow:
+  it stays half underground while it works and plays, digs over to another
+  spot (towards your mouse) instead of walking, and only comes all the way
+  out when you drag it out; dropped, it digs back in where it landed. A new
+  chat's pet digs up out of the ground, and one whose chat leaves the list
+  waves and digs away. Its lamp glows in the chat's state color, and it
+  picks what to do at random from what fits the moment, so it's never the
+  same twice. A chat's pet wears a calm version of the chat's color. It's
+  the same creature as in the Plasma widget and the GNOME extension, drawn
+  by the same code.
+- **A new icon:** Talpa peeking up out of the ground, in the view's header
+  (in the state color: it pops up when a chat needs you, glances around
+  while Claude works, smiles when it's your turn and sleeps when nothing
+  runs), in the sidebar and on the extension's page.
+
 - A plan or memory in a long folder lost the end of its time ("5d 22h a")
   at the row's end, whatever the panel's width: the folder is now cut in
   the middle, as in **Recent chats**, and the time always shows.

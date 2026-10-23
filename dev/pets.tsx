@@ -2,7 +2,7 @@
 // the hero, one stage per account, a list with each chat's pet color, and
 // buttons that fire pet events. See dev/pets.html for how to run it.
 //
-// Query: ?theme=light|dark, ?mood=sleeping (the hero's mood), ?pets=N (pets
+// Query: ?theme=light|dark, ?mood=done (the hero's mood), ?pets=N (pets
 // per account), ?phase=N (the demo's story), ?still (no scheduled events).
 
 import "../webview/styles.css";

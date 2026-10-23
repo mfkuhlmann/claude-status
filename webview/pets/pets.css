@@ -1,5 +1,5 @@
 /* The pets' stages (webview/pets/stage.ts). Pets move with transforms only;
-   their poses animate inside their own shadow roots (art.ts). */
+   each Talpa draws itself on its own canvas (pet.ts). */
 
 @property --cs-glow {
   syntax: "<number>";
@@ -95,7 +95,7 @@
   color: #d4dbff;
 }
 
-/* The headline and the session counts, left of where he stands */
+/* The headline and the session counts, left of where it stands */
 .cs-hero-text {
   position: absolute;
   left: calc(var(--cs-gu, 16px) * 0.8);
@@ -192,19 +192,13 @@
 
 /* ------------------------------------------------------------ pets */
 
-.cs-stage-pets,
-.cs-stage-fx {
+.cs-stage-pets {
   position: absolute;
   inset: 0;
   pointer-events: none;
 }
 
-.cs-stage-fx {
-  z-index: 2;
-}
-
-.cs-pet-ring,
-.cs-pet-body,
+.cs-pet-canvas,
 .cs-pet-tag,
 .cs-pet-grab {
   position: absolute;
@@ -212,39 +206,11 @@
   top: 0;
 }
 
-.cs-pet-ring {
-  border-radius: 999px;
-  background: var(--vscode-foreground, #888);
-}
-
-/* Squash and stretch pivot at his feet (41/45 down the image) */
-.cs-pet-body,
-.cs-pet-breath {
-  transform-origin: 50% 91.111%;
-}
-
-.cs-pet-body {
+.cs-pet-canvas {
   will-change: transform;
 }
 
-.cs-pet-breath,
-.cs-pet-art {
-  width: 100%;
-  height: 100%;
-}
-
-/* Gentle breathing on top of the pose's own animation: slow when idle or
-   asleep, quick while he types (--cs-breath is the half period) */
-.cs-pet-body.cs-breathing > .cs-pet-breath {
-  animation: cs-breathe var(--cs-breath, 1100ms) var(--cs-ease-in-out-sine) infinite alternate;
-}
-
-@keyframes cs-breathe {
-  from { transform: none; }
-  to { transform: scaleY(0.94); }
-}
-
-/* Name tag under his feet, in the chat's color */
+/* Name tag under its burrow, in the chat's color */
 .cs-pet-tag {
   box-sizing: border-box;
   padding: 0 4px;
@@ -262,24 +228,10 @@
   display: none;
 }
 
-/* Grab area around his body (doesn't flip with him) */
+/* Grab area around its body (doesn't flip with it) */
 .cs-pet-grab {
   pointer-events: auto;
   touch-action: none;
-}
-
-.cs-particle {
-  position: absolute;
-  left: 0;
-  top: 0;
-  font-size: calc(var(--cs-gu, 16px) * 0.9);
-  font-weight: bold;
-  line-height: 1;
-  pointer-events: none;
-}
-
-.cs-particle-glyph {
-  display: block;
 }
 
 /* Speech bubble above whoever speaks */
@@ -307,8 +259,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .cs-stage-light,
-  .cs-pet-breath {
+  .cs-stage-light {
     animation: none !important;
   }
 }

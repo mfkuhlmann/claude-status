@@ -243,15 +243,15 @@ export function agentsRunning(groups: Group[]): number {
   return n;
 }
 
-// Clawd's mood for the whole dashboard
+// Talpa's mood for the whole dashboard (talpa.mjs MOODS)
 export function heroMood(state: Pick<ViewState, "status" | "errorText">, overall: Overall, groups: Group[]): string {
   const answered = !!state.status || groups.length > 0; // a host's chats count too
   if (!answered && state.errorText) return "error";
   if (!answered) return "loading";
-  if (overall === "waiting") return "waving";
-  if (overall === "working") return agentsRunning(groups) > 0 ? "working-juggling" : "working-typing";
-  if (overall === "idle") return "idle-living";
-  return "sleeping";
+  if (overall === "waiting") return "needs";
+  if (overall === "working") return agentsRunning(groups) > 0 ? "agents" : "working";
+  if (overall === "idle") return "idle";
+  return "done";
 }
 
 // Plan usage is the account's, whichever machine it's used on. An account on

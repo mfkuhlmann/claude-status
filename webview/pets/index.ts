@@ -1,5 +1,5 @@
-// The animated Clawd pets (artwork: clawd-pet by Abderrahim Ghazali, MIT),
-// ported from the widget's PetStrip.qml and Pet.qml. The UI talks to them only
+// Talpa, the pet (the widget's talpa.mjs, vendored), on the stages ported
+// from the widget's PetStrip.qml and Pet.qml. The UI talks to the pets only
 // through this module (see api.ts).
 //
 // A stage starts live: it pauses by itself while it's off screen or the page
