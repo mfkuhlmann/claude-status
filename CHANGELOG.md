@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.14.1
 
 - **Claude Code tab** in Recent chats stayed greyed out (*The Claude Code
   extension isn't installed or enabled in this window*) for good when the
