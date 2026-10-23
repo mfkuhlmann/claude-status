@@ -38,7 +38,7 @@ import {
   shellQuote,
 } from "./shared/model";
 import type { ChatRef, FoundChat, FoundMemory, FoundPlan, FoundProject, Group, PlanItem, Project, Session } from "./shared/types";
-import { localAncestors, type Place, type Terminals } from "./terminals";
+import { attachClients, localAncestors, type Place, type Terminals } from "./terminals";
 import type { PlanReview } from "./planReview";
 
 const CHAT_LINK = "vscode://anthropic.claude-code/open?session=";
@@ -74,6 +74,12 @@ export function typedFolder(typed: string, home: string | null): string | null {
 }
 
 const AGAIN_MS = 30000; // pressing the shortcut again this soon goes on to the next chat
+
+// Why a chat in another window can't be brought up: on GNOME, the extension
+// that would do it isn't running (canRaiseWindows)
+function noRaiserHint(): string {
+  return isGnome() ? " Bringing it up on GNOME needs the Claude Status GNOME Shell extension, and it isn't running." : "";
+}
 
 export class Actions {
   private lastNext: { id: string; at: number } | null = null;
@@ -134,6 +140,22 @@ export class Actions {
       await vscode.env.openExternal(vscode.Uri.parse(CHAT_LINK + encodeURIComponent(chat.sessionId)));
       return;
     }
+    // A background job a terminal shows already (`claude attach`): that one,
+    // not a second client
+    if (chat.jobId && !host) {
+      const clients = attachClients(chat.jobId);
+      for (const pid of clients) {
+        const t = await this.terminals.find(localAncestors(pid), false);
+        if (t) {
+          t.show();
+          return;
+        }
+      }
+      if (clients.length) {
+        if (await canRaiseWindows()) return this.openSystem(chat); // jump.py brings up the terminal it's in
+        return this.fail(`${chat.name} is open in a terminal outside this VS Code window.${noRaiserHint()}`);
+      }
+    }
     // A command opens it: a background job attaches, a finished chat resumes
     if (chat.openCommand) {
       await this.terminals.run(`${host ?? ""}|${chat.key}`, chat.name, chat.openCommand, this.place(host));
@@ -142,8 +164,7 @@ export class Actions {
     // It runs in a terminal outside VS Code (or in another VS Code window)
     if (await canRaiseWindows()) return this.openSystem(chat);
     const where = host && chat.vscodeTerminal ? `a terminal of a VS Code window connected to ${host}` : `a terminal outside this VS Code window${host ? ` on ${host}` : ""}`;
-    const why = isGnome() ? " Bringing it up on GNOME needs the Claude Status GNOME Shell extension, and it isn't running." : "";
-    this.fail(`${chat.name} runs in ${where}.${why}`);
+    this.fail(`${chat.name} runs in ${where}.${noRaiserHint()}`);
   }
 
   // The widget's way: jump.py raises the terminal tab or window it runs in

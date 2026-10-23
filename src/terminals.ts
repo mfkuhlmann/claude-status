@@ -43,6 +43,29 @@ export function localAncestors(pid: number): Set<number> {
   return out;
 }
 
+// The `claude attach <jobId>` processes here: terminals showing that
+// background job (jump.py's attach_clients)
+export function attachClients(jobId: string, procDir = "/proc"): number[] {
+  const out: number[] = [];
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(procDir);
+  } catch {
+    return out; // not Linux
+  }
+  for (const p of entries) {
+    if (!/^\d+$/.test(p)) continue;
+    try {
+      if (fs.readFileSync(`${procDir}/${p}/comm`, "utf8").trim() !== "claude") continue;
+      const argv = fs.readFileSync(`${procDir}/${p}/cmdline`, "utf8").split("\0");
+      if (argv[1] === "attach" && argv[2] === jobId) out.push(Number(p));
+    } catch {
+      // gone, or not ours to read
+    }
+  }
+  return out;
+}
+
 function hasChildren(pid: number): boolean {
   try {
     for (const task of fs.readdirSync(`/proc/${pid}/task`)) {

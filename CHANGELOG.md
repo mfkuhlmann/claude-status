@@ -66,6 +66,12 @@
   window (is the Claude Status GNOME Shell extension enabled?)*. The view
   now checks that the GNOME Shell extension is running before it tries,
   and says where the chat runs when it isn't.
+- Clicking a background job that a terminal outside VS Code already shows
+  (such as the Konsole tab the Plasma widget opened) attached it a second
+  time in VS Code's terminal: that terminal comes up now (on Plasma, and on
+  GNOME with the Claude Status GNOME Shell extension; elsewhere the view
+  says where it is), and one of this window's terminals that shows it is
+  brought up.
 - Pets: a chat's pet never heard that its usage limit had reset (it kept
   its low-battery pose); a hidden view piled up the sparks of pet
   reactions until it was shown; a pet you held could walk off or vanish
