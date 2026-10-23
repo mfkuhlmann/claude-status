@@ -133,6 +133,12 @@ export const ACTIONS = {
         { depth: 'hidden', tunnel: 1, travel: true, t: rnd(1300, 1900) },
         { depth: 'high', eyes: 'wide', mouth: 'o', fx: dirt(8), t: 450 },
         { body: 'shake', eyes: 'happy', t: 600 }] },
+    // Making room in the row (its spot moved): the same dig, quicker
+    scoot: { steps: () => [
+        { depth: 'hidden', eyes: 'closed', fx: dirt(6), t: 450 },
+        { depth: 'hidden', tunnel: 1, travel: true, t: 700 },
+        { depth: 'high', eyes: 'wide', mouth: 'o', fx: dirt(6), t: 350 },
+        { eyes: 'happy', t: 300 }] },
 
     typing: { keep: { prop: 'laptop', depth: 'high', look: [0, 1.6], mouth: 'none' }, steps: () => [
         ...repeat(int(2, 4), () => [{ arms: 'type', body: 'fast', t: rnd(900, 1800) }, { arms: 'rest', t: rnd(250, 600) }]),

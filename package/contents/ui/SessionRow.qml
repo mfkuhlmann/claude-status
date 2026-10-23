@@ -124,8 +124,8 @@ RowLayout {
     // A bar in the color of the chat's pet, to spot which pet is which
     Rectangle {
         Layout.fillHeight: true
-        Layout.preferredWidth: 3
-        radius: 1.5
+        Layout.preferredWidth: 6
+        radius: 3
         color: row.petColor || "transparent"
     }
 

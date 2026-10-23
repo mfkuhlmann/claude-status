@@ -31,6 +31,16 @@ const ARMS = { rest: [16, -16], up: [150, -150], hold: [16, 35], sip: [16, 62], 
                ear: [16, 153], scope: [16, -164], sign: [16, -150], balloon: [150, -16], cover: [-101, 101], juggle: [-20, 20],
                type: [-38, 38], held: [60, -60], wave: [16, -145], waveboth: [145, -145], dance: [90, -90], flail: [70, -70], throw: [16, -140] };
 const BLINKING = { open: 1, wide: 1, sad: 1, tired: 1, wink: 1 };
+// How often a picture is worth drawing (frameMs): quick moves want 25 a
+// second, slow ones 12; at rest (breathing, the lamp's glow) 5 show it all.
+// What's eased towards where it's going, and how much it moves in a tick
+// (40 ms) to count as a quick move (a twentieth of it: a slow one). Sleepy
+// z's float up slowly enough for 5, and a sleepy slump too.
+const EASED = { depth: 0.3, hole: 0.02, armL: 1.5, armR: 1.5, armLy: 0.1, armRy: 0.1, plume: 3, lx: 0.08, ly: 0.08, sip: 0.05 };
+const QUICK_BODY = { hop: 1, jump: 1, bounce: 1, wiggle: 1, shake: 1, spin: 1, jolt: 1, shiver: 1, tumble: 1, land: 1, bob: 1 };
+const RESTING_BODY = { slump: 1 };   // (as slow as breathing)
+const QUICK_PROPS = { phone: 1, juggle: 1 };
+const SLOW_PROPS = { gum: 1, magnifier: 1 };
 
 // ---------------------------------------------------------------- easing
 
@@ -214,6 +224,7 @@ export class Talpa {
         this.brainOn = opts.brain !== false;
         this.held = false;
         this.heldAt = 0;
+        this.frameMs = 40;        // see tick()
         this.fx = [];
         this.v = { depth: DEPTH.half, depthFrom: DEPTH.half, depthTo: DEPTH.half, depthAt: -1e9, hole: 1, holeFrom: 1, holeTo: 1,
                    holeAt: -1e9, armL: 16, armR: -16, plume: 0, lx: 0, ly: 0, sip: 0 };
@@ -290,6 +301,7 @@ export class Talpa {
         this.apply(step || {}, true);
         this.nextBlink = this.now + 1e9;   // eyes open for a still picture
         this.nextGlance = this.now + 1e9;
+        this.glance = [0, 0];
         const look = this.st.look || [0, 0];
         this.v.lx = look[0];
         this.v.ly = look[1];
@@ -393,6 +405,9 @@ export class Talpa {
             this.st.mouth = 'wavy';
         }
         const v = this.v, st = this.st;
+        const before = {};
+        for (const key in EASED)
+            before[key] = v[key] || 0;
         // the burrow depth: pops up with a little overshoot, sinks smoothly
         const dp = clamp01((now - v.depthAt) / 450);
         v.depth = lerp(v.depthFrom, v.depthTo, v.depthTo > v.depthFrom && v.depthTo >= DEPTH.hidden ? dp * dp : outBack(dp));
@@ -424,6 +439,19 @@ export class Talpa {
             this.nextBlink = now + (Math.random() < 0.22 ? 250 : random.rnd(1800, 5200));
         }
         this.fx = this.fx.filter(p => now - p.born < (p.o.dur || 1.6) * 1000);
+        // How often the host should draw it now (each picture costs)
+        let quick = false, slow = false;
+        for (const key in EASED) {
+            const moved = Math.abs((v[key] || 0) - before[key]) * 40 / Math.max(dt, 1);
+            quick = quick || moved > EASED[key];
+            slow = slow || moved > EASED[key] / 20;
+        }
+        const body = st.body === '' ? null : st.body === 'fast' ? true : bodyMove(st.body, now - (this.since.body || 0), Number(st.it));
+        quick = quick || this.held || st.walk === '1' || QUICK_PROPS[st.prop] === 1 || (body !== null && QUICK_BODY[st.body] === 1)
+            || (BLINKING[st.eyes] === 1 && now >= this.nextBlink - 45) || now < this.blinkUntil + 45;
+        slow = slow || (body !== null && RESTING_BODY[st.body] !== 1) || this.fx.some(p => p.kind !== 'z') || st.tunnel === '1' || st.orbit === '1'
+            || st.think === '1' || SLOW_PROPS[st.prop] === 1;
+        this.frameMs = quick ? 40 : slow ? 80 : 200;
     }
 
     think() {

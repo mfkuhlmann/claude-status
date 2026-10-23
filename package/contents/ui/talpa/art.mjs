@@ -10,8 +10,9 @@ export const INK = '#1b2143';
 export const HEART = 'M0 4.5C-6 .5-3-4.5 0-1.5 3-4.5 6 .5 0 4.5Z';
 export const STAR4 = 'M0-3.4L1-1 3.4 0 1 1 0 3.4-1 1-3.4 0-1-1Z';
 export const BODY = 'M19 54C13.5 54 12.6 47 13 40C13.8 27 21.5 20 32 20S50.2 27 51 40C51.4 47 50.5 54 45 54Z';
-// The body is cut along the burrow's front edge
-export const CUT = 'M-40-60H104V55.6H53.5A21.5 3.8 0 0 1 10.5 55.6H-40Z';
+// The creature (and what it holds) is cut along the burrow's front edge; the
+// lip covers that edge, so nothing shows below it
+export const CUT = 'M-40-60H104V55.6H53.5A21.5 2.2 0 0 1 10.5 55.6H-40Z';
 export const FACE_Y = -2;    // the face sits a little higher on the Bean
 export const PLUME_Y = -5;   // and so does what's on its head
 
@@ -111,8 +112,8 @@ export const LAMP = {
 // ---------------------------------------------------------------- the burrow
 
 const BACK_LUMPS = [[12, 52.4, 2.6, 1.4], [21.5, 50.9, 2.8, 1.4], [42.5, 50.9, 2.8, 1.4], [52, 52.4, 2.6, 1.4]];
-const FRONT_LUMPS = [[13.5, 57.1, 2.4, 1.5], [19.5, 58.3, 2.8, 1.7], [26, 58.9, 2.6, 1.5], [33, 59, 3, 1.7],
-                     [40, 58.7, 2.6, 1.6], [46.5, 58, 2.8, 1.6], [51.5, 56.8, 2.2, 1.4]];
+const FRONT_LUMPS = [[13.5, 56.3, 2.4, 1.5], [19.5, 57, 2.8, 1.7], [26, 57.3, 2.6, 1.5], [33, 57.4, 3, 1.7],
+                     [40, 57.2, 2.6, 1.6], [46.5, 56.8, 2.8, 1.6], [51.5, 56.1, 2.2, 1.4]];
 const DIRT = '#8d6e57', LUMP = '#977760';
 
 export function holeBack(ctx) {
@@ -125,9 +126,10 @@ export function holeBack(ctx) {
 
 export function holeFront(ctx) {
     // a soft shadow where the body meets the burrow
-    line(ctx, 'M11 55.2A21 3.2 0 0 0 53 55.2', '#1c120c', 4.6, 0.16);
-    line(ctx, 'M11 55.2A21 3.2 0 0 0 53 55.2', '#1c120c', 2.4, 0.3);
-    path(ctx, 'M5 56.6A27 6.2 0 0 0 59 56.6L53.5 55.6A21.5 3.8 0 0 1 10.5 55.6Z', DIRT);
+    line(ctx, 'M11 55.2A21 1.6 0 0 0 53 55.2', '#1c120c', 4.6, 0.16);
+    line(ctx, 'M11 55.2A21 1.6 0 0 0 53 55.2', '#1c120c', 2.4, 0.3);
+    // the lip, up to the edge the creature is cut along (CUT)
+    path(ctx, 'M5 56.6A27 6.2 0 0 0 59 56.6L53.5 55.6A21.5 2.2 0 0 1 10.5 55.6Z', DIRT);
     for (const l of FRONT_LUMPS)
         ellipse(ctx, l[0], l[1], l[2], l[3], LUMP);
     line(ctx, 'M12.4 57.6A19.8 2.9 0 0 0 51.6 57.6', '#b29276', 0.8, 0.8);

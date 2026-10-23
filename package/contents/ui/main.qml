@@ -154,6 +154,16 @@ PlasmoidItem {
     // petEvent makes one react ("done", "failed", "reset", "waiting", …): the
     // pet of the chat with that row key, or the main one.
     signal petEvent(string kind, string text, string key)
+    // One clock for all the pets of this widget, so its window is drawn once
+    // a tick, not once for each pet; a pet draws itself only when that shows
+    // something new (TalpaView.qml)
+    signal petFrame(real now)
+    Timer {
+        interval: 40
+        repeat: true
+        running: root.dashboardShown && !root.coveredByWindow && Plasmoid.configuration.showPet
+        onTriggered: root.petFrame(Date.now())
+    }
     // Each chat pet's color by pet key, for the bar next to its chat in the
     // list (every pet stage publishes its own: setPetColors)
     property var petColorsByStage: ({})

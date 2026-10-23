@@ -19,6 +19,17 @@ import { drawGlyph } from '../package/contents/ui/talpa/glyph.mjs';
 const here = dirname(fileURLToPath(import.meta.url));
 const num = v => +v.toFixed(2);
 
+// A color as SVG attributes: Qt's SVG renderer (Plasma's notifications)
+// reads no rgba(), it paints that black; so '#rrggbb' and an opacity
+// (times alpha: the canvas's globalAlpha)
+function paint(attr, color, alpha) {
+    const m = /^rgba?\(([^)]*)\)$/.exec(color);
+    const v = m ? m[1].split(',').map(Number) : null;
+    const hex = v ? '#' + v.slice(0, 3).map(c => Math.round(c).toString(16).padStart(2, '0')).join('') : color;
+    const a = (v && v.length > 3 ? v[3] : 1) * (alpha === undefined ? 1 : alpha);
+    return ` ${attr === 'stop' ? 'stop-color' : attr}="${hex}"` + (a < 1 ? ` ${attr}-opacity="${num(a)}"` : '');
+}
+
 class SvgContext {
     constructor() {
         this.out = [];
@@ -78,7 +89,7 @@ class SvgContext {
         const id = 'g' + (++this.ids), ctx = this, a = this.pt(x0, y0).split(' '), b = this.pt(x1, y1).split(' ');
         const stops = [];
         ctx.defs.push(() => `<linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}">`
-            + stops.map(s => `<stop offset="${s[0]}" stop-color="${s[1]}"/>`).join('') + '</linearGradient>');
+            + stops.map(s => `<stop offset="${s[0]}"${paint('stop', s[1])}/>`).join('') + '</linearGradient>');
         return { url: `url(#${id})`, addColorStop: (o, c) => stops.push([o, c]) };
     }
     paint(kind) {
@@ -90,11 +101,9 @@ class SvgContext {
                 + ` data-cut="1"/>`);
         let a = `<path d="${this.path.join('')}"`;
         if (kind === 'fill')
-            a += ` fill="${color}"`;
+            a += paint('fill', color, this.s.alpha);
         else
-            a += ` fill="none" stroke="${color}" stroke-width="${num(this.width())}" stroke-linecap="${this.s.lineCap}" stroke-linejoin="${this.s.lineJoin}"`;
-        if (this.s.alpha < 1)
-            a += ` opacity="${num(this.s.alpha)}"`;
+            a += ` fill="none"${paint('stroke', color, this.s.alpha)} stroke-width="${num(this.width())}" stroke-linecap="${this.s.lineCap}" stroke-linejoin="${this.s.lineJoin}"`;
         this.out.push(a + '/>');
     }
     width() {

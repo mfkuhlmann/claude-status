@@ -7,8 +7,9 @@
 //
 // An account's stage: one pet per chat in its list (up to `chat-pets`). A pet
 // wears the chat's name on a tag in the chat's color (the chat's row gets a
-// bar in that color), acts the chat out, opens it when clicked, and keeps its
-// spot until the chat leaves the list; then it waves and digs away.
+// bar in that color), stands in the row in the list's order, acts the chat
+// out, opens it when clicked, and stays until the chat leaves the list; then
+// it waves and digs away.
 //
 // Talpa itself (looks, moods, what it does) is talpa/talpa.js, shared with the
 // Plasma widget and the VS Code extension; it's drawn with Cairo
@@ -253,8 +254,9 @@ class Pet {
         return Math.max(min, Math.min(max, x));
     }
 
-    // Digs over to x (it dives in, tunnels across, pops up there)
-    digTo(x) {
+    // Digs over to x (it dives in, tunnels across, pops up there); quick: its
+    // spot moved (a new chat makes room), so it hurries
+    digTo(x, quick) {
         if (this.leaving || this.arriving)
             return;
         this.travelTo = this.clampX(x);
@@ -262,7 +264,7 @@ class Pet {
             this.travelTo = -1;
             return;
         }
-        this.react('dig');
+        this.react(quick ? 'scoot' : 'dig');
     }
 
     // It dug in: tunnel across to the spot within ms
@@ -372,10 +374,16 @@ class Pet {
             return;
         this.sync();
         this.talpa.setTheme(this.stage.pets.theme);
-        // its clock and its picture, about 30 times a second
-        this.timers.every('frame', 33, () => {
-            this.talpa.tick(Date.now());
-            this.view.queue_repaint();
+        // its clock, and its picture as often as that shows something new
+        // (talpa.frameMs: 25 times a second for quick moves, down to 5 at rest)
+        let painted = 0;
+        this.timers.every('frame', 40, () => {
+            const now = Date.now();
+            this.talpa.tick(now);
+            if (now - painted >= this.talpa.frameMs - 5) {
+                painted = now;
+                this.view.queue_repaint();
+            }
         });
         // the hero turns towards the mouse while it hovers the stage
         if (this.lone) {
@@ -453,7 +461,7 @@ class Stage {
         this.live = false;
         this.cursorX = -1;
         this.chats = [];
-        this.order = [];      // the shown chats' keys, in the order their pets came
+        this.order = [];      // the shown chats' keys, in the list's order
         this.list = new Map();   // pet key -> Pet
         this.colors = {};     // pet key -> palette index
         this.timers = new Timers();
@@ -574,7 +582,7 @@ class Stage {
         return h % PALETTE.length;
     }
 
-    // An account's chats as [{key, session, host}], the ones that get a pet first
+    // An account's chats as [{key, session, host, order}] (order: in the list), the ones that get a pet first
     setChats(chats) {
         const shown = chats.slice(0, this.pets.maxPets);
         this.hidden = chats.length - shown.length;
@@ -590,13 +598,8 @@ class Stage {
             if (c)
                 pet.setChat(c.session, (c.session.name || '').trim());
         }
-        // spots: a pet keeps its place in the row while its chat changes state;
-        // newcomers line up on the right
-        this.order = this.order.filter(k => byKey.has(k));
-        for (const c of shown) {
-            if (!this.order.includes(c.key))
-                this.order.push(c.key);
-        }
+        // spots: in the order of the chats in the list, left to right
+        this.order = shown.slice().sort((a, b) => a.order - b.order).map(c => c.key);
         for (const c of shown) {
             if (this.list.has(c.key))
                 continue;
@@ -662,9 +665,9 @@ class Stage {
                 pet.px = home;   // not seen yet: it's just there
                 pet.placed = true;
             } else if (!pet.lone && Math.abs(pet.px - home) > s.body * 0.3) {
-                pet.digTo(home);   // its spot moved: it digs over
+                pet.digTo(home, true);   // its spot moved: it digs over
             } else if (pet.lone && pet.clampX(pet.px) !== pet.px) {
-                pet.digTo(pet.clampX(pet.px));
+                pet.digTo(pet.clampX(pet.px), true);
             }
         }
         if (this.hero) {

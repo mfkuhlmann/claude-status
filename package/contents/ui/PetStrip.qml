@@ -14,16 +14,16 @@ import org.kde.kirigami as Kirigami
 //
 // an account's stage (in GroupSection): one pet per chat of that account in
 // the sessions list, up to a few. A pet wears the chat's name on a tag in the
-// chat's color (the chat's row gets a bar in the same color), acts the chat
-// out, opens it when clicked, and stays the same pet, on the same spot, until
-// the chat leaves the list; then it waves and digs away.
+// chat's color (the chat's row gets a bar in the same color), stands in the
+// row in the list's order, acts the chat out, opens it when clicked, and stays
+// the same pet until the chat leaves the list; then it waves and digs away.
 //
 // Everything stops while the popup is closed.
 Item {
     id: strip
 
     property bool hero: false
-    // An account's chats, as [{key, session, host}], the ones that get a pet first
+    // An account's chats, as [{key, session, host, order}] (order: in the list), the ones that get a pet first
     property var chats: []
     // Names this stage's colors in root.petColors (an account's group key)
     property string stageKey: hero ? "hero" : ""
@@ -43,7 +43,27 @@ Item {
     readonly property real chatGround: height - tagHeight - boxSize * 6 / 64 - Kirigami.Units.smallSpacing
     readonly property real loneGround: height - gu * 0.55
     readonly property bool live: visible && root.dashboardShown
-    readonly property bool playing: live && !root.coveredByWindow   // can be seen: things move
+    readonly property bool playing: live && !root.coveredByWindow && inView   // can be seen: things move
+    // Scrolled out of sight in the list: its pets hold still (every picture
+    // costs). The list (a Flickable) is found up the parents; the hero has none.
+    property bool inView: true
+    property Item list: null
+    function checkInView() {
+        if (!list || !live)
+            return
+        const top = strip.mapToItem(list, 0, 0).y
+        const seen = top + strip.height > 0 && top < list.height
+        if (seen !== inView)
+            inView = seen
+    }
+    Connections {
+        target: strip.list
+        function onContentYChanged() { strip.checkInView() }
+        function onHeightChanged() { strip.checkInView() }
+        function onContentHeightChanged() { Qt.callLater(strip.checkInView) }   // (rows above it came or went)
+    }
+    onLiveChanged: checkInView()
+    onHeightChanged: checkInView()
     property real cursorX: -1        // mouse x while it hovers the stage
     property bool firstShown: false  // once shown, a new pet digs its way up
     readonly property int maxPets: Math.max(0, Plasmoid.configuration.chatPets)
@@ -55,7 +75,6 @@ Item {
     readonly property int hiddenChats: hero ? 0 : Math.max(0, chats.length - shownChats.length)
     readonly property int petCount: petModel.count
     property var chatByKey: ({})
-    property var order: []      // the shown chats' keys, in the order their pets came
     property var slots: ({})    // pet key → where it stands; a leaving pet keeps its spot
 
     // The hero's light: what the whole dashboard is up to
@@ -65,7 +84,26 @@ Item {
                                      : mood === "idle" ? Kirigami.Theme.positiveTextColor
                                      : mood === "error" ? Kirigami.Theme.negativeTextColor
                                      : darkTheme ? "#6f7fd0" : "#5363b8"   // night
-    property real glow: 1   // pulses while a chat needs you
+    // The light pulses while a chat needs you, the stars twinkle once all is
+    // done: in steps with the pets' clock, 10 a second (each step redraws the
+    // whole window, which a smooth animation would do 60 times a second)
+    property real stageClock: 0
+    readonly property real glow: hero && playing && mood === "needs" ? 1.3 - 0.3 * Math.cos(stageClock / 1800 * 2 * Math.PI) : 1
+    Connections {
+        target: root
+        enabled: strip.hero && strip.playing && (strip.mood === "needs" || strip.mood === "done")
+        function onPetFrame(now) {
+            if (now - strip.stageClock >= 95)
+                strip.stageClock = now
+        }
+    }
+    // a star's light: up in 900 + 260·i ms, down in 1100 + 190·i
+    function twinkle(i, now) {
+        const up = 900 + 260 * i, down = 1100 + 190 * i
+        const p = (now + 400 * i) % (up + down)
+        const ease = x => 0.5 - 0.5 * Math.cos(Math.PI * x)
+        return p < up ? 0.15 + 0.75 * ease(p / up) : 0.9 - 0.75 * ease((p - up) / down)
+    }
 
     // Room for what the pets hold over their heads (signs, bubbles: up to
     // half the image above the floor)
@@ -78,7 +116,15 @@ Item {
 
     onShownChatsChanged: sync()
     onWidthChanged: sync()
-    Component.onCompleted: sync()
+    Component.onCompleted: {
+        for (let p = parent; p; p = p.parent) {
+            if (p.contentY !== undefined && p.flicking !== undefined) {
+                list = p
+                break
+            }
+        }
+        sync()
+    }
     Component.onDestruction: if (root) root.dropPetColors(stageKey)   // (root may be gone at shutdown)
 
     // Shown and laid out: from now on a new pet digs its way up
@@ -165,13 +211,9 @@ Item {
             if (indexOfPet(c.key) < 0)
                 petModel.append({ petKey: c.key, colorIndex: freeColor(c.key), leaving: false,
                                   label: (c.session.name || "").trim(), host: c.host })
-        // Spots: a pet keeps its place in the row while its chat changes state
-        // (the colors tie pets to rows); newcomers line up on the right
-        const keys = order.filter(k => k in byKey)
-        for (const c of shownChats)
-            if (keys.indexOf(c.key) < 0)
-                keys.push(c.key)
-        order = keys
+        // Spots: in the order of the chats in the list, left to right (the
+        // colors tie pets to rows)
+        const keys = shownChats.slice().sort((a, b) => a.order - b.order).map(c => c.key)
         const spacing = spacingFor(keys.length)
         const spots = {}
         for (let i = 0; i < petModel.count; i++) {
@@ -240,14 +282,6 @@ Item {
         border.color: Qt.rgba(strip.moodColor.r, strip.moodColor.g, strip.moodColor.b, 0.35 * strip.glow)
     }
 
-    SequentialAnimation on glow {
-        running: strip.hero && strip.playing && strip.mood === "needs"
-        loops: Animation.Infinite
-        NumberAnimation { to: 1.6; duration: 900; easing.type: Easing.InOutSine }
-        NumberAnimation { to: 1; duration: 900; easing.type: Easing.InOutSine }
-        onRunningChanged: if (!running) strip.glow = 1
-    }
-
     // An account's stage: barely there, just a place to stand
     Rectangle {
         visible: !strip.hero
@@ -279,13 +313,7 @@ Item {
             text: index % 3 === 0 ? "✦" : "·"
             font.pixelSize: strip.gu * (index % 3 === 0 ? 0.6 : 1)
             color: strip.darkTheme ? "#d4dbff" : "#5363b8"
-            opacity: 0.5
-            SequentialAnimation on opacity {
-                running: strip.playing && strip.mood === "done"
-                loops: Animation.Infinite
-                NumberAnimation { to: 0.9; duration: 900 + 260 * index; easing.type: Easing.InOutSine }
-                NumberAnimation { to: 0.15; duration: 1100 + 190 * index; easing.type: Easing.InOutSine }
-            }
+            opacity: strip.stageClock > 0 ? strip.twinkle(index, strip.stageClock) : 0.5
         }
     }
 

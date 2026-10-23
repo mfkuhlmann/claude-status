@@ -3,8 +3,10 @@ import org.kde.kirigami as Kirigami
 import "talpa/talpa.mjs" as T
 
 // Talpa on a canvas: talpa/talpa.mjs is the creature (looks, moods, actions);
-// this ticks its clock while it can be seen and paints it. The canvas has
-// room around the creature's box for what it throws and holds up.
+// this ticks its clock with the widget's (main.qml: petFrame) while it can be
+// seen, and paints it as often as that shows something new (talpa.frameMs:
+// 25 times a second for quick moves, down to 5 at rest; each picture costs). The canvas has room around the creature's box for
+// what it throws and holds up.
 Canvas {
     id: view
 
@@ -17,6 +19,7 @@ Canvas {
     readonly property real boxY: box * 0.45
     readonly property real floorY: boxY + box * T.FLOOR / T.BOX   // the floor, from the canvas top
     property var talpa: null
+    property real lastPaint: 0
     signal travel(int ms)                  // it dug in: move it to its new spot within ms
     signal ready()                         // talpa exists
 
@@ -62,13 +65,15 @@ Canvas {
         }
     }
 
-    Timer {
-        interval: 33
-        repeat: true
-        running: view.playing && view.visible && view.talpa !== null
-        onTriggered: {
-            view.talpa.tick(Date.now())
-            view.requestPaint()
+    Connections {
+        target: root
+        enabled: view.playing && view.visible && view.talpa !== null
+        function onPetFrame(now) {
+            view.talpa.tick(now)
+            if (now - view.lastPaint >= view.talpa.frameMs - 5) {   // (ticks come every 40 ms, give or take)
+                view.lastPaint = now
+                view.requestPaint()
+            }
         }
     }
 

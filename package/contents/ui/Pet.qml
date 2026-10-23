@@ -82,8 +82,9 @@ Item {
             talpa.react(name, done || null)
     }
 
-    // Digs over to x (it dives in, tunnels across, pops up there)
-    function digTo(x) {
+    // Digs over to x (it dives in, tunnels across, pops up there); quick: its
+    // spot moved (a new chat makes room), so it hurries
+    function digTo(x, quick) {
         if (held || leaving || arriving || !talpa)
             return
         travelTo = clampX(x)
@@ -91,7 +92,7 @@ Item {
             travelTo = -1
             return
         }
-        react("dig")
+        react(quick ? "scoot" : "dig")
     }
 
     function say(text) {
@@ -133,10 +134,10 @@ Item {
         if (lone && !strip.firstShown)
             px = homeX   // laid out before anyone saw it: it's just there
         else if (!lone && !leaving && !held)
-            digTo(homeX)
+            digTo(homeX, true)
     }
     // The strip got narrower: back inside it
-    onMaxXChanged: if (!held && px > maxX) digTo(maxX)
+    onMaxXChanged: if (!held && px > maxX) digTo(maxX, true)
     onLeavingChanged: {
         if (leaving && !held)
             goAway()

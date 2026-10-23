@@ -114,6 +114,62 @@ console.log(JSON.stringify({ held: held, landed: landed, depth: t.st.depth, afte
         self.assertNotEqual(result["depth"], "out")
         self.assertFalse(result["after"])
 
+    def test_it_asks_to_be_drawn_only_as_often_as_it_changes(self):
+        # Drawing every pet 30 times a second made Plasma Shell busy (four
+        # desktop dashboards: 90% of a core, 2026-10-23). At rest it asks for
+        # 5 pictures a second; quick moves (held, digging) get 25.
+        result = run_node("""
+const t = new Talpa({ brain: false });
+let now = 1000;
+t.tick(now);
+t.pose({ eyes: 'closed', mouth: 'small', depth: 'low' });   // asleep: no blinking
+const rest = [];
+for (let i = 0; i < 40; i++) { now += 40; t.tick(now); rest.push(t.frameMs); }
+t.setHeld(true);
+now += 40; t.tick(now);
+const held = t.frameMs;
+t.land(10, null);
+const landing = [];
+for (let i = 0; i < 10; i++) { now += 40; t.tick(now); landing.push(t.frameMs); }
+console.log(JSON.stringify({ rest: rest.slice(10), held: held, landing: landing }));""")
+        self.assertEqual(set(result["rest"]), {200})
+        self.assertEqual(result["held"], 40)
+        self.assertIn(40, result["landing"])
+
+    def test_a_pet_whose_spot_moves_hurries_there(self):
+        # A new chat makes room in the row: the others dig over quicker than
+        # when the hero wanders off by itself
+        result = run_node("""
+const length = name => { const steps = ACTIONS[name].steps(s => s); return steps.reduce((sum, s) => sum + (s.t || 600), 0); };
+console.log(JSON.stringify({ scoot: length('scoot'), dig: length('dig'),
+                             travels: ACTIONS.scoot.steps(s => s).some(s => s.travel) }));""")
+        self.assertTrue(result["travels"])
+        self.assertLess(result["scoot"], result["dig"] * 0.6)
+        pet = (ROOT / "ui/Pet.qml").read_text()
+        self.assertIn("digTo(homeX, true)", pet)
+        self.assertIn('react(quick ? "scoot" : "dig")', pet)
+
+    def test_the_pets_stand_in_the_order_of_the_list(self):
+        # The user got confused when the pets stood in the order their chats
+        # came, not in the list's
+        strip = (ROOT / "ui/PetStrip.qml").read_text()
+        section = (ROOT / "ui/GroupSection.qml").read_text()
+        self.assertIn("order: out.length", section)
+        self.assertIn("shownChats.slice().sort((a, b) => a.order - b.order)", strip)
+
+    def test_nothing_shows_under_the_burrows_lip(self):
+        # Talpa and what it holds are cut along the same edge the lip is drawn
+        # up to, so nothing peeks out between the lip's lumps
+        art = (TALPA / "art.mjs").read_text()
+        cut = re.search(r"export const CUT = '[^']*H53\.5(A[^H]*)H", art).group(1)
+        self.assertIn("L53.5 55.6" + cut + "Z', DIRT", art)
+
+    def test_notification_icons_use_colors_qt_can_read(self):
+        # Qt's SVG renderer paints rgba() black: the notifications showed a
+        # black Talpa
+        for p in PETS.glob("*.svg"):
+            self.assertNotIn("rgba(", p.read_text(), p.name)
+
     def test_notification_icons_exist(self):
         main = (ROOT / "ui/main.qml").read_text()
         block = main[main.index("const pose = kind"):]
