@@ -72,10 +72,12 @@ test("the shortcut goes to the chat waiting longest, then to finished ones you h
   const s = demoState(NOW);
   const groups = allGroups(s.status, s.hosts);
   const g = groups[0];
+  const waiting = g.sessions.find((x) => x.state === "waiting")!,
+    done = g.sessions.find((x) => x.state === "done")!;
   const extra: Session[] = [
-    { ...g.sessions[1], key: "w-old", sessionId: "w-old", chatId: "w-old", name: "older wait", since: NOW - 20 * MIN },
-    { ...g.sessions[2], key: "f-1", sessionId: "f-1", chatId: "f-1", name: "finished first", state: "done" },
-    { ...g.sessions[2], key: "f-2", sessionId: "f-2", chatId: "f-2", name: "finished last", state: "idle" },
+    { ...waiting, key: "w-old", sessionId: "w-old", chatId: "w-old", name: "older wait", since: NOW - 20 * MIN },
+    { ...done, key: "f-1", sessionId: "f-1", chatId: "f-1", name: "finished first", state: "done" },
+    { ...done, key: "f-2", sessionId: "f-2", chatId: "f-2", name: "finished last", state: "idle" },
   ];
   groups[0] = { ...g, sessions: [...g.sessions, ...extra] };
   const host = groups[1];

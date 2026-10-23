@@ -227,10 +227,33 @@ test("a pet on a stage in view draws itself, the canvas as sharp as the screen",
   show();
   stage.render();
   const pet = stage.petFor("p/1");
-  const canvas = pet.canvas;
+  const canvas = pet.front.canvas; // (the first picture is drawn on the sheet behind it, then shown)
   assert.equal(canvas.width, Math.round(stage.canvasW * 2)); // devicePixelRatio 2
-  assert.ok(canvas.drawn.includes("fill"), "nothing drawn");
+  assert.ok([...canvas.drawn, ...pet.back.canvas.drawn].includes("fill"), "nothing drawn");
   assert.equal(canvas.style.width, `${stage.canvasW}px`);
+  stage.destroy();
+});
+
+test("a chat's pet draws a picture only when what it shows changes", async () => {
+  const { stage, lay, show, give } = account();
+  give([chat("p/1", "done")]); // asleep: its picture changes now and then
+  lay();
+  show();
+  const pet = stage.petFor("p/1");
+  wait(pet, 3000);
+  const drawn = () => pet.front.canvas.drawn.length + pet.back.canvas.drawn.length;
+  const fadeOver = () => new Promise((done) => setTimeout(done, 260)); // (the stage's clock is real time)
+  stage.render(); // its first picture, fading in
+  await fadeOver();
+  stage.render();
+  const before = drawn();
+  stage.render(); // nothing new to show
+  assert.equal(drawn(), before, "drawn again without a change");
+  const key = pet.talpa.stillKey();
+  pet.talpa.react("pet"); // a new pose
+  assert.notEqual(pet.talpa.stillKey(), key);
+  stage.render();
+  assert.ok(drawn() > before, "the new pose isn't drawn");
   stage.destroy();
 });
 

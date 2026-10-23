@@ -14,7 +14,6 @@
 //
 // Plain ES2017 (see paths.mjs).
 
-import { tracePath } from './paths.mjs';
 import * as art from './art.mjs';
 import { ACTIONS, MOODS, dirt, random } from './actions.mjs';
 
@@ -201,6 +200,19 @@ function plumeAngle(name, ms, it) {
     }
 }
 
+// ---------------------------------------------------------------- stills
+
+// A host may show a pet as pictures instead of drawing it every frame (each
+// drawing costs; the widget does it for the chats' pets, the big one moves
+// all the time): stillKey() says what a picture of it shows now, drawStill()
+// draws that picture, settled. A quick move shows as two pictures in turn, a
+// beat apart: these are its two ends (ms into the move).
+const BEAT_MS = 280;
+const ARM_BEATS = { wave: 380, waveboth: 340, sign: 500, type: 130, juggle: 375, dance: 500, flail: 180, scratch: 160 };
+const BODY_BEATS = { bounce: 210, bob: 230, wiggle: 180, shake: 90, sway: 500, shiver: 70, nod: 1200, float: 1400 };
+const PLUME_BEATS = { bob: 550, wild: 160 };
+const PROP_BEATS = { phone: 39, juggle: 250 };   // (time for its prop's own motion)
+
 // ---------------------------------------------------------------- the creature
 
 export class Talpa {
@@ -289,15 +301,21 @@ export class Talpa {
     }
 
     // Dropped from `height` box units: lands, maybe dizzy, then digs in right there
+    // Returns how it feels, for the words the host has it say: 'sick' (from
+    // high up), 'dizzy' or 'fine'
     land(height, done) {
         this.held = false;
-        const high = height > 40;
+        const feel = height > 28 ? 'sick' : height > 16 ? 'dizzy' : 'fine';
+        const first = feel === 'sick' ? { eyes: 'spiral', mouth: 'wavy', plume: 'droop', orbit: 1, t: 1800 }
+                    : feel === 'dizzy' ? { eyes: 'spiral', mouth: 'o', orbit: 1, t: 1200 }
+                    : { eyes: 'happy', mouth: 'smile', t: 700 };
         this.play({ steps: () => [
-            { depth: 'out', hole: 0, body: 'land', eyes: high ? 'spiral' : 'happy', mouth: high ? 'wavy' : 'smile', orbit: high ? 1 : 0,
-              t: high ? 1800 : 700 },
-            { depth: 'out', hole: 1, eyes: 'open', mouth: 'flat', look: [-1.5, 0.5], t: 500 },   // the hole opens under it first
+            Object.assign({ depth: 'out', hole: 0, body: 'land' }, first),
+            { depth: 'out', hole: 1, eyes: feel === 'sick' ? 'tired' : 'open', mouth: feel === 'sick' ? 'wavy' : 'flat', look: [-1.5, 0.5],
+              t: 500 },   // the hole opens under it first
             { body: 'spin', eyes: 'squint', fx: dirt(10), t: 700 },
             { eyes: 'happy', t: 500 }] }, done, false);
+        return feel;
     }
 
     // Shown at rest in a pose right away, no motion in between (icons, previews)
@@ -496,6 +514,66 @@ export class Talpa {
         this.play(name, null, true);
     }
 
+    // ------------------------------------------------------------ stills (see above)
+
+    beat() {
+        const st = this.st;
+        const beats = ARM_BEATS[st.arms] !== undefined || BODY_BEATS[st.body] !== undefined || PLUME_BEATS[st.plume] !== undefined
+            || PROP_BEATS[st.prop] !== undefined || st.tunnel === '1';
+        return beats ? Math.floor(this.now / BEAT_MS) % 2 : -1;
+    }
+
+    stillLook() {
+        const look = this.st.look || this.glance;
+        return [Math.round(look[0] * 2) / 2, Math.round(look[1] * 2) / 2];
+    }
+
+    // What a picture of it shows now, as "pose#details": the host fades over
+    // to a new pose, and just changes the picture for new details (a blink, a
+    // glance, a beat)
+    stillKey() {
+        const st = this.st;
+        const blink = this.now < this.blinkUntil && BLINKING[st.eyes] === 1;
+        return KEYS.map(k => st[k]).join(',') + ',' + st.it + ',' + (st.gum || '') + (this.facingLeft ? ',L' : ',R')
+            + '#' + this.stillLook().join(',') + (blink ? ',blink' : '') + ',' + this.beat();
+    }
+
+    drawStill(ctx) {
+        let s = this.stillOne;
+        if (!s)
+            s = this.stillOne = new Talpa({ brain: false });
+        s.colors = this.colors;
+        s.theme = this.theme;
+        s.facingLeft = this.facingLeft;
+        const st = this.st, step = { it: st.it, look: this.stillLook() };
+        for (const k of KEYS) {
+            if (st[k] !== '')
+                step[k] = st[k];
+        }
+        if (st.gum)
+            step.gum = st.gum;
+        if (this.now < this.blinkUntil && BLINKING[st.eyes] === 1)
+            step.eyes = 'closed';
+        const beat = Math.max(0, this.beat());
+        s.now = 1e6 + beat * (PROP_BEATS[st.prop] || (st.tunnel === '1' ? 260 : 0));
+        s.pose(step);
+        // a quick move at one end or the other of its swing
+        const arms = ARM_BEATS[st.arms] !== undefined ? armMove(st.arms, beat * ARM_BEATS[st.arms]) : null;
+        if (arms) {
+            s.v.armL = arms[0];
+            s.v.armR = arms[1];
+            s.v.armLy = arms[2];
+            s.v.armRy = arms[3];
+        }
+        if (st.tunnel === '1')
+            s.v.plume = plumeAngle('wild', beat * 160, 1);
+        else if (PLUME_BEATS[st.plume] !== undefined)
+            s.v.plume = plumeAngle(st.plume, beat * PLUME_BEATS[st.plume], 1);
+        // (a move that happens once shows as done)
+        s.since.body = s.now - (BODY_BEATS[st.body] !== undefined ? beat * BODY_BEATS[st.body] : 1e7);
+        s.draw(ctx);
+    }
+
     // ------------------------------------------------------------ drawing
 
     // Draws the 64 × 64 box at the context's current transform
@@ -640,11 +718,10 @@ export class Talpa {
         ctx.restore();
     }
 
+    // (no clip of its own: Qt's canvas puts the cut back in the wrong place
+    // after a clip inside it, and hands showed under the burrow)
     drawFace(ctx, now, st, v, pal, move, ms) {
         ctx.save();
-        ctx.beginPath();
-        tracePath(ctx, art.BODY);
-        ctx.clip();
         ctx.translate(0, art.FACE_Y);
         if (move.turn !== undefined) {
             const p = move.turn;
@@ -652,6 +729,13 @@ export class Talpa {
                      : p < 0.46 ? -27 : p < 0.58 ? lerp(-27, -13, (p - 0.46) / 0.12) : p < 0.8 ? lerp(-13, 0, sine((p - 0.58) / 0.22)) : 0;
             const sx = p < 0.22 ? lerp(1, 0.55, p / 0.22) : p < 0.32 ? lerp(0.55, 0.3, (p - 0.22) / 0.1)
                      : p < 0.46 ? 0.3 : p < 0.58 ? lerp(0.3, 0.55, (p - 0.46) / 0.12) : p < 0.8 ? lerp(0.55, 1, sine((p - 0.58) / 0.22)) : 1;
+            // it fades as it slides round the body's edge
+            const fade = clamp01((24 - Math.abs(tx)) / 8);
+            if (fade <= 0) {
+                ctx.restore();
+                return;
+            }
+            ctx.globalAlpha = ctx.globalAlpha * fade;
             ctx.translate(tx, 0);
             art.about(ctx, 32, 40, 0, sx, 1);
         }

@@ -204,7 +204,8 @@
   pointer-events: none;
 }
 
-.cs-pet-canvas,
+.cs-pet-sheets,
+.cs-pet-sheet,
 .cs-pet-tag,
 .cs-pet-grab {
   position: absolute;
@@ -212,7 +213,7 @@
   top: 0;
 }
 
-.cs-pet-canvas {
+.cs-pet-sheets {
   will-change: transform;
 }
 

@@ -335,9 +335,17 @@ function buildServer(now: number, phase: number): Status {
   };
 }
 
+// As the backend lists an account's chats: the ones that need you first
+// (asking longest first), the others in the order they started
+function listed<G extends { sessions: Session[] }>(g: G): G {
+  const order = (s: Session): [number, number] => (s.state === "waiting" ? [0, s.since ?? 0] : [1, s.startedAt ?? s.since ?? 0]);
+  g.sessions.sort((a, b) => order(a)[0] - order(b)[0] || order(a)[1] - order(b)[1] || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  return g;
+}
+
 // phase moves the story on (a chat finishes, the host's chat starts again…)
 export function demoState(now: number, phase = 0): ViewState {
-  const groups = [personal(now, phase)];
+  const groups = [listed(personal(now, phase))];
   const status: Status = {
     ok: true,
     generatedAt: now,

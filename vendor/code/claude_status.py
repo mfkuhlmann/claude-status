@@ -5249,7 +5249,11 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
             else:
                 forget.update(ids)  # it runs again: it comes back (and is forgotten)
                 shown.append(s)
-        g["sessions"] = sorted(shown, key=lambda s: (STATE_ORDER[s["state"]], -(s["since"] or 0)))
+        # The chats that need you first (the one asking longest first), the
+        # others in the order they started, the newest last: a row (and its
+        # pet) moves only when its chat starts or stops needing you
+        g["sessions"] = sorted(shown, key=lambda s: (0, s["since"] or 0, s["key"]) if s["state"] == "waiting"
+                               else (1, s.get("startedAt") or s["since"] or 0, s["key"]))
     # Only another copy of this script (with other settings) may list a
     # removed session now: forget it only after a long while
     forget.update(i for i, t in dismissed.items() if not isinstance(t, (int, float)) or now_ms - t > DISMISSED_KEEP_MS)

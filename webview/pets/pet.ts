@@ -58,6 +58,18 @@ export function chatRef(c: StageChat): ChatRef {
   };
 }
 
+// A canvas with the picture on it ("": drawn live)
+interface Sheet {
+  canvas: HTMLCanvasElement;
+  key: string;
+}
+
+function sheet(): Sheet {
+  const canvas = document.createElement("canvas");
+  canvas.className = "cs-pet-sheet";
+  return { canvas, key: "" };
+}
+
 function div(className: string): HTMLDivElement {
   const el = document.createElement("div");
   el.className = className;
@@ -85,9 +97,14 @@ export class Pet {
   private sleepyClicks = 0;
   private lastMood: string;
   private lastDraw = -1e9;
+  private landing = false; // picked up, until it has landed and dug in: drawn live
+  private fadeUntil = -1; // the back sheet fades in until then
 
   readonly talpa: Talpa;
-  private readonly canvas: HTMLCanvasElement;
+  // Two sheets: the one shown and, behind it, the next picture (stills)
+  private readonly sheets: HTMLDivElement;
+  private front: Sheet;
+  private back: Sheet;
   private readonly tag: HTMLDivElement | null;
   private readonly grab: HTMLDivElement;
   private readonly drawn: Record<string, string> = {};
@@ -150,10 +167,13 @@ export class Pet {
       this.say(input?.highUsageText ?? "");
     }, true, true);
 
-    // Drawing: Talpa on its canvas (with room around it for what it throws
+    // Drawing: Talpa on its sheets (with room around it for what it throws
     // and holds up), its name tag, and a grab area around its body
-    this.canvas = document.createElement("canvas");
-    this.canvas.className = "cs-pet-canvas";
+    this.sheets = div("cs-pet-sheets");
+    this.front = sheet();
+    this.back = sheet();
+    this.back.canvas.style.opacity = "0";
+    this.sheets.append(this.front.canvas, this.back.canvas);
     this.grab = div("cs-pet-grab");
     this.grab.style.width = `${stage.bodyWidth + LARGE}px`;
     this.grab.style.height = `${stage.bodyHeight + LARGE}px`;
@@ -164,7 +184,7 @@ export class Pet {
       this.tag.style.color = textOn(PALETTE[colorIndex]);
       this.tag.addEventListener("click", () => this.clicked());
     }
-    stage.petLayer.append(this.canvas, ...(this.tag ? [this.tag] : []), this.grab);
+    stage.petLayer.append(this.sheets, ...(this.tag ? [this.tag] : []), this.grab);
     this.listen();
     this.describe();
 
@@ -308,6 +328,8 @@ export class Pet {
   themeChanged(): void {
     this.talpa.setTheme(this.stage.theme());
     this.lastDraw = -1e9;
+    this.front.key = "~"; // (the pictures are drawn again)
+    this.back.key = "";
     this.changed();
   }
 
@@ -432,6 +454,7 @@ export class Pet {
 
   private pickUp(): void {
     this.held = true; // first: nothing else moves it while you hold it
+    this.landing = true;
     this.stride.stop();
     this.faller.stop(); // grabbed again while falling
     this.talpa.setHeld(true);
@@ -447,15 +470,16 @@ export class Pet {
 
   // On the floor again: dizzy if it fell from high up, then it digs in where it landed
   private landed(fromHeight: number): void {
-    const gu = this.stage.gu;
     this.held = false;
-    if (fromHeight > gu * 2.6) this.say("Ugh… I don't feel so good.");
-    else if (fromHeight > gu * 1.5) this.say("Ouch… the room is spinning.");
-    this.talpa.land(fromHeight / (this.stage.box / 64), () => {
+    const feel = this.talpa.land(fromHeight / (this.stage.box / 64), () => {
+      this.landing = false;
       if (this.destroyed) return;
       if (this.leaving) this.goAway(); // its chat left while you held it: now it goes
       else if (!this.lone && Math.abs(this.px - this.homeX) > this.stage.bodyWidth * 0.5) this.digTo(this.homeX);
     });
+    // (in the words for how it looks)
+    if (feel === "sick") this.say("Ugh… I don't feel so good.");
+    else if (feel === "dizzy") this.say("Ouch… the room is spinning.");
     this.changed();
   }
 
@@ -547,7 +571,7 @@ export class Pet {
       ground = this.ground;
     const px = Math.round(this.px * 10) / 10,
       lift = Math.round(this.lift * 10) / 10;
-    this.put(this.canvas, "canvas", "transform", `translate(${px - s.canvasW / 2}px, ${ground - lift - s.floorY}px)`);
+    this.put(this.sheets, "sheets", "transform", `translate(${px - s.canvasW / 2}px, ${ground - lift - s.floorY}px)`);
     if (this.tag) {
       this.put(this.tag, "tag", "transform", `translate(${px}px, ${ground + (box * 6) / 64}px) translateX(-50%)`);
       this.put(this.tag, "tagWidth", "maxWidth", `${s.tagWidth}px`);
@@ -557,29 +581,89 @@ export class Pet {
     this.put(this.grab, "grab", "transform", `translate(${px - gw / 2}px, ${ground - lift - gh}px)`);
     this.put(this.grab, "cursor", "cursor", this.held ? "grabbing" : this.lone ? "grab" : "pointer");
 
-    // As often as that shows something new (talpa.frameMs: 25 pictures a
-    // second for quick moves, down to 5 at rest); each picture costs
     const now = s.clock.now();
     this.talpa.tick(now);
-    if (s.live && now - this.lastDraw < this.talpa.frameMs - 10) return; // (frames come every 16.7 ms)
+    if (this.lone || this.landing) this.drawLive(now);
+    else this.drawStills(now);
+  }
+
+  // The hero, and a pet you hold until it has landed: as often as that shows
+  // something new (talpa.frameMs: 25 pictures a second for quick moves, down
+  // to 5 at rest); each picture costs
+  private drawLive(now: number): void {
+    if (this.front.key !== "" || this.fadeUntil >= 0) {
+      this.front.key = ""; // (back from pictures: drawn live on the shown sheet)
+      this.back.key = "";
+      this.fadeUntil = -1;
+      this.show(this.front, 1, false);
+      this.show(this.back, 0, false);
+    }
+    if (this.stage.live && now - this.lastDraw < this.talpa.frameMs - 10) return; // (frames come every 16.7 ms)
     this.lastDraw = now;
-    const k = devicePixelRatio || 1,
+    this.paint(this.front);
+  }
+
+  // A chat's pet: pictures (only the big one moves all the time), drawn when
+  // what it shows changes (talpa.stillKey), on the sheet behind; that one
+  // then fades in as the shown one fades out for a new pose, or just takes
+  // its place for a blink, a glance or a beat
+  private drawStills(now: number): void {
+    const s = this.stage;
+    if (this.fadeUntil >= 0) {
+      if (now < this.fadeUntil && s.live) return;
+      this.swap();
+    }
+    const key = this.talpa.stillKey();
+    if (key === this.front.key) return;
+    if (key !== this.back.key) {
+      this.back.key = key;
+      this.paint(this.back);
+    }
+    const pose = (k: string): string => k.split("#")[0];
+    const fade = s.live && !reducedMotion() && (this.front.key === "" || this.front.key === "~" || pose(key) !== pose(this.front.key));
+    this.back.canvas.style.zIndex = "1";
+    this.front.canvas.style.zIndex = "0";
+    this.show(this.back, 1, fade);
+    this.show(this.front, 0, fade);
+    if (fade) this.fadeUntil = now + 200;
+    else this.swap();
+  }
+
+  private show(sheet: Sheet, opacity: number, fade: boolean): void {
+    sheet.canvas.style.transition = fade ? "opacity 200ms ease-in-out" : "none";
+    sheet.canvas.style.opacity = String(opacity);
+  }
+
+  private swap(): void {
+    const shown = this.back;
+    this.back = this.front;
+    this.front = shown;
+    this.fadeUntil = -1;
+  }
+
+  private paint(sheet: Sheet): void {
+    const s = this.stage,
+      box = s.box,
+      k = devicePixelRatio || 1,
       w = Math.round(s.canvasW * k),
       h = Math.round(s.canvasH * k);
-    if (this.canvas.width !== w || this.canvas.height !== h) {
-      // (also when the zoom changes)
-      this.canvas.width = w;
-      this.canvas.height = h;
-      this.canvas.style.width = `${s.canvasW}px`;
-      this.canvas.style.height = `${s.canvasH}px`;
+    for (const one of [this.front, this.back]) {
+      if (one.canvas.width === w && one.canvas.height === h) continue;
+      // (also when the zoom changes: the other picture is drawn again too)
+      one.canvas.width = w;
+      one.canvas.height = h;
+      one.canvas.style.width = `${s.canvasW}px`;
+      one.canvas.style.height = `${s.canvasH}px`;
+      if (one !== sheet) one.key = "~";
     }
-    const ctx = this.canvas.getContext("2d");
+    const ctx = sheet.canvas.getContext("2d");
     if (!ctx) return;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, w, h);
     ctx.save();
     ctx.setTransform((k * box) / 64, 0, 0, (k * box) / 64, k * box * 0.3, k * box * 0.45);
-    this.talpa.draw(ctx);
+    if (sheet.key === "") this.talpa.draw(ctx);
+    else this.talpa.drawStill(ctx);
     ctx.restore();
   }
 
@@ -587,6 +671,6 @@ export class Pet {
     this.destroyed = true;
     for (const t of [this.stride, this.faller]) t.stop();
     for (const t of [this.lookTimer, this.tickleTimer, this.contextTimer, this.usageTimer]) t.stop();
-    for (const el of [this.canvas, this.tag, this.grab]) el?.remove();
+    for (const el of [this.sheets, this.tag, this.grab]) el?.remove();
   }
 }

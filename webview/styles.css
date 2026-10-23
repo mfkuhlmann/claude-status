@@ -10,7 +10,7 @@
   --cs-waiting: var(--vscode-charts-orange, #d18616);
   --cs-working: var(--vscode-focusBorder, #0078d4);
   --cs-idle: var(--vscode-testing-iconPassed, var(--vscode-charts-green, #388a34));
-  --cs-failed: var(--vscode-errorForeground, #f14c4c);
+  --cs-failed: var(--vscode-charts-red, var(--vscode-errorForeground, #f14c4c));
   --cs-muted: var(--vscode-descriptionForeground, #8b8b8b);
   --cs-disabled: var(--vscode-disabledForeground, #8b8b8b80);
   --cs-usage-high: var(--cs-failed);

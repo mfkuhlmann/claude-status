@@ -125,7 +125,8 @@ As an editor tab (**Claude Status: Open in Editor Tab**):
   two or more accounts which one VS Code's Claude runs on (**Claude: work**):
   click it to change the default account.
 - **Talpa**: one pet for the whole dashboard, one per chat (in the same
-  order as the list, its bar in the pet's color), each acting out its chat.
+  order as the list: the chats that need you first, the others in the order
+  they started; its bar in the pet's color), each acting out its chat.
   Talpa lives in a burrow: it digs over to another spot instead of walking,
   a new chat's pet digs up out of the ground, and one whose chat leaves the
   list waves and digs away. Click a pet to open its chat, drag one out of
