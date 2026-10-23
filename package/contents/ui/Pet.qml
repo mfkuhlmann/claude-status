@@ -266,8 +266,8 @@ Item {
 
     // Something happened to its chat (or, for the main pet, to an account)
     function event(kind, text) {
-        if (held)
-            return
+        if (held || leaving)
+            return   // (a reaction now would stop it digging away)
         const action = { done: "finished", failed: "failed", stopped: "shrug", oops: "confused", reset: "charged" }[kind]
         react(action || "alert")
         say(text)

@@ -356,6 +356,8 @@ class Pet {
 
     // Something happened to its chat (or, for the hero, to an account)
     event(kind, text) {
+        if (this.leaving)
+            return; // (a reaction now would stop it digging away)
         const action = {done: 'finished', failed: 'failed', stopped: 'shrug', oops: 'confused', reset: 'charged'}[kind];
         this.react(action || 'alert');
         this.say(text);
