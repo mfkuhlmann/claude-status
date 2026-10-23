@@ -2943,10 +2943,10 @@ def load_queue(cache_root):
     return [t for t in tasks if isinstance(t, dict) and valid_id(t.get("id"))] if isinstance(tasks, list) else []
 
 
-def change_queue(cache_root, add=None, take=None, put_back=None):
-    """Change queue.json under a lock: add a task, take one out by its id
-    (returned), or put one back (e.g. with the error it got). The task taken
-    out, or None."""
+def change_queue(cache_root, add=None, take=None, put_back=None, once=False):
+    """Change queue.json under a lock: add a task (once: unless a go-on of
+    the same chat is queued already), take one out by its id (returned), or
+    put one back (e.g. with the error it got). The task taken out, or None."""
     private_dir(cache_root)
     with open(cache_root / "queue.lock", "a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -2957,6 +2957,9 @@ def change_queue(cache_root, add=None, take=None, put_back=None):
             tasks = [t for t in tasks if t["id"] != take]
         if put_back is not None:
             tasks = [t for t in tasks if t["id"] != put_back["id"]] + [put_back]
+        if add is not None and once and add.get("chat") and any(
+                t.get("chat") == add["chat"] and (t.get("host") or "") == (add.get("host") or "") for t in tasks):
+            add = None
         if add is not None:
             tasks.append(add)
         if add is not None or taken is not None or put_back is not None:
@@ -2965,10 +2968,14 @@ def change_queue(cache_root, add=None, take=None, put_back=None):
 
 
 def queue_entry(profile, folder, prompt, start_at, host="", account="", plan=None, plan_profile=None,
-                plan_title="", now_ms=None, chat=None, name="", scheduled=False):
+                plan_title="", now_ms=None, chat=None, name="", scheduled=False, why="", model=None, effort=None):
     """A task to queue (checked), or ValueError. With chat (its id), it goes
-    on with that chat (one a usage limit stopped: continue_chat), named name.
-    scheduled: it starts at a time you picked, not when a limit resets."""
+    on with that chat (one a usage limit stopped: continue_chat), named name;
+    why: "retry" (its turn broke off) or "cap" (stopped at the usage cap) goes
+    on whatever its newest turn is (keep_going). scheduled: it starts at a
+    time you picked, not when a limit resets. model, effort: a new chat's
+    (chat_options)."""
+    chat_options(model, effort)  # (checked)
     if not isinstance(profile, str) or not profile or not isinstance(folder, str):
         raise ValueError("A queued task needs an account and a folder")
     if chat is not None and not valid_id(chat):
@@ -2987,6 +2994,8 @@ def queue_entry(profile, folder, prompt, start_at, host="", account="", plan=Non
         "folder": folder, "prompt": (prompt or "").strip(), "plan": plan, "planProfile": plan_profile,
         "planTitle": plan_title or "", "startAt": start_at, "createdAt": now_ms, "error": "",
         "chat": chat, "name": clean_text(name, 80) if chat else "", "scheduled": bool(scheduled) and chat is None,
+        "why": why if chat and why in ("retry", "cap") else "",
+        "model": (model or None) if chat is None else None, "effort": (effort or None) if chat is None else None,
     }
 
 
@@ -3000,6 +3009,307 @@ def queued_tasks(cache_root, now_ms):
         t["folderShort"] = short_path(t["folder"], Path.home()) if not t.get("host") else t.get("folder") or "~"
         out.append(t)
     return out
+
+
+# ---------------------------------------------------------------- chats that keep going
+#
+# A chat of this computer can keep going until it's done: whenever a usage
+# limit stops it, it goes on a minute after the limit resets, as often as that
+# takes. Such chats are kept in ~/.cache/claude-widget/keep.json, and the
+# status run of the copy that notifies looks after them (look_after_kept): it
+# queues each go-on (started like one you queued), tries again after a pause
+# when one didn't take (nothing new in the chat a while after it went on) or
+# when the turn broke off on an API error that isn't a limit (the connection
+# lost), a few times with longer pauses, and lets the chat go once a turn of
+# it has ended by itself. One you interrupted has ended too: you took over.
+#
+# With a usage cap (--usage-cap N), it also stops what an account has at work
+# once one of its plan windows reaches N%, once in that window: the chats
+# that keep going go on after the window resets, and queued tasks wait for it.
+
+KEEP_TAKE_MS = 5 * 60_000  # a go-on that leaves nothing new in its chat after this long didn't take
+KEEP_RETRY_MINUTES = (2, 5, 15, 30, 60)  # the pauses before each try again; then it gives up
+KEEP_IDLE_MS = 7 * 86400_000  # a chat kept this long with nothing new is let go
+TURN_ENDS = ("end_turn", "stop_sequence", "max_tokens")  # a reply's stop_reason that ends its turn
+RETRY_PROMPT = "Your last turn broke off (an API error): go on where you stopped."
+
+
+def load_keep(cache_root):
+    """{"chats": the chats that keep going, "capped": {account|window: when
+    that window resets}, for the windows the usage cap stopped chats in}."""
+    data = read_json(cache_root / "keep.json")
+    data = data if isinstance(data, dict) else {}
+    chats = data.get("chats") if isinstance(data.get("chats"), list) else []
+    capped = data.get("capped") if isinstance(data.get("capped"), dict) else {}
+    return {"chats": [k for k in chats if isinstance(k, dict) and valid_id(k.get("chat"))
+                      and isinstance(k.get("profile"), str) and k["profile"]],
+            "capped": {w: at for w, at in capped.items() if isinstance(w, str) and number(at) is not None}}
+
+
+def change_keep(cache_root, change, wait=True):
+    """Change keep.json under a lock: change(data) changes it in place and
+    says whether it did. False (nothing done) when another copy has the lock
+    and wait is False: it looks after the chats right now."""
+    private_dir(cache_root)
+    with open(cache_root / "keep.lock", "a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | (0 if wait else fcntl.LOCK_NB))
+        except BlockingIOError:
+            return False
+        data = load_keep(cache_root)
+        if change(data):
+            write_json_atomic(cache_root / "keep.json", data)
+        return True
+
+
+def keep_chat(cache_root, profile_key, chat_id, name="", folder="", on=True, now_ms=None):
+    """Have a chat of this computer keep going, or (not on) not any more."""
+    now_ms = int(time.time() * 1000) if now_ms is None else now_ms
+
+    def change(data):
+        had = any(k["chat"] == chat_id for k in data["chats"])
+        if on and had:
+            return False
+        data["chats"] = [k for k in data["chats"] if k["chat"] != chat_id]
+        if on:
+            data["chats"].append({"chat": chat_id, "profile": profile_key, "name": clean_text(name, 80),
+                                  "folder": folder or "", "since": now_ms, "wentOnAt": None, "tries": 0,
+                                  "note": "", "error": "", "errorAt": None, "cappedUntil": None})
+        return on or had
+    change_keep(cache_root, change)
+
+
+def note_went_on(cache_root, chat_id, now_ms=None):
+    """A go-on of a chat that keeps going has started: something new should
+    show in it soon (look_after_kept checks)."""
+    now_ms = int(time.time() * 1000) if now_ms is None else now_ms
+
+    def change(data):
+        k = next((k for k in data["chats"] if k["chat"] == chat_id), None)
+        if k is None:
+            return False
+        k.update(wentOnAt=now_ms, note="", cappedUntil=None)
+        return True
+    change_keep(cache_root, change)
+
+
+def kept_chats(cache_root):
+    """The chats that keep going, as the status lists them."""
+    return [{f: k.get(f) for f in ("chat", "profile", "name", "since", "wentOnAt", "tries", "note", "error")}
+            for k in load_keep(cache_root)["chats"]]
+
+
+def last_turn(path):
+    """How a chat's newest turn (a prompt of yours or a reply; not tool
+    results or notes) stands, from the end of its transcript: {"kind":
+    "prompt" (no reply yet), "reply", "limit", "login" (stopped_by) or "error"
+    (an API error that isn't a limit: the connection lost, say), "at",
+    "ended": whether the turn is over}, or None."""
+    try:
+        size = path.stat().st_size
+    except (OSError, AttributeError):
+        return None
+    nbytes = PEEK_TAIL_BYTES
+    while True:
+        turn = next((e for e in tail_entries(path, size, nbytes) if not e.get("isSidechain")
+                     and (e["type"] == "assistant" or human_prompt(e) is not None)), None)
+        if turn is not None or nbytes >= size or nbytes >= PEEK_TAIL_MAX:
+            break
+        nbytes *= 4
+    if turn is None:
+        return None
+    at = to_ms(turn.get("timestamp")) or 0
+    if turn["type"] != "assistant":
+        return {"kind": "prompt", "at": at, "ended": False}
+    stop = stopped_by(turn)
+    if stop is not None:
+        return dict(stop, at=stop.get("at") or at, ended=True)
+    msg = turn.get("message") if isinstance(turn.get("message"), dict) else {}
+    if turn.get("isApiErrorMessage") is True:
+        return {"kind": "error", "at": at, "text": short_text(" ".join(message_text(msg).split()), 160), "ended": True}
+    return {"kind": "reply", "at": at, "ended": msg.get("stop_reason") in TURN_ENDS}
+
+
+def kept_step(k, turn, row, queued, limits, now_ms):
+    """What to do now about the chat that keeps going k (keep.json's entry,
+    changed in place: tries, note, error), whose newest turn is turn
+    (last_turn), whose row in the status (its process) is row, and whose
+    account's plan limits are limits: ("go on", when, why, prompt) to queue
+    its go-on, "done" to let it go, or None (nothing for now)."""
+    if queued:
+        return None  # its go-on waits (or couldn't start, and says why)
+    k["note"] = ""
+    if row is not None and row.get("state") in ("working", "waiting"):
+        return None  # at work, or waiting for you
+    live = row is not None and row.get("pid") is not None
+    # (open in a Claude Code tab, or in a session it was resumed in: ending that isn't up to the widget)
+    in_tab = live and (row.get("entrypoint") == "claude-vscode" or row.get("sessionId") != row.get("chatId"))
+
+    def go(start, why="", prompt=""):
+        if in_tab:
+            k["note"] = "It's open in a Claude Code tab: it can't go on by itself while that's open"
+            return None
+        return "go on", int(start), why, prompt
+
+    def again(why, prompt=""):
+        tries = k.get("tries") or 0
+        if in_tab:
+            return go(now_ms)  # (says why it can't)
+        if tries >= len(KEEP_RETRY_MINUTES):
+            k.update(error=f"Gave up after {tries} tries: {why}", errorAt=now_ms)
+            return None
+        k["tries"] = tries + 1
+        return go(now_ms + KEEP_RETRY_MINUTES[tries] * 60_000, "retry", prompt)
+
+    if k.get("cappedUntil"):  # the usage cap stopped it: on once that window resets
+        return go(max(k["cappedUntil"] + 60_000, now_ms), "cap")
+    if turn is None:
+        return None
+    at, went = turn["at"], k.get("wentOnAt") or 0
+    if k.get("error"):
+        if at <= (k.get("errorAt") or 0):
+            return None  # it gave up; something new in the chat starts it over
+        k.update(error="", errorAt=None, tries=0)
+    if turn["kind"] == "limit" and at > went:
+        k["tries"] = 0
+        s = limit_stop(turn, limits, now_ms)
+        return go(s["resetsAt"] + 60_000 if s.get("resetsAt") and not s.get("over") else now_ms)
+    if turn["kind"] == "login":
+        k["note"] = "Its account's login has expired: log in again, then it can go on"
+        return None
+    if turn["kind"] == "error" and at > went:
+        return again(turn.get("text") or "an API error", RETRY_PROMPT)
+    if went and at <= went:
+        # nothing new since it went on: that didn't take
+        return again("it didn't go on") if now_ms - went > KEEP_TAKE_MS else None
+    if not turn["ended"] and not live:
+        # a turn with no process to finish it: it broke off (its process ended in it)
+        return again("its turn broke off") if now_ms - at > KEEP_TAKE_MS else None
+    if turn["ended"] and at > max(went, k.get("since") or 0):
+        return "done"
+    if now_ms - max(at, went, k.get("since") or 0) > KEEP_IDLE_MS:
+        return "done"  # (nothing new for days: let it go)
+    return None
+
+
+def cap_window(group, cap, now_ms):
+    """The account's plan window that's at or past cap percent (of several,
+    the one that resets last), or None."""
+    best = None
+    for w in ((group.get("limits") or group.get("accountLimits") or {}).get("windows") or []):
+        pct, at = number(w.get("pct")), number(w.get("resetsAt"))
+        if pct is not None and pct >= cap and at and at > now_ms and not w.get("reset") \
+                and (best is None or at > best["resetsAt"]):
+            best = w
+    return best
+
+
+def note_caps(groups, cap, now_ms):
+    """Mark each account whose plan window is at the usage cap: group["cap"]
+    = {"pct", "label", "key", "resetsAt"} (queued tasks wait for it), else None."""
+    for g in groups:
+        w = cap_window(g, cap, now_ms) if cap else None
+        g["cap"] = {"pct": cap, "label": w.get("label") or "", "key": w.get("key") or "", "resetsAt": int(w["resetsAt"])} \
+            if w else None
+
+
+def look_after_kept(home, cache_root, extra_dirs, groups, now_ms, cap=0):
+    """Look after the chats that keep going, and stop the chats at work at
+    the usage cap (see above). groups: this computer's accounts, as the
+    status lists them. Nothing when another copy is at it right now."""
+    profiles = discover_profiles(home, extra_dirs)
+    queued = {t.get("chat") for t in load_queue(cache_root) if t.get("chat") and not t.get("host")}
+    rows = {}
+    for g in groups:
+        for s in g.get("sessions", []):
+            for i in (s.get("sessionId"), s.get("chatId")):
+                if i and (i not in rows or s.get("pid") is not None):
+                    rows[i] = s
+    adds, stops = [], []
+
+    def change(data):
+        changed = False
+        for mark, at in list(data["capped"].items()):
+            if at <= now_ms:  # (that window is over)
+                del data["capped"][mark]
+                changed = True
+        for g in groups:
+            w = g.get("cap")
+            mark = "|".join(g.get("profileKeys") or []) + "|" + (w["key"] if w else "")
+            if not w or mark in data["capped"]:
+                continue
+            data["capped"][mark] = w["resetsAt"]
+            changed = True
+            for s in g.get("sessions", []):
+                if s.get("pid") is not None and s.get("state") == "working":
+                    stops.append(s)
+                    for k in data["chats"]:
+                        if k["chat"] in (s.get("chatId"), s.get("sessionId")):
+                            k["cappedUntil"] = w["resetsAt"]
+        for k in list(data["chats"]):
+            before = dict(k)
+            profile = next((p for p in profiles if matches_profile(p, k["profile"])), None)
+            path = transcript_path(profile, k["chat"]) if profile is not None else None
+            g = next((g for g in groups if k["profile"] in (g.get("profileKeys") or [])), None)
+            step = None if path is None else kept_step(
+                k, last_turn(path), rows.get(k["chat"]), k["chat"] in queued,
+                (g.get("limits") or g.get("accountLimits")) if g else None, now_ms)
+            if path is None or step == "done":
+                data["chats"].remove(k)
+                changed = True
+            elif step is not None:
+                _, start, why, prompt = step
+                adds.append(queue_entry(k["profile"], k.get("folder") or "", prompt, int(start), chat=k["chat"],
+                                        name=k.get("name") or "", why=why, now_ms=now_ms))
+                k["cappedUntil"] = None
+            changed = changed or k != before
+        return changed
+
+    if not change_keep(cache_root, change, wait=False):
+        return
+    for entry in adds:
+        change_queue(cache_root, add=entry, once=True)
+    if stops:
+        in_background(lambda: stop_all(home, extra_dirs, stops))
+
+
+def stop_all(home, extra_dirs, sessions):
+    """Stop these chats at work, as the stop button does where they run (an
+    interrupt in tmux: the chat stays open there)."""
+    profiles = discover_profiles(home, extra_dirs)
+    for s in sessions:
+        try:
+            if s.get("kind") == "bg" and valid_id(s.get("jobId")):
+                profile = next((p for p in profiles if matches_profile(p, s.get("profileDir") or "")), None)
+                if profile is not None:
+                    stop_background(profile, s["jobId"], read_job([profile], s["jobId"]), home)
+            elif s.get("tmux"):
+                interrupt_chat_by_id(home, extra_dirs, s["sessionId"], s.get("profileDir"))
+            else:
+                stop_chat_by_id(home, extra_dirs, s["sessionId"], s.get("profileDir"), busy_ok=True)
+        except Exception:  # (on with the others)
+            pass
+
+
+def in_background(task):
+    """Run task in a process of its own once this one has answered (the
+    widget waits until the status's output ends: it mustn't inherit it)."""
+    try:
+        pid = os.fork()
+    except OSError:
+        return
+    if pid:
+        return
+    try:
+        os.setsid()
+        devnull = os.open(os.devnull, os.O_RDWR)
+        for fd in (0, 1, 2):
+            os.dup2(devnull, fd)
+        task()
+    except Exception:
+        pass
+    finally:
+        os._exit(0)
 
 
 # ---------------------------------------------------------------- plans
@@ -3858,11 +4168,32 @@ def resume_command(profile, session_id, home=None, folder=None, claude="claude")
     return claude_command(profile, ["--resume", session_id], home, None, folder, claude)
 
 
-def new_chat_command(profile, home=None, claude="claude"):
-    """Shell command starting a new chat on this profile. With background
-    sessions around, plain `claude` opens the agent view (where a task becomes
-    a new background session): ask for a normal chat."""
-    return f"CLAUDE_CODE_DISABLE_AGENT_VIEW=1 {config_env(profile, home)} {claude_words(claude)}"
+MODEL_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9._\[\]-]{0,79}$")  # an alias (opus, sonnet, fable) or a model's full name
+EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
+
+
+def chat_options(model=None, effort=None):
+    """claude's options for a new chat's model and reasoning effort (none
+    for Claude's own defaults); ValueError for one that isn't."""
+    words = []
+    if model:
+        if not MODEL_NAME.match(model):
+            raise ValueError(f"Not a model name: {model}")
+        words += ["--model", model]
+    if effort:
+        if effort not in EFFORT_LEVELS:
+            raise ValueError(f"Not an effort level: {effort} (it's low, medium, high, xhigh or max)")
+        words += ["--effort", effort]
+    return words
+
+
+def new_chat_command(profile, home=None, claude="claude", options=()):
+    """Shell command starting a new chat on this profile (options: claude's,
+    e.g. chat_options'). With background sessions around, plain `claude` opens
+    the agent view (where a task becomes a new background session): ask for a
+    normal chat."""
+    return (f"CLAUDE_CODE_DISABLE_AGENT_VIEW=1 {config_env(profile, home)} {claude_words(claude)}"
+            + "".join(" " + shlex.quote(w) for w in options))
 
 
 def login_command(profile, home=None, claude="claude"):
@@ -3957,19 +4288,21 @@ def prompt_word(prompt):
     return shlex.quote(prompt_arg(prompt))
 
 
-def task_command(profile, prompt, home=None, claude="claude"):
+def task_command(profile, prompt, home=None, claude="claude", options=()):
     """Shell command starting a chat on this profile with prompt sent as its first message."""
-    return f"{new_chat_command(profile, home, claude)} {prompt_word(prompt)}"
+    return f"{new_chat_command(profile, home, claude, options)} {prompt_word(prompt)}"
 
 
 def start_background(profile, folder, prompt, home=None, claude="claude", wait=BACKGROUND_WAIT, prefix=(),
-                     resume=None):
+                     resume=None, options=()):
     """Start a background session on this profile in folder, with prompt:
     (ok, message, its short id or None). prefix: words claude runs behind,
     e.g. systemd-run's, so a background service it starts lives on its own
     (not in the widget's group of processes, which a restart of the desktop
     shell ends: jump.scope_prefix). resume: the id of a chat it goes on
-    with (claude --bg --resume: the same chat, if nothing has it open)."""
+    with (claude --bg --resume: the same chat, if nothing has it open; with
+    options too, Claude would start a copy of it). options: a new one's, e.g.
+    chat_options'."""
     import subprocess
     home = home or Path.home()
     if not prompt.strip():
@@ -3989,7 +4322,7 @@ def start_background(profile, folder, prompt, home=None, claude="claude", wait=B
     folder_bin = os.path.dirname(claude)
     if folder_bin and os.path.isfile(os.path.join(folder_bin, "node")):
         env["PATH"] = folder_bin + os.pathsep + env.get("PATH", "")
-    argv = [*prefix, claude, "--bg", *(["--resume", resume] if resume else []), prompt_arg(prompt)]
+    argv = [*prefix, claude, "--bg", *(["--resume", resume] if resume else options), prompt_arg(prompt)]
     try:
         r = subprocess.run(argv, cwd=folder, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                            stderr=subprocess.PIPE, timeout=wait)
@@ -4008,14 +4341,16 @@ def start_background(profile, folder, prompt, home=None, claude="claude", wait=B
 
 
 def run_task(home, extra_dirs, background, folder, profile_key, text, plan_slug=None, plan_profile=None,
-             claude=None):
+             claude=None, model=None, effort=None):
     """A task on the profile profile_key in folder (here or on an SSH host,
-    --start-task / --task-command): started in the background, or the shell
-    command that starts it in a terminal. {"ok", "message", "id" | "command"}."""
+    --start-task / --task-command), with that model and effort: started in
+    the background, or the shell command that starts it in a terminal.
+    {"ok", "message", "id" | "command"}."""
     profiles = discover_profiles(home, extra_dirs)
     profile = next((p for p in profiles if matches_profile(p, profile_key)), None)
     if profile is None:
         return {"ok": False, "message": f"No Claude profile called {profile_key}"}
+    options = chat_options(model, effort)
     plan = None
     if plan_slug:
         plan = find_plan(profiles, plan_slug, plan_profile)
@@ -4025,9 +4360,10 @@ def run_task(home, extra_dirs, background, folder, profile_key, text, plan_slug=
     folder = folder if isinstance(folder, str) and folder.startswith("/") else str(home)
     claude = claude or find_claude(home, ask_shell=True)
     if background:
-        ok, message, job = start_background(profile, folder, prompt, home, claude)
+        ok, message, job = start_background(profile, folder, prompt, home, claude, options=options)
         return {"ok": ok, "message": message, "id": job}
-    command = task_command(profile, prompt, home, claude) if prompt else new_chat_command(profile, home, claude)
+    command = (task_command(profile, prompt, home, claude, options) if prompt
+               else new_chat_command(profile, home, claude, options))
     return {"ok": True, "message": "", "command": in_folder(folder, command)}
 
 
@@ -4035,14 +4371,16 @@ CONTINUE_PROMPT = "The usage limit has reset: go on where you stopped."
 
 
 def continue_chat(home, extra_dirs, profile_key, chat_id, folder=None, text="", claude=None, prefix=(),
-                  wait=None):
+                  wait=None, force=False):
     """Go on with a chat a usage limit stopped, now that the limit has reset
     (a queued one: jump.py --start-queued; here or on an SSH host,
     --continue-chat): in the background on its account, with text (else
     CONTINUE_PROMPT) as your next message. A session that has it open idle
     ends first (end_for_handover), then claude --bg --resume goes on with the
     same chat. {"ok", "message", "id"}; ok with no message when it went on
-    already (its newest turn isn't the limit's any more): nothing to do."""
+    already (its newest turn isn't the limit's any more): nothing to do.
+    force: go on whatever its newest turn (a chat that keeps going whose turn
+    broke off, or that the usage cap stopped)."""
     profiles = discover_profiles(home, extra_dirs)
     profile = next((p for p in profiles if matches_profile(p, profile_key)), None)
     if profile is None:
@@ -4050,7 +4388,7 @@ def continue_chat(home, extra_dirs, profile_key, chat_id, folder=None, text="", 
     path = transcript_path(profile, chat_id)
     if path is None:
         return {"ok": False, "message": "That chat isn't on this account any more"}
-    if ((chat_peek(path) or {}).get("stopped") or {}).get("kind") != "limit":
+    if not force and ((chat_peek(path) or {}).get("stopped") or {}).get("kind") != "limit":
         return {"ok": True, "message": ""}
     if not (isinstance(folder, str) and os.path.isdir(folder)):
         folder = chat_folder(path) or str(home)
@@ -5139,7 +5477,7 @@ class Context:
 
 
 def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_done_hours=KEEP_DONE_HOURS,
-            recent=RECENT_CHATS, plans=PLANS_LISTED):
+            recent=RECENT_CHATS, plans=PLANS_LISTED, usage_cap=0):
     now = time.time() if now is None else now
     now_ms = int(now * 1000)
     snapshot_root = cache_root / "statusline"
@@ -5333,11 +5671,13 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
     except (OSError, ValueError) as exc:
         errors.append(f"queued tasks: {exc}")
         queue = []
+    note_caps(groups, usage_cap, now_ms)  # (an account at the usage cap: g["cap"])
     return {
         "ok": True,
         "generatedAt": now_ms,
         "overall": overall,
         "queue": queue,  # tasks waiting for a usage limit to reset (queued_tasks)
+        "keep": [],  # the chats that keep going (kept_chats, after look_after_kept)
         "counts": counts,
         "groups": groups,
         "dismissed": hidden,
@@ -5889,7 +6229,7 @@ USAGE = """usage: claude_status.py [--config-dir DIR]... [--done-hours H] [--rec
        claude_status.py --vscode-account CONFIG_DIR|- [--vscode-server FOLDER]
        claude_status.py --find QUERY [--limit N] [--remote]
        claude_status.py --start-task|--task-command FOLDER --profile PROFILE [--prompt TEXT]
-                        [--plan SLUG [--plan-profile PROFILE]] [--remote]
+                        [--plan SLUG [--plan-profile PROFILE]] [--model MODEL] [--effort LEVEL] [--remote]
        claude_status.py --plan-text SLUG [--profile PROFILE] [--remote]
        claude_status.py --continue-chat CHAT_ID --profile PROFILE [--folder F] [--prompt TEXT] [--remote]
   --config-dir DIR  extra Claude config dir (repeatable)
@@ -5915,7 +6255,10 @@ USAGE = """usage: claude_status.py [--config-dir DIR]... [--done-hours H] [--rec
   --vscode-account  VS Code's Claude on this host runs with that CLAUDE_CONFIG_DIR (- for
                     none: a plain ~/.claude), in its VS Code server's settings (on an SSH host)
   --instance ID     this copy of the widget (with --interval-ms N, how often it checks):
-                    says whether it sends the notifications, and the shared settings"""
+                    says whether it sends the notifications, and the shared settings; the
+                    one that does looks after the chats that keep going (look_after_kept)
+  --keep-going      look after the chats that keep going (the VS Code window that notifies)
+  --usage-cap N     stop what an account has at work once one of its plan windows reaches N%"""
 
 
 def main(argv=None):
@@ -5929,6 +6272,7 @@ def main(argv=None):
     task_folder, task_action, prompt, plan_slug, plan_profile, plan_text = None, None, "", None, None, None
     continue_id, continue_folder = None, None
     vscode_account, vscode_server = None, VSCODE_SERVERS["Code"]
+    keep_going, usage_cap, model, effort = False, 0, None, None
     while args:
         arg = args.pop(0)
         if arg == "--config-dir" and args:
@@ -5951,6 +6295,10 @@ def main(argv=None):
             continue_folder = args.pop(0)
         elif arg == "--prompt" and args:
             prompt = args.pop(0)
+        elif arg == "--model" and args:
+            model = args.pop(0)
+        elif arg == "--effort" and args:
+            effort = args.pop(0)
         elif arg == "--plan" and args:
             plan_slug = args.pop(0)
         elif arg == "--plan-profile" and args:
@@ -6002,6 +6350,10 @@ def main(argv=None):
             with_tokens = False
         elif arg == "--pretty":
             pretty = True
+        elif arg == "--keep-going":
+            keep_going = True
+        elif arg == "--usage-cap" and args and args[0].isdigit():
+            usage_cap = min(100, int(args.pop(0)))
         else:
             sys.exit(USAGE)
     os.umask(0o077)  # cache files are private to the user
@@ -6031,7 +6383,7 @@ def main(argv=None):
     elif task_action is not None:
         try:
             result = run_task(home, config_dirs, task_action == "--start-task", task_folder, profile_key, prompt,
-                              plan_slug, plan_profile)
+                              plan_slug, plan_profile, model=model, effort=effort)
         except Exception as exc:
             result = {"ok": False, "message": f"{type(exc).__name__}: {exc}"}
     elif agent_run_id is not None:
@@ -6060,7 +6412,7 @@ def main(argv=None):
     else:
         try:
             result = collect(home, cache_root, config_dirs, with_tokens=with_tokens, keep_done_hours=done_hours,
-                             recent=recent, plans=plans)
+                             recent=recent, plans=plans, usage_cap=usage_cap if not remote or local else 0)
             try:
                 add_vscode(result, home, config_dirs, remote and not local, cache_root)
             except Exception as exc:
@@ -6079,6 +6431,14 @@ def main(argv=None):
                     result["sharedSettings"] = shared_settings(cache_root)
                 except (OSError, ValueError) as exc:
                     result["errors"].append(f"other widgets: {exc}")
+            if not remote or local:  # (this computer's chats: an SSH host's keep going from here, not there)
+                try:
+                    if keep_going or result.get("notifier") is True:
+                        look_after_kept(home, cache_root, config_dirs, result["groups"], int(time.time() * 1000),
+                                        usage_cap)
+                    result["keep"] = kept_chats(cache_root)
+                except Exception as exc:
+                    result["errors"].append(f"chats that keep going: {exc}")
             if remote:
                 result["host"] = os.uname().nodename
                 add_remote_commands(result, home, config_dirs, claude)

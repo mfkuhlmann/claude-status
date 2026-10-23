@@ -15,7 +15,8 @@
                                                     and reopen it there in a terminal (or print the command)
     python3 -I remote.py --unshare HOST CHAT_ID PROFILE    keep a shared chat only on PROFILE there
     python3 -I remote.py --find HOST QUERY          the chats there with every word of QUERY
-    python3 -I remote.py --task HOST PROFILE FOLDER [--prompt TEXT] [--plan SLUG PLAN_PROFILE] [--bg | --print-command]
+    python3 -I remote.py --task HOST PROFILE FOLDER [--prompt TEXT] [--plan SLUG PLAN_PROFILE] [--model M] [--effort E]
+                         [--bg | --print-command]
                                                     a new chat there with a task: in the background there,
                                                     or in a terminal here (or print its command)
     python3 -I remote.py --plan HOST SLUG [PROFILE] [--no-open]   a plan there, as a Markdown file here
@@ -466,15 +467,21 @@ def plan_sharing(host, slug, profile, share_it, to=None):
     return answer["ok"], answer["message"]
 
 
-def task(host, profile, folder, text="", plan=None, plan_profile=None, background=False, open_it=True):
-    """A new chat on host's profile in folder there, with a task: in the
-    background there, or in a terminal here (ssh -t), or (without open_it)
-    the command that starts it there. {"ok", "message", "id" | "command"}."""
+def task(host, profile, folder, text="", plan=None, plan_profile=None, background=False, open_it=True,
+         model=None, effort=None):
+    """A new chat on host's profile in folder there, with a task (and that
+    model and effort): in the background there, or in a terminal here (ssh
+    -t), or (without open_it) the command that starts it there. {"ok",
+    "message", "id" | "command"}."""
     args = ["--start-task" if background else "--task-command", folder or "~", "--profile", profile]
     if text:
         args += ["--prompt", text]
     if plan:
         args += ["--plan", plan] + (["--plan-profile", plan_profile] if plan_profile else [])
+    if model:
+        args += ["--model", model]
+    if effort:
+        args += ["--effort", effort]
     answer = host_answer(host, args)
     if background or not answer["ok"]:
         return answer
@@ -699,6 +706,8 @@ def main(argv=None):
                     kw["text"] = rest.pop(0)
                 elif arg == "--plan" and len(rest) >= 2:
                     kw["plan"], kw["plan_profile"] = rest.pop(0), rest.pop(0)
+                elif arg in ("--model", "--effort") and rest:
+                    kw[arg[2:]] = rest.pop(0) or None
                 elif arg == "--bg":
                     kw["background"] = True
                 elif arg == "--print-command":

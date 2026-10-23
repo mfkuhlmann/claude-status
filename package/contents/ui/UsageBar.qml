@@ -70,9 +70,10 @@ ColumnLayout {
             PlasmaCore.ToolTipArea {
                 textFormat: Text.PlainText
                 anchors.fill: parent
-                active: bar.forecast !== null
+                active: bar.forecast !== null || bar.resetsAt > root.now
                 mainText: i18nc("usage window, percent used", "%1: %2% used", bar.label, Math.round(bar.pct))
-                subText: root.forecastText(bar.forecast, bar.pct, bar.resetsAt)
+                subText: [bar.resetsAt > root.now ? root.resetAtText(bar.resetsAt) + "." : "",
+                          root.forecastText(bar.forecast, bar.pct, bar.resetsAt)].filter(t => t).join("\n")
             }
         }
 
@@ -90,6 +91,13 @@ ColumnLayout {
             opacity: 0.7
             font: Kirigami.Theme.smallFont
             elide: Text.ElideRight
+
+            PlasmaCore.ToolTipArea {
+                textFormat: Text.PlainText
+                anchors.fill: parent
+                active: bar.resetsAt > root.now
+                mainText: active ? root.resetAtText(bar.resetsAt) : ""
+            }
         }
     }
 

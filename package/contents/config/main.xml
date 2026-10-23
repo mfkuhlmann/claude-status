@@ -139,5 +139,19 @@
       <label>New and recent chats open in VS Code (the Terminal | VS Code switch at the top of their lists)</label>
       <default>false</default>
     </entry>
+    <entry name="newChatModel" type="String">
+      <label>The model new chats start with, picked in the new-chat box (opus, sonnet, fable, haiku; empty: Claude's default)</label>
+      <default>opus</default>
+    </entry>
+    <entry name="newChatEffort" type="String">
+      <label>The reasoning effort new chats start with, picked in the new-chat box (low, medium, high, xhigh, max; empty: Claude's default)</label>
+      <default>xhigh</default>
+    </entry>
+    <entry name="usageCap" type="Int">
+      <label>Stop what an account has at work once one of its plan windows reaches this percent (0: never)</label>
+      <default>0</default>
+      <min>0</min>
+      <max>100</max>
+    </entry>
   </group>
 </kcfg>

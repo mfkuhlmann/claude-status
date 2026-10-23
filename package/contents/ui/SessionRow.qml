@@ -84,6 +84,8 @@ RowLayout {
     // or by itself once the limit resets (queued), when the widget knows when
     readonly property real goOnAt: root.goOnAt(session)
     readonly property var goingOn: goOnAt || stopped ? root.queuedChat(session.chatId, remoteHost) : null
+    // it keeps going until it's done: after each usage limit, it goes on by itself (root.keptChat)
+    readonly property var kept: remoteHost ? null : root.keptChat(session.chatId || session.sessionId)
     readonly property string openHint: remoteHost
                                        ? (session.entrypoint === "claude-vscode" && !session.openCommand
                                           ? i18n("Show this conversation in VS Code (connected to %1)", remoteHost)
@@ -289,6 +291,31 @@ RowLayout {
                 font.bold: row.session.state === "waiting" || !!row.stopped
                 elide: Text.ElideRight
                 Layout.maximumWidth: Kirigami.Units.gridUnit * 11
+
+                PlasmaCore.ToolTipArea {
+                    textFormat: Text.PlainText
+                    anchors.fill: parent
+                    active: !!row.stopped && !row.stopped.over && row.stopped.resetsAt > root.now
+                    mainText: active ? root.resetAtText(row.stopped.resetsAt) : ""
+                }
+            }
+            PlasmaComponents3.ToolButton {
+                // keep going until it's done: on by itself after each usage limit
+                visible: row.kept === null && root.canKeepGoing(row.session, row.remoteHost)
+                opacity: rowHover.hovered ? 1 : 0
+                icon.name: "media-playlist-repeat"
+                display: PlasmaComponents3.AbstractButton.IconOnly
+                text: i18n("Keep going after usage limits")
+                Layout.preferredHeight: nameLabel.implicitHeight
+                Layout.preferredWidth: Layout.preferredHeight
+                onClicked: root.keepGoing(row.session, true)
+
+                PlasmaCore.ToolTipArea {
+                    textFormat: Text.PlainText
+                    anchors.fill: parent
+                    mainText: i18n("Keep going until it's done")
+                    subText: i18n("When a usage limit stops this chat, it goes on by itself in the background a minute after the limit resets, and again after each later one, until a turn of it ends by itself. Claude here quits first then (its terminal stays open); open the chat from here to see it.")
+                }
             }
             PlasmaComponents3.ToolButton {
                 id: shareButton
@@ -535,8 +562,20 @@ RowLayout {
                                     : row.session.kind === "bg" ? i18n("This background session is stopped first (claude stop).")
                                     : i18n("Claude here quits first (its terminal stays open); open the chat from here to see it.")) + " "
                                  + i18n("If it went on before then, nothing happens.")
+                                 + (row.remoteHost ? "" : " " + i18n("It goes on by itself after later limits too, until it's done."))
                                  + (row.goingOn ? "\n\n" + i18n("Click to cancel it.") : "")
                     }
+                }
+                // it keeps going: after each usage limit, on by itself (click: not any more)
+                Tag {
+                    visible: row.kept !== null && row.goingOn === null
+                    text: i18nc("a chat that goes on by itself after usage limits", "↻ keeps going")
+                    active: row.kept !== null && !row.kept.error
+                    warning: row.kept !== null && (!!row.kept.error || !!row.kept.note)
+                    clickable: true
+                    tooltipTitle: i18n("Keeps going until it's done")
+                    tooltip: row.kept ? root.keptText(row.kept) : ""
+                    onClicked: root.keepGoing(row.session, false)
                 }
                 Kirigami.Icon {
                     visible: row.hasPeek

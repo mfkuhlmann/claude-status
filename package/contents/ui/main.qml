@@ -318,8 +318,17 @@ PlasmoidItem {
         cmd += " --recent " + Math.max(0, Plasmoid.configuration.recentChats)
         if (!Plasmoid.configuration.showTokens)
             cmd += " --no-tokens"
+        if (Plasmoid.configuration.usageCap > 0)
+            cmd += " --usage-cap " + Math.round(Plasmoid.configuration.usageCap)
         return cmd   // (hub/Hub.qml adds --instance and --interval-ms)
     }
+
+    // The model and reasoning effort new chats start with (the new-chat box
+    // picks them), as claude's options; not for VS Code's Claude, which has its own
+    readonly property string chatOptions: (Plasmoid.configuration.newChatModel
+                                           ? " --model " + shellQuote(Plasmoid.configuration.newChatModel) : "")
+                                          + (Plasmoid.configuration.newChatEffort
+                                             ? " --effort " + shellQuote(Plasmoid.configuration.newChatEffort) : "")
 
     // ---------------------------------------------------------------- several widgets
     // This widget can run several times, e.g. on a panel, in the system tray
@@ -336,7 +345,7 @@ PlasmoidItem {
         "notifyDoneMinSeconds", "notifySound", "soundVolume", "soundWaiting", "soundDone", "soundFailed", "recentChats",
         "sshHosts", "remotePollSeconds", "sshUsage", "keepDoneHours", "showUsageInPanel", "showPet", "chatPets", "showTokens",
         "newChatInVscode", "iconBlink", "awayDigest", "awayMinutes", "phoneWhileAway", "phoneFinished", "phoneDevice",
-        "markdownApp"]
+        "markdownApp", "newChatModel", "newChatEffort", "usageCap"]
     property real settingsSeenAt: 0     // the newest shared settings this copy has seen
     property string settingsSeen: ""    // its own settings as of the last check (to see changes)
 
@@ -1917,13 +1926,16 @@ PlasmoidItem {
     property var startingTasks: ({})   // task id -> true while it's being started
 
     // When the usage limit this account is at resets ({at, label}), or null:
-    // the latest of its full windows, else of the chats a limit stopped
+    // the latest of its full windows (or of one at the usage cap), else of
+    // the chats a limit stopped
     function limitReset(group, host) {
         let best = null
         const limits = group.limits || group.accountLimits   // (also where its usage isn't shown: withUsage)
         for (const w of (limits ? limits.windows : []))
             if (w.pct >= 95 && w.resetsAt && (!best || w.resetsAt > best.at))
                 best = { at: w.resetsAt, label: w.label }
+        if (group.cap && (!best || group.cap.resetsAt > best.at))
+            best = { at: group.cap.resetsAt, label: group.cap.label }
         if (!best)
             for (const s of group.sessions)
                 if (s.stopped && s.stopped.kind === "limit" && !s.stopped.over && s.stopped.resetsAt
@@ -1971,6 +1983,43 @@ PlasmoidItem {
                              + " --at " + Math.round(at) + (session.cwd ? " --cwd " + shellQuote(session.cwd) : "")
                              + " --name " + shellQuote(session.name || "") + (host ? " --host " + shellQuote(host) : "")
                              + " --account " + shellQuote(account) + configDirArgs + " # " + Date.now())
+    }
+
+    // ---------------------------------------------------------------- chats that keep going
+    // A chat of this computer can keep going until it's done: after each usage
+    // limit that stops it, it goes on by itself when that resets (claude_status.py:
+    // look_after_kept; jump.py --keep-going, --keep-off). Go on at … does it too.
+
+    // The chat that keeps going ({chat, note, error, …}), or null
+    function keptChat(chatId) {
+        return (status && status.keep ? status.keep : []).find(k => k.chat === chatId) || null
+    }
+
+    // Can a chat of this row keep going? One of this computer at work, not in VS Code's Claude
+    function canKeepGoing(session, host) {
+        return !host && !!(session.chatId || session.sessionId) && session.entrypoint !== "claude-vscode"
+               && session.state === "working"
+    }
+
+    function keepGoing(session, on) {
+        const chat = session.chatId || session.sessionId
+        queuer.connectSource("python3 -I " + shellQuote(codeDir + "jump.py")
+                             + (on ? " --keep-going " + shellQuote(chat) + " --profile " + shellQuote(session.profileDir)
+                                     + (session.cwd ? " --cwd " + shellQuote(session.cwd) : "")
+                                     + " --name " + shellQuote(session.name || "")
+                                   : " --keep-off " + shellQuote(chat))
+                             + configDirArgs + " # " + Date.now())
+    }
+
+    // What a chat that keeps going does, for its tag's tooltip
+    function keptText(kept) {
+        const lines = [i18n("When a usage limit stops it, it goes on by itself in the background a minute after the limit resets, and again after each later one, until a turn of it ends by itself. When a go-on doesn't take or its turn breaks off (the connection lost), it tries again a few times.")]
+        if (kept.error)
+            lines.push(kept.error)
+        else if (kept.note)
+            lines.push(kept.note)
+        lines.push(i18n("Click to stop it keeping going."))
+        return lines.join("\n\n")
     }
 
     // Queueing a task or a chat: says when it starts, or why it can't
@@ -2516,14 +2565,27 @@ PlasmoidItem {
         taskLaterTime = Qt.locale("C").toString(d, "HH:mm")
     }
 
+    // Days from today to the day of ms (0 today, 1 tomorrow)
+    function daysAway(ms) {
+        const d = new Date(ms), today = new Date()
+        return Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate())
+                           - new Date(today.getFullYear(), today.getMonth(), today.getDate())) / 86400000)
+    }
+
     // When a queued task starts, in words: "14:30" today, "tomorrow 09:00", "Fri 24 Oct 09:00"
     function startText(ms) {
-        const d = new Date(ms), today = new Date()
-        const days = Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate())
-                                 - new Date(today.getFullYear(), today.getMonth(), today.getDate())) / 86400000)
+        const days = daysAway(ms)
         return days <= 0 ? clockText(ms)
              : days === 1 ? i18nc("a time tomorrow", "tomorrow %1", clockText(ms))
-             : Qt.locale().toString(d, "ddd d MMM") + " " + clockText(ms)
+             : Qt.locale().toString(new Date(ms), "ddd d MMM") + " " + clockText(ms)
+    }
+
+    // When a usage limit resets, for the tooltips of its "resets in …"
+    function resetAtText(ms) {
+        const days = daysAway(ms)
+        return days <= 0 ? i18n("Resets at %1", clockText(ms))
+             : days === 1 ? i18n("Resets tomorrow at %1", clockText(ms))
+             : i18n("Resets on %1 at %2", Qt.locale().toString(new Date(ms), "ddd d MMM"), clockText(ms))
     }
 
     function startChat(group, host, folder, inVscode, plan) {
@@ -2553,20 +2615,21 @@ PlasmoidItem {
                                       + (text ? " --prompt " + shellQuote(text) : "")
                                       + (plan ? " --plan " + shellQuote(plan.slug) + " --plan-profile " + shellQuote(plan.profileDir) : "")
                                       + (host ? " --host " + shellQuote(host) : "") + " --account " + shellQuote(group.title)
-                                      + configDirArgs + " # " + Date.now())
+                                      + chatOptions + configDirArgs + " # " + Date.now())
             return
         }
         if (host) {
             if (background || (hasTask && !inVscode)) {
-                // remote.py --task HOST PROFILE FOLDER [--prompt TEXT] [--plan SLUG PROFILE] [--bg]
+                // remote.py --task HOST PROFILE FOLDER [--prompt TEXT] [--plan SLUG PROFILE] [--model M] [--effort E] [--bg]
                 remoteAction(background ? "task" : "open", host, "--task " + shellQuote(host) + " " + shellQuote(group.chatProfile)
                              + " " + shellQuote(folder.path || "~") + (text ? " --prompt " + shellQuote(text) : "")
                              + (plan ? " --plan " + shellQuote(plan.slug) + " " + shellQuote(plan.profileDir) : "")
-                             + (background ? " --bg" : ""))
+                             + chatOptions + (background ? " --bg" : ""))
             } else if (inVscode) {
                 remoteNewChatVscode(host, folder.path, group, text, plan)
             } else {
-                remoteNewChat(host, folder.newChatCommand)
+                // (the host's command ends with claude itself: its options go after it)
+                remoteNewChat(host, folder.newChatCommand ? folder.newChatCommand + chatOptions : folder.newChatCommand)
             }
             return
         }
@@ -2575,7 +2638,7 @@ PlasmoidItem {
                     + (background ? " --bg" : inVscode ? " --vscode" : "")
                     + (text ? " --prompt " + shellQuote(text) : "")
                     + (plan ? " --plan " + shellQuote(plan.slug) + " --plan-profile " + shellQuote(plan.profileDir) : "")
-                    + configDirArgs + " # " + Date.now()
+                    + (background || !inVscode ? chatOptions : "") + configDirArgs + " # " + Date.now()
         if (!folder.path)
             root.expanded = false   // the folder dialog takes over
         if (background)

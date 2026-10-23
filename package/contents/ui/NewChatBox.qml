@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import org.kde.plasma.components as PlasmaComponents3
 import org.kde.plasma.core as PlasmaCore
+import org.kde.plasma.plasmoid
 import org.kde.kirigami as Kirigami
 
 // A new chat on an account: what Claude should do (optional), then the folder
@@ -115,6 +116,45 @@ Rectangle {
                 subText: (box.plan ? i18n("The chat starts with the plan as its first message, and what you add here.")
                                    : i18n("With a task, the chat starts with it as its first message. Without one, it opens empty."))
                          + " " + i18n("Then click the folder it's for (Ctrl+Enter: the first one).")
+            }
+        }
+
+        // The model and reasoning effort it runs with (kept for the next chat).
+        // Not for VS Code's Claude: its tab has its own model setting.
+        RowLayout {
+            Layout.leftMargin: Kirigami.Units.smallSpacing
+            visible: !box.inVscode || box.background
+            spacing: Kirigami.Units.smallSpacing
+
+            PlasmaComponents3.Label {
+                textFormat: Text.PlainText
+                text: i18n("Model:")
+                opacity: 0.8
+            }
+            PlasmaComponents3.ComboBox {
+                readonly property var values: ["opus", "sonnet", "fable", "haiku", ""]
+                model: [i18n("Opus"), i18n("Sonnet"), i18n("Fable"), i18n("Haiku"), i18n("Claude's default")]
+                currentIndex: Math.max(0, values.indexOf(Plasmoid.configuration.newChatModel))
+                onActivated: Plasmoid.configuration.newChatModel = values[currentIndex]
+            }
+            PlasmaComponents3.Label {
+                textFormat: Text.PlainText
+                text: i18n("Effort:")
+                opacity: 0.8
+            }
+            PlasmaComponents3.ComboBox {
+                readonly property var values: ["low", "medium", "high", "xhigh", "max", ""]
+                model: [i18nc("reasoning effort", "Low"), i18nc("reasoning effort", "Medium"), i18nc("reasoning effort", "High"),
+                        i18nc("reasoning effort", "Extra high"), i18nc("reasoning effort", "Max"), i18n("Claude's default")]
+                currentIndex: Math.max(0, values.indexOf(Plasmoid.configuration.newChatEffort))
+                onActivated: Plasmoid.configuration.newChatEffort = values[currentIndex]
+
+                PlasmaCore.ToolTipArea {
+                    textFormat: Text.PlainText
+                    anchors.fill: parent
+                    mainText: i18n("Model and effort")
+                    subText: i18n("The chat starts with them (claude --model, --effort); you can still change them in it (/model, /effort). The next new chat starts with the same.")
+                }
             }
         }
 

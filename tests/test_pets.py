@@ -469,7 +469,8 @@ class NewChatTests(unittest.TestCase):
         self.assertNotIn("planComposer", rows)
         self.assertIn("onClicked: root.startChat(box.group, box.remoteHost, folderRow.folder, box.inVscode, box.plan)", rows)
         start = main[main.index("function startChat("):]
-        self.assertIn("remoteNewChat(host, folder.newChatCommand)", start[:start.index("\n    }\n")])
+        self.assertIn("remoteNewChat(host, folder.newChatCommand ? folder.newChatCommand + chatOptions : folder.newChatCommand)",
+                      start[:start.index("\n    }\n")])
         self.assertIn('function remoteNewChat(host, command) {\n        newChatGroup = ""\n        remoteOpen(host, command)', main)
 
 

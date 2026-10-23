@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Keep going until it's done:** a chat at work on this computer can keep going while you're away (the ↻ button on its row): when a usage limit stops it, it goes on by itself in the background a minute after the limit resets, and again after each later limit, however many that takes, until a turn of it ends by itself. Its row says **↻ keeps going**; click that to stop it. **Go on at …** on a chat a limit stopped does the same now: it used to go on once, and a chat that hit the next limit too just stayed stopped.
+- **Going on is checked:** when a go-on didn't take (nothing new in the chat five minutes after it went on) or its turn broke off on an API error that isn't a limit (the connection lost, say), it goes on again after a pause, five times with longer and longer pauses (2 minutes to an hour), then says it gave up. A chat that waits for your answer, one whose login expired and one open in VS Code's Claude tab are left alone, and say why. (While the computer sleeps nothing can run: a chat goes on when it wakes up.)
+- **A usage cap:** the settings can have an account's chats at work stopped once one of its plan windows (5 hours, a week) reaches a percentage you pick, e.g. to keep some of a week for yourself. That happens once in each window; queued tasks wait until it resets, and chats that keep going go on then.
+- **Model and effort for new chats:** the new-chat box picks the model (Opus, Sonnet, Fable, Haiku or Claude's default) and the reasoning effort (low to max) a chat in a terminal or in the background starts with, Opus and extra high to begin with, and keeps them for the next one. Also for queued tasks and SSH hosts. (VS Code's Claude has its own model setting.)
+- **When a limit resets:** hovering over *resets in 2h 5m* (a plan window's, or a chat's *Limit · resets in …*) shows the time it resets, with the day when that isn't today.
 - **A recent chat reopened in VS Code** comes up in the window of the folder it started in. Where Claude had gone into a subfolder (`cd source`), VS Code opened a new window just for that subfolder, next to the project's own window. A chat started in your home folder still opens where it went.
 
 ## 1.14.0 (2026-10-23)

@@ -9,11 +9,13 @@ import org.kde.plasma.plasmoid
 KCM.SimpleKCM {
     id: page
 
-    // Plasma writes back every cfg_ property on Apply. These two are set in
-    // the popup, not here: take what they are now, so applying this page
-    // doesn't put back what they were when it opened.
+    // Plasma writes back every cfg_ property on Apply. These are set in the
+    // popup, not here: take what they are now, so applying this page doesn't
+    // put back what they were when it opened.
     function saveConfig() {
         cfg_newChatInVscode = Plasmoid.configuration.newChatInVscode
+        cfg_newChatModel = Plasmoid.configuration.newChatModel
+        cfg_newChatEffort = Plasmoid.configuration.newChatEffort
         cfg_sshHosts = Plasmoid.configuration.sshHosts
     }
 
@@ -33,6 +35,9 @@ KCM.SimpleKCM {
     property alias cfg_showUsageInPanel: showUsage.checked
     property alias cfg_iconBlink: iconBlink.checked
     property bool cfg_newChatInVscode   // set with the Terminal | VS Code switch in the popup
+    property string cfg_newChatModel    // these two in the popup's new-chat box
+    property string cfg_newChatEffort
+    property int cfg_usageCap
     property alias cfg_showTokens: showTokens.checked
     property alias cfg_showPet: showPet.checked
     property alias cfg_chatPets: chatPets.value
@@ -65,6 +70,9 @@ KCM.SimpleKCM {
     property bool cfg_showUsageInPanelDefault
     property bool cfg_iconBlinkDefault
     property bool cfg_newChatInVscodeDefault
+    property string cfg_newChatModelDefault
+    property string cfg_newChatEffortDefault
+    property int cfg_usageCapDefault
     property bool cfg_showTokensDefault
     property bool cfg_showPetDefault
     property int cfg_chatPetsDefault
@@ -294,6 +302,37 @@ KCM.SimpleKCM {
             font: Kirigami.Theme.smallFont
             opacity: 0.7
             text: i18n("Sounds use your sound theme and the system's notification volume. They stay quiet while Do Not Disturb is on.")
+        }
+
+        // The usage cap: stop what an account has at work at N% of a plan window
+        RowLayout {
+            Kirigami.FormData.label: i18n("Usage cap:")
+            QQC2.CheckBox {
+                id: capOn
+                text: i18n("Stop an account's chats at work when a plan limit reaches")
+                checked: page.cfg_usageCap > 0
+                onToggled: page.cfg_usageCap = checked ? capPct.value : 0
+            }
+            QQC2.SpinBox {
+                id: capPct
+                from: 10
+                to: 100
+                stepSize: 5
+                value: page.cfg_usageCap > 0 ? page.cfg_usageCap : 90
+                enabled: capOn.checked
+                onValueModified: if (capOn.checked) page.cfg_usageCap = value
+            }
+            QQC2.Label {
+                text: i18nc("percent sign after the usage cap", "%")
+            }
+        }
+
+        QQC2.Label {
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 20
+            wrapMode: Text.Wrap
+            font: Kirigami.Theme.smallFont
+            opacity: 0.7
+            text: i18n("Once an account's 5-hour or weekly window reaches it, the chats of that account that are at work on this computer are stopped, once in that window (in tmux and VS Code's Claude the turn is interrupted, the chat stays open). Queued tasks wait until the window resets, and chats that keep going go on then. Chats you start or answer yourself afterwards aren't stopped again.")
         }
 
         QQC2.SpinBox {
