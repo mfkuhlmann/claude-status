@@ -815,6 +815,51 @@ class AttachedTabTests(unittest.TestCase):
         self.assertIsNone(self.find({}, {}))
 
 
+class AttachedElsewhereTests(unittest.TestCase):
+    """A background job attached in a terminal that isn't Konsole (VS Code's,
+    GNOME's, a tmux pane) is brought up, not attached a second time."""
+
+    PROFILE = type("P", (), {"path": Path("/h/.claude-work")})()
+
+    def clients(self, cmdlines, config_dirs, name="fix the parser"):
+        with Patch(claude_pids=lambda: list(cmdlines), proc_cmdline=lambda pid: cmdlines[pid],
+                   proc_config_dir=lambda pid: config_dirs.get(pid)):
+            return jump.attach_clients("ab12cd34", name, Path("/h/.claude-work"))
+
+    def test_attach_clients_by_id_or_by_name_on_this_profile(self):
+        self.assertEqual(self.clients({5: ["claude", "attach", "ab12cd34"], 6: ["claude"], 7: ["claude", "attach", "ff00ff00"]}, {}), [5])
+        self.assertEqual(self.clients({8: ["claude", "attach", "fix the parser"]}, {8: Path("/h/.claude-work")}), [8])
+        self.assertEqual(self.clients({8: ["claude", "attach", "fix the parser"]}, {8: Path("/h/.claude-personal")}), [], "another profile's job")
+        self.assertEqual(self.clients({8: ["claude", "attach", ""]}, {8: Path("/h/.claude-work")}, name=""), [])
+
+    def jump_job(self, clients, shown):
+        raised, opened = [], []
+        with Patch(live_entries=lambda p: [], find_attached_tab=lambda *a: None,
+                   attach_clients=lambda job_id, name, config_dir: clients,
+                   tmux_pane_of=lambda pid: "work:@1.%3" if pid == 9 else "",
+                   jump_terminal=lambda entry, what: raised.append(entry) or shown(entry["pid"]),
+                   claude_in_terminal=lambda home: "claude", attach_command=lambda *a: "claude attach ab12cd34",
+                   open_terminal=lambda cwd, cmd: opened.append(cmd) or True):
+            answer = jump.jump_job(self.PROFILE, "ab12cd34", {"cwd": "/h/repos/api"}, "fix the parser", Path("/h"))
+        return answer, raised, opened
+
+    def test_a_terminal_attached_elsewhere_comes_up(self):
+        answer, raised, opened = self.jump_job([5], lambda pid: (True, "Switched to the VS Code terminal running this background job"))
+        self.assertEqual(answer, (True, "Switched to the VS Code terminal running this background job"))
+        self.assertEqual(raised, [{"pid": 5, "cwd": "/h/repos/api", "tmux": ""}])
+        self.assertEqual(opened, [], "no second client")
+
+    def test_one_in_tmux_selects_its_pane(self):
+        _, raised, _ = self.jump_job([9], lambda pid: (True, ""))
+        self.assertEqual(raised[0]["tmux"], "work:@1.%3")
+
+    def test_one_that_cant_be_shown_still_gets_a_terminal(self):
+        # (e.g. attached in an SSH login to this computer: no window here)
+        answer, raised, opened = self.jump_job([5], lambda pid: (False, "no window"))
+        self.assertEqual(answer, (True, "Opened the background job in a terminal"))
+        self.assertEqual(opened, ["claude attach ab12cd34"])
+
+
 class LinkedProfileTests(unittest.TestCase):
     """~/.claude as a link to ~/.claude-personal: one profile, snapshots under both names."""
 

@@ -349,6 +349,38 @@ def find_attached_tab(job_id, name, config_dir):
     return by_title
 
 
+def claude_pids():
+    return [int(p) for p in os.listdir("/proc") if p.isdigit() and proc_name(int(p)) == "claude"]
+
+
+def attach_clients(job_id, name, config_dir):
+    """The `claude attach` processes showing this background job, in any
+    terminal: by its id, or by its name on this profile."""
+    pids = []
+    for pid in claude_pids():
+        argv = proc_cmdline(pid)
+        if len(argv) >= 3 and argv[1] == "attach" and (
+                argv[2] == job_id or (name and argv[2] == name and proc_config_dir(pid) == config_dir)):
+            pids.append(pid)
+    return pids
+
+
+def tmux_pane_of(pid):
+    """The tmux pane a process runs in, as Claude's session entries name it
+    (session:@window.%pane), or "" outside tmux."""
+    socket = cs.tmux_socket(pid)
+    try:
+        env = Path(f"/proc/{pid}/environ").read_bytes().split(b"\0")
+    except OSError:
+        return ""
+    pane = next((e[10:].decode(errors="replace") for e in env if e.startswith(b"TMUX_PANE=")), "")
+    if not socket or not pane:
+        return ""
+    code, out = run(["tmux", "-S", socket, "display-message", "-p", "-t", pane,
+                     "#{session_name}:#{window_id}.#{pane_id}"])
+    return out if code == 0 else ""
+
+
 def proc_cmdline(pid):
     try:
         return Path(f"/proc/{pid}/cmdline").read_bytes().decode(errors="replace").split("\0")[:-1]
@@ -757,6 +789,12 @@ def jump_job(profile, job_id, job, name, home=None):
     tab = find_attached_tab(job_id, name, profile.path.resolve())
     if tab and show_konsole_tab(*tab):
         return True, "Switched to the terminal showing this background job"
+    # one attached in another terminal (VS Code's, GNOME's, a tmux pane)
+    for pid in attach_clients(job_id, name, profile.path.resolve()):
+        ok, message = jump_terminal({"pid": pid, "cwd": (job or {}).get("cwd"), "tmux": tmux_pane_of(pid)},
+                                    "background job")
+        if ok:
+            return ok, message
     claude = claude_in_terminal(home or Path.home())
     if claude is None:
         return False, NO_CLAUDE
