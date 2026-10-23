@@ -186,8 +186,16 @@ class SessionTests(Fixture):
         states = {s["sessionId"]: s["state"] for s in work["sessions"]}
         self.assertEqual(states, {"waiting": "waiting", "busy": "working", "bgworking": "working", "bgdone": "done",
                                   "bgstale": "working", "bgperm": "waiting", "dialog": "idle"})
-        # sorted: waiting first, then working, ...
-        self.assertEqual({s["state"] for s in work["sessions"][:2]}, {"waiting"})
+        # the ones that need you first (asking longest first), the others in the
+        # order they started, the newest last (a row and its pet don't move
+        # while the chat works, idles or finishes)
+        rows = work["sessions"]
+        asking = [s for s in rows if s["state"] == "waiting"]
+        self.assertEqual(rows[:len(asking)], asking)
+        self.assertEqual([s["since"] or 0 for s in asking], sorted(s["since"] or 0 for s in asking))
+        started = [s.get("startedAt") or s["since"] or 0 for s in rows[len(asking):]]
+        self.assertEqual(started, sorted(started))
+        self.assertEqual({s["state"] for s in rows[:2]}, {"waiting"})
         by_id = {s["sessionId"]: s for s in work["sessions"]}
         self.assertEqual((by_id["waiting"]["waitingFor"], by_id["waiting"]["reason"]), ("Bash", "Bash"))
         self.assertEqual((by_id["bgperm"]["reason"], by_id["bgperm"]["detail"]), ("permission", "approve Write: /tmp/x"))

@@ -63,6 +63,7 @@ Item {
     property real px: homeX
     property real lift: 0
     property bool held: false
+    property bool landing: false        // picked up, until it has landed and dug in: drawn live
     property bool arriving: false
     property bool departed: false   // dug away: only waiting to be removed
     property real travelTo: -1      // where the next dig takes it (-1: it picks)
@@ -225,6 +226,7 @@ Item {
 
     function pickUp() {
         held = true
+        landing = true
         fall.stop()   // grabbed again while falling
         stride.stop()
         if (talpa)
@@ -240,18 +242,22 @@ Item {
     // On the floor again: dizzy if it fell from high up, then it digs in where it landed
     function landed(fromHeight) {
         held = false
-        if (fromHeight > gu * 2.6)
-            say(i18n("Ugh… I don't feel so good."))
-        else if (fromHeight > gu * 1.5)
-            say(i18n("Ouch… the room is spinning."))
-        if (!talpa)
+        if (!talpa) {
+            landing = false
             return
-        talpa.land(fromHeight / unit, () => {
+        }
+        const feel = talpa.land(fromHeight / unit, () => {
+            pet.landing = false
             if (pet.leaving)
                 pet.goAway()      // its chat left while you held it: now it goes
             else if (!pet.lone && Math.abs(pet.px - pet.homeX) > pet.bodyWidth * 0.5)
                 pet.digTo(pet.homeX)
         })
+        // (in the words for how it looks)
+        if (feel === "sick")
+            say(i18n("Ugh… I don't feel so good."))
+        else if (feel === "dizzy")
+            say(i18n("Ouch… the room is spinning."))
     }
 
     function petLine() {
@@ -360,6 +366,9 @@ Item {
         playing: pet.playing
         travels: pet.lone
         tint: pet.lone ? "transparent" : pet.tint
+        // a chat's pet: pictures (only the big Talpa moves all the time), but
+        // drawn live while you hold it and until it has landed
+        stills: !pet.lone && !pet.landing
         onReady: pet.start()
         onTravel: ms => {
             let to = pet.travelTo

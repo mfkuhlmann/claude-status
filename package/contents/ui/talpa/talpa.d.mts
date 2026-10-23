@@ -29,8 +29,11 @@ export class Talpa {
     setMood(mood: string): void;
     react(name: string, done?: ((ok: boolean) => void) | null): void;
     setHeld(held: boolean): void;
-    land(height: number, done?: ((ok: boolean) => void) | null): void;
+    land(height: number, done?: ((ok: boolean) => void) | null): "sick" | "dizzy" | "fine";   // height in box units
     pose(step?: Record<string, unknown>): void;
     tick(now: number): void;
     draw(ctx: unknown): void;
+    // a picture instead of every frame: what it shows ("pose#details": fade over to a new pose), and the picture
+    stillKey(): string;
+    drawStill(ctx: unknown): void;
 }

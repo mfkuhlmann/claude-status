@@ -121,9 +121,14 @@ class Pet {
         this.talpa.onTravel = ms => this._travel(ms);
         this.talpa.tick(Date.now());
         this.actor = new St.Widget({reactive: true, track_hover: true, width: s.slot, height: s.canvasH + s.tag});
-        this.view = new St.DrawingArea({width: s.canvasW, height: s.canvasH, x: Math.round((s.slot - s.canvasW) / 2)});
-        this.view.connect('repaint', area => this._paint(area));
-        this.actor.add_child(this.view);
+        // the sheet shown and, for a chat's pet, the next picture behind it
+        // (see _still); the hero is drawn live on its one sheet
+        this.view = this._sheet(s);
+        this.back = this.lone ? null : this._sheet(s);
+        if (this.back)
+            this.back.opacity = 0;
+        this._fadeUntil = 0;
+        this._painting = false;
         if (!this.lone) {
             const dark = this.tint && this._luma(this.tint) < 0.6;
             this._tagStyle = `background-color: ${this.tint}; color: ${dark ? 'white' : 'black'};`;
@@ -161,6 +166,14 @@ class Pet {
         return (((n >> 16) & 255) * 0.299 + ((n >> 8) & 255) * 0.587 + (n & 255) * 0.114) / 255;
     }
 
+    _sheet(s) {
+        const area = new St.DrawingArea({width: s.canvasW, height: s.canvasH, x: Math.round((s.slot - s.canvasW) / 2)});
+        area.key = '';   // the picture on it ('': drawn live)
+        area.connect('repaint', a => this._paint(a));
+        this.actor.add_child(area);
+        return area;
+    }
+
     _paint(area) {
         const cr = area.get_context();
         const [width] = area.get_surface_size();
@@ -168,8 +181,58 @@ class Pet {
         const ctx = new CairoCanvas(cr);
         ctx.translate(boxPx * 0.3, boxPx * 0.45);
         ctx.scale(boxPx / 64, boxPx / 64);
-        this.talpa.draw(ctx);
+        if (area.key === '')
+            this.talpa.draw(ctx);
+        else
+            this.talpa.drawStill(ctx);
         cr.$dispose();
+    }
+
+    // A chat's pet: pictures (only the hero moves all the time), drawn when
+    // what it shows changes (talpa.stillKey), on the sheet behind; that one
+    // then fades in as the shown one fades out for a new pose, or just takes
+    // its place for a blink, a glance or a beat
+    _still(now) {
+        if (this._fadeUntil) {
+            if (now < this._fadeUntil)
+                return;
+            this._swap();
+        }
+        if (this._painting) {
+            this._painting = false;   // (painted by now)
+            this._showBack();
+            return;
+        }
+        const key = this.talpa.stillKey();
+        if (key === this.view.key)
+            return;
+        if (key === this.back.key) {
+            this._showBack();   // the picture it needs is behind already (a beat, a blink)
+            return;
+        }
+        this.back.key = key;
+        this.back.queue_repaint();
+        this._painting = true;
+    }
+
+    _showBack() {
+        const pose = k => k.split('#')[0];
+        this.actor.set_child_above_sibling(this.back, this.view);
+        if (this.view.key === '' || this.view.key === '~' || pose(this.back.key) !== pose(this.view.key)) {
+            const how = {duration: 200, mode: Clutter.AnimationMode.EASE_IN_OUT_QUAD};
+            this.back.ease({opacity: 255, ...how});
+            this.view.ease({opacity: 0, ...how});
+            this._fadeUntil = Date.now() + 200;
+        } else {
+            this.back.opacity = 255;
+            this.view.opacity = 0;
+            this._swap();
+        }
+    }
+
+    _swap() {
+        [this.view, this.back] = [this.back, this.view];
+        this._fadeUntil = 0;
     }
 
     // The name tag fits the room between pets
@@ -374,14 +437,23 @@ class Pet {
             return;
         this.sync();
         this.talpa.setTheme(this.stage.pets.theme);
-        // its clock, and its picture as often as that shows something new
-        // (talpa.frameMs: 25 times a second for quick moves, down to 5 at rest)
+        if (this.back) {
+            this.view.key = '~';   // (the pictures are drawn again: the theme may have changed)
+            this.back.key = '';
+        }
+        // its clock, and its picture: the hero's as often as that shows
+        // something new (talpa.frameMs: 25 times a second for quick moves,
+        // down to 5 at rest), a chat's pet's when it changes (_still)
         let painted = 0;
         this.timers.every('frame', 40, () => {
             const now = Date.now();
             this.talpa.tick(now);
             if (this.gone)
                 return;   // (it dug away in that tick: removed)
+            if (this.back) {
+                this._still(now);
+                return;
+            }
             if (now - painted >= this.talpa.frameMs - 5) {
                 painted = now;
                 this.view.queue_repaint();

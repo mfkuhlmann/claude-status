@@ -192,6 +192,84 @@ console.log(JSON.stringify({ bad: bad.slice(0, 5), away: away, back: t.v.depth }
         self.assertGreater(result["away"], 60)
         self.assertLess(result["back"], 15)
 
+    def test_it_never_clips_inside_a_clip(self):
+        # Qt's canvas puts a clip back under the wrong transform once a clip
+        # made inside it is undone: Talpa's cut slid down by its depth and its
+        # hands showed under the burrow in Plasma (2026-10-23). So its drawing
+        # makes at most one clip at a time.
+        result = run_node("""
+let depth = 0, clipped = [false], nested = 0;
+const ctx = new Proxy({}, { get: (t, k) => {
+    if (k === 'save') return () => clipped.push(clipped[clipped.length - 1]);
+    if (k === 'restore') return () => { if (clipped.length > 1) clipped.pop(); };
+    if (k === 'clip') return () => { if (clipped[clipped.length - 1]) nested++; clipped[clipped.length - 1] = true; };
+    if (k === 'createLinearGradient') return () => ({ addColorStop() {} });
+    return k in t ? t[k] : () => {};
+}, set: (t, k, v) => { t[k] = v; return true; } });
+let now = 1000;
+for (const name of Object.keys(ACTIONS)) {
+    const t = new Talpa({ brain: false });
+    t.onTravel = () => {};
+    t.tick(now); t.react(name);
+    for (let i = 0; i < 200 && t.run; i++) { now += 50; t.tick(now); t.draw(ctx); }
+}
+console.log(JSON.stringify({ nested: nested }));""")
+        self.assertEqual(result["nested"], 0)
+
+    def test_how_it_looks_after_a_fall_is_what_it_says(self):
+        # "Ugh… I don't feel so good." came with a happy face: the widget
+        # judged the height its own way. Now Talpa says how it feels.
+        result = run_node("""
+const out = {};
+for (const h of [5, 20, 35]) {
+    const t = new Talpa({ brain: false });
+    t.tick(1000); t.setHeld(true); t.tick(1040);
+    const feel = t.land(h, null); t.tick(1080);
+    out[h] = [feel, t.st.eyes];
+}
+console.log(JSON.stringify(out));""")
+        self.assertEqual(result["5"], ["fine", "happy"])
+        self.assertEqual(result["20"], ["dizzy", "spiral"])
+        self.assertEqual(result["35"], ["sick", "spiral"])
+        pet = (ROOT / "ui/Pet.qml").read_text()
+        self.assertIn('const feel = talpa.land(', pet)
+        self.assertIn('if (feel === "sick")', pet)
+
+    def test_a_chats_pet_as_pictures_shows_every_action(self):
+        # Only the big Talpa is drawn every frame; a chat's pet shows pictures
+        # (stillKey / drawStill), drawn when what it shows changes. Every
+        # action still shows each of its poses, a quick move as two pictures.
+        result = run_node(NULL_CANVAS + """
+let now = 1000;
+const out = { shown: {}, typing: new Set(), quiet: 0 };
+for (const name of Object.keys(ACTIONS)) {
+    const t = new Talpa({ brain: false });
+    t.onTravel = () => {};
+    t.tick(now); t.react(name);
+    const poses = new Set(), steps = new Set();
+    for (let i = 0; i < 400 && t.run; i++) {
+        now += 40; t.tick(now);
+        if (!t.run) break;
+        steps.add(t.run.i);
+        const key = t.stillKey();
+        poses.add(key.split('#')[0]);
+        t.drawStill(ctx);
+        if (name === 'typing' && t.st.arms === 'type') out.typing.add(key);
+    }
+    out.shown[name] = poses.size >= 1 && poses.size >= Math.min(steps.size, 1);
+}
+// resting, asleep, it changes its picture only now and then
+const t = new Talpa({}); t.tick(now); t.setMood('done');
+let last = '';
+for (let i = 0; i < 250; i++) { now += 40; t.tick(now); const k = t.stillKey(); if (k !== last) { out.quiet++; last = k; } }
+out.typing = out.typing.size;
+console.log(JSON.stringify(out));""")
+        self.assertEqual([n for n, ok in result["shown"].items() if not ok], [])
+        self.assertGreaterEqual(result["typing"], 2)          # the hands go up and down
+        self.assertLess(result["quiet"], 25)                   # 10 s asleep: a few pictures, not 250
+        pet = (ROOT / "ui/Pet.qml").read_text()
+        self.assertIn("stills: !pet.lone && !pet.landing", pet)
+
     def test_nothing_shows_under_the_burrows_lip(self):
         # Talpa and what it holds are cut along the same edge the lip is drawn
         # up to, so nothing peeks out between the lip's lumps
