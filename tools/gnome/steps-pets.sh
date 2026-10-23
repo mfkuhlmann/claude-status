@@ -11,7 +11,7 @@ popup pets-done
 ev "ext._pets.event({kind: 'reset', text: '5h limit reset!', key: ''})"
 sleep 0.6
 popup pets-reset
-ev 'ext._pets.hero.list.get("").petHim()'
+ev 'ext._pets.hero.list.get("").petIt()'
 sleep 0.5
 popup pets-petted
 ev 'ext.menu.close()'

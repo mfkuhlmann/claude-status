@@ -207,10 +207,6 @@ PlasmoidItem {
     }
     property var lastWindows: ({})
     readonly property string petsDir: decodeURIComponent(Qt.resolvedUrl("../pets/").toString().replace(/^file:\/\//, ""))
-    // Animated pets need Qt 6.10+ and the QtQuick.VectorImage module (on
-    // Debian/Ubuntu: qml6-module-qtquick-vectorimage); without them the pets
-    // are still images that move all the same.
-    readonly property bool animatedPets: Qt.createComponent("PetImage.qml").status === Component.Ready
     // On the desktop the dashboard is shown all the time, and is often under
     // your windows: there the pets and the spinner stop moving while a window
     // covers it all (CoverWatch.qml), since every frame redraws the screen.
@@ -248,7 +244,7 @@ PlasmoidItem {
         return m
     }
     // Accounts close to their 5-hour limit, e.g. "work: 100% of the 5-hour limit!".
-    // Clawd shows it now and then; as a mood it froze him in one pose.
+    // Talpa shows it now and then (mind-blown, or out of steam at the limit).
     readonly property string highUsageText: {
         const parts = []
         for (const g of allGroups)
@@ -272,12 +268,12 @@ PlasmoidItem {
         if (!status)
             return "loading"
         if (overall === "waiting")
-            return "waving"
+            return "needs"
         if (overall === "working")
-            return agentsRunning > 0 ? "working-juggling" : "working-typing"
+            return agentsRunning > 0 ? "agents" : "working"
         if (overall === "idle")
-            return "idle-living"
-        return "sleeping"
+            return "idle"
+        return "done"
     }
 
     // The account whose 5-hour usage goes next to the panel icon: this
@@ -985,7 +981,7 @@ PlasmoidItem {
     function notify(key, session, kind, title, body, icon, host) {
         // One notification per row: a newer one replaces the previous.
         closeNotification(key, notifications[key] ? notifications[key].kind : "")
-        // With the pet on, notifications show Clawd in a matching pose.
+        // With the pet on, notifications show Talpa in a matching pose.
         const summary = kind === "digest"   // while you were away: someone waits for you, or all went well
         const pose = kind === "done" && session && session.reason === "failed" ? "sad"
                    : summary ? (session ? "oncall" : "trophy")

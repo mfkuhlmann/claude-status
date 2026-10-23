@@ -3,8 +3,9 @@
 #   gnome/build.sh [--gnome43] [OUT_DIR]   (default gnome/build)
 # makes OUT_DIR/claude-status@wzaielamri.github.io/ (the extension folder) and
 # OUT_DIR/claude-status@wzaielamri.github.io.shell-extension.zip (for
-# `gnome-extensions install`). The Python helpers and the pets come from the
-# Plasma widget's package/contents, so both front ends share them.
+# `gnome-extensions install`). The Python helpers, Talpa (the pet) and its
+# pictures come from the Plasma widget's package/contents, so both front ends
+# share them.
 # --gnome43 converts the result for GNOME Shell 43/44 (gnome/gnome43/port43.py).
 set -euo pipefail
 gnome43=0
@@ -20,10 +21,14 @@ dest="$out/$uuid"
 zip="$out/$uuid.shell-extension.zip"
 
 rm -rf "$dest" "$zip"
-mkdir -p "$dest/code" "$dest/pets"
+mkdir -p "$dest/code" "$dest/pets" "$dest/ui/talpa"
 cp -r "$here/extension/." "$dest/"
 cp "$repo"/package/contents/code/*.py "$dest/code/"
-cp "$repo"/package/contents/pets/*.svg "$repo/package/contents/pets/LICENSE" "$repo/package/contents/pets/README.md" "$dest/pets/"
+cp "$repo"/package/contents/pets/*.svg "$repo/package/contents/pets/README.md" "$dest/pets/"
+# Talpa, the pet, is the widget's own code (ES modules: .mjs there, .js here)
+for f in "$repo"/package/contents/ui/talpa/*.mjs; do
+  sed "s/\.mjs';\$/.js';/" "$f" > "$dest/ui/talpa/$(basename "${f%.mjs}").js"
+done
 cp "$repo/LICENSE" "$dest/"
 glib-compile-schemas --strict "$dest/schemas"
 if [ "$gnome43" = 1 ]; then

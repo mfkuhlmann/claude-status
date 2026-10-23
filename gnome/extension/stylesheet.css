@@ -162,7 +162,6 @@
 .claude-star-dot { font-size: 1.3em; }
 .claude-stage { margin: 0 4px; border-radius: 8px; background-color: rgba(127, 127, 127, 0.06); }
 .claude-stage-floor { background-color: rgba(127, 127, 127, 0.25); }
-.claude-pet-shadow { border-radius: 99px; }
 .claude-pet-tag { font-size: 0.75em; padding: 0 6px; border-radius: 99px; }
 .claude-bubble {
     font-size: 0.85em;
@@ -171,7 +170,6 @@
     color: white;
     background-color: rgba(36, 36, 36, 0.88);
 }
-.claude-particle { font-weight: bold; font-size: 1.1em; }
 
 /* An account's last days (stats), unfolded from its tokens line */
 .claude-stats {

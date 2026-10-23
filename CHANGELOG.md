@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Talpa, a new pet of its own:** Clawd is gone. Talpa lives in a burrow: it stays half underground while it works and plays, digs over to another spot (towards your mouse) instead of walking, and only comes all the way out when you drag it out; dropped, it digs back in where it landed. A new chat's pet digs up out of the ground, and one whose chat leaves the list waves and digs away. Its lamp glows in the chat's state color, and it picks what to do at random from what fits the moment (typing, thinking, hunting bugs, checking tests, juggling subagents, calling you with a sign or a phone, sleeping, sneezing itself out of its burrow, balloons, peekaboo, …), so it's never the same twice. A chat's pet wears a calm version of the chat's color. It's one creature, drawn by the same code in the Plasma widget, the GNOME extension and the VS Code extension: it moves fully on every Plasma version now (no QtQuick.VectorImage module needed), and on GNOME too.
+- **A new panel icon:** Talpa peeking up through the panel's edge, in the state color: it pops up when a chat needs you, glances around while Claude works, smiles when it's your turn and sleeps when nothing runs. The notifications show Talpa too.
+
 Fixes from a review of the whole code:
 
 - **Tasks and plans sent to VS Code arrive whole:** a task or plan given to VS Code's Claude was cut at its first `&` (*Run make && make test* arrived as *Run make*), a `+` turned into a space, and a subagent run named like *Port C++ parser* didn't open there. VS Code decodes a link once before the extension reads it; the widget's links now take that into account.

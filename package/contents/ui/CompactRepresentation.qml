@@ -13,7 +13,7 @@ MouseArea {
     readonly property bool showUsage: Plasmoid.configuration.showUsageInPanel && !vertical && !root.inTray && root.panelWindow !== null
     // One count at a time, the most urgent: chats that need you (red), else
     // chats that finished since you last opened the popup (green). Working
-    // chats show as the spinning spark; the tooltip has every count.
+    // chats show as Talpa glancing around; the tooltip has every count.
     readonly property int badgeCount: root.counts.waiting > 0 ? root.counts.waiting : root.unseenDone
     // To catch your eye: it blinks while a chat that needs you hasn't been
     // seen, and pulses a few times when one finishes (opening the popup stops it)
@@ -40,11 +40,11 @@ MouseArea {
         repeat: true
         running: compact.blinking
         onTriggered: {
-            spark.dimmed = !spark.dimmed
+            icon.dimmed = !icon.dimmed
             if (compact.pulses > 0)
                 compact.pulses -= 1
         }
-        onRunningChanged: if (!running) spark.dimmed = false
+        onRunningChanged: if (!running) icon.dimmed = false
     }
     property bool wasExpanded: false
 
@@ -83,14 +83,14 @@ MouseArea {
                 height: width
             }
 
-            SparkIcon {
-                id: spark
+            TalpaIcon {
+                id: icon
                 property bool dimmed: false
                 anchors.centerIn: square
                 width: square.width * (root.inTray ? 0.86 : 0.78)
                 height: width
                 color: root.stateColor(root.overall)
-                spinning: root.overall === "working"
+                mode: root.overall
                 opacity: dimmed ? 0.2 : 1
 
                 Behavior on opacity {

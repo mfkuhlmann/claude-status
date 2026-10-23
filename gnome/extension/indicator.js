@@ -17,7 +17,7 @@ import {Notifier} from './notifier.js';
 import {Runner} from './runner.js';
 import {Pets} from './ui/pets.js';
 import {buildGroupSection, buildHostSection} from './ui/groupSection.js';
-import {Spark} from './ui/spark.js';
+import {TalpaIcon} from './ui/talpaIcon.js';
 import {box, column, iconButton, label, paragraph, textButton, Tooltips} from './ui/widgets.js';
 
 const USAGE_PAGE = 'https://claude.ai/settings/usage';
@@ -838,7 +838,7 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
     _buildPanel() {
         const panelBox = box('panel-status-indicators-box claude-panel');
         const iconBin = new St.Widget({layout_manager: new Clutter.BinLayout(), y_align: Clutter.ActorAlign.CENTER});
-        this._spark = new Spark('claude-spark');
+        this._spark = new TalpaIcon('claude-spark');
         // the count of chats that need you, on the spark's corner
         this._badge = new St.Label({style_class: 'claude-badge', visible: false,
             x_align: Clutter.ActorAlign.END, y_align: Clutter.ActorAlign.START,
@@ -864,7 +864,7 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         const groups = this.allGroups;
         const c = L.counts(groups);
         const overall = L.overall(groups, c);
-        this._spark.setState(L.stateClass(overall), overall === 'working');
+        this._spark.setState(L.stateClass(overall), overall);
         this._badge.text = String(c.waiting);
         this._badge.visible = c.waiting > 0;
         const w = this._settings.get_boolean('show-usage-in-panel') ? L.panelWindow(groups) : null;
@@ -887,7 +887,7 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
 
         // Header: Claude Code, the summary, SSH hosts, refresh
         const header = box('claude-header', {x_expand: true});
-        this._headerSpark = new Spark('claude-spark claude-spark-small');
+        this._headerSpark = new TalpaIcon('claude-spark claude-spark-small');
         header.add_child(this._headerSpark);
         header.add_child(label('Claude Code', 'claude-title'));
         this._summary = label('', 'claude-summary', {x_expand: true, x_align: Clutter.ActorAlign.END});
@@ -908,7 +908,7 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         header.add_child(this.tips.add(iconButton('view-refresh-symbolic', () => this.refreshAll()), 'Refresh'));
         popup.add_child(header);
 
-        // The big Clawd (pets.js) stays put while the list scrolls
+        // The big Talpa (pets.js) stays put while the list scrolls
         this._heroBin = new St.Bin({x_expand: true});
         popup.add_child(this._heroBin);
 
@@ -986,8 +986,8 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
 
         const c = L.counts(this.allGroups);
         const overall = L.overall(this.allGroups, c);
-        this._headerSpark.setState(L.stateClass(overall), overall === 'working');
-        this._summary.text = this._pets.heroShown ? '' : L.summaryText(c);   // the big Clawd's headline says it
+        this._headerSpark.setState(L.stateClass(overall), overall);
+        this._summary.text = this._pets.heroShown ? '' : L.summaryText(c);   // the big Talpa's headline says it
         const hosts = this.shownHosts;
         this._hostsCount.text = hosts.length > 0 ? String(hosts.length) : '';
         this._undismissItem.label.text = L.fmt('Show removed sessions again (%1)', this._status?.dismissed || 0);

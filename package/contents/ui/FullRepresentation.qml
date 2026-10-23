@@ -22,12 +22,13 @@ PlasmaExtras.Representation {
             spacing: Kirigami.Units.smallSpacing
 
             // In the system tray, the tray's own heading names the widget
-            SparkIcon {
+            TalpaIcon {
                 visible: !root.inTray
                 Layout.preferredWidth: Kirigami.Units.iconSizes.small
                 Layout.preferredHeight: Kirigami.Units.iconSizes.small
                 color: root.stateColor(root.overall)
-                spinning: root.overall === "working" && root.dashboardShown && !root.coveredByWindow
+                mode: root.overall
+                moving: root.dashboardShown && !root.coveredByWindow
             }
             Kirigami.Heading {
                 textFormat: Text.PlainText
@@ -39,7 +40,7 @@ PlasmaExtras.Representation {
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
                 horizontalAlignment: Text.AlignRight
-                text: hero.visible ? "" : root.summaryText()   // the big Clawd's headline says it
+                text: hero.visible ? "" : root.summaryText()   // the big Talpa's headline says it
                 opacity: 0.8
                 elide: Text.ElideRight
             }
@@ -95,7 +96,7 @@ PlasmaExtras.Representation {
     contentItem: ColumnLayout {
         spacing: Kirigami.Units.smallSpacing
 
-        // The big Clawd: the whole dashboard at a glance (stays put while the list scrolls)
+        // The big Talpa: the whole dashboard at a glance (stays put while the list scrolls)
         PetStrip {
             id: hero
             hero: true

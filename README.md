@@ -15,7 +15,7 @@ In VS Code, [Claude Status for VS Code](https://github.com/wzaielamri/claude-sta
 [![Python 3.7+](https://img.shields.io/badge/python-3.7%2B-3776ab?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-<img src="docs/screenshots/popup-light.png" alt="The Claude Status popup: a big Clawd says one chat needs you; below, each account shows its chats as pets, plan usage bars, token totals and its sessions" width="48%">&nbsp;<img src="docs/screenshots/popup-dark.png" alt="The same popup in a dark theme" width="48%">
+<img src="docs/screenshots/popup-light.png" alt="The Claude Status popup: the big Talpa says one chat needs you; below, each account shows its chats as pets, plan usage bars, token totals and its sessions" width="48%">&nbsp;<img src="docs/screenshots/popup-dark.png" alt="The same popup in a dark theme" width="48%">
 
 </div>
 
@@ -34,16 +34,16 @@ In VS Code, [Claude Status for VS Code](https://github.com/wzaielamri/claude-sta
 
 **See everything at a glance**
 
-- **Panel icon:** a ✳ spark in the state color: orange with a red badge counting the sessions that need you, blue and spinning while Claude works, green when it's your turn, grey when nothing runs. The 5-hour usage of your default account sits next to it (see [Accounts](#accounts)).
-- **The big Clawd** at the top of the popup sums it all up. His stage glows orange (gently pulsing) when a chat needs you, blue while chats work, green when it's your turn, and turns into a starry night once everything is done. His headline says what matters most, e.g. *2 chats need you*: click it to go there.
+- **Panel icon:** Talpa peeking up through the panel's edge, in the state color: orange and popping up, with a red badge counting the sessions that need you; blue and glancing around while Claude works; green and smiling when it's your turn; grey and asleep when nothing runs. The 5-hour usage of your default account sits next to it (see [Accounts](#accounts)).
+- **The big Talpa** at the top of the popup sums it all up. Its stage glows orange (gently pulsing) when a chat needs you, blue while chats work, green when it's your turn, and turns into a starry night once everything is done. Its headline says what matters most, e.g. *2 chats need you*: click it to go there.
 - **One section per Claude account** (profiles logged into the same account are merged; the default account comes first): plan usage with reset countdowns, tokens for today and the last 7 days, and every session (terminal, background job or VS Code) with its state, how long it's been in it, project folder, model and reasoning effort (e.g. *Opus 5.5 · max*) and context fill, plus what a waiting session asks for (e.g. *approve Bash: rm -rf build/*).
 - **What each chat is doing, without switching to it:** under each session, a line says what it's doing right now (`▸ Bash: npm test`), what it needs, Claude's recap of it (when you come back to a chat after a while, Claude Code writes one: *You asked …; Next step: …*) or what Claude said last, with a bar for its task list (*2/5*). Click the line to read your last prompt, Claude's reply and the chat's tasks. A chat in plan mode, auto mode, accept edits or don't ask says so next to its name; one that bypasses permissions says so in red.
-- **Chats a usage limit stopped** say so in red, with when the limit resets (a background session too, which Claude marks as blocked); their pet's battery runs low. Once it has reset, a notification says which chats can go on. Meanwhile **Continue on personal** moves the chat to another account with room left (see [Sharing chats](#sharing-chats)), or **Go on at 10:41** has it go on by itself once the limit resets: in the background, telling Claude the limit has reset (an idle Claude that still has it open quits first). In **Recent chats**, click a chat's **limit** tag for the same.
+- **Chats a usage limit stopped** say so in red, with when the limit resets (a background session too, which Claude marks as blocked); their pet runs out of steam. Once it has reset, a notification says which chats can go on. Meanwhile **Continue on personal** moves the chat to another account with room left (see [Sharing chats](#sharing-chats)), or **Go on at 10:41** has it go on by itself once the limit resets: in the background, telling Claude the limit has reset (an idle Claude that still has it open quits first). In **Recent chats**, click a chat's **limit** tag for the same.
 - **Where your usage is heading:** each usage bar shows where you'd be when the window resets at your pace (the faded part), a mark where an even pace would be by now, and a warning when you'd run out first (*At this pace: full in 1h 20m, 40m before it resets*).
 - **Your last days in numbers:** click an account's token line for its last 14 days: tokens per day as bars, chats and prompts, your busiest folders and the models used. Each chat's unfolded box ends with its own recap (*3 prompts · worked 54m · 313 tool calls (Bash 265, Read 25) · 100.6M tokens · $37.06 at API prices*).
-- **A pet for every chat:** each account's chats walk on a little stage under its name, wearing the chat's name and color. The chat's row in the list gets a bar in the same color. A pet acts its chat out: it works (types, tests, reviews, juggles subagents), holds up a warning sign when the chat needs you, relaxes when it's your turn, sleeps once the chat is done and looks sad if it failed. Click a pet to open its chat.
+- **A pet for every chat:** Talpa lives in a burrow, and each account's chats get one on a little stage under its name, wearing the chat's name and a calm version of its color. The chat's row in the list gets a bar in that color. A pet acts its chat out, half out of its burrow: it works (types, thinks, hunts bugs, checks tests, juggles subagents), pops up waving or holding up a sign when the chat needs you, plays when it's your turn, sleeps once the chat is done and looks sad if it failed. The lamp on its head glows in the chat's state color. Click a pet to open its chat.
 
-<p align="center"><img src="docs/screenshots/pets.gif" alt="Pets reacting: a chat finishes and its pet celebrates, a new chat's pet walks in, and the big Clawd charges up when a usage limit resets" width="500"></p>
+<p align="center"><img src="docs/screenshots/pets.gif" alt="Pets reacting: a chat finishes and its pet celebrates, a new chat's pet digs up out of the ground, and the big Talpa cheers when a usage limit resets" width="500"></p>
 
 **Act on your sessions**
 
@@ -88,9 +88,9 @@ In VS Code, [Claude Status for VS Code](https://github.com/wzaielamri/claude-sta
   - A shared chat's tokens appear in every profile it's shared with, since a transcript doesn't record which account paid; the token tooltip shows how much that is.
   - **Share from the widget:** hover a finished chat (or a recent one) and press its share button: **Continue on work** (shares it if needed and opens it there with `claude --resume`, the quick way on when one account hits its limit), **Share with all accounts**, or **Keep only on personal…** (asks first). Nothing is done to a chat while a session has it open. See [Sharing chats](#sharing-chats).
 - **Pets:**
-  - a chat's pet stays the same pet, with the same color and on the same spot, as long as the chat is in the list, even while it finishes and runs again; a new chat's pet lines up on the right. When the chat leaves the list (you hide it, its terminal closes, or it gets old), the pet waves and walks off. Up to 5 pets per account (configurable); with more chats, the ones that need you get a pet first, and "+N" counts the rest.
-  - the big Clawd (93 poses) takes the news that isn't about one chat's pet, such as limit resets. While Claude works he types, thinks, tests, reviews, debugs or talks to his rubber duck; at ≥ 90% of the 5-hour limit he's mind-blown or overheated now and then, and at 100% he shows a **429**. When things are quiet he wanders, takes coffee breaks and has hobbies (reading, music, gaming, gardening, stargazing, …), dresses for the season and greets you on holidays.
-  - click Clawd to pet him (click quickly to tickle him), double-click to make him dance, drag to pick him up and drop him (he gets dizzy from high up)
+  - a chat's pet stays the same pet, with the same color and on the same spot, as long as the chat is in the list, even while it finishes and runs again; a new chat's pet lines up on the right. A new chat's pet digs up out of the ground; when the chat leaves the list (you hide it, its terminal closes, or it gets old), the pet waves and digs away. Up to 5 pets per account (configurable); with more chats, the ones that need you get a pet first, and "+N" counts the rest.
+  - the big Talpa takes the news that isn't about one chat's pet, such as limit resets. It picks what to do at random from what fits the moment, so it's never the same twice: while Claude works it types, thinks, gets ideas, hunts bugs with a magnifier or reads the docs; at ≥ 90% of the 5-hour limit it's mind-blown now and then, and at 100% it runs out of steam. When things are quiet it digs over to wherever your mouse is, sneezes itself out of its burrow, blows bubbles, floats off with a balloon, plays peekaboo, listens to music and greets you on holidays.
+  - click Talpa to pet it (click quickly to tickle it), double-click to make it dance, drag it out of its burrow and drop it: it gets dizzy from high up, then digs back in where it landed
   - notification icons show him with a warning sign (needs input), a trophy (finished) or a rain cloud (failed)
   - they only move while the popup is open
 - **Jumping, in detail:** terminal sessions: Konsole switches to the tab running it (or tmux to its pane) and the window comes to the front. VS Code sessions: the conversation opens in the VS Code window of that project. Background jobs: the terminal already showing the job comes to the front; if there is none, a new terminal runs `claude attach <id>` in the job's folder. A finished background job is reopened the same way; if it ran in a folder Claude doesn't trust yet (always so for your home folder), Claude first asks whether you trust it, with "No, exit" preselected, and the terminal says so before the question comes up.
@@ -118,7 +118,6 @@ In VS Code, [Claude Status for VS Code](https://github.com/wzaielamri/claude-sta
 - **jq**, for the status-line snippet that supplies plan usage and context.
 - Optional:
   - **Konsole**, so that clicking a session switches to its tab. With other terminals the window is raised. New terminals open in your default terminal (System Settings → Default Applications).
-  - **Qt 6.10 or newer with the QtQuick.VectorImage module**, for animated pets. Without it the pets are still images that walk, hop and react all the same.
   - **PipeWire** (`pw-play`) or PulseAudio (`paplay`) for sounds.
   - **kdialog** (usually installed with KDE) for *Choose folder…*; `zenity` works too.
   - **Okular**, to read plans, memories and subagent runs rendered. Without it they open as a page in your web browser.
@@ -127,8 +126,8 @@ In VS Code, [Claude Status for VS Code](https://github.com/wzaielamri/claude-sta
 
 | Distribution | Extra packages |
 |---|---|
-| Fedora KDE | `sudo dnf install jq` (animated pets work out of the box) |
-| Kubuntu, KDE neon, Debian | `sudo apt install jq`, and for animated pets on Qt 6.10+ (e.g. Kubuntu 26.04): `sudo apt install qml6-module-qtquick-vectorimage` |
+| Fedora KDE | `sudo dnf install jq` |
+| Kubuntu, KDE neon, Debian | `sudo apt install jq` |
 | Arch Linux | `sudo pacman -S jq` |
 | openSUSE | `sudo zypper install jq` |
 
@@ -192,7 +191,7 @@ Then paste `statusline-snippet.sh` into your status-line script, right after the
 
 ## On GNOME
 
-The same dashboard as a GNOME Shell extension: the ✳ in the top bar, the popup with your accounts, sessions, plan usage, SSH hosts, notifications and pets. It uses the same scripts as the Plasma widget.
+The same dashboard as a GNOME Shell extension: Talpa in the top bar, the popup with your accounts, sessions, plan usage, SSH hosts, notifications and pets. It uses the same scripts as the Plasma widget.
 
 **Requirements:** GNOME Shell 49 or 50 (Ubuntu 26.04 LTS has 50), python3, jq (`sudo apt install jq`); zenity for *Choose folder…* (Ubuntu has it).
 
@@ -202,8 +201,8 @@ The same dashboard as a GNOME Shell extension: the ✳ in the top bar, the popup
 
 - Not on GNOME yet: chats a usage limit stopped (and their **Continue on …** and **Go on at …**), Claude's recaps and permission modes, starting a chat with a task or in the background, queued tasks, finding a chat, plans, memories and **⚠ same files**. Nor are the share button on an SSH host's chats, **Log in…** for an SSH host that wants a password, and the *Phone* setting.
 - Jumping to a session brings its window to the front. Konsole and tmux also switch to the right tab or pane; in Ptyxis and GNOME Terminal the window comes up, but not the tab. New chats open in your default terminal (`xdg-terminal-exec`, else Ptyxis, GNOME Terminal or Console).
-- The pets are still poses: they walk, hop, breathe and react, but don't move their arms. You can't pick them up.
-- The menu at the bottom of the popup replaces the right-click menu; a middle click on the ✳ refreshes.
+- You can't pick the pets up (they do everything else, with the same Talpa as the widget).
+- The menu at the bottom of the popup replaces the right-click menu; a middle click on the icon refreshes.
 - Working sessions are blue rather than your accent color (Ubuntu's orange would look like "needs you").
 - Sounds come from your GNOME sound theme and stay quiet with Do Not Disturb.
 - The shortcut to the chat that needs you is **Super+Shift+C** (change it in the settings).
@@ -220,7 +219,7 @@ The same dashboard as a GNOME Shell extension: the ✳ in the top bar, the popup
 | Where | What it does |
 |---|---|
 | Panel icon | Left-click opens the popup, middle-click refreshes. Right-click: *Refresh*, *Show removed sessions again*, *Open Usage Page on claude.ai*, and the settings. |
-| The big Clawd | Click his headline (*… needs you*) to go to that chat. Click him to pet him, double-click to make him dance, drag him around. |
+| The big Talpa | Click its headline (*… needs you*) to go to that chat. Click it to pet it, double-click to make it dance, drag it out of its burrow. |
 | A session's name | Jumps to the session: its terminal tab, its VS Code window, or a terminal attached to the background job. |
 | The line under a session | Unfolds your last prompt, Claude's reply, the chat's tasks, and buttons that compare what it changed (all of it, or its last turn). |
 | **±3** next to a session | Compares the files the chat changed in VS Code. |
@@ -287,9 +286,9 @@ Right-click the widget → **Configure Claude Status…**
 | Panel | on | The default account's 5-hour usage next to the icon |
 | Keyboard shortcut | goes to the chat | Goes to the chat that needs you (else opens the popup); the key itself is set on the Keyboard Shortcuts page |
 | Icon | on | Blink while a chat needs you (until you open the popup), pulse when one finishes |
-| Pet | on | Clawd in the popup and in notifications |
+| Pet | on | Talpa in the popup and in notifications |
 | Open plans and runs in | Okular if installed, else your browser | Plans and subagent runs (Markdown): in Okular, your browser (a page the widget makes), VS Code's Markdown preview (with the Claude Status extension for VS Code 1.13 or newer), or your app for Markdown files |
-| Chat pets per account | 5 | 0 keeps only the big Clawd |
+| Chat pets per account | 5 | 0 keeps only the big Talpa |
 | Popup | on | Token totals |
 
 ## Accounts
@@ -309,7 +308,7 @@ The widget never sees a login: you sign in on Claude's own pages, and Claude its
 
 Chats aren't copied between accounts: to move a chat to another account, share it (see [Sharing chats](#sharing-chats)).
 
-**The icon** shows one number, the most urgent: red for chats that need you, else green for chats that finished since you last opened the popup (turns as long as the "finished" notifications ask for). A working chat makes the spark spin, and hovering the icon lists every count.
+**The icon** shows one number, the most urgent: red for chats that need you, else green for chats that finished since you last opened the popup (turns as long as the "finished" notifications ask for). While a chat works, Talpa glances around; hovering the icon lists every count.
 
 **In the system tray (Plasma):** Claude Status can sit in the system tray as well as (or instead of) on a panel: right-click the tray's arrow → **Configure System Tray…** → **Entries** → **Claude Status**. It's off until you switch it on. *Shown when relevant* shows it while a chat runs; clicking it opens the same popup. With two Claude Status widgets, only one of them (the one running longest) sends notifications and sounds, and they share their settings: a change in one shows in the other within a few seconds, and a new one starts with what the others use.
 
@@ -345,7 +344,6 @@ Apart from the chats you share and the accounts you add, the widget never change
 - **"Can't find the claude command":** the widget looks on PATH, in the usual install folders and on your login shell's PATH. If Claude is somewhere else, add its folder to PATH in `~/.profile` (not only `~/.bashrc`) and log in again.
 - **Clicking a session doesn't switch to its tab:** tab switching works with Konsole and tmux. With other terminals the window is raised.
 - **An SSH host refuses the login:** the checks log in without a terminal, so they need key-based login (load your key with `ssh-add`) or a connection you logged in with: click **Log in…** at the host (Plasma) and type your password where `ssh` asks for it. The host also needs `python3`.
-- **The pets don't move their arms:** animated poses need Qt 6.10 and the QtQuick.VectorImage module (see [Requirements](#requirements)). Without them, the pets are still images.
 - **Something else:** run the widget in its own window to see its messages: `plasmawindowed org.wzaielamri.claudestatus`. You can also run the status script on its own: `python3 -I package/contents/code/claude_status.py --pretty`.
 
 Issues and ideas are welcome on the [issue tracker](https://github.com/wzaielamri/claude-status/issues).
@@ -430,11 +428,12 @@ package/                  the widget (what install.sh installs)
     │                     jump.py (actions), sharing.py (shared chats), accounts.py (accounts), remote.py (SSH),
     │                     markdown_page.py (plans and runs as a web page), notify_sound.py
     ├── config/           settings schema and pages
-    └── pets/             Clawd artwork (clawd-pet, MIT)
+    ├── ui/talpa/         Talpa, the pet: its parts, moods and actions (shared with GNOME and VS Code)
+    └── pets/             Talpa's notification icons (made by tools/talpa_icons.mjs)
 gnome/                    the GNOME Shell extension: extension/ (GJS: indicator.js, logic.js, ui/, prefs.js), build.sh, tests/
 statusline-snippet.sh     the snippet install.sh adds to your status line
 tests/                    unit tests: they build Claude Code's files in temporary folders
-tools/                    render_popup.sh (offscreen screenshots), bake_pet_origins.py (pet artwork for Qt), gnome/ (headless GNOME Shell test)
+tools/                    render_popup.sh (offscreen screenshots), talpa_icons.mjs (Talpa's still pictures), gnome/ (headless GNOME Shell test)
 ```
 
 The tests build Claude Code's files (sessions, background jobs, transcripts, shared-chat links, a switched `~/.claude` link) in temporary folders. `tests/test_remote.py` drives the SSH code through a stand-in `ssh` that runs the command locally.
@@ -459,7 +458,7 @@ As with any open-source code, please read it before you run it. It is provided u
 
 ## Credits
 
-The Clawd pet artwork (`package/contents/pets/`) comes from [clawd-pet](https://github.com/abderrahimghazali/clawd-pet) by Abderrahim Ghazali, used under the MIT License (see the `LICENSE` and `README.md` in that folder). `tools/bake_pet_origins.py` adapts the SVGs for Qt's renderer: it bakes each CSS pivot (`transform-origin`) into wrapper groups, because otherwise rotating limbs fly off the character. [Claude Usage Widget](https://github.com/projectvelox/claude-usage-widget) inspired how Clawd reacts to usage and clicks.
+[Claude Usage Widget](https://github.com/projectvelox/claude-usage-widget) inspired how the pet reacts to usage and clicks.
 
 ## Author
 

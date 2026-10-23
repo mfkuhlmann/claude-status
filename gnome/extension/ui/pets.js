@@ -1,6 +1,6 @@
 // The pets (port of the Plasma widget's PetStrip.qml and Pet.qml).
 //
-// The hero: the big Clawd at the top of the popup, on a stage lit in the
+// The hero: the big Talpa at the top of the popup, on a stage lit in the
 // whole dashboard's mood (orange and pulsing when a chat needs you, the
 // accent while chats work, green when it's your turn, a starry night once
 // everything is done), with a headline and the session counts.
@@ -8,65 +8,42 @@
 // An account's stage: one pet per chat in its list (up to `chat-pets`). A pet
 // wears the chat's name on a tag in the chat's color (the chat's row gets a
 // bar in that color), acts the chat out, opens it when clicked, and keeps its
-// spot until the chat leaves the list; then it waves and walks off.
+// spot until the chat leaves the list; then it waves and digs away.
 //
-// The poses are still images here (St draws SVGs without their animations);
-// the pets live through moving, hopping, breathing and their reactions.
-// Nothing moves while the popup is closed.
+// Talpa itself (looks, moods, what it does) is talpa/talpa.js, shared with the
+// Plasma widget and the VS Code extension; it's drawn with Cairo
+// (cairoCanvas.js). Nothing moves while the popup is closed.
 
 import Clutter from 'gi://Clutter';
-import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
-import Graphene from 'gi://Graphene';
 import St from 'gi://St';
 
 import * as L from '../logic.js';
+import {CairoCanvas} from './cairoCanvas.js';
+import {Talpa, LILAC, calmColors} from './talpa/talpa.js';
 import {box, dot, label, link} from './widgets.js';
 
 // Colors that stay apart from each other on light and dark themes
 const PALETTE = ['#e5534b', '#e8913a', '#c9a227', '#4caf50', '#26a69a', '#42a5f5', '#7e57c2', '#ec407a'];
-// All poses share the viewBox -15 -25 45 45: the character is centred, 15
-// units wide and ~11 tall, standing 41/45 down the image.
-const FEET = 41 / 45;
-const MOOD_COLORS = {waving: [245, 121, 0], error: [232, 68, 58], 'idle-living': [51, 184, 108]};
+const MOOD_COLORS = {needs: [245, 121, 0], error: [232, 68, 58], idle: [51, 184, 108]};
 const NIGHT = [99, 113, 200];
-
-const WORK_POSES = ['working-typing', 'working-thinking', 'coding', 'working-testing', 'working-reviewing',
-    'working-debugger', 'working-building', 'working-tool-calling', 'working-deploying', 'working-rubber-duck',
-    'working-wizard'];
-const AGENT_POSES = ['working-juggling', 'working-conducting', 'working-pairing'];
-const WAIT_POSES = ['waving', 'working-oncall', 'notification', 'mail', 'working-beacon', 'praying'];
-const HOBBIES = [
-    ['reading', 'Reading the docs…'], ['music', '♪'], ['gaming', ''], ['meditating', 'Ommm…'], ['yoga', ''],
-    ['eating', 'Snack time!'], ['ice-cream', ''], ['painting', ''], ['gardening', ''],
-    ['studying', 'Learning new tricks.'], ['singing', '♪ ♫'], ['telescope', 'Any bugs out there?'], ['peeking', ''],
-    ['photography', 'Say cheese!'], ['drumming', ''], ['magic', 'Ta-da!'], ['chef', ''], ['idea', 'I have an idea!'],
-    ['cool', ''], ['bored', 'So quiet…'], ['shrug', ''], ['hopeful', ''], ['flexing', ''], ['skeptical', ''],
-    ['going-away', 'Brb!'],
-];
 
 function pick(list, last) {
     const choices = list.length > 1 ? list.filter(x => x !== last) : list;
     return choices[Math.floor(Math.random() * choices.length)];
 }
 
-// Seasons (northern hemisphere, by month) and a few days of the year
-function seasonPose() {
-    const m = new Date().getMonth();
-    return m === 11 || m <= 1 ? 'winter' : m <= 4 ? 'spring' : m <= 7 ? 'summer' : 'autumn';
-}
-
 function holidayGreeting() {
     const d = new Date(), m = d.getMonth() + 1, day = d.getDate();
     if ((m === 12 && day === 31) || (m === 1 && day === 1))
-        return ['new-year', 'Happy New Year!'];
+        return 'Happy New Year!';
     if (m === 12 && day >= 24 && day <= 26)
-        return ['christmas', 'Merry Christmas!'];
+        return 'Merry Christmas!';
     if (m === 10 && day === 31)
-        return ['halloween', 'Boo! Happy Halloween!'];
+        return 'Boo! Happy Halloween!';
     if (m === 2 && day === 14)
-        return ['valentine', "Happy Valentine's Day!"];
-    return ['', ''];
+        return "Happy Valentine's Day!";
+    return '';
 }
 
 function colorHash(key) {
@@ -131,29 +108,21 @@ class Pet {
         this.chat = null;
         this.lastChat = null;
         this.leaving = false;
-        this.offstage = false;
-        this.moving = false;
-        this.running = false;
-        this.facingLeft = false;
-        this.action = '';
-        this.reaction = '';
-        this.reactionUntil = 0;
+        this.arriving = false;
+        this.travelTo = -1;              // where the next dig takes it (-1: it picks)
         this.clicks = 0;
         this.lastMood = '';
-        this.lastHobby = '';
-        this.workPose = pick(WORK_POSES, '');
-        this.agentPose = 'working-juggling';
-        this.waitPose = 'working-oncall';   // the alert sign first: it reads best
         this.timers = new Timers();
-        this._pose = '';
 
         const s = stage.size;
-        this.actor = new St.Widget({reactive: true, track_hover: true, width: s.slot, height: s.image + s.tag});
-        this.shadow = new St.Widget({style_class: 'claude-pet-shadow'});
-        this.actor.add_child(this.shadow);
-        this.image = new St.Icon({icon_size: s.imageLogical, width: s.image, height: s.image,
-            x: (s.slot - s.image) / 2, pivot_point: new Graphene.Point({x: 0.5, y: FEET})});
-        this.actor.add_child(this.image);
+        this.talpa = new Talpa({colors: this.lone ? LILAC : calmColors(this.tint), theme: stage.pets.theme,
+            travels: this.lone});
+        this.talpa.onTravel = ms => this._travel(ms);
+        this.talpa.tick(Date.now());
+        this.actor = new St.Widget({reactive: true, track_hover: true, width: s.slot, height: s.canvasH + s.tag});
+        this.view = new St.DrawingArea({width: s.canvasW, height: s.canvasH, x: Math.round((s.slot - s.canvasW) / 2)});
+        this.view.connect('repaint', area => this._paint(area));
+        this.actor.add_child(this.view);
         if (!this.lone) {
             const dark = this.tint && this._luma(this.tint) < 0.6;
             this._tagStyle = `background-color: ${this.tint}; color: ${dark ? 'white' : 'black'};`;
@@ -163,12 +132,6 @@ class Pet {
             this.actor.add_child(this.tag);
             this.tag.connect('notify::width', () => this._placeTag());
         }
-        const ring = this.lone ? [s.body * 1.25, s.gu * 0.5] : [s.body * 1.15, s.gu * 0.42];
-        this.shadow.set_size(ring[0], ring[1]);
-        this.shadow.set_position((s.slot - ring[0]) / 2, s.image * FEET - ring[1] / 2);
-        this.shadow.style = this.lone ? 'background-color: rgba(127,127,127,0.25);'
-            : `background-color: ${this.tint}; border-radius: ${ring[1] / 2}px;`;
-        this.shadow.opacity = this.lone ? 255 : 115;
 
         this.actor.connect('destroy', () => {
             this.gone = true;   // with the popup (or the whole shell)
@@ -197,6 +160,17 @@ class Pet {
         return (((n >> 16) & 255) * 0.299 + ((n >> 8) & 255) * 0.587 + (n & 255) * 0.114) / 255;
     }
 
+    _paint(area) {
+        const cr = area.get_context();
+        const [width] = area.get_surface_size();
+        const boxPx = width / 1.6;
+        const ctx = new CairoCanvas(cr);
+        ctx.translate(boxPx * 0.3, boxPx * 0.45);
+        ctx.scale(boxPx / 64, boxPx / 64);
+        this.talpa.draw(ctx);
+        cr.$dispose();
+    }
+
     // The name tag fits the room between pets
     setTagWidth(width) {
         width = Math.round(width);
@@ -208,7 +182,7 @@ class Pet {
 
     _placeTag() {
         const s = this.stage.size;
-        this.tag.set_position(Math.round((s.slot - this.tag.width) / 2), Math.round(s.image * FEET + 2));
+        this.tag.set_position(Math.round((s.slot - this.tag.width) / 2), Math.round(s.floorY + s.box * 6 / 64));
     }
 
     get px() {
@@ -223,54 +197,34 @@ class Pet {
         return this.stage.live;
     }
 
+    // Talpa's moods: idle working agents needs done failed limit (error loading for the hero)
     get mood() {
         if (this.lone)
             return this.stage.ctxMood;
         const c = this.chat;
         if (!c)
-            return this.leaving ? 'waving' : 'sleeping';   // its chat left the list: bye
+            return 'idle';
         if (c.state === 'waiting')
-            return 'waving';
+            return 'needs';
         if (c.state === 'working')
-            return c.agents && c.agents.running > 0 ? 'working-juggling' : 'working-typing';
+            return c.agents && c.agents.running > 0 ? 'agents' : 'working';
+        if (c.stopped && !c.stopped.over)
+            return 'limit';                               // a usage limit (or the login) stopped it
         if (c.state === 'idle')
-            return 'idle-living';                         // ready for your next message
-        return c.reason === 'failed' ? 'sad' : 'sleeping';   // done: results to look at
+            return 'idle';                                // ready for your next message
+        return c.reason === 'failed' ? 'failed' : 'done';   // done: results to look at
     }
 
-    get pose() {
-        if (this.reaction)
-            return this.reaction;
-        if (this.moving)
-            return this.running ? 'running' : 'crab-walking';
-        if (this.action)
-            return this.action;
-        const mood = this.mood;
-        return mood === 'working-typing' ? this.workPose : mood === 'working-juggling' ? this.agentPose
-            : mood === 'waving' ? this.waitPose : mood;
-    }
-
-    // Shows the pose, direction and height off the ground
+    // Shows its mood (and wakes up for work)
     sync() {
         if (this.gone)
             return;
-        const pose = this.pose;
-        if (pose !== this._pose) {
-            this._pose = pose;
-            this.image.gicon = this.stage.icon(pose);
-        }
-        this.image.scale_x = this.facingLeft ? -1 : 1;
         const mood = this.mood;
         if (mood !== this.lastMood) {
-            if (!this.offstage)
-                this.stopMoving();
-            this.action = '';
-            const woken = this.lastMood === 'sleeping' && mood !== 'sleeping' && mood !== 'waving';
-            // noted before doAction(), whose sync() would otherwise see the same change again
+            this.talpa.setMood(mood);
+            if (this.lastMood === 'done' && mood !== 'done' && !this.leaving)
+                this.react('yawn');   // woken up by work
             this.lastMood = mood;
-            this._breathe();
-            if (woken)
-                this.doAction('yawning', 1800);   // woken up by work
         }
     }
 
@@ -287,120 +241,56 @@ class Pet {
 
     // ------------------------------------------------------------ actions
 
+    react(name, done) {
+        this.talpa.react(name, done || null);
+    }
+
     clampX(x) {
-        const s = this.stage.size;
-        const min = s.body / 2 + 4, max = Math.max(min, this.stage.width - s.body / 2 - 4);
+        const s = this.stage.size, reach = s.box * 27 / 64 + 4;
+        // the burrow stays on the stage; the hero keeps to the right half, clear of the headline
+        const min = this.lone ? Math.max(reach, this.stage.width * 0.5) : reach;
+        const max = Math.max(min, this.stage.width - reach);
         return Math.max(min, Math.min(max, x));
     }
 
-    // Walk (or run) to x; anywhere: x may be off the stage (entering, leaving)
-    moveTo(x, fast, anywhere = false) {
-        if (!anywhere)
-            x = this.clampX(x);
-        if (Math.abs(x - this.px) < 4)
+    // Digs over to x (it dives in, tunnels across, pops up there)
+    digTo(x) {
+        if (this.leaving || this.arriving)
             return;
-        // stop the last walk first: its end mustn't undo this one
+        this.travelTo = this.clampX(x);
+        if (Math.abs(this.travelTo - this.px) < this.stage.size.body * 0.3) {
+            this.travelTo = -1;
+            return;
+        }
+        this.react('dig');
+    }
+
+    // It dug in: tunnel across to the spot within ms
+    _travel(ms) {
+        let to = this.travelTo;
+        this.travelTo = -1;
+        if (to < 0) {
+            const cursor = this.stage.cursorX, s = this.stage.size;
+            to = cursor >= 0 ? cursor + (Math.random() - 0.5) * s.body : Math.random() * this.stage.width;
+        }
+        to = this.clampX(to);
+        this.talpa.facingLeft = to < this.px;
         this.actor.remove_transition('x');
-        this.facingLeft = x < this.px;
-        this.running = fast;
-        this.action = '';
-        this.moving = true;
-        this.sync();
-        const s = this.stage.size;
         this.actor.ease({
-            x: Math.round(x - s.slot / 2),
-            duration: Math.abs(x - this.px) / (s.gu * (fast ? 6 : 2)) * 1000,
+            x: Math.round(to - this.stage.size.slot / 2),
+            duration: Math.max(200, ms - 100),
             mode: Clutter.AnimationMode.EASE_IN_OUT_SINE,
-            onStopped: () => {
-                if (this.gone)
-                    return;
-                this.moving = false;
-                this.running = false;
-                if (this.leaving && this.offstage) {
-                    this.stage.removePet(this.key);
-                    return;
-                }
-                this.offstage = false;
-                this.sync();
-            },
         });
-    }
-
-    stopMoving() {
-        this.actor.remove_transition('x');
-    }
-
-    react(pose, text, ms = 2500) {
-        if (!this.offstage)
-            this.stopMoving();
-        this.action = '';
-        this.reaction = pose;
-        this.reactionUntil = Date.now() + ms;
-        this.timers.after('reaction', ms, () => {
-            this.reaction = '';
-            this.sync();
-        });
-        if (text)
-            this.say(text);
-        this.sync();
-    }
-
-    doAction(pose, ms) {
-        this.action = pose;
-        this.timers.after('action', ms, () => {
-            this.action = '';
-            this.sync();
-        });
-        this.sync();
     }
 
     say(text) {
         this.stage.say(this, text);
     }
 
-    burst(symbol, color, count) {
-        this.stage.burst(this, symbol, color, count);
-    }
-
-    hop(height) {
-        if (this.image.translation_y < 0)
-            return;
-        const s = this.stage.size;
-        this.image.ease({
-            translation_y: -(height || s.gu * 0.8), duration: 170, mode: Clutter.AnimationMode.EASE_OUT_QUAD,
-            onComplete: () => this.image.ease({
-                translation_y: 0, duration: 230, mode: Clutter.AnimationMode.EASE_IN_QUAD,
-                onComplete: () => this._land(),
-            }),
-        });
-    }
-
-    // squash on landing, then a little stretch back
-    _land() {
-        this.image.remove_transition('scale-y');
-        this.image.ease({scale_y: 0.75, duration: 80, mode: Clutter.AnimationMode.EASE_OUT_QUAD,
-            onComplete: () => this.image.ease({scale_y: 1.1, duration: 120, mode: Clutter.AnimationMode.EASE_OUT_QUAD,
-                onComplete: () => this.image.ease({scale_y: 1, duration: 150, mode: Clutter.AnimationMode.EASE_IN_OUT_QUAD,
-                    onComplete: () => this._breathe()})})});
-    }
-
-    // Breathing: slow when idle or asleep, quick while he works
-    _breathe() {
-        this.image.remove_transition('scale-y');
-        this.image.scale_y = 1;
-        if (!this.live)
-            return;
-        const mood = this.mood;
-        this.image.ease({
-            scale_y: 0.95, duration: mood.startsWith('working') ? 260 : mood === 'sleeping' ? 1600 : 1100,
-            mode: Clutter.AnimationMode.EASE_IN_OUT_SINE, repeatCount: -1, autoReverse: true,
-        });
-    }
-
     // Clicked: the hero gets petted, a chat's pet opens its chat
     clicked() {
         if (this.lone) {
-            this.petHim();
+            this.petIt();
             return;
         }
         const c = this.lastChat;
@@ -412,197 +302,63 @@ class Pet {
             this.stage.ctx.jumpTo(c.sessionId, c.profileDir);
     }
 
-    petHim() {
+    petIt() {
         this.clicks += 1;
         this.timers.after('tickle', 1500, () => {
             this.clicks = 0;
         });
-        if (this.mood === 'sleeping') {
+        if (this.mood === 'done') {
             if (this.clicks >= 3) {
                 this.clicks = 0;
-                this.react('angry', 'I said let me SLEEP!', 2500);
-                this.burst('!', '#e8443a', 2);
+                this.react('angry');
+                this.say('I said let me SLEEP!');
             } else {
-                this.react('grumpy', 'Zzz… let me sleep.', 2500);
+                this.react('grumpy');
+                this.say('Zzz… let me sleep.');
             }
             return;
         }
         if (this.clicks >= 4) {
             this.clicks = 0;
-            this.react('laughing', 'Hehe, that tickles!', 2500);
-            this.burst('♥', '#ff6b8a', 4);
+            this.react('laugh');
+            this.say('Hehe, that tickles!');
         } else if (this.clicks === 3) {
-            this.react('embarrassed', 'Aww, stop it…', 2000);
-            this.burst('♥', '#ff6b8a', 3);
+            this.react('shy');
+            this.say('Aww, stop it…');
         } else {
-            this.react(Math.random() < 0.7 ? 'love' : 'happy', this.petLine(), 2000);
-            this.burst('♥', '#ff6b8a', 2);
+            this.react('pet');
+            this.say(this.petLine());
         }
-        this.hop();
     }
 
     dance() {
-        if (this.mood === 'sleeping') {
-            this.react('yawning', '…five more minutes.', 2500);
+        if (this.mood === 'done') {
+            this.react('yawn');
+            this.say('…five more minutes.');
             return;
         }
-        this.react(pick(['dancing', 'dancing', 'dj', 'music', 'singing']), '♪ ♫', 3500);
-        this.burst('♪', this.stage.accent, 3);
+        this.react('dance');
+        this.say('♪ ♫');
     }
 
     petLine() {
         const ctx = this.stage.ctx, mood = this.mood;
-        if (mood === 'waving')
+        if (mood === 'needs')
             return L.fmt('%1 needs you!', L.firstWaitingName(ctx.allGroups));
-        if (mood === 'working-juggling') {
+        if (mood === 'agents') {
             const n = L.agentsRunning(ctx.allGroups);
             return L.fmt(n === 1 ? 'Juggling %1 agent!' : 'Juggling %1 agents!', n);
         }
-        if (mood === 'working-typing')
+        if (mood === 'working')
             return 'Busy coding… thanks!';
         return pick(['Hi!', '♥', 'Ship it!', 'All quiet here.', 'Pet me more!'], '');
     }
 
-    doHobby(quiet) {
-        let h = HOBBIES[Math.floor(Math.random() * HOBBIES.length)];
-        if (h[0] === this.lastHobby)
-            h = HOBBIES[(HOBBIES.indexOf(h) + 1) % HOBBIES.length];
-        this.lastHobby = h[0];
-        this.doAction(h[0], 5000);
-        if (!quiet && h[1] && Math.random() < 0.5)
-            this.say(h[1]);
-    }
-
-    // What the hero does by himself when nothing in particular is going on
-    idleChoice() {
-        const cursor = this.stage.cursorX, s = this.stage.size;
-        if (cursor >= 0 && Math.abs(cursor - this.px) > s.body * 0.8) {
-            this.moveTo(cursor, Math.abs(cursor - this.px) > this.stage.width / 3);   // follow the mouse
-            return;
-        }
-        const r = Math.random();
-        const anywhere = this.clampX(Math.random() * this.stage.width);
-        if (r < 0.26) {
-            this.moveTo(anywhere, false);
-        } else if (r < 0.32) {
-            this.moveTo(anywhere, true);
-        } else if (r < 0.42) {
-            this.facingLeft = !this.facingLeft;
-            this.sync();
-            this.timers.after('lookBack', 900, () => {
-                this.facingLeft = !this.facingLeft;
-                this.sync();
-            });
-        } else if (r < 0.48) {
-            this.hop();
-        } else if (r < 0.53) {
-            this.doAction('smile', 2500);
-        } else if (r < 0.58) {
-            this.doAction('coffee', 4500);
-        } else if (r < 0.61) {
-            this.doAction('dancing', 2500);
-            this.burst('♪', this.stage.accent, 2);
-        } else if (r < 0.64) {
-            this.doAction('yawning', 2500);
-        } else if (r < 0.80) {
-            this.doHobby(false);
-        } else if (r < 0.85) {
-            // dressed for the day or the season
-            const [holiday] = holidayGreeting();
-            const season = seasonPose();
-            this.doAction(holiday || (season === 'winter' && Math.random() < 0.3 ? 'snow' : season), 5000);
-        }
-        // otherwise: just stand there for a bit
-    }
-
-    // What a chat's pet does: stays near its spot and acts its chat out
-    chatChoice() {
-        const s = this.stage.size, home = this.stage.slotX(this.key);
-        if (Math.abs(this.px - home) > s.body * 0.7) {
-            this.moveTo(home, false);
-            return;
-        }
-        const r = Math.random(), mood = this.mood;
-        if (mood === 'waving') {
-            this.hop(s.gu * 0.9);
-            if (r < 0.3)
-                this.say(L.fmt('%1 needs you!', this.label));
-            else if (r < 0.6)
-                this.burst('!', '#f57900', 1);
-        } else if (mood === 'sleeping') {
-            if (r < 0.5)
-                this.burst('z', '#9a9996', 1);
-        } else if (mood === 'idle-living') {
-            // awake and relaxed, waiting for your next message (quietly: the
-            // speech bubble is for things that matter)
-            if (r < 0.15) {
-                this.facingLeft = !this.facingLeft;
-                this.sync();
-            } else if (r < 0.25) {
-                this.moveTo(home + (Math.random() - 0.5) * s.body * 0.8, false);
-            } else if (r < 0.32) {
-                this.doAction('smile', 2500);
-            } else if (r < 0.38) {
-                this.doAction('coffee', 4000);
-            } else if (r < 0.50) {
-                this.doHobby(true);
-            }
-        } else if (mood !== 'sad') {
-            if (r < 0.2) {
-                this.facingLeft = !this.facingLeft;   // busy, but glances around
-                this.sync();
-            } else if (r < 0.3) {
-                this.moveTo(home + (Math.random() - 0.5) * s.body * 0.6, false);
-            }
-        }
-    }
-
-    _think() {
-        if (this.reaction || this.moving || this.action || this.leaving || this.offstage)
-            return;
-        const mood = this.mood, ctx = this.stage.ctx;
-        if (!this.lone) {
-            this.chatChoice();
-        } else if (mood === 'idle-living') {
-            this.idleChoice();
-        } else if (mood === 'waving') {
-            this.hop(this.stage.size.gu * 0.9);
-            const name = L.firstWaitingName(ctx.allGroups);
-            if (Math.random() < 0.25 && name)
-                this.say(L.fmt('%1 needs you!', name));
-        } else if (mood === 'sleeping') {
-            this.burst('z', '#9a9996', 1);
-        } else if (Math.random() < 0.2) {
-            this.facingLeft = !this.facingLeft;   // busy, but glances around
-            this.sync();
-        }
-    }
-
-    // Something happened to his chat (or, for the hero, to an account)
+    // Something happened to its chat (or, for the hero, to an account)
     event(kind, text) {
-        const s = this.stage.size;
-        if (kind === 'done') {
-            this.react(pick(['celebrating', 'celebrating', 'clapping', 'trophy', 'shipping', 'rocket', '200', 'star',
-                'happy', 'flexing'], ''), text, 3000);
-            this.burst('✦', '#f57900', 4);
-            this.hop(s.gu);
-        } else if (kind === 'failed') {
-            this.react(pick(['facepalm', 'sad', 'crying', 'working-firefighting'], ''), text, 3500);
-            this.burst('✗', '#e8443a', 2);
-        } else if (kind === 'stopped') {
-            this.react('shrug', text, 2500);
-        } else if (kind === 'oops') {
-            this.react('confused', text, 3000);
-            this.burst('?', '#f57900', 2);
-        } else if (kind === 'reset') {
-            this.react(pick(['charging', 'celebrating'], ''), text, 3000);
-            this.burst('⚡', '#f57900', 3);
-            this.hop(s.gu);
-        } else {
-            this.say(text);
-            this.burst('!', '#f57900', 1);
-            this.hop();
-        }
+        const action = {done: 'finished', failed: 'failed', stopped: 'shrug', oops: 'confused', reset: 'charged'}[kind];
+        this.react(action || 'alert');
+        this.say(text);
     }
 
     // Shown or hidden with the popup
@@ -610,81 +366,72 @@ class Pet {
         if (this.gone)
             return;
         this.timers.stopAll();
-        this.image.remove_all_transitions();
-        this.image.translation_y = 0;
-        this.image.scale_y = 1;
-        this.stopMoving();
-        this.moving = false;
-        if (!live) {
-            this.reaction = '';
-            this.action = '';
-            this.sync();
+        if (!live)
             return;
-        }
         this.sync();
-        this._breathe();
-        const tick = () => {
-            this._think();
-            this.timers.after('brain', 2000 + Math.random() * 3000, tick);
-        };
-        this.timers.after('brain', 1500 + Math.random() * 1500, tick);
-        // a different pose now and then while Claude works, or waits for you
-        this.timers.every('poses', 6000, () => {
-            if (this.reaction)
-                return;
-            const mood = this.mood;
-            if (mood === 'waving')
-                this.waitPose = pick(WAIT_POSES, this.waitPose);
-            else if (mood === 'working-juggling' && Math.random() < 0.5)
-                this.agentPose = pick(AGENT_POSES, this.agentPose);
-            else if (mood === 'working-typing' && Math.random() < 0.5)
-                this.workPose = pick(WORK_POSES, this.workPose);
-            this.sync();
+        this.talpa.setTheme(this.stage.pets.theme);
+        // its clock and its picture, about 30 times a second
+        this.timers.every('frame', 33, () => {
+            this.talpa.tick(Date.now());
+            this.view.queue_repaint();
         });
+        // the hero turns towards the mouse while it hovers the stage
+        if (this.lone) {
+            this.timers.every('face', 350, () => {
+                const cursor = this.stage.cursorX;
+                if (cursor >= 0 && Math.abs(cursor - this.px) > this.stage.size.body * 0.4 && this.mood !== 'done')
+                    this.talpa.facingLeft = cursor < this.px;
+            });
+        }
         // a working chat whose context is nearly full, or a limit close by
         this.timers.every('worries', 25000, () => this._worry());
         this.timers.after('firstWorry', 2500, () => this._worry());
     }
 
     _worry() {
-        if (this.reaction || this.leaving)
+        if (this.leaving || this.talpa.busy)
             return;
         const ctx = this.stage.ctx, mood = this.mood;
         const contextFull = !this.lone
             ? this.chat && this.chat.state === 'working' && this.chat.context !== null && this.chat.context >= 85
                 ? L.fmt('%1: context %2% full', this.label, Math.round(this.chat.context)) : ''
             : L.contextFullText(ctx.allGroups, ctx.petColors);
-        if (contextFull && mood.startsWith('working')) {
-            this.react('working-context-full', contextFull, 3500);
+        if (contextFull && (mood === 'working' || mood === 'agents')) {
+            this.react('contextFull');
+            this.say(contextFull);
             return;
         }
         const high = this.lone ? L.highUsageText(ctx.allGroups) : '';
-        if (high && mood !== 'sleeping') {
-            this.react(L.maxFiveHour(ctx.allGroups) >= 100 ? '429'
-                : pick(['mindblown', 'mindblown', 'working-overheated', 'battery-low'], ''), high, 3500);
+        if (high && mood !== 'done') {
+            this.react(L.maxFiveHour(ctx.allGroups) >= 100 ? 'battery' : 'mindblown');
+            this.say(high);
         }
     }
 
+    // A new chat: it digs up out of the ground
+    arrive() {
+        this.arriving = true;
+        this.react('arrive', () => {
+            this.arriving = false;
+        });
+    }
+
+    // Its chat left the list: it waves and digs away
     leave() {
         this.leaving = true;
-        this.timers.after('leave', Math.max(300, this.reactionUntil - Date.now() + 300), () => {
-            this.reaction = '';
-            this.offstage = true;
-            if (!this.live) {
+        if (!this.live) {
+            this.stage.removePet(this.key);
+            return;
+        }
+        this.react('leave', ok => {
+            if (ok && this.leaving && !this.gone)
                 this.stage.removePet(this.key);
-                return;
-            }
-            const s = this.stage.size;
-            this.moveTo(this.px < this.stage.width / 2 ? -s.image / 2 : this.stage.width + s.image / 2, true, true);
         });
-        this.sync();
     }
 
     comeBack() {
         this.leaving = false;
-        this.offstage = false;
-        this.timers.stop('leave');
-        this.moveTo(this.stage.slotX(this.key), true);
+        this.arrive();
     }
 
     destroy() {
@@ -712,10 +459,13 @@ class Stage {
 
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
         const gu = 16 * scale;
-        const image = (hero ? 10 : 6.2) * gu;
+        // Talpa's 64-unit box, its canvas (room around it for what it throws and
+        // holds up), where the floor is on the canvas, and its body's size
+        const boxPx = (hero ? 5.6 : 3.8) * gu;
         this.size = {
-            gu, scale, image, imageLogical: Math.round(image / scale), body: image / 3,
-            tag: gu * 1.1, slot: Math.round(hero ? image : Math.max(image, gu * 7)),
+            gu, scale, box: boxPx, canvasW: Math.round(boxPx * 1.6), canvasH: Math.round(boxPx * 1.5),
+            floorY: boxPx * 0.45 + boxPx * 57 / 64, body: boxPx * 38 / 64, bodyH: boxPx * 31 / 64,
+            tag: gu * 1.1, slot: Math.round(hero ? boxPx * 1.6 : Math.max(boxPx * 1.6, gu * 7)),
         };
         this.actor = new St.Widget({
             style_class: hero ? 'claude-hero' : 'claude-stage', reactive: true, track_hover: true,
@@ -784,14 +534,6 @@ class Stage {
 
     get ctxMood() {
         return this.pets.mood;
-    }
-
-    get accent() {
-        return '#3584e4';
-    }
-
-    icon(pose) {
-        return this.pets.icon(pose);
     }
 
     get petCount() {
@@ -872,18 +614,12 @@ class Stage {
     }
 
     _enter(pet) {
-        const s = this.size, home = this.slotX(pet.key);
-        if (!this.firstShown || !this.live || this.width <= 0) {
-            pet.px = home;   // the first time the popup opens they're just there
-            pet.setLive(this.live);
-            return;
-        }
-        // walk in from the nearest edge
-        const fromLeft = home < this.width / 2;
-        pet.px = fromLeft ? -s.image / 2 : this.width + s.image / 2;
-        pet.offstage = true;
-        pet.setLive(true);
-        pet.moveTo(home, true, true);
+        pet.px = this.slotX(pet.key);
+        pet.placed = this.width > 0;
+        pet.setLive(this.live);
+        // the first time the popup opens they're just there; later a new chat's pet digs up
+        if (this.firstShown && this.live && this.width > 0)
+            pet.arrive();
     }
 
     removePet(key) {
@@ -911,13 +647,23 @@ class Stage {
         const w = this.width, h = this.actor.height, s = this.size;
         if (w <= 0 || this.gone || !this.actor.get_stage())   // detached while the list is rebuilt
             return;
-        const ground = this.hero ? h - s.gu * 0.55 : h - s.tag - 4;
+        // (a chat's name tag goes under its burrow's mound)
+        const ground = this.hero ? h - s.gu * 0.55 : h - s.tag - s.box * 6 / 64 - 4;
         const tagWidth = Math.max(s.gu * 3.5, this.spacing - 8);
         for (const pet of this.list.values()) {
             pet.setTagWidth(tagWidth);
-            pet.actor.y = Math.round(ground - s.image * FEET);
-            if (!pet.moving && !pet.offstage && !pet.leaving)
-                pet.px = this.hero ? this.slotX('') : this.slotX(pet.key);
+            pet.actor.y = Math.round(ground - s.floorY);
+            if (pet.leaving)
+                continue;
+            const home = this.slotX(pet.key);
+            if (!this.live || !this.firstShown || !pet.placed) {
+                pet.px = home;   // not seen yet: it's just there
+                pet.placed = true;
+            } else if (!pet.lone && Math.abs(pet.px - home) > s.body * 0.3) {
+                pet.digTo(home);   // its spot moved: it digs over
+            } else if (pet.lone && pet.clampX(pet.px) !== pet.px) {
+                pet.digTo(pet.clampX(pet.px));
+            }
         }
         if (this.hero) {
             this.glow.set_size(w, h);
@@ -957,7 +703,7 @@ class Stage {
             return;
         const mood = this.pets.mood;
         this.headline.child.text = headline;
-        if (mood === 'waving')
+        if (mood === 'needs')
             this.headline.add_style_class_name('claude-fg-waiting');
         else
             this.headline.remove_style_class_name('claude-fg-waiting');
@@ -976,11 +722,11 @@ class Stage {
                 this.chips.add_child(label('No sessions running', 'claude-small claude-dim'));
         }
         // the light: what the whole dashboard is up to
-        const [r, g, b] = mood.startsWith('working') ? this.pets.accentRgb : MOOD_COLORS[mood] || NIGHT;
+        const [r, g, b] = mood === 'working' || mood === 'agents' ? this.pets.accentRgb : MOOD_COLORS[mood] || NIGHT;
         this.actor.style = `background-gradient-direction: vertical; background-gradient-start: rgba(${r},${g},${b},0.22);` +
             ` background-gradient-end: rgba(${r},${g},${b},0.05); border-color: rgba(${r},${g},${b},0.35);`;
         this.glow.style = `background-color: rgba(${r},${g},${b},0.12);`;
-        const night = mood === 'sleeping';
+        const night = mood === 'done';
         for (const star of this.stars)
             star.visible = night;
         if (mood !== this._heroMood) {
@@ -1003,10 +749,10 @@ class Stage {
         }
         if (!this.live)
             return;
-        if (this._heroMood === 'waving') {
+        if (this._heroMood === 'needs') {
             this.glow.ease({opacity: 255, duration: 900, mode: Clutter.AnimationMode.EASE_IN_OUT_SINE,
                 repeatCount: -1, autoReverse: true});
-        } else if (this._heroMood === 'sleeping') {
+        } else if (this._heroMood === 'done') {
             this.stars.forEach((star, i) => star.ease({opacity: 230, duration: 900 + 260 * i,
                 mode: Clutter.AnimationMode.EASE_IN_OUT_SINE, repeatCount: -1, autoReverse: true}));
         }
@@ -1024,7 +770,7 @@ class Stage {
         const [, natWidth] = this.bubble.get_preferred_width(-1);
         const width = Math.min(natWidth, this.width - 8);
         this.bubble.width = width;
-        const headTop = pet.actor.y + s.image * FEET - s.image * 11 / 45 + pet.image.translation_y;
+        const headTop = pet.actor.y + s.floorY - s.bodyH;
         const above = headTop - this.bubble.height - 4 >= 0;
         let x = above ? pet.px - width / 2
             : pet.px + s.body / 2 + width + 4 <= this.width ? pet.px + s.body / 2 + 4 : pet.px - s.body / 2 - width - 4;
@@ -1032,22 +778,6 @@ class Stage {
         this.bubble.set_position(Math.round(x), Math.round(above ? headTop - this.bubble.height - 4 : Math.max(0, headTop)));
         this.actor.set_child_above_sibling(this.bubble, null);
         this.timers.after('bubble', 4500, () => this.bubble.hide());
-    }
-
-    // Floating hearts, notes, sparkles and z's
-    burst(pet, symbol, color, count) {
-        if (!this.live || this.gone)
-            return;
-        const s = this.size;
-        for (let i = 0; i < count; i++) {
-            const bit = new St.Label({text: symbol, style_class: 'claude-particle', style: `color: ${color};`});
-            this.actor.add_child(bit);
-            const x = pet.px - s.gu * 0.4 + (Math.random() - 0.5) * s.body;
-            const y = pet.actor.y + s.image * FEET - s.image * 11 / 45 - s.gu * 0.6 - Math.random() * s.gu * 0.5;
-            bit.set_position(Math.round(x), Math.round(y));
-            bit.ease({y: Math.round(y - s.gu * 2.4), x: Math.round(x + (Math.random() - 0.5) * s.gu * 2), opacity: 0,
-                duration: 1500, mode: Clutter.AnimationMode.EASE_OUT_QUAD, onStopped: () => bit.destroy()});
-        }
     }
 
     // Events go to the chat's own pet; the hero takes the ones about
@@ -1066,12 +796,10 @@ class Stage {
         if (!live) {
             this.timers.stopAll();
             this.bubble.hide();
-            for (const child of this.actor.get_children()) {
-                if (child.has_style_class_name?.('claude-particle'))
-                    child.destroy();
-            }
+        } else {
+            this.pets.updateTheme(this.actor);
         }
-        // shown and laid out: from now on pets walk in
+        // shown and laid out: from now on a new chat's pet digs up
         if (live && !this.firstShown)
             this.timers.after('firstShown', 500, () => {
                 this.firstShown = true;
@@ -1095,14 +823,14 @@ class Stage {
     _greet() {
         const hero = this.list.get('');
         const mood = this.pets.mood;
-        if (!hero || mood === 'sleeping' || mood === 'loading')
+        if (!hero || mood === 'done' || mood === 'loading')
             return;
-        const [pose, text] = holidayGreeting();
+        const text = holidayGreeting();
         if (text) {
-            hero.react(pose, text, 3500);
-            hero.hop(this.size.gu * 0.6);
+            hero.react('celebrate');
+            hero.say(text);
         } else if (Math.random() < 0.6) {
-            hero.hop(this.size.gu * 0.6);
+            hero.react('wave');
             hero.say('Hi!');
         }
     }
@@ -1121,15 +849,15 @@ class Stage {
 export class Pets {
     constructor(ctx) {
         this.ctx = ctx;
-        this._icons = new Map();
         this._stages = new Map();   // group key -> Stage
+        this.theme = {fx: 'rgba(255,255,255,0.55)', text: '#ffffff'};   // the popup's text color (updateTheme)
         this.mood = 'loading';
         this.accentRgb = [53, 132, 228];   // "working" blue (stylesheet.css)
         this.hero = new Stage(this, 'hero', true);
-        const clawd = new Pet(this.hero, '', {});
-        this.hero.list.set('', clawd);
-        this.hero.actor.insert_child_below(clawd.actor, this.hero.bubble);
-        clawd.sync();
+        const talpa = new Pet(this.hero, '', {});
+        this.hero.list.set('', talpa);
+        this.hero.actor.insert_child_below(talpa.actor, this.hero.bubble);
+        talpa.sync();
         this._heroShown = null;
     }
 
@@ -1145,13 +873,12 @@ export class Pets {
         return this.settings.get_boolean('show-pet');
     }
 
-    icon(pose) {
-        if (!this._icons.has(pose)) {
-            this._icons.set(pose, new Gio.FileIcon({
-                file: Gio.File.new_for_path(GLib.build_filenamev([this.ctx.petsDir, `clawd-${pose}.svg`])),
-            }));
-        }
-        return this._icons.get(pose);
+    // Talpa's words and particles take the popup's text color
+    updateTheme(actor) {
+        if (!actor.get_stage())
+            return;
+        const c = actor.get_theme_node().get_foreground_color();
+        this.theme = {fx: `rgba(${c.red},${c.green},${c.blue},0.55)`, text: `rgba(${c.red},${c.green},${c.blue},1)`};
     }
 
     // An account's stage with its chats' pets, or null when it has none

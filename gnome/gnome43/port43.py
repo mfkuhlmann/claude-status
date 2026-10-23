@@ -47,6 +47,7 @@ FORBIDDEN = [
 ]
 
 GI = re.compile(r"^import (\w+) from 'gi://(\w+)(?:\?version=[\d.]+)?';$")
+CAIRO = re.compile(r"^import Cairo from 'cairo';$")
 SHELL_UI = re.compile(r"^import \* as (\w+) from 'resource:///org/gnome/shell/ui/(\w+)\.js';$")
 BASE = re.compile(r"^import \{(Extension|ExtensionPreferences)\} from 'resource:///org/gnome/"
                   r"(?:shell/extensions/extension|Shell/Extensions/js/extensions/prefs)\.js';$")
@@ -87,6 +88,8 @@ def convert(root, file):
         if line.startswith("import "):
             if m := GI.match(line):
                 new = f"const {m[1]} = imports.gi.{m[2]};"
+            elif CAIRO.match(line):
+                new = "const Cairo = imports.cairo;"
             elif m := SHELL_UI.match(line):
                 new = f"const {m[1]} = imports.ui.{m[2]};"
             elif m := BASE.match(line):

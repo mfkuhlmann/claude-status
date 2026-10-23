@@ -389,7 +389,7 @@ KCM.SimpleKCM {
         QQC2.CheckBox {
             id: showPet
             Kirigami.FormData.label: i18n("Pet:")
-            text: i18n("Show Clawd in the popup and in notifications")
+            text: i18n("Show Talpa, the pet, in the popup and in notifications")
         }
 
         QQC2.SpinBox {

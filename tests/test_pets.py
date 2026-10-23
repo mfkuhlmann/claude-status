@@ -1,56 +1,118 @@
-"""Every pose the pet code asks for exists, and every bundled pose is used."""
+"""Talpa, the pet: what the widget asks of it exists, its shared code runs in
+every host, and its rules hold (run in Node where it's installed)."""
+import json
 import re
+import shutil
+import subprocess
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent / "package/contents"
 PETS = ROOT / "pets"
-# strings in the QML that aren't pose names
-NOT_POSES = {"px", "lift", "squash", "breath", "z", "file", "chat", "bg", "interactive", "done", "failed",
-             "stopped", "reset", "waiting", "working", "idle", "limit", "none", "permission", "question",
-             "network access", "goal approval", "claude-vscode", "five_hour", "plasma_workspace", "oops",
-             "jump-error", "dialog-warning", "dialog-ok", "dialog-error", "dialog-information", "view-refresh",
-             "view-visible", "internet-web-browser", "dialog-messages", "list-add", "list-remove", "user-home",
-             "folder", "media-playback-stop", "executable", "x-kde-display-appname", "oncall",
-             "x", "y", "opacity", "notify-", "transparent", "lift", "petkey",
-             "black", "white", "label", "leaving", "hero", "source", "playing"}
-
-
-# strings in the GNOME pets.js that aren't pose names (timers, events, settings)
-GNOME_NOT_POSES = {"action", "black", "white", "brain", "bubble", "chat-pets", "show-pet", "hero", "leave", "destroy",
-                   "poses", "reaction", "scale-y", "tickle", "worries", "x", "z", "ok", "oops",
-                   "done", "failed", "stopped", "reset", "waiting", "working", "idle"}
+TALPA = ROOT / "ui/talpa"
 
 
 def quoted(text):
-    return set(re.findall(r'"([a-z0-9][a-z0-9-]*)"', text))
+    return set(re.findall(r'"([a-zA-Z][\w-]*)"', text))
 
 
-class PoseTests(unittest.TestCase):
-    def test_every_pose_used_exists_and_every_file_is_used(self):
-        strip = (ROOT / "ui/Pet.qml").read_text() + (ROOT / "ui/PetStrip.qml").read_text()
+def talpa_names():
+    text = (TALPA / "actions.mjs").read_text()
+    actions = text[text.index("export const ACTIONS = {"):text.index("export const MOODS")]
+    moods = text[text.index("export const MOODS"):]
+    pools = re.findall(r"pool: \{([^}]*)\}", moods)
+    return (set(re.findall(r"^    (\w+): \{", actions, re.M)) | {"comego"} - {"comego"},
+            set(re.findall(r"^    (\w+): \{ base", moods, re.M)),
+            {n for pool in pools for n in re.findall(r"(\w+):", pool)})
+
+
+def run_node(script):
+    """Runs a module script in Node with Talpa imported; returns its JSON output."""
+    if not shutil.which("node"):
+        raise unittest.SkipTest("node isn't installed")
+    code = (f"import {{ Talpa }} from {json.dumps(str(TALPA / 'talpa.mjs'))};\n"
+            f"import {{ ACTIONS, MOODS }} from {json.dumps(str(TALPA / 'actions.mjs'))};\n" + script)
+    out = subprocess.run(["node", "--input-type=module", "-e", code], capture_output=True, text=True, timeout=120)
+    if out.returncode:
+        raise AssertionError(out.stderr)
+    return json.loads(out.stdout)
+
+
+# A canvas that draws nothing, for running Talpa's drawing code
+NULL_CANVAS = """
+const ctx = new Proxy({}, { get: (t, k) => k === 'createLinearGradient' ? () => ({ addColorStop() {} })
+    : k in t ? t[k] : () => {}, set: (t, k, v) => { t[k] = v; return true; } });
+"""
+
+
+class TalpaTests(unittest.TestCase):
+    def test_every_action_and_mood_the_widget_asks_for_exists(self):
+        actions, moods, pools = talpa_names()
+        pet = (ROOT / "ui/Pet.qml").read_text()
+        asked = set()
+        for call in re.findall(r"react\(([^)]*)\)", pet):
+            asked |= quoted(call)
+        events = pet[pet.index("const action = {"):]
+        asked |= quoted(events[:events.index("\n")])
+        self.assertEqual(sorted(asked - actions), [], "actions Pet.qml asks for that Talpa doesn't have")
+        self.assertLessEqual(pools, actions, "a mood picks an action that doesn't exist")
+        block = pet[pet.index("readonly property string mood:"):]
         main = (ROOT / "ui/main.qml").read_text()
-        mood_block = main[main.index("readonly property string petMood"):]
-        mood_block = mood_block[:mood_block.index("\n    }\n")]
-        used = (quoted(strip) | quoted(mood_block)) - NOT_POSES
-        files = {p.name[len("clawd-"):-len(".svg")] for p in PETS.glob("clawd-*.svg")}
-        self.assertEqual(sorted(used - files), [], "poses the code uses but that have no file")
-        self.assertEqual(sorted(files - used), [], "bundled poses nothing uses")
+        mood = main[main.index("readonly property string petMood"):]
+        used = quoted(block[:block.index("\n\n")]) | quoted(mood[:mood.index("\n    }\n")])
+        used -= {"waiting", "working", "idle", "failed"} - moods   # (the chat states it reads)
+        self.assertEqual(sorted(used - moods - {"waiting"}), [], "moods the widget sets that Talpa doesn't have")
 
-    def test_every_pose_the_gnome_pets_use_exists(self):
-        # The GNOME extension's pets ask for the same files (single-quoted there)
-        gnome = ROOT.parent.parent / "gnome/extension"
-        pets = (gnome / "ui/pets.js").read_text()
-        logic = (gnome / "logic.js").read_text()
-        mood = logic[logic.index("export function petMood"):]
-        mood = mood[:mood.index("\n}\n")]
-        words = set(re.findall(r"'([a-z0-9][a-z0-9-]*)'", pets + mood))
-        used = {w for w in words if not w.startswith("claude-") and not w.endswith("-event")} - GNOME_NOT_POSES
-        files = {p.name[len("clawd-"):-len(".svg")] for p in PETS.glob("clawd-*.svg")}
-        self.assertEqual(sorted(used - files), [], "poses the GNOME pets use but that have no file")
-        notifier = (gnome / "notifier.js").read_text()
-        for name in re.findall(r"'(notify-[a-z]+\.svg|clawd-[a-z-]+\.svg)'", notifier):
-            self.assertTrue((PETS / name).is_file(), name)
+    def test_the_shared_code_runs_in_every_host(self):
+        # Qt's and GNOME Shell's JavaScript engines: no optional chaining, no
+        # nullish operator, no class fields; imports only of its own modules
+        for path in TALPA.glob("*.mjs"):
+            text = re.sub(r"//.*", "", path.read_text())
+            self.assertNotRegex(text, r"\?\.[\w(\[]|\?\?", path.name)
+            for body in re.findall(r"(?ms)^(?:export )?class \w+ \{\n(.*?)^\}", text):
+                self.assertNotRegex(body, r"(?m)^    (static\s+)?#?\w+\s*=", path.name)
+            for spec in re.findall(r"from '([^']+)'", text):
+                self.assertRegex(spec, r"^\./\w+\.mjs$", path.name)
+
+    def test_every_action_runs_to_its_end_and_draws(self):
+        result = run_node(NULL_CANVAS + """
+const out = {};
+for (const name of Object.keys(ACTIONS)) {
+    const t = new Talpa({ travels: true });
+    t.onTravel = () => {};
+    let now = 1000, ended = null;
+    t.tick(now);
+    t.react(name, ok => { ended = ok; });
+    for (let i = 0; i < 600 && ended === null; i++) { now += 50; t.tick(now); t.draw(ctx); }
+    out[name] = ended;
+}
+console.log(JSON.stringify(out));""")
+        self.assertEqual({k for k, v in result.items() if v is not True}, set())
+
+    def test_while_held_nothing_else_moves_it(self):
+        # It was petted, then grabbed while the petting went on: the action
+        # ending gave the brain its turn, and it dug a burrow in mid-air
+        # (seen on the design page, 2026-10-23). Held, it waits; dropped, it
+        # lands and digs in where it landed.
+        result = run_node(NULL_CANVAS + """
+const t = new Talpa({ travels: true });
+t.onTravel = () => {};
+let now = 1000;
+t.tick(now);
+t.react('pet');
+for (let i = 0; i < 8; i++) { now += 50; t.tick(now); }
+t.setHeld(true);
+t.setMood('working');
+const held = [];
+for (let i = 0; i < 120; i++) { now += 50; t.tick(now); t.draw(ctx); held.push([t.st.depth, t.st.held, !!t.run]); }
+let landed = null;
+t.land(50, ok => { landed = ok; });
+for (let i = 0; i < 120; i++) { now += 50; t.tick(now); }
+console.log(JSON.stringify({ held: held, landed: landed, depth: t.st.depth, after: t.held }));""")
+        self.assertEqual({tuple(h) for h in result["held"]}, {("out", "1", False)})
+        self.assertTrue(result["landed"])
+        self.assertNotEqual(result["depth"], "out")
+        self.assertFalse(result["after"])
 
     def test_notification_icons_exist(self):
         main = (ROOT / "ui/main.qml").read_text()
@@ -59,17 +121,16 @@ class PoseTests(unittest.TestCase):
         for pose in set(re.findall(r'"([a-z0-9-]+)"', block)) - {"done", "failed", "waiting", "notify-"}:
             self.assertTrue((PETS / f"notify-{pose}.svg").is_file(), pose)
 
-    def test_shared_viewbox_and_no_external_content(self):
+    def test_icons_have_no_external_content(self):
         for p in PETS.glob("*.svg"):
-            text = p.read_text()
-            if p.name.startswith("clawd-"):
-                self.assertIn('viewBox="-15 -25 45 45"', text, p.name)
-            self.assertNotRegex(text, r"(?i)<script|<image|<foreignObject|href=\"(?!#)|url\((?!#)|@import", p.name)
+            self.assertNotRegex(p.read_text(), r"(?i)<script|<image|<foreignObject|href=\"(?!#)|url\((?!#)|@import", p.name)
 
-    def test_pivots_baked(self):
-        # Qt draws CSS transform-origin wrongly: tools/bake_pet_origins.py must have run
-        for p in PETS.glob("*.svg"):
-            self.assertNotRegex(p.read_text(), r"transform-origin\s*:\s*-?[\d.]+px", p.name)
+    def test_no_clawd_left(self):
+        # Talpa replaced Clawd (Anthropic's mascot) everywhere
+        repo = ROOT.parent.parent
+        for path in list((repo / "package").rglob("*")) + list((repo / "gnome/extension").rglob("*")) + [repo / "README.md"]:
+            if path.is_file() and path.suffix in {".qml", ".js", ".mjs", ".py", ".xml", ".md", ".svg", ".json", ".css"}:
+                self.assertNotRegex(path.read_text(errors="ignore"), r"(?i)clawd", str(path.relative_to(repo)))
 
 
 class ThemeTests(unittest.TestCase):
@@ -194,7 +255,7 @@ class SeveralCopiesTests(unittest.TestCase):
         # Every repeating timer and endless animation of the pets runs only
         # while it can be seen (playing), not just while the popup is open
         # (live): on the desktop the dashboard is always "open".
-        for name in ("Pet.qml", "PetStrip.qml"):
+        for name in ("Pet.qml", "PetStrip.qml", "TalpaView.qml"):
             lines = (ROOT / "ui" / name).read_text().split("\n")
             for i, line in enumerate(lines):
                 if not re.search(r"^\s*(loops: Animation\.Infinite|repeat: true)\s*$", line):
@@ -389,11 +450,13 @@ class PetLifeTests(unittest.TestCase):
         grab = pet[pet.index("id: grab"):]
         self.assertRegex(grab, r"onCanceled:\s*\{[^}]*pet\.drop\(\)")
 
-    def test_a_pet_whose_chat_left_waves_goodbye(self):
-        # "then it waves and walks off" (PetStrip.qml): a pet without a chat is
-        # in the mood "waving", and a waving pet shows waitPose, the on-call
-        # sign first: it held up the alert sign instead of waving
+    def test_a_pet_whose_chat_left_waves_and_digs_away(self):
+        # "then it waves and digs away" (PetStrip.qml): leaving plays Talpa's
+        # leave, which waves before it digs in, and only then is the pet gone
         pet = (ROOT / "ui/Pet.qml").read_text()
-        pose = pet[pet.index("readonly property string moodPose:"):]
-        pose = pose[:pose.index("readonly property string pose:")]
-        self.assertRegex(pose, r'mood === "waving" \? \(!lone && !chat \? "waving" : waitPose\)')
+        self.assertRegex(pet, r"onLeavingChanged: \{\n\s+if \(leaving && !held\)\n\s+goAway\(\)")
+        self.assertRegex(pet, r'react\("leave", ok => \{\n\s+if \(ok && pet\.leaving\) \{\n\s+pet\.departed = true\n\s+pet\.gone\(\)')
+        actions = (TALPA / "actions.mjs").read_text()
+        leave = actions[actions.index("    leave: {"):]
+        leave = leave[:leave.index("}] }")]
+        self.assertLess(leave.index("arms: 'wave'"), leave.index("depth: 'gone'"))

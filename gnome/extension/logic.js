@@ -318,19 +318,19 @@ export function stopQuestion(session) {
     return fmt("Stop “%1”? It's finished, so this only shuts down its idle process. The conversation is kept.", session.name);
 }
 
-// The pets' mood for the whole dashboard (the big Clawd)
+// The pets' mood for the whole dashboard (the big Talpa)
 export function petMood(status, errorText, overallState, agentsRunning) {
     if (!status && errorText)
         return 'error';
     if (!status)
         return 'loading';
     if (overallState === 'waiting')
-        return 'waving';
+        return 'needs';
     if (overallState === 'working')
-        return agentsRunning > 0 ? 'working-juggling' : 'working-typing';
+        return agentsRunning > 0 ? 'agents' : 'working';
     if (overallState === 'idle')
-        return 'idle-living';
-    return 'sleeping';
+        return 'idle';
+    return 'done';
 }
 
 export function agentsRunning(groups) {

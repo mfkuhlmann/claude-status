@@ -96,11 +96,11 @@
       <default>true</default>
     </entry>
     <entry name="showPet" type="Bool">
-      <label>Show Clawd the pet in the popup and in notifications</label>
+      <label>Show Talpa, the pet, in the popup and in notifications</label>
       <default>true</default>
     </entry>
     <entry name="chatPets" type="Int">
-      <label>Pets for each account's chats in the list, at most (0 = only the big Clawd)</label>
+      <label>Pets for each account's chats in the list, at most (0 = only the big Talpa)</label>
       <default>5</default>
       <min>0</min>
       <max>8</max>

@@ -90,8 +90,8 @@ export default class ClaudeStatusPreferences extends ExtensionPreferences {
 
         const look = new Adw.PreferencesGroup({title: 'Panel and popup'});
         look.add(toggle('show-usage-in-panel', 'Show 5-hour usage next to the icon'));
-        look.add(toggle('show-pet', 'Show Clawd', 'in the popup and in notifications'));
-        look.add(needs(spin('chat-pets', 'Chat pets per account, at most', '0 keeps only the big Clawd', 0, 8, 1),
+        look.add(toggle('show-pet', 'Show Talpa, the pet', 'in the popup and in notifications'));
+        look.add(needs(spin('chat-pets', 'Chat pets per account, at most', '0 keeps only the big Talpa', 0, 8, 1),
             'show-pet'));
         look.add(toggle('show-tokens', 'Show token totals', 'from local transcripts'));
         page.add(look);
