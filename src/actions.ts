@@ -63,6 +63,16 @@ export function folderOf(command: string): string | null {
   return word.startsWith("'") ? word.slice(1, -1).replace(/'"'"'/g, "'") : word;
 }
 
+// A folder typed for an SSH host: its full path, or one in its home folder
+// ("~/project", home: the host's); null for any other, which the chat's
+// command (inFolder, the backend's in_folder) would leave for the home folder
+export function typedFolder(typed: string, home: string | null): string | null {
+  const t = typed.trim();
+  if (t.startsWith("/")) return t;
+  if (home && (t === "~" || t.startsWith("~/"))) return home.replace(/\/+$/, "") + t.slice(1);
+  return null;
+}
+
 const AGAIN_MS = 30000; // pressing the shortcut again this soon goes on to the next chat
 
 export class Actions {
@@ -491,7 +501,10 @@ export class Actions {
       pid: null,
       openCommand: plan.openCommand ?? null,
     };
-    const codeHere = claudeCodeHere(group, this.dash.claudeCodeInfo());
+    // (Claude Code reopens it when it's on the chat's account, which isn't
+    // the plan's when the plan was shared with it)
+    const chatGroup = (machine?.groups ?? []).find((g) => (g.profileKeys ?? []).includes(chat.profileDir));
+    const codeHere = claudeCodeHere(chatGroup ? { ...chatGroup, host } : group, this.dash.claudeCodeInfo());
     if (reopensInClaudeCode(settings.reopenIn(), this.cliOn(host), codeHere)) return this.openInClaudeCode(chat);
     if (!chat.openCommand && !host) {
       // (an older status has no command for it: the widget's jump.py reopens it)
@@ -849,9 +862,15 @@ export class Actions {
       if (!picked?.length) return;
       folder = host ? picked[0].path : picked[0].fsPath;
     } else if (pick.choose === "type") {
-      const typed = await vscode.window.showInputBox({ prompt: `Folder on ${host}`, placeHolder: "/home/you/project" });
-      if (!typed) return;
-      folder = typed.trim();
+      const remoteHome = folderOf(home);
+      const typed = await vscode.window.showInputBox({
+        prompt: `Folder on ${host}`,
+        placeHolder: "/home/you/project",
+        validateInput: (v) => (!v.trim() || typedFolder(v, remoteHome) ? null : "The folder's full path, e.g. /home/you/project or ~/project"),
+      });
+      const typedPath = typedFolder(typed ?? "", remoteHome);
+      if (!typedPath) return;
+      folder = typedPath;
     }
     const taskArgs = [...(task ? ["--prompt", task] : []), ...(plan ? ["--plan", plan.slug, "--plan-profile", plan.profileDir] : [])];
     if (pick.start === "queue") {

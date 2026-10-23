@@ -13,7 +13,13 @@ import {
   reopensInClaudeCode,
   terminalReopenHint,
 } from "../src/shared/model";
-import type { Group } from "../src/shared/types";
+import type { Group, PlanItem } from "../src/shared/types";
+import * as vscode from "vscode";
+import type { AccountSwitch } from "../src/accountSwitch";
+import { Actions, typedFolder } from "../src/actions";
+import type { Backend } from "../src/backend";
+import type { Dashboard } from "../src/dashboard";
+import type { Terminals } from "../src/terminals";
 
 const chat = { kind: "interactive", entrypoint: "cli", state: "idle", pid: 42 };
 
@@ -59,4 +65,52 @@ test("each half says what it does, or why it's greyed out", () => {
   assert.match(claudeCodeReopenHint(personal, onWork, [work, personal]), /^Claude Code runs on work · Team, not personal · Pro/);
   assert.match(claudeCodeReopenHint(work, { available: false, profileKey: null }, []), /isn't installed or enabled/);
   assert.match(claudeCodeReopenHint(work, onWork, [work]), /^Opens the chat in a Claude Code tab/);
+});
+
+test("a plan's chat reopens in a Claude Code tab only when Claude Code is on the chat's account", async () => {
+  // (the plan is shared with work, Claude Code's account; the chat that made it is personal's)
+  const stub = vscode as unknown as typeof import("./vscode-stub");
+  const getConfiguration = stub.workspace.getConfiguration;
+  stub.workspace.getConfiguration = () => ({
+    get: <T>(key: string, fallback: T) => (key === "reopenIn" ? "claudeCode" : fallback) as T,
+    update: async () => undefined,
+  });
+  try {
+    const work = { id: "w", title: "work", profileKeys: ["work"], sessions: [], vscodeHere: true } as unknown as Group;
+    const personal = { id: "p", title: "personal", profileKeys: ["personal"], sessions: [] } as unknown as Group;
+    const plan = {
+      slug: "s", title: "Plan", path: "/p.md", updatedAt: 0, key: "work/s", profileDir: "work", profile: "work", shared: true,
+      chatId: "c1", chatProfileDir: "personal", cwd: "/proj", cwdShort: "~/proj", openCommand: "cd /proj 2>/dev/null; claude --resume c1",
+    } as PlanItem;
+    const helpers: string[][] = [];
+    const runs: string[] = [];
+    const dash = {
+      demo: false,
+      state: () => ({ status: { groups: [work, personal], cli: { installed: true } }, hosts: [] }),
+      claudeCodeInfo: () => ({ available: true, profileKey: "work" }),
+      setActionError: () => undefined,
+      isVisible: () => true,
+    };
+    const actions = new Actions(
+      { action: async (_script: string, args: string[]) => (helpers.push(args), { ok: false, message: "Claude Code isn't on personal" }) } as unknown as Backend,
+      dash as unknown as Dashboard,
+      { run: async (_key: string, _name: string, command: string) => void runs.push(command) } as unknown as Terminals,
+      { warn: () => undefined } as unknown as vscode.LogOutputChannel,
+      {} as AccountSwitch,
+    );
+    await actions.continuePlanChat(plan, work);
+    assert.deepEqual(helpers, [], "not jump.py --resume --vscode on an account Claude Code isn't on");
+    assert.deepEqual(runs, [plan.openCommand], "in a terminal, on personal");
+  } finally {
+    stub.workspace.getConfiguration = getConfiguration;
+  }
+});
+
+test("a folder typed for an SSH host: its full path, or one in its home folder", () => {
+  assert.equal(typedFolder(" /srv/app ", "/home/me"), "/srv/app");
+  assert.equal(typedFolder("~/project", "/home/me"), "/home/me/project", "not the home folder itself");
+  assert.equal(typedFolder("~", "/home/me/"), "/home/me");
+  assert.equal(typedFolder("project", "/home/me"), null, "it would start in the home folder");
+  assert.equal(typedFolder("~other/x", "/home/me"), null);
+  assert.equal(typedFolder("~/project", null), null, "the host's home isn't known");
 });

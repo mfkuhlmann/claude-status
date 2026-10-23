@@ -67,3 +67,43 @@ test("opening the view doesn't cancel the next try of a Python that didn't work"
     mock.timers.reset();
   }
 });
+
+test("a slow pollInterval isn't made faster while the view is hidden", async () => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  const { overrides } = await import("./vscode-stub");
+  overrides.set("pollInterval", 30000);
+  try {
+    let polls = 0;
+    const backend = {
+      checkPython: async () => "",
+      status: async () => (polls++, { status: demoState(NOW).status! }),
+    } as unknown as Backend;
+    const log = { warn() {}, info() {}, error() {} } as unknown as vscode.LogOutputChannel;
+    const dash = new Dashboard(backend, { handle() {}, isLeader: () => true } as unknown as Notifier, log);
+    await dash.start();
+    mock.timers.tick(0);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(polls, 1);
+    mock.timers.tick(10000); // hidden: not sooner than the setting
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(polls, 1, "no poll after 10 s");
+    mock.timers.tick(20000);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(polls, 2);
+    dash.dispose();
+  } finally {
+    overrides.clear();
+    mock.timers.reset();
+  }
+});
+
+test("a host listed twice in the settings is one host", async () => {
+  const { overrides } = await import("./vscode-stub");
+  const { settings } = await import("../src/config");
+  overrides.set("sshHosts", ["a", " b ", "a", ""]);
+  try {
+    assert.deepEqual(settings.sshHosts(), ["a", "b"]);
+  } finally {
+    overrides.clear();
+  }
+});

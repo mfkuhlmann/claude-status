@@ -9,6 +9,36 @@
   tokens, and the bars of days with no weekday under them reached down into
   the weekdays, taller than they should be: a day without tokens now has no
   bar, and all bars stand on the same line.
+- Feedback on a plan was never sent: the chat didn't reopen and nothing
+  was copied to paste, although your comments were cleared. It reaches the
+  chat again.
+- **Set Up Plan Usage Bars** replaced a `settings.json` that is a link
+  (accounts sharing one settings file) with a plain file per account: it
+  writes through the link now, once per file.
+- **Remove from the list** is offered on every finished chat, also one whose
+  process is still there, as in the Plasma widget.
+- Continuing the chat that made a shared plan opened Claude Code on the
+  plan's account instead of the chat's, and failed.
+- A folder typed for an SSH host as `~/project` was ignored, so the chat
+  started in the home folder: it's taken in the host's home folder now, and
+  other relative paths are refused.
+- While the view is hidden, a slow `claudeStatus.pollInterval` (over 10 s)
+  is kept instead of checking every 10 s; a host listed twice in
+  `claudeStatus.sshHosts` shows once.
+- Where an SSH host's plan usage shows under another account
+  (`claudeStatus.sshUsage`), **Continue on …** and waiting for the limit
+  ignored that usage; the host's memories showed its own clock's time.
+- Token counts said *1000.0k* just below a million.
+- Pets: a chat's pet never heard that its usage limit had reset (it kept
+  its low-battery pose); a hidden view piled up the sparks of pet
+  reactions until it was shown; a pet you held could walk off or vanish
+  from under the pointer; a pet still walking in went on to its old spot.
+- The backend it shares with the Claude Status widget got the widget's
+  fixes: tasks and plans reach Claude's tab whole (an `&` cut them), a
+  one-word task no longer runs a Claude command, switching VS Code's account
+  keeps the settings file as it was (a link, its line ends, commas inside
+  values), **Remove** refuses to take files other accounts use to the
+  Trash, and more (see the widget's changelog).
 
 ## 1.13.0
 

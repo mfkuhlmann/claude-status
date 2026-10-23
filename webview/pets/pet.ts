@@ -203,6 +203,7 @@ export class Pet {
 
     this.enterTimer = new Timer(clock, 60, () => this.moveTo(this.homeX, true, true));
     this.leaveTimer = new Timer(clock, 300, () => {
+      if (this.held) return; // put down, it goes on (landed)
       this.reaction = "";
       this.offstage = true;
       const w = this.stage.width, size = this.stage.imageSize;
@@ -402,13 +403,11 @@ export class Pet {
     if (leaving !== this.leaving) {
       this.leaving = leaving;
       if (leaving) {
-        // a wave first (or the end of a reaction), then off he goes
-        this.leaveTimer.interval = Math.max(900, this.reactionUntil - this.stage.clock.now() + 300);
-        this.leaveTimer.restart();
+        this.leaveSoon();
       } else {
         this.leaveTimer.stop();
         this.offstage = false;
-        this.moveTo(this.homeX, true);
+        if (!this.held) this.moveTo(this.homeX, true);
       }
     }
     this.changed();
@@ -433,7 +432,15 @@ export class Pet {
       this.changed();
     } else if (!this.leaving && !this.held && !this.offstage) {
       this.moveTo(x, true);
+    } else if (this.offstage && !this.leaving && !this.held && this.moving) {
+      this.moveTo(x, true, true); // still walking in: to where its spot is now
     }
+  }
+
+  // A wave first (or the end of a reaction), then off he goes
+  private leaveSoon(): void {
+    this.leaveTimer.interval = Math.max(900, this.reactionUntil - this.stage.clock.now() + 300);
+    this.leaveTimer.restart();
   }
 
   // The stage was shown or hidden (offFor: ms it was hidden)
@@ -498,7 +505,7 @@ export class Pet {
   private strideStopped(): void {
     this.moving = false;
     this.running = false;
-    if (this.leaving && this.offstage) {
+    if (this.leaving && this.offstage && !this.held) {
       this.stage.removePet(this);
       return;
     }
@@ -594,6 +601,7 @@ export class Pet {
   }
 
   private pickUp(): void {
+    this.held = true; // first: a walk that stops now isn't an arrival or a departure
     this.stopMoving();
     this.reaction = "";
     this.action = "";
@@ -601,7 +609,6 @@ export class Pet {
     this.faller.stop();
     this.lander.stop();
     this.squash = 1;
-    this.held = true;
     this.heldLong = false;
     this.heldTimer.restart();
     this.say("Whoa!");
@@ -622,6 +629,7 @@ export class Pet {
     if (fromHeight > gu * 2.6) this.react("sick", "Ugh… I don't feel so good.", 2600);
     else if (fromHeight > gu * 1.5) this.react("dizzy", "Ouch… the room is spinning.", 2200);
     this.heldLong = false;
+    if (this.leaving) this.leaveSoon(); // its chat left while you held it: now it goes
     this.changed();
   }
 

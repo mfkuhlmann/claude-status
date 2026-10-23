@@ -13,8 +13,10 @@ import {
   findChatRef,
   duration,
   formatTokens,
+  handoverTarget,
   headlineText,
   heroMood,
+  limitReset,
   machineStatus,
   overallState,
   panelWindow,
@@ -140,6 +142,24 @@ test("plan usage on every host, or on none", () => {
   assert.equal(none.status!.groups[0].limitsFrom, "lab");
 });
 
+test("where an account's usage is hidden, what weighs it still uses the account's numbers", () => {
+  const status = machine([account("work", 100, NOW - 60_000), account("personal", 97, NOW)]);
+  const lab = { ...machine([account("work", 100, NOW - 600_000, { shareProfile: ".claude-work" }),
+                            account("personal", 96, NOW - 600_000, { shareProfile: ".claude-personal" })]), canShare: true };
+  const hosts = [{ ...host("lab", []), result: lab }];
+  const stopped = { stopped: { kind: "limit", window: "five_hour", text: "", at: NOW, resetsAt: NOW + 3600_000 },
+                    chatId: "c1", sessionId: "c1", pid: null, state: "done", profileDir: ".claude-work" } as Session;
+  for (const mode of ["once", "none"] as const) {
+    const shown = shareUsage(status, hosts, mode);
+    const [labWork, labPersonal] = shown.hosts[0].result!.groups;
+    assert.ok(labWork.limitsHidden && labWork.limits === null && labPersonal.limitsHidden); // (not shown on lab)
+    // personal is full: no "Continue on personal" for a chat on lab, as on this computer
+    assert.equal(handoverTarget(stopped, shareAccounts(machineStatus({ ...shown }, "lab"))), null);
+    // and a task on lab's work can wait for its limit
+    assert.equal(limitReset(labWork, NOW)?.at, NOW + 3600_000);
+  }
+});
+
 test("the status bar shows the usage of the account VS Code's Claude runs on, before an active one", () => {
   const busy = { state: "working" } as Session;
   const status = machine([account("work", 99, NOW - 600_000), account("personal", 79, NOW, { sessions: [busy] })]);
@@ -170,6 +190,10 @@ test("formatting", () => {
   assert.equal(duration(25 * 3600000), "1d 1h");
   assert.equal(formatTokens(1500), "1.5k");
   assert.equal(formatTokens(2_500_000), "2.5M");
+  // the unit by what it rounds to
+  assert.equal(formatTokens(999_949), "999.9k");
+  assert.equal(formatTokens(999_960), "1.0M");
+  assert.equal(formatTokens(999_960_000), "1.0B");
   assert.equal(stateText({ state: "done", reason: "failed", since: NOW - 120000 }, NOW), "Failed · 2m");
   const window = { key: "five_hour", label: "5h", pct: 99, reset: false };
   assert.equal(resetText({ ...window, resetsAt: NOW + 30000 }, NOW), "resets in <1m", "the last minute doesn't read 0m");
@@ -213,6 +237,14 @@ test("a host that didn't answer this time doesn't count; its clock is put right"
   assert.equal(shifted.generatedAt, result.generatedAt + 60000);
   assert.equal(shifted.groups[0].sessions[0].since, (result.groups[0].sessions[0].since ?? 0) + 60000);
   assert.equal(toLocalClock(result, 2000), result, "a few seconds: just the network");
+});
+
+test("a host's memories come onto this computer's clock too, like its plans", () => {
+  const memory = { key: "m", name: "m", description: "", type: "", path: "/m.md", folder: "", folderShort: "", profileDir: ".claude", profile: "main", updatedAt: NOW - 60_000 };
+  const result = machine([account("work", 10, NOW, { memories: [memory] })]);
+  const local = toLocalClock(result, 2 * 3600_000); // the host's clock is 2 hours behind
+  assert.equal(local.groups[0].memories![0].updatedAt, NOW - 60_000 + 2 * 3600_000);
+  assert.equal(result.groups[0].memories![0].updatedAt, NOW - 60_000); // (the answer itself stays as it was)
 });
 
 test("a new account's name: the backend's rule, and not one there already", () => {

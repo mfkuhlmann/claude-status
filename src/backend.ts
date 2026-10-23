@@ -209,6 +209,8 @@ export class Backend {
       message: String(r.message ?? r.error ?? ""),
       ...(typeof r.command === "string" ? { command: r.command } : {}),
       ...(typeof r.file === "string" ? { file: r.file } : {}),
+      ...(r.how === "resumed" || r.how === "typed" || r.how === "clipboard" ? { how: r.how } : {}),
+      ...(typeof r.text === "string" ? { text: r.text } : {}),
     };
   }
 

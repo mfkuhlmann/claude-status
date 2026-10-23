@@ -178,7 +178,7 @@ export class Dashboard implements vscode.Disposable {
   private scheduleLocal(delay?: number): void {
     if (this.disposed) return;
     clearTimeout(this.localTimer);
-    const wait = delay ?? (this.visible ? settings.pollInterval() : HIDDEN_POLL_MS);
+    const wait = delay ?? (this.visible ? settings.pollInterval() : Math.max(HIDDEN_POLL_MS, settings.pollInterval()));
     this.localTimer = setTimeout(() => void this.refresh().finally(() => this.scheduleLocal()), wait);
   }
 

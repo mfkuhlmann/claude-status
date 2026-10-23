@@ -519,7 +519,7 @@ export class Stage implements PetStage, Animator {
 
   // Floating hearts, notes, sparkles and z's
   burst(pet: Pet, symbol: string, color: string, count: number): void {
-    if (this.destroyed || reducedMotion()) return;
+    if (this.destroyed || !this.live || reducedMotion()) return; // (unseen, they'd pile up until it is shown)
     const gu = this.gu;
     for (let i = 0; i < count; i++) {
       const x = pet.px - gu * 0.4 + (Math.random() - 0.5) * this.bodyWidth;

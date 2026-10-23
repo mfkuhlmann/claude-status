@@ -65,9 +65,10 @@ export function shareTitle(host?: string): string {
   return `Continue on another account: share this chat with your other accounts${host ? ` on ${host}` : ""} and pick it up there, or keep it on one account only.`;
 }
 
-// Removing only hides a finished row; a running one would come right back
+// Removing only hides a finished row, also one whose process is still there,
+// as in the Plasma widget (it comes back once it runs again)
 export function canRemove(s: Session): boolean {
-  return s.state === "done" && s.pid === null;
+  return s.state === "done";
 }
 
 // Background jobs with a running process (`claude stop`; a host's come with

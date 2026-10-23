@@ -119,6 +119,25 @@ export function profileDirs(): string[] {
   });
 }
 
+// The file a link leads to (also a dangling one), so that a settings.json that
+// is a link stays one, and profiles that link one file share one change
+function throughLinks(file: string): string {
+  let f = file;
+  for (let i = 0; i < 20; i++) {
+    try {
+      return fs.realpathSync(f);
+    } catch {
+      try {
+        if (!fs.lstatSync(f).isSymbolicLink()) return f;
+        f = path.resolve(path.dirname(f), fs.readlinkSync(f));
+      } catch {
+        return f;
+      }
+    }
+  }
+  return f;
+}
+
 function readJson(file: string): Record<string, any> | null {
   try {
     return JSON.parse(fs.readFileSync(file, "utf8"));
@@ -155,7 +174,8 @@ export function plan(snippet: string, remove: boolean): { changes: Change[]; not
   };
   for (const dir of profileDirs()) {
     const label = dir.replace(os.homedir(), "~");
-    const settingsFile = path.join(dir, "settings.json");
+    const settingsFile = throughLinks(path.join(dir, "settings.json"));
+    if (changes.has(settingsFile)) continue; // shared with a profile planned already
     const settings = readJson(settingsFile);
     if (settings === null) {
       notes.push(`${label}: settings.json isn't valid JSON; left alone.`);

@@ -111,6 +111,7 @@ export function toLocalClock(result: Status, offset: number): Status {
     }
     for (const c of g.sharedHere ?? []) shift(c as unknown as Record<string, unknown>, ["lastActive", "since"]);
     for (const p of g.plans ?? []) shift(p as unknown as Record<string, unknown>, ["updatedAt"]);
+    for (const m of g.memories ?? []) shift(m as unknown as Record<string, unknown>, ["updatedAt"]);
     if (g.limits) {
       shift(g.limits as unknown as Record<string, unknown>, ["updatedAt"]);
       for (const w of g.limits.windows ?? []) {
@@ -278,13 +279,18 @@ export function shareUsage(
   // when the numbers come from another machine
   const shown = (g: Group, host: string): Group => {
     const o = owners.get(g.id);
-    if (host && (mode === "none" || (o && o.host !== host))) return { ...g, limits: null, limitsHidden: true };
+    if (host && (mode === "none" || (o && o.host !== host))) return { ...g, limits: null, limitsHidden: true, accountLimits: o ? o.limits : g.limits };
     return !o || o.from === host ? g : { ...g, limits: o.limits, limitsFrom: o.from };
   };
   return {
     status: status && { ...status, groups: status.groups.map((g) => shown(g, "")) },
     hosts: hosts.map((h) => (h.result ? { ...h, result: { ...h.result, groups: h.result.groups.map((g) => shown(g, h.name)) } } : h)),
   };
+}
+
+// An account's plan usage, also where it isn't shown (shareUsage)
+function usageOf(g: Pick<Group, "limits" | "accountLimits">): Limits | null {
+  return g.limits ?? g.accountLimits ?? null;
 }
 
 // The account VS Code's Claude runs on in this window: this computer's, or
@@ -414,9 +420,10 @@ export function stateText(s: Pick<Session, "state" | "reason" | "since"> & { sto
   }
 }
 
+// (the unit by what it rounds to: 999,960 is "1.0M", not "1000.0k")
 export function formatTokens(n: number): string {
-  if (n >= 1e9) return (n / 1e9).toFixed(1) + "B";
-  if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
+  if (n >= 999.95e6) return (n / 1e9).toFixed(1) + "B";
+  if (n >= 999.95e3) return (n / 1e6).toFixed(1) + "M";
   if (n >= 1e3) return (n / 1e3).toFixed(1) + "k";
   return String(n);
 }
@@ -505,7 +512,7 @@ export function handoverTarget(
   let best: { title: string; shareProfile: string; pct: number | null; label: string } | null = null;
   for (const g of accounts) {
     if (!g.shareProfile || (g.profileKeys ?? []).includes(s.profileDir)) continue;
-    const w = g.limits?.windows.find((x) => x.key === (stop.window || "five_hour"));
+    const w = usageOf(g)?.windows.find((x) => x.key === (stop.window || "five_hour"));
     const pct = w ? w.pct : null;
     if (pct !== null && pct >= 95) continue;
     if (!best || (pct !== null && (best.pct === null || pct < best.pct)))
@@ -568,9 +575,9 @@ export function startText(ms: number, now: number): string {
 
 // When the usage limit an account is at resets (the latest of its full
 // windows, else of the chats a limit stopped), or null
-export function limitReset(g: Pick<Group, "limits" | "sessions">, now: number): { at: number; label: string } | null {
+export function limitReset(g: Pick<Group, "limits" | "accountLimits" | "sessions">, now: number): { at: number; label: string } | null {
   let best: { at: number; label: string } | null = null;
-  for (const w of g.limits?.windows ?? []) if (w.pct >= 95 && w.resetsAt && (!best || w.resetsAt > best.at)) best = { at: w.resetsAt, label: w.label };
+  for (const w of usageOf(g)?.windows ?? []) if (w.pct >= 95 && w.resetsAt && (!best || w.resetsAt > best.at)) best = { at: w.resetsAt, label: w.label };
   if (!best)
     for (const s of g.sessions)
       if (s.stopped?.kind === "limit" && !s.stopped.over && s.stopped.resetsAt && (!best || s.stopped.resetsAt > best.at))

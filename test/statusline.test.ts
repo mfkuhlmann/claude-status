@@ -108,3 +108,20 @@ test("more ways to read the input, a last line without its newline, $HOME in the
   const files = plan(SNIPPET, false).changes.map((c) => path.relative(home, c.file));
   assert.deepEqual(files, [".claude/statusline.sh"], "the script itself is patched, not wrapped");
 });
+
+test("a settings.json that is a link stays a link, and profiles sharing one file get one change", () => {
+  const home = fakeHome();
+  const shared = path.join(home, "dotfiles", "claude-settings.json");
+  write(shared, JSON.stringify({ model: "opus" }, null, 2));
+  for (const name of [".claude-a", ".claude-b"]) {
+    fs.mkdirSync(path.join(home, name, "projects"), { recursive: true });
+    fs.symlinkSync(shared, path.join(home, name, "settings.json"));
+  }
+  const setup = plan(SNIPPET, false);
+  assert.equal(setup.changes.filter((c) => c.file.endsWith("settings.json") || c.file === shared).length, 1);
+  assert.equal(setup.changes.find((c) => c.file.endsWith("settings.json") || c.file === shared)!.file, fs.realpathSync(shared));
+  apply(setup.changes);
+  for (const name of [".claude-a", ".claude-b"]) assert.ok(fs.lstatSync(path.join(home, name, "settings.json")).isSymbolicLink());
+  assert.match(JSON.parse(fs.readFileSync(shared, "utf8")).statusLine.command, /statusline\.sh/);
+  assert.equal(JSON.parse(fs.readFileSync(shared, "utf8")).model, "opus");
+});

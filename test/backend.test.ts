@@ -132,6 +132,22 @@ test("a chat is shared between a stock ~/.claude and ~/.claude-work", async () =
   assert.equal(fs.statSync(chat).nlink, 1);
 });
 
+test("an action's answer keeps how plan feedback reaches the chat", async () => {
+  // jump.py --plan-feedback --print-command: the command that reopens the
+  // chat, or the text to type in or paste; without them nothing is sent
+  const ext = fs.mkdtempSync(path.join(os.tmpdir(), "claude-status-ext-"));
+  fs.mkdirSync(path.join(ext, "vendor", "code"), { recursive: true });
+  fs.writeFileSync(
+    path.join(ext, "vendor", "code", "jump.py"),
+    'import json, sys\nprint(json.dumps({"ok": True, "message": "m", "how": sys.argv[1], "command": "claude --resume x", "text": "feedback"}))\n',
+  );
+  const backend = new Backend(ext, () => "python3");
+  const resumed = await backend.action("jump.py", ["resumed"]);
+  assert.deepEqual(resumed, { ok: true, message: "m", command: "claude --resume x", how: "resumed", text: "feedback" });
+  assert.equal((await backend.action("jump.py", ["clipboard"])).how, "clipboard");
+  assert.equal((await backend.action("jump.py", ["something else"])).how, undefined);
+});
+
 test("a missing Python is explained", async () => {
   const backend = new Backend(path.resolve("."), () => "python3-that-does-not-exist");
   assert.match(await backend.checkPython(), /Install Python 3\.7 or newer/);

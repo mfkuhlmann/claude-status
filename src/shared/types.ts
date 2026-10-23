@@ -372,6 +372,9 @@ export interface Group {
   // the account (or no host's shows), or comes from that host
   limitsHidden?: boolean;
   limitsFrom?: string;
+  // With limitsHidden: the account's numbers all the same (the newest of its
+  // machines'), for what weighs them (handoverTarget, limitReset)
+  accountLimits?: Limits | null;
 }
 
 export interface Status {

@@ -191,9 +191,11 @@ def ours(path):
 
 def command_script(folder_name, label):
     # Claude keys its background service by the folder's name: where ~/.claude
-    # links to this folder, terminals use that name, so this does too
+    # links to this folder, terminals use that name, so this does too (the
+    # label on one line: .profile-name is other tools' too, and a second line
+    # would run as a command)
     return f"""#!/bin/sh
-# Claude Code on {label} (~/{folder_name}).
+# Claude Code on {cs.clean_text(label)} (~/{folder_name}).
 # {COMMAND_MARK} (its Accounts settings remove it again).
 dir="$HOME/{folder_name}"
 if [ "$(readlink -f "$HOME/.claude" 2>/dev/null)" = "$(readlink -f "$dir" 2>/dev/null)" ]; then
@@ -272,6 +274,37 @@ def auth_status(profile, home, claude):
             "email": cs.clean_text(data.get("email"), 80) or None}
 
 
+def linked_from(profile, profiles):
+    """What the other profiles link to in this profile's folder (settings
+    shared from it, a projects/ folder shared through a link, …): "side:
+    settings.json, skills/mine", or "". Gone to the Trash, they'd lose it."""
+    real = str(profile.real)
+    found = []
+    for p in profiles:
+        if p.real == profile.real:
+            continue
+        names = []
+        try:
+            entries = sorted(os.listdir(str(p.path)))
+        except OSError:
+            continue
+        for e in entries:
+            items = [e]
+            if e in SHARED_FOLDERS and not os.path.islink(str(p.path / e)) and cs.is_dir(p.path / e):
+                try:  # (shared one by one)
+                    items = [f"{e}/{c}" for c in sorted(os.listdir(str(p.path / e)))]
+                except OSError:
+                    items = []
+            for item in items:
+                if os.path.islink(str(p.path / item)):  # (never raises, unlike Path's on Python 3.7)
+                    to = os.path.realpath(str(p.path / item))
+                    if to == real or to.startswith(real + os.sep):
+                        names.append(item)
+        if names:
+            found.append(f"{p.label}: {', '.join(names)}")
+    return "; ".join(found)
+
+
 def not_removable(profile, profiles, home, vscode_on, chats):
     """Why the profile can't be removed here, or ""."""
     if profile.path.parent != home or not profile.path.name.startswith(".claude-"):
@@ -286,6 +319,9 @@ def not_removable(profile, profiles, home, vscode_on, chats):
                 return "~/.claude links to it (plain claude runs on it): point ~/.claude at another account first"
         except (OSError, RuntimeError):
             pass
+    linked = linked_from(profile, profiles)
+    if linked:
+        return f"other accounts link to files in it ({linked}): give them copies first"
     if vscode_on is not None and vscode_on.real == profile.real:
         return "VS Code's Claude runs on it: switch VS Code's Claude to another account first"
     if chats:
@@ -474,9 +510,36 @@ def device(path):
     return os.stat(str(path)).st_dev
 
 
+MOUNTINFO = "/proc/self/mountinfo"
+
+
+def mount_inside(path):
+    """A mount point at or inside the folder path, or None. A folder
+    bind-mounted from the same disk shows only here (its device is the
+    disk's): moved into the Trash with the folder, it stays mounted there,
+    and emptying the Trash would delete what it shows."""
+    real = os.path.realpath(str(path))
+    try:
+        with open(MOUNTINFO, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                fields = line.split(" ")
+                if len(fields) < 5:
+                    continue
+                point = re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)), fields[4])  # (\040: a space)
+                if point == real or point.startswith(real + "/"):
+                    return point
+    except OSError:
+        pass
+    return None
+
+
 def trash_problem(path, home):
     """Why path can't be moved to your Trash, or "". A move can't cross
     filesystems; gio, the desktop's own tool, knows the Trash of other disks."""
+    mounted = mount_inside(path)
+    if mounted:
+        return (f"{short(mounted, home)} is a mount point (emptying the Trash would delete what's mounted there): "
+                "unmount it first")
     root = trash_root(home)
     try:
         for d in (root, root / "files", root / "info"):
@@ -695,7 +758,9 @@ def make_default(home, extra, key, vscode=True):
     done, notes, failed = [], [], []
     if moves_link:
         target = os.readlink(str(link))
-        new = profile.path.name if not os.path.isabs(target) else str(profile.real)
+        # (a relative link names a folder next to it: one elsewhere, from
+        # --config-dir, gets its full path)
+        new = profile.path.name if not os.path.isabs(target) and profile.path.parent == home else str(profile.real)
         tmp = home / f".claude.{os.getpid()}.tmp"
         os.symlink(new, str(tmp))
         os.replace(str(tmp), str(link))

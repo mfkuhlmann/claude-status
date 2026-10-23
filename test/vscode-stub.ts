@@ -12,8 +12,11 @@ export const recorded = {
   messages: [] as string[],
 };
 
+// settings a test sets (key -> value); the rest read as their defaults
+export const overrides = new Map<string, unknown>();
+
 export const workspace = {
-  getConfiguration: () => ({ get: <T>(_key: string, fallback: T) => fallback, update: async () => undefined }),
+  getConfiguration: () => ({ get: <T>(key: string, fallback: T) => (overrides.has(key) ? (overrides.get(key) as T) : fallback), update: async () => undefined }),
   workspaceFolders: undefined,
   workspaceFile: undefined,
   onDidChangeConfiguration: disposable,

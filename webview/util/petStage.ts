@@ -20,10 +20,11 @@ export function useViewVisible(): boolean {
   return host && page;
 }
 
-function petFields(key: string, value: unknown): unknown {
+export function petFields(key: string, value: unknown): unknown {
   if (key !== "session" || !value || typeof value !== "object") return value;
   const s = value as Session;
-  return [s.key, s.chatId, s.sessionId, s.state, s.reason, s.name, s.since, s.context, s.agents?.running ?? 0, s.openCommand ?? ""];
+  const stopped = s.stopped ? [s.stopped.kind, s.stopped.over, s.stopped.resetsAt] : null; // (a limit that has reset)
+  return [s.key, s.chatId, s.sessionId, s.state, s.reason, s.name, s.since, s.context, s.agents?.running ?? 0, s.openCommand ?? "", stopped];
 }
 
 // `active`: the stage is open (an account's stage folds away without chats)
