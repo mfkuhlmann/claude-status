@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.14.0
 
 - **Talpa, a new pet of its own:** Clawd is gone. Talpa lives in a burrow:
   it stays half underground while it works and plays, digs over to another
