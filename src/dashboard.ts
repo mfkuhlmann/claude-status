@@ -42,6 +42,7 @@ export class Dashboard implements vscode.Disposable {
   private disposed = false;
   private windowHost: string | undefined;
   private claudeCodeAvailable = false;
+  private claudeCodeCheckedAt = 0;
   // Chats that finished a turn while you weren't looking (trackKey -> when)
   private unseen = new Map<string, number>();
   private away: AwayWatch;
@@ -128,6 +129,7 @@ export class Dashboard implements vscode.Disposable {
   // Whether the Claude Code extension can open chats in this window (its
   // commands are registered wherever it runs)
   private async checkClaudeCode(): Promise<void> {
+    this.claudeCodeCheckedAt = Date.now();
     const available = await claudePanelAvailable();
     if (available === this.claudeCodeAvailable || this.disposed) return;
     this.claudeCodeAvailable = available;
@@ -195,6 +197,9 @@ export class Dashboard implements vscode.Disposable {
   // Check this computer now (a check still running isn't doubled)
   async refresh(): Promise<void> {
     if (this.localBusy || this.demo || this.disposed) return;
+    // Claude Code starts alongside this extension and can register its commands
+    // after the first check, with no event for it: look again until it's there
+    if (!this.claudeCodeAvailable && Date.now() - this.claudeCodeCheckedAt >= HIDDEN_POLL_MS) void this.checkClaudeCode();
     this.localBusy = true;
     try {
       const { status, error } = await this.backend.status([...configDirArgs(), ...statusArgs()]);

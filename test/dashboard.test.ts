@@ -107,3 +107,33 @@ test("a host listed twice in the settings is one host", async () => {
     overrides.clear();
   }
 });
+
+test("the Claude Code extension starting after this one is found without a reload", async () => {
+  mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const stub = await import("./vscode-stub");
+  const getCommands = stub.commands.getCommands;
+  let registered: string[] = []; // both start on onStartupFinished, in no set order
+  stub.commands.getCommands = async () => registered;
+  const settle = async () => {
+    for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve));
+  };
+  try {
+    const backend = { checkPython: async () => "", status: async () => ({ status: demoState(NOW).status! }) } as unknown as Backend;
+    const log = { warn() {}, info() {}, error() {} } as unknown as vscode.LogOutputChannel;
+    const dash = new Dashboard(backend, { handle() {}, isLeader: () => true } as unknown as Notifier, log);
+    dash.setVisible(true);
+    await dash.start();
+    await settle();
+    assert.equal(dash.claudeCodeInfo().available, false);
+    registered = ["claude-vscode.editor.open"]; // its activate ran a moment later
+    for (let s = 0; s < 10; s++) {
+      mock.timers.tick(2000);
+      await settle();
+    }
+    assert.equal(dash.claudeCodeInfo().available, true, "a Claude Code tab can reopen chats");
+    dash.dispose();
+  } finally {
+    stub.commands.getCommands = getCommands;
+    mock.timers.reset();
+  }
+});

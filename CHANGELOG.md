@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **Claude Code tab** in Recent chats stayed greyed out (*The Claude Code
+  extension isn't installed or enabled in this window*) for good when the
+  Claude Code extension started a moment after this one, which both do as
+  VS Code starts up. It's looked for again until it's there.
+
 ## 1.14.0
 
 - **Talpa, a new pet of its own:** Clawd is gone. Talpa lives in a burrow:
