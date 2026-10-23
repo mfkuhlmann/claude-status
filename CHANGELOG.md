@@ -59,6 +59,13 @@
   (`claudeStatus.sshUsage`), **Continue on …** and waiting for the limit
   ignored that usage; the host's memories showed its own clock's time.
 - Token counts said *1000.0k* just below a million.
+- On GNOME without the widget's Claude Status GNOME Shell extension (not
+  installed, turned off, or GNOME 45 to 48, which it doesn't run on),
+  clicking a chat in another window, such as a VS Code window connected to
+  an SSH host or a terminal app, failed with *Couldn't raise the VS Code
+  window (is the Claude Status GNOME Shell extension enabled?)*. The view
+  now checks that the GNOME Shell extension is running before it tries,
+  and says where the chat runs when it isn't.
 - Pets: a chat's pet never heard that its usage limit had reset (it kept
   its low-battery pose); a hidden view piled up the sparks of pet
   reactions until it was shown; a pet you held could walk off or vanish

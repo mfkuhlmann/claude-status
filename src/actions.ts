@@ -130,7 +130,7 @@ export class Actions {
     // A chat in the Claude Code extension: its link reveals it
     if (chat.entrypoint === "claude-vscode" && chat.pid !== null) {
       const thisWindow = host ? onWindowHost : !vscode.env.remoteName;
-      if (!thisWindow && canRaiseWindows()) return this.openSystem(chat); // raises the window it's in
+      if (!thisWindow && (await canRaiseWindows())) return this.openSystem(chat); // raises the window it's in
       await vscode.env.openExternal(vscode.Uri.parse(CHAT_LINK + encodeURIComponent(chat.sessionId)));
       return;
     }
@@ -139,9 +139,11 @@ export class Actions {
       await this.terminals.run(`${host ?? ""}|${chat.key}`, chat.name, chat.openCommand, this.place(host));
       return;
     }
-    // It runs in a terminal outside VS Code
-    if (canRaiseWindows()) return this.openSystem(chat);
-    this.fail(`${chat.name} runs in a terminal outside this VS Code window${host ? ` on ${host}` : ""}.`);
+    // It runs in a terminal outside VS Code (or in another VS Code window)
+    if (await canRaiseWindows()) return this.openSystem(chat);
+    const where = host && chat.vscodeTerminal ? `a terminal of a VS Code window connected to ${host}` : `a terminal outside this VS Code window${host ? ` on ${host}` : ""}`;
+    const why = isGnome() ? " Bringing it up on GNOME needs the Claude Status GNOME Shell extension, and it isn't running." : "";
+    this.fail(`${chat.name} runs in ${where}.${why}`);
   }
 
   // The widget's way: jump.py raises the terminal tab or window it runs in

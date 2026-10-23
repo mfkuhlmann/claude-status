@@ -337,10 +337,12 @@ you paste goes straight to Claude on the host.
   Code**).
 - With the Plasma widget or the GNOME extension running too, both notify:
   turn notifications off in one of them.
-- On KDE Plasma, a chat running in a terminal outside VS Code is brought to
-  the front the way the widget does it (Konsole tab, window); on GNOME too,
-  while the widget's Claude Status GNOME Shell extension is on. Elsewhere the
-  view says where it runs. On GNOME, sounds use GNOME's sound theme.
+- On KDE Plasma, a chat running in a terminal outside VS Code (or in
+  another VS Code window) is brought to the front the way the widget does it
+  (Konsole tab, window); on GNOME too, while the widget's Claude Status GNOME
+  Shell extension runs (GNOME 43, 44, 49 and newer; log out and in after
+  installing it). Elsewhere, and on GNOME without it, the view says where
+  the chat runs. On GNOME, sounds use GNOME's sound theme.
 - **Claude Status: Toggle Demo Data** shows made-up chats (for screenshots,
   or to try it without Claude Code).
 - **Sharing a chat** hard-links its transcript into each account's profile,
