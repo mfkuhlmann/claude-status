@@ -22,6 +22,7 @@ export class Talpa {
     facingLeft: boolean;
     travels: boolean;
     readonly busy: boolean;
+    readonly frameMs: number;   // how often a picture is worth drawing now: 40 (quick moves), 80 (slow) or 200 (at rest)
     readonly run: unknown;
     setColors(colors: TalpaColors): void;
     setTheme(theme: TalpaTheme): void;

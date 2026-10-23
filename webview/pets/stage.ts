@@ -8,9 +8,9 @@
 //
 // an account's stage: one pet per chat of that account in the list, up to a
 // few. A pet wears the chat's name on a tag in the chat's color (the chat's
-// row gets a bar in the same color), acts the chat out, opens it when
-// clicked, and stays the same pet, on the same spot, until the chat leaves the
-// list; then it waves and digs away.
+// row gets a bar in the same color), stands in the row in the list's order,
+// acts the chat out, opens it when clicked, and stays the same pet until the
+// chat leaves the list; then it waves and digs away.
 //
 // Everything stops while a stage isn't shown: no animation frame, no timer,
 // paused CSS animations.
@@ -106,7 +106,6 @@ export class Stage implements PetStage, Animator {
   pets: Pet[] = []; // in the order they came (later ones in front)
   private chats: StageChat[] = [];
   private maxPets = 0;
-  private order: string[] = []; // the shown chats' keys, in the order their pets came
   private readonly slots = new Map<string, number>(); // pet key → where it stands; a leaving pet keeps its spot
 
   private wantLive = true; // what the UI says (setLive)
@@ -349,11 +348,9 @@ export class Stage implements PetStage, Animator {
     }
     const shown = this.chats.slice(0, this.maxPets);
     const byKey = new Map(shown.map((c) => [c.key, c]));
-    // Spots: a pet keeps its place in the row while its chat changes state
-    // (the colors tie pets to rows); newcomers line up on the right
-    const keys = this.order.filter((k) => byKey.has(k));
-    for (const c of shown) if (!keys.includes(c.key)) keys.push(c.key);
-    this.order = keys;
+    // Spots: in the order of the chats in the list, left to right (the
+    // colors tie pets to rows)
+    const keys = [...shown].sort((a, b) => a.order - b.order).map((c) => c.key);
     const spacing = this.spacingFor(keys.length);
     this.tagWidth = Math.max(this.gu * 3.5, spacing - SMALL * 2);
     keys.forEach((k, i) => this.slots.set(k, this.margin + (i + 0.5) * spacing));

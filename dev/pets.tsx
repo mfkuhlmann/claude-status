@@ -42,7 +42,7 @@ function chatsOf(g: Group): StageChat[] {
   return g.sessions
     .map((s, i) => ({ s, i }))
     .sort((a, b) => order[a.s.state] - order[b.s.state] || a.i - b.i)
-    .map(({ s }) => ({ key: petKeyOf(s, g.host), session: s, host: g.host }));
+    .map(({ s, i }) => ({ key: petKeyOf(s, g.host), session: s, host: g.host, order: i }));
 }
 
 function heroInput(state: ViewState, groups: Group[]): HeroInput {

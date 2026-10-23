@@ -24,15 +24,14 @@ export { chatRefOf, recentRef, sharedRef } from "../../src/shared/model";
 export function stageChats(g: Group): StageChat[] {
   const rank: Record<string, number> = { waiting: 0, working: 1, idle: 2, done: 3 };
   const seen = new Set<string>();
-  const out: { chat: StageChat; order: number }[] = [];
+  const out: StageChat[] = [];
   for (const s of g.sessions) {
     const key = petKeyOf(s, g.host);
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ chat: g.host ? { key, session: s, host: g.host } : { key, session: s }, order: out.length });
+    out.push(g.host ? { key, session: s, host: g.host, order: out.length } : { key, session: s, order: out.length });
   }
-  out.sort((a, b) => (rank[a.chat.session.state] ?? 4) - (rank[b.chat.session.state] ?? 4) || a.order - b.order);
-  return out.map((o) => o.chat);
+  return out.sort((a, b) => (rank[a.session.state] ?? 4) - (rank[b.session.state] ?? 4) || a.order - b.order);
 }
 
 export function fiveHourOf(g: Group): number {

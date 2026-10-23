@@ -282,11 +282,11 @@ export class Pet {
       } else if (!this.stage.shownOnce() || this.arriving) {
         this.px = x; // not seen yet, or still underground: it's just there
       } else if (!this.lone) {
-        this.digTo(x);
+        this.digTo(x, true);
       }
     }
     // the stage got narrower: back inside it
-    if (!this.held && this.px > this.maxX) this.digTo(this.maxX);
+    if (!this.held && this.px > this.maxX) this.digTo(this.maxX, true);
     this.changed();
   }
 
@@ -343,8 +343,9 @@ export class Pet {
     });
   }
 
-  // Digs over to x (it dives in, tunnels across, pops up there)
-  private digTo(x: number): void {
+  // Digs over to x (it dives in, tunnels across, pops up there); quick: its
+  // spot moved (a new chat makes room), so it hurries
+  private digTo(x: number, quick = false): void {
     if (this.held || this.leaving || this.arriving) return;
     this.travelTo = this.clampX(x);
     if (Math.abs(this.travelTo - this.px) < this.stage.bodyWidth * 0.3) {
@@ -357,7 +358,7 @@ export class Pet {
       this.changed();
       return;
     }
-    this.talpa.react("dig");
+    this.talpa.react(quick ? "scoot" : "dig");
   }
 
   // It dug in: tunnel across to its new spot within ms
@@ -556,11 +557,12 @@ export class Pet {
     this.put(this.grab, "grab", "transform", `translate(${px - gw / 2}px, ${ground - lift - gh}px)`);
     this.put(this.grab, "cursor", "cursor", this.held ? "grabbing" : this.lone ? "grab" : "pointer");
 
-    // About 30 pictures a second are plenty
+    // As often as that shows something new (talpa.frameMs: 25 pictures a
+    // second for quick moves, down to 5 at rest); each picture costs
     const now = s.clock.now();
-    if (s.live && now - this.lastDraw < 30) return;
-    this.lastDraw = now;
     this.talpa.tick(now);
+    if (s.live && now - this.lastDraw < this.talpa.frameMs - 10) return; // (frames come every 16.7 ms)
+    this.lastDraw = now;
     const k = devicePixelRatio || 1,
       w = Math.round(s.canvasW * k),
       h = Math.round(s.canvasH * k);

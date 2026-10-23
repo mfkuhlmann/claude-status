@@ -171,7 +171,8 @@ function account(maxPets = 3) {
     frames: t.frames,
     lay: (width = 400) => t.resize[0]([{ contentRect: { width, height: 80 } }]),
     show: (on = true) => t.intersect[0]([{ isIntersecting: on }]),
-    give: (chats: unknown[]) => stage.update({ chats, maxPets, fiveHour: 0 }),
+    // (in the order of the account's list)
+    give: (chats: Any[]) => stage.update({ chats: chats.map((c, i) => ({ order: i, ...c })), maxPets, fiveHour: 0 }),
   };
 }
 
@@ -333,6 +334,30 @@ test("a pet dropped away from its spot digs back to it", () => {
   assert.ok(dug, "it stays where it was dropped");
   assert.equal(pet.stride.to, pet.homeX);
   s.stage.destroy();
+});
+
+test("the pets stand in the order of the list", () => {
+  const { stage, lay, show, give } = account();
+  lay();
+  show();
+  // (the chats come with the ones that need you first; the list has them in its own order)
+  give([chat("p/2", "waiting", { }), chat("p/1"), chat("p/3", "idle")].map((c, i) => ({ ...c, order: [1, 0, 2][i] })));
+  const x = (k: string) => stage.petFor(k).homeX;
+  assert.ok(x("p/1") < x("p/2") && x("p/2") < x("p/3"), "not in the list's order");
+  stage.destroy();
+});
+
+test("a pet whose spot moves hurries over to it", () => {
+  const { stage, lay, show, give } = account();
+  lay();
+  show();
+  stage.firstShownTimer.fire();
+  give([chat("p/1")]);
+  const pet = stage.petFor("p/1");
+  wait(pet, 3000); // up out of the ground
+  give([chat("p/0"), chat("p/1")]); // a new chat comes first in the list: p/1's spot moves right
+  assert.equal(pet.talpa.run?.name, "scoot");
+  stage.destroy();
 });
 
 test("a pet still popping up goes to where its spot is now", () => {

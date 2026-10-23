@@ -10,6 +10,7 @@ export interface StageChat {
   key: string; // petKeyOf(session, host): stays the same while the chat's row changes
   session: Session;
   host?: string;
+  order: number; // its place in the account's list: the pets stand in that order, left to right
 }
 
 export interface HeroInput {

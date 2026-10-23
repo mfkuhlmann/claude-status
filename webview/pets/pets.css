@@ -1,12 +1,6 @@
 /* The pets' stages (webview/pets/stage.ts). Pets move with transforms only;
    each Talpa draws itself on its own canvas (pet.ts). */
 
-@property --cs-glow {
-  syntax: "<number>";
-  inherits: true;
-  initial-value: 1;
-}
-
 .cs-stage {
   --cs-ease-in-out-sine: cubic-bezier(0.37, 0, 0.63, 1);
   --cs-small-font: calc(var(--vscode-font-size, 13px) * 0.85);
@@ -40,7 +34,8 @@
 
 /* A hidden stage: nothing animates */
 .cs-stage.cs-paused,
-.cs-stage.cs-paused * {
+.cs-stage.cs-paused *,
+.cs-stage.cs-paused *::after {
   animation-play-state: paused !important;
 }
 
@@ -59,23 +54,34 @@
   inset: 0;
   box-sizing: border-box;
   border-radius: inherit;
-  --cs-glow: 1;
   background: linear-gradient(
     to bottom,
-    color-mix(in srgb, var(--cs-mood) calc(24% * var(--cs-glow)), transparent),
+    color-mix(in srgb, var(--cs-mood) 24%, transparent),
     color-mix(in srgb, var(--cs-mood) 6%, transparent)
   );
-  border: 1px solid color-mix(in srgb, var(--cs-mood) calc(35% * var(--cs-glow)), transparent);
+  border: 1px solid color-mix(in srgb, var(--cs-mood) 35%, transparent);
 }
 
-/* It pulses while a chat needs you */
-.cs-stage--hero.cs-glowing .cs-stage-light {
+/* It pulses while a chat needs you: a brighter light fades in and out over
+   it (only its opacity changes, which needs no repainting) */
+.cs-stage-light::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  box-sizing: border-box;
+  border-radius: inherit;
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--cs-mood) 14%, transparent), transparent 60%);
+  border: 1px solid color-mix(in srgb, var(--cs-mood) 21%, transparent);
+  opacity: 0;
+}
+
+.cs-stage--hero.cs-glowing .cs-stage-light::after {
   animation: cs-glow 1.8s infinite;
 }
 
 @keyframes cs-glow {
-  0%, 100% { --cs-glow: 1; animation-timing-function: var(--cs-ease-in-out-sine); }
-  50% { --cs-glow: 1.6; animation-timing-function: var(--cs-ease-in-out-sine); }
+  0%, 100% { opacity: 0; animation-timing-function: var(--cs-ease-in-out-sine); }
+  50% { opacity: 1; animation-timing-function: var(--cs-ease-in-out-sine); }
 }
 
 .cs-stage-stars {
@@ -259,7 +265,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .cs-stage-light {
+  .cs-stage-light::after {
     animation: none !important;
   }
 }

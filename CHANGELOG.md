@@ -16,6 +16,13 @@
   (in the state color: it pops up when a chat needs you, glances around
   while Claude works, smiles when it's your turn and sleeps when nothing
   runs), in the sidebar and on the extension's page.
+- **Pets in the order of the list:** an account's pets stand left to right in
+  the order of its chats in the list; when a new chat comes, the others
+  hurry over to make room. The bar in the pet's color next to each chat is
+  twice as wide, so you find a pet's chat at a glance.
+- **Lighter:** a pet is drawn only as often as that shows something new (up
+  to 25 times a second while it moves quickly, 5 while it just breathes),
+  and the stage's glow fades without redrawing the stage.
 
 - A plan or memory in a long folder lost the end of its time ("5d 22h a")
   at the row's end, whatever the panel's width: the folder is now cut in
