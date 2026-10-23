@@ -108,6 +108,13 @@ def run(args, timeout=5):
         return 1, ""
 
 
+def link_query(params):
+    """The query of a vscode:// link. VS Code decodes it once before the
+    extension's URLSearchParams decodes it again, so it's encoded twice: else
+    an & in a prompt would end it there, and a + would become a space."""
+    return urlencode(params).replace("%", "%25")
+
+
 def dbus_call(dest, path, method, *args):
     """Call a session-bus method via gdbus; returns the first result value or None."""
     code, out = run(["gdbus", "call", "--session", "--dest", dest, "--object-path", path,
@@ -135,15 +142,17 @@ def dbus_children(dest, path):
 
 def parent_pid(pid):
     try:
-        stat = Path(f"/proc/{pid}/stat").read_text()
+        stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8", errors="replace")
         return int(stat[stat.rfind(")") + 2:].split()[1])
     except (OSError, ValueError, IndexError):
         return 0
 
 
 def proc_name(pid):
+    # (errors="replace": the kernel cuts a name at 15 bytes, also inside a
+    # character, and any process on the system is looked at)
     try:
-        return Path(f"/proc/{pid}/comm").read_text().strip()
+        return Path(f"/proc/{pid}/comm").read_text(encoding="utf-8", errors="replace").strip()
     except OSError:
         return ""
 
@@ -442,15 +451,21 @@ def ssh_target(argv):
             i += 1
             break
         if a.startswith("-") and len(a) > 1:
-            if a[-1] in takes_value and len(a) == 2:
-                i += 1  # its value is the next word
+            # flags can come in a group (-tt, -Xp 2222): the first one that
+            # takes a value takes the rest of the word, or the next word
+            for n, letter in enumerate(a[1:], 1):
+                if letter in takes_value:
+                    if n == len(a) - 1:
+                        i += 1  # its value is the next word
+                    break
             i += 1
             continue
         break
     if i >= len(argv):
         return None
     target = argv[i]
-    return target.split("@", 1)[-1].split(":", 1)[0] if not target.startswith("ssh://") else target[6:].split("@")[-1].split(":")[0].split("/")[0]
+    # (ssh takes the user up to the last @: user names can have one)
+    return target.rsplit("@", 1)[-1].split(":", 1)[0] if not target.startswith("ssh://") else target[6:].split("@")[-1].split(":")[0].split("/")[0]
 
 
 def host_names(host):
@@ -467,26 +482,32 @@ def host_names(host):
 
 
 def vscode_connected_to(host):
-    """VS Code's main processes with a window connected to host (Remote-SSH's
-    ssh to it runs under them)."""
+    """(VS Code's main processes with a window connected to host, the caption
+    of that window): Remote-SSH's ssh to it runs under them, and its title
+    says "[SSH: <name>]" with the name that ssh went to (alias or HostName)."""
     names = host_names(host)
     children = process_children()
-    return [main for main in vscode_main_pids()
-            if any(proc_name(pid) == "ssh" and ssh_target(proc_cmdline(pid)) in names
-                   for pid in descendants(main, children))]
+    mains, caption = [], f"[SSH: {host}]"
+    for main in vscode_main_pids():
+        target = next((t for t in (ssh_target(proc_cmdline(pid)) for pid in descendants(main, children)
+                                   if proc_name(pid) == "ssh") if t in names), None)
+        if target is not None:
+            mains.append(main)
+            caption = f"[SSH: {target}]" if len(mains) == 1 else caption
+    return mains, caption
 
 
 def jump_remote_vscode(host, session_id, folder=""):
     """Show a VS Code chat that runs on an SSH host: raise the VS Code window
     connected to that host (Remote-SSH puts "[SSH: host]" in its title) and
     reveal the conversation; open VS Code on the host if none is."""
-    url = "vscode://anthropic.claude-code/open?" + urlencode({"session": session_id})
+    url = "vscode://anthropic.claude-code/open?" + link_query({"session": session_id})
     opener = shutil.which("xdg-open")
     if not opener:
         return False, "xdg-open is missing; can't hand the session link to VS Code"
-    mains = vscode_connected_to(host)
+    mains, caption = vscode_connected_to(host)
     if mains:
-        raise_window(mains, f"[SSH: {host}]", require=True, prefer=os.path.basename(folder.rstrip("/")))
+        raise_window(mains, caption, require=True, prefer=os.path.basename(folder.rstrip("/")))
         time.sleep(0.3)  # let VS Code see its window focused, so the link opens there
         subprocess.Popen([opener, url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
         return True, f"Opened the conversation in VS Code ({host})"
@@ -506,10 +527,10 @@ def jump_remote_vscode_terminal(host, terminal, folder=""):
     """Show a chat that runs in a terminal of a VS Code window connected to
     host (terminal: the process that terminal started there): raise that
     window, then have the Claude Status extension bring the terminal up."""
-    mains = vscode_connected_to(host)
+    mains, caption = vscode_connected_to(host)
     if not mains:
         return False, f"This chat runs in a VS Code terminal on {host}, and no VS Code window here is connected to it"
-    if not raise_window(mains, f"[SSH: {host}]", require=True, prefer=os.path.basename(folder.rstrip("/"))):
+    if not raise_window(mains, caption, require=True, prefer=os.path.basename(folder.rstrip("/"))):
         return False, f"Couldn't raise the VS Code window ({raise_hint()})"
     if show_vscode_terminal(proc_name(mains[0]), terminal, host):
         return True, f"Switched to the VS Code terminal running this chat on {host}"
@@ -548,7 +569,7 @@ def jump_vscode(entry):
     folder = os.path.basename(entry.get("cwd") or "")
     raise_window(pids, folder)  # VS Code titles end with "<folder> - Visual Studio Code"
     time.sleep(0.3)  # let VS Code see its window focused, so the link opens there
-    url = "vscode://anthropic.claude-code/open?" + urlencode({"session": entry.get("sessionId", "")})
+    url = "vscode://anthropic.claude-code/open?" + link_query({"session": entry.get("sessionId", "")})
     opener = shutil.which("xdg-open")
     if not opener:
         return False, "xdg-open is missing; can't hand the session link to VS Code"
@@ -570,7 +591,7 @@ def show_vscode_terminal(code, terminal, host=None):
     if not opener or not status_extension_since(code, STATUS_EXTENSION_TERMINALS):
         return False
     time.sleep(0.3)  # let VS Code see its window focused, so the link opens there
-    link = TERMINAL_LINK + "?" + urlencode({"pid": terminal, **({"host": host} if host else {})})
+    link = TERMINAL_LINK + "?" + link_query({"pid": terminal, **({"host": host} if host else {})})
     subprocess.Popen([opener, link], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     return True
 
@@ -918,7 +939,7 @@ def queue_task(home, extra_dirs, dirname, folder, task, start_at, host="", accou
     cs.change_queue(cs.cache_dir(home), add=entry)
     if scheduled:
         return True, f"Queued: it starts {start_time(start_at)}"
-    return True, f"Queued: it starts at {time.strftime('%H:%M', time.localtime(start_at / 1000))}, when the limit resets"
+    return True, f"Queued: it starts {start_time(start_at)}, when the limit resets"  # (a weekly one: days away)
 
 
 def start_time(at_ms, now=None):
@@ -957,7 +978,7 @@ def queue_continue(home, extra_dirs, chat_id, profile_dir, folder, text, start_a
         if old.get("chat") == chat_id and (old.get("host") or "") == (host or ""):
             cs.change_queue(cache_root, take=old["id"])
     cs.change_queue(cache_root, add=entry)
-    return True, f"Queued: it goes on at {time.strftime('%H:%M', time.localtime(start_at / 1000))}, when the limit resets"
+    return True, f"Queued: it goes on {start_time(start_at)}, when the limit resets"
 
 
 def requeue(home, extra_dirs, task_id, start_at):
@@ -968,7 +989,7 @@ def requeue(home, extra_dirs, task_id, start_at):
     if entry is None:
         return True, ""
     cs.change_queue(cache_root, put_back=dict(entry, startAt=start_at, error=""))
-    return True, f"It waits for the usage limit: it starts at {time.strftime('%H:%M', time.localtime(start_at / 1000))}"
+    return True, f"It waits for the usage limit: it starts {start_time(start_at)}"
 
 
 def unqueue(home, extra_dirs, task_id):
@@ -1041,7 +1062,7 @@ VSCODE_NEW_CHAT = "vscode://anthropic.claude-code/open"   # without a session: a
 def vscode_chat_link(session_id):
     """The Claude extension's link that opens this chat (an open one is
     brought up; another one is resumed in a new tab)."""
-    return VSCODE_NEW_CHAT + "?" + urlencode({"session": session_id})
+    return VSCODE_NEW_CHAT + "?" + link_query({"session": session_id})
 
 
 def later(task):
@@ -1110,7 +1131,7 @@ def start_vscode_chat(code, folder, link=VSCODE_NEW_CHAT):
 def vscode_task_link(prompt):
     """The Claude extension's link to a new conversation with prompt typed in
     (you send it), or to an empty one."""
-    return VSCODE_NEW_CHAT + "?" + urlencode({"prompt": prompt}) if prompt else VSCODE_NEW_CHAT
+    return VSCODE_NEW_CHAT + "?" + link_query({"prompt": prompt}) if prompt else VSCODE_NEW_CHAT
 
 
 def new_chat_vscode(home, extra_dirs, dirname, folder=None, task=NO_TASK):
@@ -1269,9 +1290,9 @@ EXTENSION_FOLDERS = {"code": ".vscode", "code-insiders": ".vscode-insiders", "co
                      "code-oss": ".vscode-oss"}
 
 
-def git_original(path):
-    """A file's content as of git's HEAD: b"" for a file git doesn't have
-    there (new since), None outside a git repository."""
+def git_original(path, missing=b""):
+    """A file's content as of git's HEAD: missing (b"": new since) for a
+    file git doesn't have there, None outside a git repository."""
     folder = os.path.dirname(path)
     if not shutil.which("git") or not os.path.isdir(folder):
         return None
@@ -1286,7 +1307,7 @@ def git_original(path):
                                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=10)
     except (OSError, subprocess.TimeoutExpired, ValueError):
         return None
-    return shown.stdout if shown.returncode == 0 else b""
+    return shown.stdout if shown.returncode == 0 else missing
 
 
 def read_bytes(path):
@@ -1359,7 +1380,9 @@ def chat_comparison(home, extra_dirs, session_id, profile_dir=None, turn=False):
         else:
             original = backup_content(profiles, rec["sessions"], backup)
             if original is None:
-                original = git_original(full)  # Claude has removed the backup since
+                # Claude has removed the backup since. The file was there (it
+                # was backed up): one git doesn't have wasn't empty, but unknown
+                original = git_original(full, missing=None)
         if original is None:
             unknown += 1
             continue
@@ -1430,7 +1453,7 @@ def show_changes(home, extra_dirs, session_id, profile_dir=None, turn=False):
     if status_extension_opens_changes(code) and shutil.which("xdg-open"):
         manifest = Path(comparison["items"][0]["original"]).parent.parent / "changes.json"
         cs.write_json_atomic(manifest, comparison)
-        link = CHANGES_LINK + "?" + urlencode({"file": str(manifest)})
+        link = CHANGES_LINK + "?" + link_query({"file": str(manifest)})
         if folder and os.path.isdir(folder):
             start_vscode_chat(code, folder, link)  # the folder's window, then the link there
         else:
@@ -1533,8 +1556,11 @@ def open_markdown(path, home=None):
     if app == "vscode":
         code, _ = cs.vscode_app()
         opener = shutil.which("xdg-open")
-        if code and opener and status_extension_since(code, STATUS_EXTENSION_MARKDOWN):
-            start_app([opener, MARKDOWN_LINK + "?" + urlencode({"path": str(path)})])
+        # (the extension's link shows plans and the runs saved here, nothing
+        # else: a memory or a CLAUDE.md opens as a file)
+        shown = Path(path).parent.name == "plans" or Path(path).parent == cs.cache_dir(home) / "agent-runs"
+        if code and opener and shown and status_extension_since(code, STATUS_EXTENSION_MARKDOWN):
+            start_app([opener, MARKDOWN_LINK + "?" + link_query({"path": str(path)})])
             return True, ""
         if code:
             start_app([code, str(path)])
@@ -1730,7 +1756,10 @@ def send_plan_feedback(home, extra_dirs, slug, profile_dir, chat_id, comments=()
     if print_command:
         return True, hint, {"how": "clipboard", "text": text, "copied": False}
     copied = copy_to_clipboard(text)
-    jump(home, extra_dirs, chat_id, chat_profile.key)
+    # the session that has it open, on whichever account it runs (a shared
+    # chat's transcript is in several: by the first, a second claude --resume
+    # of it would start)
+    jump(home, extra_dirs, chat_id)
     return True, f"Your feedback is in the clipboard. {hint}." if copied else hint, \
         {"how": "clipboard", "text": "" if copied else text, "copied": copied}
 

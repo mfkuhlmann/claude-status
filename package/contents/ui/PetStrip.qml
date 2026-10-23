@@ -142,7 +142,8 @@ Item {
         }
         const seen = JSON.stringify([width, shownChats.map(c => {
             const s = c.session   // what a pet shows of its chat (Pet.qml)
-            return [c.key, s.state, s.reason, s.name, s.since, s.context, s.agents ? s.agents.running : 0, c.host || ""]
+            return [c.key, s.state, s.reason, s.name, s.since, s.context, s.agents ? s.agents.running : 0,
+                    s.stopped ? [s.stopped.kind, s.stopped.over, s.stopped.resetsAt] : null, c.host || ""]
         })])
         if (seen === syncedAs)
             return

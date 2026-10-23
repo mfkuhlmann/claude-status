@@ -101,9 +101,15 @@ def links(path):
 
 def entry(path):
     """The directory entry a path names, through linked folders: two profiles
-    whose projects/ is one folder (a symlink) reach the same entry, which is
+    whose projects/ is one folder (a symlink, or a bind mount, which no path
+    shows: hence its folder's device and inode) reach the same entry, which is
     one copy of the chat, not two."""
-    return os.path.realpath(str(path))
+    real = os.path.realpath(str(path))
+    try:
+        folder = os.stat(os.path.dirname(real))
+    except OSError:
+        return real
+    return folder.st_dev, folder.st_ino, os.path.basename(real)
 
 
 def merge_into(src, dst):

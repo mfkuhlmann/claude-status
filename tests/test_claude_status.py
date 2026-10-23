@@ -39,6 +39,15 @@ def session(sid, **kw):
             "kind": "interactive", "status": "idle", "statusUpdatedAt": 1000, **kw}
 
 
+def vscode_link_params(link):
+    """What the extension that handles a vscode:// link gets: VS Code decodes
+    the query once (its URI.parse), then the extension's URLSearchParams does."""
+    import re
+    from urllib.parse import unquote, unquote_plus
+    query = re.sub(r"(%[0-9A-Za-z]{2})+", lambda m: unquote(m.group(0)), link.partition("?")[2])
+    return {unquote_plus(k): unquote_plus(v) for k, _, v in (p.partition("=") for p in query.split("&") if p)}
+
+
 def assistant(msg_id, ts, output, model="claude-opus-5-5"):
     return json.dumps({"type": "assistant", "timestamp": iso(ts), "requestId": "req_" + msg_id,
                        "message": {"id": msg_id, "model": model, "usage": {
@@ -287,6 +296,14 @@ class ParkedJobTests(unittest.TestCase):
         fresh = {**job, "createdAt": self.iso(1000)}
         self.assertEqual(self.parked(fresh), ("working", ""))  # just dispatched
 
+    def test_answered_then_died(self):
+        # state "blocked" is stale once you answered (tempo "active" again)
+        job = {"state": "blocked", "tempo": "active", "needs": "Which database?",
+               "createdAt": self.iso(600_000), "updatedAt": self.iso(300_000)}
+        self.assertEqual(self.parked(job), ("done", "failed"))
+        self.assertIsNone(self.parked({**job, "updatedAt": self.iso(30 * self.DAY)}))
+        self.assertEqual(self.parked(job, present=True), ("working", ""))
+
     def test_not_started_hidden(self):
         self.assertIsNone(self.parked({"state": "blocked", "tempo": "blocked", "needs": cs.NOT_STARTED}))
 
@@ -362,6 +379,14 @@ class LimitTests(Fixture):
         self.snapshot(".claude-personal", "c", {"session_id": "c"}, age=0)  # no limits yet
         limits = self.group(self.collect(with_tokens=False), "personal")["limits"]
         self.assertEqual(limits["windows"][0]["pct"], 20)
+
+    def test_a_snapshot_that_goes_away_doesnt_take_the_others_along(self):
+        # (another copy's check pruning an old one while this one lists the folder; here links to nothing)
+        for i in range(10):
+            self.snapshot(".claude-work", f"s{i}", {"rate_limits": {"five_hour": {"used_percentage": i}}}, age=i)
+            (self.cache / "statusline/.claude-work" / f"gone{i}.json").symlink_to(self.cache / "nowhere")
+        work = next(p for p in cs.discover_profiles(self.home) if p.label == "work")
+        self.assertEqual(len(cs.snapshot_files(self.cache / "statusline", [work])), 10)
 
     def test_old_snapshots_pruned(self):
         self.snapshot(".claude-work", "old", {"rate_limits": {"five_hour": {"used_percentage": 99}}}, age=9 * 86400)
@@ -440,6 +465,21 @@ class TokenTests(Fixture):
         write(path, cache)
         today = self.group(self.collect(), "work")["tokens"]["today"]
         self.assertEqual(today["messages"], 3)
+
+    def test_a_chat_shared_later_counts_as_shared_from_its_first_message(self):
+        mine = self.home / ".claude-personal/projects/p/chat.jsonl"
+        write(mine, assistant("m1", self.now - 30, 5) + "\n")
+        personal = next(p for p in cs.discover_profiles(self.home) if p.label == "personal")
+        cache = cs.scan_transcripts(personal, cs.empty_token_cache(), self.now)
+        self.assertEqual(cs.token_totals([cache], self.now)["today"]["shared"], 0)
+        # hard-linked into another account's folder, and the chat goes on: that account counts all of it
+        (self.home / ".claude-work/projects/p").mkdir(parents=True)
+        os.link(mine, self.home / ".claude-work/projects/p/chat.jsonl")
+        with open(mine, "a") as f:
+            f.write(assistant("m2", self.now - 5, 6) + "\n")
+        cache = cs.scan_transcripts(personal, cache, self.now + 1)
+        today = cs.token_totals([cache], self.now + 1)["today"]
+        self.assertEqual((today["messages"], today["shared"]), (2, today["total"]))
 
 
 # The shells a status-line script may be written for (on Debian and Ubuntu, sh is dash)
@@ -606,6 +646,16 @@ class AgentTests(Fixture):
         a = cache.session_agents(profile, "busy", alive=False)
         self.assertEqual((a["done"], a["running"], a["stopped"]), (1, 0, 2))
 
+    def test_agents_of_the_process_before_a_resume_are_stopped(self):
+        # claude --resume keeps the chat's id: the agents that ran in its
+        # earlier process can't be running in this one
+        busy = self.home / ".claude-work/sessions/11.json"
+        write(busy, session("busy", status="busy", startedAt=int((self.now + 60) * 1000)))
+        a, rows = self.agents_of_busy()
+        self.assertEqual((a["running"], a["stopped"], rows["a1"][0]), (0, 2, "done"))
+        write(busy, session("busy", status="busy", startedAt=int((self.now - 60) * 1000)))
+        self.assertEqual(self.agents_of_busy()[0]["running"], 2)
+
     def test_unchanged_transcripts_are_not_read_again(self):
         self.collect(with_tokens=False)
         calls = []
@@ -724,6 +774,12 @@ class AgentTests(Fixture):
         self.assertEqual(cs.describe_tool({"name": "Edit", "input": {"file_path": "/a/b/parser.py"}}), "Edit: parser.py")
         self.assertEqual(cs.describe_tool({"name": "mcp__github__create_issue", "input": {}}), "github: create_issue")
         self.assertEqual(cs.describe_tool({"name": "TodoWrite", "input": {"todos": []}}), "TodoWrite")
+
+
+class TokenCountTests(unittest.TestCase):
+    def test_the_unit_by_what_it_rounds_to(self):
+        self.assertEqual([cs.token_count(n) for n in (999, 1500, 999_949, 999_960, 2_500_000)],
+                         ["999", "1.5k", "999.9k", "1.0M", "2.5M"])
 
 
 class AgentRunTests(Fixture):
@@ -869,6 +925,14 @@ class SharedCacheFileTests(unittest.TestCase):
         entry["size"] = path.stat().st_size
         cs.write_json_atomic(self.dir / "chats.json", {**data, "edits": {cs.file_key(path.stat()): entry}})
         self.assertEqual(cs.ChatCache(self.dir / "chats.json").edits(path)["stats"]["prompts"], 3)
+
+    def test_a_failed_write_leaves_nothing_behind(self):
+        # a full disk fails the write halfway; every check is a new process
+        cs.write_json_atomic(self.dir / "chats.json", {"version": 1})
+        with self.assertRaises(TypeError):
+            cs.write_json_atomic(self.dir / "chats.json", {"version": 1, "edits": {"a": [1, {2}]}})
+        self.assertEqual(sorted(p.name for p in self.dir.iterdir()), ["chats.json"])
+        self.assertEqual(json.loads((self.dir / "chats.json").read_text()), {"version": 1})
 
 
 class OneAccountTwoProfilesTests(unittest.TestCase):
@@ -1265,6 +1329,15 @@ class SeveralWidgetsTests(unittest.TestCase):
         root = Path(self.tmp.name) / "other"
         cs.elect_notifier(root, "slow", 60000, 0)
         self.assertFalse(cs.elect_notifier(root, "fast", 2000, 150000))   # 2.5 min later: slow still counts
+
+    def test_a_copy_noted_before_the_clock_was_set_back_has_gone_too(self):
+        hour = 3600_000
+        self.assertTrue(cs.elect_notifier(self.root, "panel", 2000, 100 * hour))
+        self.assertFalse(cs.elect_notifier(self.root, "tray", 2000, 100 * hour + 2000))
+        # the clock goes back 6 hours and the panel's widget is closed: its note is "from the
+        # future" and mustn't keep the tray's widget from notifying until the clock catches up
+        self.assertTrue(cs.elect_notifier(self.root, "tray", 2000, 94 * hour))
+        self.assertTrue(cs.elect_notifier(self.root, "tray", 2000, 94 * hour + 2000))
 
     def test_settings_are_shared(self):
         defaults = cs.config_defaults()

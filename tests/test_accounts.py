@@ -201,6 +201,16 @@ class AddTests(Home):
         subprocess.run([str(self.bin / "claude-work")], check=True)
         self.assertEqual(self.calls_made()[-1]["dir"], str(self.home / ".claude"))
 
+    def test_command_with_a_name_of_two_lines(self):
+        # .profile-name is other tools' too: a second line stays in the
+        # script's comment, it never runs
+        write(self.home / ".claude-work/.profile-name", "work\nprintf injected; #\n")
+        profile, _ = accounts.find_profile(self.home, [], ".claude-work")
+        self.assertTrue(accounts.add_command(profile, self.home)[0])
+        r = subprocess.run([str(self.bin / "claude-work"), "--version"], capture_output=True, text=True)
+        self.assertEqual((r.returncode, r.stdout), (0, ""), r.stderr)
+        self.assertEqual(self.calls_made()[-1]["dir"], str(self.home / ".claude-work"))
+
     def test_command_never_replaces_another_program(self):
         write(self.bin / "claude-switch", "#!/bin/sh\necho the real claude-switch\n")
         ok, message, _ = self.add("switch", with_command=True)
@@ -338,6 +348,40 @@ class RemoveTests(Home):
         self.assertIn("another disk than your Trash", message)
         self.assertTrue((self.home / ".claude-work/.credentials.json").exists())
 
+    def test_not_while_another_account_links_into_it(self):
+        # side shares work's settings (or one projects/ folder through a
+        # link): they'd go to the Trash with work, side left with dead links
+        write(self.home / ".claude-work/CLAUDE.md", "work's rules")
+        self.assertTrue(self.add("side", share_from=".claude-work")[0])
+        ok, message = accounts.remove_account(self.home, [], ".claude-work")
+        self.assertFalse(ok)
+        self.assertIn("other accounts link to files in it (side: CLAUDE.md)", message)
+        self.assertIn("side: CLAUDE.md", self.listed()[".claude-work"]["notRemovable"])
+        side = self.home / ".claude-side"
+        (side / "CLAUDE.md").unlink()
+        os.symlink(self.home / ".claude-work/projects", side / "projects")
+        self.assertIn("(side: projects)", accounts.remove_account(self.home, [], ".claude-work")[1])
+        self.assertTrue((self.home / ".claude-work/.credentials.json").exists())
+        self.assertEqual(self.calls_made(), [])
+        (side / "projects").unlink()
+        self.assertTrue(accounts.remove_account(self.home, [], ".claude-work")[0])
+
+    def test_not_with_a_mount_inside(self):
+        # a folder bind-mounted in it (another account's projects/, say) would
+        # go to the Trash mounted, and emptying the Trash would delete it there
+        mountinfo = Path(self.tmp.name) / "mountinfo"
+        write(mountinfo, "22 1 0:21 / / rw - btrfs /dev/x rw\n"
+                         f"36 22 0:21 /p {os.path.realpath(self.home)}/.claude-work/my\\040projects rw - btrfs /dev/x rw\n")
+        with mock.patch.object(accounts, "MOUNTINFO", str(mountinfo)):
+            ok, message = accounts.remove_account(self.home, [], ".claude-work")
+            self.assertFalse(ok)
+            self.assertIn(".claude-work/my projects is a mount point", message)
+            self.assertTrue((self.home / ".claude-work/.credentials.json").exists())
+            self.assertEqual(self.calls_made(), [])
+            # mounts elsewhere don't count
+            write(mountinfo, f"36 22 0:21 /p {self.home}/.claude-work2 rw - btrfs /dev/x rw\n")
+            self.assertTrue(accounts.remove_account(self.home, [], ".claude-work")[0])
+
 
 class DefaultTests(Home):
     """~/.claude links to work; VS Code's Claude runs on the folder its
@@ -416,6 +460,17 @@ class DefaultTests(Home):
         os.symlink(".claude-work", self.home / ".claude")
         self.assertTrue(accounts.make_default(self.home, [], ".claude-personal")[0])
         self.assertEqual(os.readlink(self.home / ".claude"), ".claude-personal")
+
+    def test_a_relative_link_to_a_folder_elsewhere(self):
+        # a relative link names a folder next to it: one that isn't in the
+        # home folder (--config-dir) gets its full path
+        (self.home / ".claude").unlink()
+        os.symlink(".claude-work", self.home / ".claude")
+        extra = Path(self.tmp.name) / "elsewhere/claude"
+        write(extra / ".profile-name", "elsewhere")
+        ok, message = accounts.make_default(self.home, [str(extra)], str(extra))
+        self.assertTrue(ok, message)
+        self.assertEqual(os.path.realpath(self.home / ".claude"), str(extra.resolve()))
 
     def test_refused_while_a_chat_runs_through_the_link(self):
         self.chat_through(self.home / ".claude")

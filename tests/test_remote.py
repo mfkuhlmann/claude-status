@@ -675,7 +675,8 @@ class HostTaskTests(TwoAccountHost):
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             remote.main(["--task", "lab", ".claude", str(self.folder), "--prompt", "go", "--print-command"])
-        self.assertTrue(json.loads(out.getvalue())["command"].endswith(" go"))
+        # (one word: with a space in front, so it isn't one of claude's commands)
+        self.assertTrue(json.loads(out.getvalue())["command"].endswith(" ' go'"))
 
     def test_a_plan_comes_here_and_is_shared_there(self):
         import jump
@@ -700,10 +701,6 @@ class HostTaskTests(TwoAccountHost):
         (plan,) = group["plans"]
         self.assertEqual((plan["slug"], plan["title"], plan["chatId"], plan["openCommand"]),
                          ("calm-red-owl", "Calm plan", None, None))
-
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 ARGV_SSH = r'''#!/bin/bash
@@ -801,3 +798,7 @@ class LoginTests(FakeSSH):
         self.assertIn(" -I ", line)
         with self.assertRaises(ValueError):
             remote.login("-oProxyCommand=evil")
+
+
+if __name__ == "__main__":
+    unittest.main()

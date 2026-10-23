@@ -32,6 +32,8 @@ KCM.SimpleKCM {
     readonly property var plainAccount: accounts.find(a => a.main) || null
     property string message: ""
     property bool messageOk: true
+    property bool listFailed: false   // the message is what a failed list said: it goes once a list works
+    property string dismissed: ""     // the message the user closed (a failed list says it again every few seconds)
     property string busy: ""          // the account (or "add") an action runs for
     property string confirm: ""       // "remove:<key>" or "logout:<key>": asks first
 
@@ -48,6 +50,11 @@ KCM.SimpleKCM {
         return ""
     }
 
+    // The message box's close button sets its visible, which ends a binding
+    // (visible: message !== ""): the next message would never show. So it's
+    // shown and hidden from here.
+    onMessageChanged: messageBox.visible = message !== ""
+
     function command(args) {
         const q = s => "'" + String(s).replace(/'/g, "'\\''") + "'"
         const line = host
@@ -63,6 +70,8 @@ KCM.SimpleKCM {
         accounts = []
         loaded = false
         message = ""
+        dismissed = ""
+        listFailed = false
         confirm = ""
         load(true)
     }
@@ -97,8 +106,12 @@ KCM.SimpleKCM {
                 result = { ok: false, message: lines[lines.length - 1] || i18n("the helper gave no answer") }
             }
             if (source.indexOf("'--list'") >= 0 && !result.ok) {
-                page.message = result.message || i18n("the helper gave no answer")
-                page.messageOk = false
+                const said = result.message || i18n("the helper gave no answer")
+                if (said !== page.dismissed) {
+                    page.message = said
+                    page.messageOk = false
+                    page.listFailed = true
+                }
                 page.loaded = true
                 return
             }
@@ -121,10 +134,16 @@ KCM.SimpleKCM {
                 if (!checked && (!page.loaded || changed))
                     page.load(true)
                 page.loaded = true
+                page.dismissed = ""
+                if (page.listFailed) {   // (what a failed list said is over)
+                    page.listFailed = false
+                    page.message = ""
+                }
                 return
             }
             page.message = result.message || ""
             page.messageOk = result.ok
+            page.listFailed = false
             page.busy = ""
             if (result.ok && source.indexOf("'--add'") >= 0)
                 nameField.text = ""
@@ -146,12 +165,17 @@ KCM.SimpleKCM {
         spacing: Kirigami.Units.largeSpacing
 
         Kirigami.InlineMessage {
+            id: messageBox
             Layout.fillWidth: true
-            visible: page.message !== ""
             type: page.messageOk ? Kirigami.MessageType.Positive : Kirigami.MessageType.Error
             text: page.message
             showCloseButton: true
-            onVisibleChanged: if (!visible) page.message = ""
+            onVisibleChanged: {
+                if (!visible) {
+                    page.dismissed = page.message
+                    page.message = ""
+                }
+            }
         }
 
         RowLayout {

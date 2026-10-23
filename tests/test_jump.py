@@ -12,7 +12,6 @@ import time
 import unittest
 from pathlib import Path
 from unittest import mock
-from urllib.parse import parse_qs, urlsplit
 
 sys.dont_write_bytecode = True  # keep __pycache__ out of the plasmoid package
 CODE = Path(__file__).resolve().parent.parent / "package/contents/code"
@@ -22,7 +21,7 @@ jump = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(jump)
 cs = jump.cs
 
-from test_claude_status import Fixture, session, write  # noqa: E402
+from test_claude_status import Fixture, session, vscode_link_params, write  # noqa: E402
 
 
 class Patch:
@@ -244,6 +243,24 @@ class SmallJumpTests(unittest.TestCase):
             ok, message = jump.jump_terminal({"pid": os.getpid(), "tmux": "s:@1.%3"})
         self.assertEqual((ok, message), (False, "This session runs in a tmux session no terminal shows right now: "
                                                 "attach to it to see it"))
+
+
+class ProcessNameTests(unittest.TestCase):
+    def test_a_name_cut_inside_a_character(self):
+        # the kernel keeps 15 bytes of a name: any process on the system can
+        # have half a character at its end, and every one is looked at
+        child = subprocess.Popen([sys.executable, "-c", "import sys, time; open('/proc/self/comm', 'wb')"
+                                  ".write(b'app-\\xe6\\xb5\\x8b\\xe8\\xaf\\x95\\xe7\\xa8\\x8b\\xe5\\xba'); "
+                                  "print('ready', flush=True); time.sleep(30)"], stdout=subprocess.PIPE)
+        self.addCleanup(child.wait)
+        self.addCleanup(child.kill)
+        child.stdout.readline()
+        self.assertTrue(jump.proc_name(child.pid).startswith("app-"))
+        self.assertEqual(jump.parent_pid(child.pid), os.getpid())
+        jump.konsole_pids()
+        jump.vscode_main_pids()
+        with mock.patch.object(cs, "VSCODE_APPS", (("code-that-isnt-there", "Nothing"),)):
+            self.assertEqual(cs.vscode_running_config_dir(), (False, None))
 
 
 class AttachCommandTests(unittest.TestCase):
@@ -1063,6 +1080,30 @@ class SharedChatActionTests(unittest.TestCase):
             self.assertEqual((self.part(".claude", "folder") / "subagents/agent-1.jsonl").read_text(), "{}\n")
             self.run_action(jump.share)
 
+    def test_a_bind_mounted_projects_folder_is_one_copy_not_two(self):
+        """The same through a bind mount (mount --bind), which no symlink
+        explains: two paths, one file and one directory entry. Keeping it on
+        one account deleted that entry, the chat's only one."""
+        if not shutil.which("unshare") or subprocess.run(["unshare", "-rm", "true"], capture_output=True).returncode:
+            self.skipTest("no user namespace for a bind mount here")
+        (self.home / ".claude-work/projects").mkdir()
+        chat = self.part(".claude", "chat")
+        script = (f"import json, subprocess, sys\nsys.path.insert(0, {str(CODE)!r})\nimport jump\n"
+                  f"from pathlib import Path\nhome, chat = Path({str(self.home)!r}), Path({str(chat)!r})\n"
+                  "subprocess.run(['mount', '--bind', str(home / '.claude/projects'), str(home / '.claude-work/projects')],"
+                  " check=True)\n"
+                  f"out = [[*jump.unshare(home, [], {self.CHAT!r}, '.claude'), chat.is_file()]]\n"
+                  "for keep in ('.claude', '.claude-work'):\n"
+                  f"    out.append([*jump.share(home, [], {self.CHAT!r}), chat.is_file()])\n"
+                  f"    out.append([*jump.unshare(home, [], {self.CHAT!r}, keep), chat.is_file()])\n"
+                  "print(json.dumps(out))\n")
+        r = subprocess.run(["unshare", "-rm", sys.executable, "-I", "-c", script], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        steps = json.loads(r.stdout)
+        self.assertEqual(steps[0], [False, "This chat isn't shared", True])
+        self.assertTrue(all(step[2] for step in steps), steps)
+        self.assertEqual((self.part(".claude", "folder") / "subagents/agent-1.jsonl").read_text(), "{}\n")
+
     def test_keep_only_takes_back_what_the_others_left_in_the_store(self):
         """Shared before by another tool (one file, but a folder of each
         account's own): the store's folder isn't left behind."""
@@ -1151,6 +1192,9 @@ class RemoteShowTests(unittest.TestCase):
             ("ssh", "-t", "alice@labserver.uni.example", "claude"): "labserver.uni.example",
             ("ssh", "-l", "me", "-p", "2222", "box"): "box",
             ("ssh", "-p2222", "-tt", "box:22"): "box",
+            ("ssh", "-Xp", "2222", "gpu"): "gpu",   # a group whose last flag takes the next word
+            ("ssh", "-vp2222", "gpu"): "gpu",
+            ("ssh", "jdoe@corp.example.com@gpu"): "gpu",   # ssh splits at the last @
             ("ssh", "-W", "[labserver]:22", "bastion"): None,       # a ProxyJump helper, not the session
             ("ssh", "-o", "X=1"): None,
             ("bash", "labserver"): None,
@@ -1176,6 +1220,14 @@ class RemoteShowTests(unittest.TestCase):
         self.assertEqual((ok, msg), (True, "Opened the conversation in VS Code (labserver)"))
         self.assertEqual(raised, [(([100], "[SSH: labserver]"), {"require": True, "prefer": "proj"})])
         self.assertEqual(opened, [["/usr/bin/xdg-open", "vscode://anthropic.claude-code/open?session=abc-123"]])
+        # a window connected by the host's HostName: its title has that name
+        raised.clear()
+        argvs[120] = ["ssh", "-T", "-D", "1", "labserver.uni.example"]
+        with Patch(vscode_main_pids=lambda: [100], raise_window=lambda *a, **k: raised.append((a, k)) or True,
+                   subprocess=fake, shutil=type("W", (), {"which": staticmethod(lambda n: "/usr/bin/" + n)}),
+                   time=type("T", (), {"sleep": staticmethod(lambda s: None)}), **self.procs(tree, names, argvs)):
+            self.assertTrue(jump.jump_remote_vscode("labserver", "abc-123", "/home/me/proj")[0])
+        self.assertEqual(raised, [(([100], "[SSH: labserver.uni.example]"), {"require": True, "prefer": "proj"})])
 
     def test_vscode_opened_on_the_host_when_not_connected(self):
         opened = []
@@ -1359,7 +1411,7 @@ class ChangesTests(Fixture):
         return jump.chat_comparison(self.home, [], "chat1", ".claude-work", **kw)
 
     def test_before_the_chat_and_now(self):
-        with Patch(git_original=lambda path: b"committed\n" if path.endswith("notes.md") else None):
+        with Patch(git_original=lambda path, missing=b"": b"committed\n" if path.endswith("notes.md") else None):
             ok, message, comparison = self.compare()
         self.assertTrue(ok, message)
         self.assertEqual(message, "4 changed files since it started")
@@ -1381,11 +1433,19 @@ class ChangesTests(Fixture):
     def test_without_earlier_versions(self):
         for f in self.backups.iterdir():
             f.unlink()
-        with Patch(git_original=lambda path: None):
+        with Patch(git_original=lambda path, missing=b"": None):
             ok, message, comparison = self.compare()
         self.assertTrue(ok)
         self.assertEqual([i["label"] for i in comparison["items"]], ["src/new.py"])
         self.assertIn("4 more with no earlier version to compare with", message)  # edited, same, gone, notes
+
+    def test_a_removed_backup_of_a_file_git_doesnt_have(self):
+        # it was there before the chat (Claude backed it up): not empty then
+        (self.backups / "e@v1").unlink()
+        with Patch(git_original=lambda path, missing=b"": missing):
+            ok, message, comparison = self.compare()
+        self.assertEqual([i["label"] for i in comparison["items"]], ["notes.md", "src/gone.py", "src/new.py"])
+        self.assertEqual(message, "3 changed files since it started; 1 more with no earlier version to compare with")
 
     def test_real_git_fallback(self):
         if not shutil.which("git"):
@@ -1414,7 +1474,7 @@ class ChangesTests(Fixture):
         ((folder, link),) = started
         self.assertEqual(folder, str(self.proj))
         self.assertTrue(link.startswith("vscode://wzaielamri.claude-status/changes?file="), link)
-        manifest = json.loads(Path(parse_qs(urlsplit(link).query)["file"][0]).read_text())
+        manifest = json.loads(Path(vscode_link_params(link)["file"]).read_text())
         self.assertEqual([i["label"] for i in manifest["items"]], ["src/edited.py"])
         self.assertEqual(diffs, [])
 

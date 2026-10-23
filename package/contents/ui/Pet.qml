@@ -89,7 +89,7 @@ Item {
 
     readonly property string moodPose: mood === "working-typing" ? workPose
                                      : mood === "working-juggling" ? agentPose
-                                     : mood === "waving" ? waitPose
+                                     : mood === "waving" ? (!lone && !chat ? "waving" : waitPose)   // (its chat left: a real wave)
                                      : mood
     readonly property string pose: held ? (heldLong ? "scared" : "surprised")
                                  : reaction !== "" ? reaction
@@ -782,6 +782,11 @@ Item {
         }
         onReleased: {
             if (dragging)
+                pet.drop()
+        }
+        // (a press that ends without a release: the popup closed or the stage folded away under the mouse)
+        onCanceled: {
+            if (dragging && pet.held)
                 pet.drop()
         }
         onClicked: {

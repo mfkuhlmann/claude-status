@@ -256,3 +256,144 @@ class SshUsageTests(unittest.TestCase):
         self.assertIn("out.push(Object.assign({}, withUsage(g, host), { host: host }))", main)
         self.assertIn("info.result.groups.map(g => root.withUsage(g, host))", host)
         self.assertIn("visible: !section.group.limitsHidden", section)
+
+
+class SearchAndNewChatBoxTests(unittest.TestCase):
+    def test_a_box_made_while_its_list_is_open_shows_the_task(self):
+        # A plan's new-chat box is made again when the plans are folded and
+        # unfolded with its composer open: it is visible from the start, so
+        # onVisibleChanged never filled its field, which stayed empty while
+        # root.taskText, still set, was what the chat started with
+        box = (ROOT / "ui/NewChatBox.qml").read_text()
+        self.assertIn("onVisibleChanged:", box)
+        self.assertRegex(box, r"Component\.onCompleted:\s*taskField\.text = root\.taskText")
+
+    def test_a_stale_hosts_error_is_a_sentence_before_what_it_said(self):
+        # "Can't reach h: ssh: connect to host h port 22: Connection timed out"
+        # has no full stop: the VS Code view adds one before "Showing what it
+        # said", the dashboard ran the two together
+        host = (ROOT / "ui/HostSection.qml").read_text()
+        self.assertIn("[.!?]$", host)
+
+    def test_a_found_chats_dot_is_red_like_its_row(self):
+        # The search shows a chat that's listed above by its row's state: the
+        # row's dot is red for a chat that failed or that a usage limit stopped
+        row = (ROOT / "ui/SessionRow.qml").read_text()
+        found = (ROOT / "ui/SearchResults.qml").read_text()
+        self.assertIn('row.session.reason === "failed" || (row.stopped && !row.stopped.over) ? Kirigami.Theme.negativeTextColor', row)
+        self.assertIn('hit.row.reason === "failed" || (!!hit.row.stopped && !hit.row.stopped.over) ? Kirigami.Theme.negativeTextColor', found)
+
+
+class SettingsPageTests(unittest.TestCase):
+    def test_a_closable_message_box_isnt_bound_to_visible(self):
+        # Kirigami's close button sets the box's visible, which ends a binding
+        # like `visible: page.message !== ""`: the next message never showed
+        # again (the Accounts settings: after one was closed, no answer to a
+        # click was seen). Such a box is shown and hidden from code.
+        for path in sorted((ROOT / "ui").glob("*.qml")):
+            lines = path.read_text().split("\n")
+            for i, line in enumerate(lines):
+                if not re.match(r"\s*Kirigami\.InlineMessage\s*\{\s*$", line):
+                    continue
+                indent = len(line) - len(line.lstrip())
+                own = []
+                for j in range(i + 1, len(lines)):
+                    if lines[j].strip() == "}" and len(lines[j]) - len(lines[j].lstrip()) == indent:
+                        break
+                    if re.match(" {%d}\\S" % (indent + 4), lines[j]):
+                        own.append(lines[j])
+                if any(re.match(r"\s*showCloseButton:\s*true", l) for l in own):
+                    self.assertFalse(any(re.match(r"\s*visible:", l) for l in own),
+                                     f"{path.name}:{i + 1}: a closable message box bound to visible")
+
+    def test_every_cfg_property_matches_a_setting_of_its_type(self):
+        # Plasma writes every cfg_ property of the page back on Apply (and
+        # passes the defaults in): one without a setting of its type in
+        # main.xml, or a setting without one, is lost or mangled
+        kinds = dict(re.findall(r'<entry name="(\w+)" type="(\w+)"', (ROOT / "config/main.xml").read_text()))
+        page = (ROOT / "ui/configGeneral.qml").read_text()
+        controls = {m.group(2): m.group(1) for m in re.finditer(r"(\S+) \{\n\s+id: (\w+)\n", page)}
+        of_control = {"QQC2.SpinBox": "Int", "QQC2.Slider": "Int", "QQC2.CheckBox": "Bool", "QQC2.TextField": "String",
+                      "SoundChooser": "String"}
+        of_type = {"string": "String", "bool": "Bool", "int": "Int"}
+        found, defaults = {}, {}
+        for m in re.finditer(r"property alias cfg_(\w+): (\w+)\.\w+", page):
+            found[m.group(1)] = of_control[controls[m.group(2)]]
+        for m in re.finditer(r"property (string|bool|int) cfg_(\w+)", page):
+            (defaults if m.group(2).endswith("Default") and m.group(2)[:-7] in kinds else found)[m.group(2)] = of_type[m.group(1)]
+        self.assertEqual(found, kinds)
+        self.assertEqual({k + "Default": v for k, v in kinds.items()}, defaults)
+
+    def test_the_settings_pages_call_the_helpers_with_flags_they_have(self):
+        # A flag a helper doesn't know ends in its usage text, never an answer:
+        # the page then says "the helper gave no answer"
+        code = ROOT / "code"
+
+        def main_of(name):
+            text = (code / name).read_text()
+            return text[text.index("def main("):]
+        accounts = (ROOT / "ui/configAccounts.qml").read_text()
+        flags = set(re.findall(r'"(--[a-z-]+)"', accounts))
+        actions = {"--list", "--add", "--login", "--logout", "--remove", "--command", "--no-command", "--default"}
+        self.assertLessEqual(actions | {"--check", "--share-from", "--config-dir", "--accounts"}, flags)
+        for flag in sorted(flags - {"--accounts"}):
+            self.assertIn(f'"{flag}"', main_of("accounts.py"), flag)
+        self.assertIn('"--accounts"', main_of("remote.py"))
+        host_actions = re.search(r"ACCOUNT_ACTIONS = \((.*?)\)", (code / "remote.py").read_text(), re.S).group(1)
+        for flag in sorted(actions):
+            self.assertIn(f'"{flag}"', host_actions, flag)
+        general = (ROOT / "ui/configGeneral.qml").read_text()
+        for flag in sorted(set(re.findall(r"--[a-z-]+", general))):
+            self.assertTrue(f'"{flag}"' in main_of("jump.py") or f'"{flag}"' in main_of("notify_sound.py"), flag)
+
+    def test_every_setting_the_ui_reads_exists(self):
+        # A setting misspelled in the UI reads as undefined, without an error
+        names = set(re.findall(r'<entry name="(\w+)"', (ROOT / "config/main.xml").read_text()))
+        for path in sorted((ROOT / "ui").glob("**/*.qml")):
+            for name in re.findall(r"Plasmoid\.configuration\.(\w+)", path.read_text()):
+                self.assertIn(name, names, f"{path.name}: Plasmoid.configuration.{name}")
+        main = (ROOT / "ui/main.qml").read_text()
+        shared = main[main.index("readonly property var sharedKeys: ["):]
+        for name in re.findall(r'"(\w+)"', shared[:shared.index("]")]):
+            self.assertIn(name, names, f"sharedKeys: {name}")
+
+
+class PetLifeTests(unittest.TestCase):
+    """What a pet shows of its chat, and what ends a drag: QML that can't be
+    run here, so the rules are read off the source."""
+
+    def test_a_pet_is_told_of_every_field_of_its_chat_that_it_shows(self):
+        # A pet reads its chat (Pet.qml's mood, the tooltip's stateText) from the
+        # row that PetStrip.sync() handed it, and sync() does nothing while the
+        # signature of the shown chats is the same. A field missing from the
+        # signature never reaches the pet: when a usage limit reset
+        # (stopped.over), the chat's pet went on waiting for it, "battery-low"
+        strip = (ROOT / "ui/PetStrip.qml").read_text()
+        pet = (ROOT / "ui/Pet.qml").read_text()
+        main = (ROOT / "ui/main.qml").read_text()
+        signature = strip[strip.index("const seen = JSON.stringify("):]
+        signature = signature[:signature.index("syncedAs = seen")]
+        tooltip = main[main.index("function stateText(s) {"):]
+        tooltip = tooltip[:tooltip.index("\n    }\n")]
+        shown = set(re.findall(r"\bchat\.(\w+)", pet)) | set(re.findall(r"\bs\.(\w+)", tooltip))
+        self.assertLessEqual({"state", "stopped", "reason", "since", "context", "agents"}, shown)
+        for field in sorted(shown):
+            self.assertIn(f"s.{field}", signature, f"PetStrip.sync() doesn't see changes of {field}")
+
+    def test_a_drag_cut_short_puts_the_pet_down(self):
+        # The popup closing (or the stage folding away) under a pressed mouse
+        # button ends the press with canceled(), not released(): the pet stayed
+        # held in the air with no life in him, and a chat's pet whose chat had
+        # left never walked off (leaveTimer waits for a pet that is held)
+        pet = (ROOT / "ui/Pet.qml").read_text()
+        grab = pet[pet.index("id: grab"):]
+        self.assertRegex(grab, r"onCanceled:\s*\{[^}]*pet\.drop\(\)")
+
+    def test_a_pet_whose_chat_left_waves_goodbye(self):
+        # "then it waves and walks off" (PetStrip.qml): a pet without a chat is
+        # in the mood "waving", and a waving pet shows waitPose, the on-call
+        # sign first: it held up the alert sign instead of waving
+        pet = (ROOT / "ui/Pet.qml").read_text()
+        pose = pet[pet.index("readonly property string moodPose:"):]
+        pose = pose[:pose.index("readonly property string pose:")]
+        self.assertRegex(pose, r'mood === "waving" \? \(!lone && !chat \? "waving" : waitPose\)')

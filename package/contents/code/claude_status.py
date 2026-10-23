@@ -125,9 +125,17 @@ def private_dir(path):
 def write_json_atomic(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, separators=(",", ":"))
-    os.replace(tmp, path)
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, separators=(",", ":"))
+        os.replace(tmp, path)
+    except BaseException:
+        # (on a full disk every check, a new process, would leave one)
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def to_ms(value):
@@ -425,7 +433,9 @@ def parked_job_state(job, present, now_ms, keep_done_ms=0):
     created = to_ms(job.get("createdAt"))
     if not present and not (created is not None and now_ms - created < RECENT_JOB_MS):
         exec_job = job.get("template") == "exec" and not job.get("respawnFlags")
-        if job.get("state") == "blocked" and not exec_job:
+        # (state "blocked" stays after you answer: with tempo "active" again,
+        # the job went on working and its process died mid-task)
+        if job.get("state") == "blocked" and job.get("tempo") != "active" and not exec_job:
             return "waiting", ""
         return ("done", "failed") if recent_end else None  # its process died mid-task
     return ("waiting" if job.get("tempo") == "blocked" else "working"), ""
@@ -703,7 +713,8 @@ def finish_row(row, job, job_id, profile, ctx, alive):
     row["chatId"], row["shared"] = chat_link(row, job, profile, ctx)
     attach_snapshot(row, ctx.snapshot_root, profile, [row["sessionId"], row["chatId"], row["jobSessionId"]])
     if ctx.agents is not None:  # a session continuing a chat shows that chat's agents
-        row["agents"] = ctx.agents.session_agents(profile, row["chatId"], alive=alive)
+        row["agents"] = ctx.agents.session_agents(profile, row["chatId"], alive=alive,
+                                                  since=row["startedAt"] if alive else None)
     chats = getattr(ctx, "chats", None)
     if chats is not None:
         path = transcript_path(profile, row["chatId"])
@@ -1040,8 +1051,9 @@ class AgentCache:
         self.changed = True
         return None
 
-    def session_agents(self, profile, session_id, alive):
-        """Subagents of one session as counts plus a display-ordered tree, or None."""
+    def session_agents(self, profile, session_id, alive, since=None):
+        """Subagents of one session as counts plus a display-ordered tree, or
+        None. since: when the session's process started (ms), if it runs."""
         if not session_id or "/" in session_id:
             return None
         agents = []
@@ -1053,8 +1065,10 @@ class AgentCache:
                 agent_id = meta_path.name[len("agent-"):-len(".meta.json")]
                 status, activity, ts, started, model, detail = self.progress(agent_dir / f"agent-{agent_id}.jsonl",
                                                                               meta.get("finished") is True)
-                if status == "running" and not alive:
-                    status = "stopped"  # its session ended before it finished
+                # its session ended before it finished, or the process that ran
+                # it did (a resumed chat keeps its id, and its agents' folder)
+                if status == "running" and (not alive or (since and ts is not None and ts < since)):
+                    status = "stopped"
                 depth = meta.get("spawnDepth") if isinstance(meta.get("spawnDepth"), int) else 1
                 parent = None
                 if depth > 1 and isinstance(meta.get("toolUseId"), str):
@@ -1211,8 +1225,8 @@ def spoken_duration(ms):
 
 
 def token_count(n):
-    """45.2k, 1.3M"""
-    return f"{n / 1e6:.1f}M" if n >= 1e6 else f"{n / 1e3:.1f}k" if n >= 1e3 else str(n)
+    """45.2k, 1.3M (by what it rounds to: 999,960 is 1.0M, not 1000.0k)"""
+    return f"{n / 1e6:.1f}M" if n >= 999_950 else f"{n / 1e3:.1f}k" if n >= 1e3 else str(n)
 
 
 def tool_call_md(block):
@@ -2557,6 +2571,7 @@ def link_shared_elsewhere(groups):
     for g in groups:
         g["sharedHere"] = []
     listed = {chat_id(s) for g in groups for s in g["sessions"]}
+    pointed = set()  # (account, chat): a chat listed twice (open on two accounts) gets one pointer
     for g in groups:
         for s in g["sessions"]:
             info = s["shared"]
@@ -2571,6 +2586,9 @@ def link_shared_elsewhere(groups):
                     continue
                 if any(chat_id(t) == chat or (t["shared"] or {}).get("forkOf") == chat for t in h["sessions"]):
                     continue
+                if (id(h), chat) in pointed:
+                    continue
+                pointed.add((id(h), chat))
                 h["sharedHere"].append({
                     "key": f"{s['key']}/shared",
                     "sessionId": s["sessionId"],
@@ -2827,6 +2845,30 @@ def note_limit_stops(group, now_ms):
             s["stopped"] = limit_stop(s["stopped"], group.get("limits"), now_ms)
 
 
+def note_limit_hits(group):
+    """A plan window one of the account's chats hit the limit of after its
+    usage was last read is full, whatever that read said (VS Code's panel
+    runs no status line: its chats use up a window with no new numbers)."""
+    limits = group.get("limits")
+    if not limits:
+        return
+    for s in group["sessions"] + group.get("recent", []):
+        stopped = s.get("stopped") or {}
+        at = stopped.get("at")
+        if stopped.get("kind") != "limit" or not at or at <= limits["updatedAt"]:
+            continue
+        if s.get("shared") and s.get("startedAt") and at < s["startedAt"]:
+            continue  # (a shared chat, or a copy, may have hit another account's limit before it came here)
+        for w in limits["windows"]:
+            hours = window_hours(w["key"])
+            if w["key"] != stopped.get("window") or w["reset"] or not w["resetsAt"] or not hours \
+                    or not w["resetsAt"] - hours * 3600_000 <= at < w["resetsAt"]:
+                continue  # (a limit of a window that's over since)
+            w["pct"] = max(w["pct"], 100.0)
+            if w.get("forecast"):
+                w["forecast"] = dict(w["forecast"], fullAt=None, atReset=max(w["forecast"]["atReset"], w["pct"]))
+
+
 # ---------------------------------------------------------------- chats changing the same files
 #
 # Two chats that can still change files (each has a process) and changed
@@ -2842,6 +2884,7 @@ def note_overlaps(groups, changed, home):
     same files as another such chat: [{"key", "name", "sessionId",
     "profileDir", "count", "files"}]. changed: row key -> absolute paths."""
     rows = [s for g in groups for s in g["sessions"] if s.get("pid") is not None and changed.get(s["key"])]
+    named = {}  # row key -> the chats it names (one listed twice, once)
     for i, a in enumerate(rows):
         for b in rows[i + 1:]:
             if (a.get("chatId") or a["sessionId"]) == (b.get("chatId") or b["sessionId"]):
@@ -2850,6 +2893,10 @@ def note_overlaps(groups, changed, home):
             if not both:
                 continue
             for row, other in ((a, b), (b, a)):
+                chat = other.get("chatId") or other["sessionId"]
+                if chat in named.setdefault(row["key"], set()):
+                    continue
+                named[row["key"]].add(chat)
                 row["overlaps"] = (row.get("overlaps") or []) + [{
                     "key": other["key"], "name": other["name"], "sessionId": other["sessionId"],
                     "profileDir": other["profileDir"], "count": len(both),
@@ -3292,7 +3339,12 @@ def memory_file(profiles, path):
     if real.suffix != ".md" or not real.is_file():
         return None
     for p in profiles:
-        if real.parent.name == "memory" and real.parent.parent.parent == p.real / "projects":
+        projects = p.real / "projects"
+        try:
+            projects = projects.resolve()  # (it may be a link to a folder elsewhere, e.g. on another disk)
+        except (OSError, RuntimeError):
+            pass
+        if real.parent.name == "memory" and real.parent.parent.parent == projects:
             return real
         if Path(path) in (p.path / "CLAUDE.md", p.real / "CLAUDE.md"):
             return Path(path)  # (by its own name: it may be a link to a shared file)
@@ -3309,7 +3361,10 @@ def memory_file(profiles, path):
 # or the plan it presented (ExitPlanMode's "plan"), counting only the tool
 # calls that went through.
 
-PLAN_FEEDBACK_MAX = 90_000  # characters of a message (one argument can be 128 KB)
+PLAN_FEEDBACK_MAX = 90_000  # characters of a message
+# ...and bytes of it once shell-quoted: the command that reopens its chat has
+# it in one argument, of 128 KB at most (a character can take 3 bytes or 4)
+PLAN_FEEDBACK_BYTES = 120_000
 PLAN_TOOLS = ("Write", "Edit", "MultiEdit", "ExitPlanMode")
 
 
@@ -3386,6 +3441,8 @@ def apply_plan_tool(text, name, inp):
         old, new = (ed or {}).get("old_string"), (ed or {}).get("new_string")
         if text is None or not isinstance(old, str) or not isinstance(new, str) or old not in text:
             return None
+        if new == "" and not old.endswith("\n") and old + "\n" in text:
+            old += "\n"  # (as Claude's Edit does: what it takes out goes with the end of its line)
         text = text.replace(old, new) if ed.get("replace_all") else text.replace(old, new, 1)
     return text
 
@@ -3396,6 +3453,10 @@ def plan_feedback(plan, original, comments=(), home=None):
     isn't known) and your comments [{"from", "to", "quote", "text"}] on its
     lines; "" when there's nothing to say."""
     import difflib
+
+    def size(text):
+        return len(shlex.quote(text).encode("utf-8", "replace"))
+
     with open(plan, encoding="utf-8", errors="replace") as f:
         current = f.read()
     where = short_folder(str(plan), home)
@@ -3403,8 +3464,11 @@ def plan_feedback(plan, original, comments=(), home=None):
     if original is not None and original != current:
         diff = "".join(difflib.unified_diff(original.splitlines(True), current.splitlines(True),
                                             "the plan as you wrote it", "the plan as I changed it", n=2))
-        if len(diff) > PLAN_FEEDBACK_MAX // 2:
-            diff = diff[:PLAN_FEEDBACK_MAX // 2] + "\n… (more changes: read the file)\n"
+        if len(diff) > PLAN_FEEDBACK_MAX // 2 or size(diff) > PLAN_FEEDBACK_BYTES // 2:
+            diff = diff[:PLAN_FEEDBACK_MAX // 2]
+            while size(diff) > PLAN_FEEDBACK_BYTES // 2:
+                diff = diff[:len(diff) * 9 // 10]
+            diff += "\n… (more changes: read the file)\n"
         parts.append(f"I changed the plan file. My changes:\n\n```diff\n{diff.rstrip()}\n```")
     elif original is None:
         parts.append(f"I changed the plan file: read {where} again for my changes.")
@@ -3417,7 +3481,10 @@ def plan_feedback(plan, original, comments=(), home=None):
         return ""
     head = (f"Here is my feedback on your plan ({where}). Revise the plan with it, and stay in plan mode: "
             "show me the revised plan before you change anything else.")
-    return (head + "\n\n" + "\n\n".join(parts))[:PLAN_FEEDBACK_MAX]
+    message = (head + "\n\n" + "\n\n".join(parts))[:PLAN_FEEDBACK_MAX]
+    while size(message) > PLAN_FEEDBACK_BYTES:
+        message = message[:len(message) * 9 // 10]
+    return message
 
 
 # ---------------------------------------------------------------- finding a chat
@@ -3805,7 +3872,12 @@ def short_folder(folder, home=None):
 # trusted already: Claude refuses otherwise ("Workspace not trusted"), and
 # always in the home folder.
 
-TASK_PLAN_MAX = 100_000  # bytes of a plan that go into a prompt (one argument can be 128 KB)
+TASK_PLAN_MAX = 100_000  # bytes of a plan that go into a prompt
+# ...as long as the prompt fits in one argument (128 KB) once quoted for an
+# SSH host's terminal: in the host's command, its sh -c and the ssh line
+TASK_ARG_MAX = 120_000
+TASK_ARG_QUOTES = 3
+TASK_PLAN_CUT = "\n\n(The plan goes on in that file.)"
 BACKGROUND_WAIT = 60  # seconds `claude --bg` gets (it may start Claude's background service first)
 # What a Claude session puts into the environment of what it runs: a claude
 # started with them would count as part of that session
@@ -3813,6 +3885,7 @@ SESSION_ENV = ("CLAUDECODE", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_ENTRYPOIN
                "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN", "CLAUDE_CODE_SESSION_ATTENDED",
                "CLAUDE_CODE_SESSION_ID", "CLAUDE_EFFORT", "CLAUDE_PID", "CLAUDE_JOB_DIR")
 SHORT_ID = re.compile(r"\b([0-9a-f]{8})\b")
+ONE_WORD = re.compile(r"[A-Za-z][A-Za-z0-9_-]*")
 
 
 def find_plan(profiles, slug, profile_key=None):
@@ -3833,8 +3906,18 @@ def task_prompt(text, plan=None, home=None):
     if plan is None:
         return text
     with open(plan, "rb") as f:
-        body = f.read(TASK_PLAN_MAX).decode("utf-8", "replace")
-    return plan_prompt(text, body, short_folder(str(plan), home))
+        data = f.read(TASK_PLAN_MAX + 1)
+    body, where = data[:TASK_PLAN_MAX].decode("utf-8", "replace"), short_folder(str(plan), home)
+    cut = len(data) > TASK_PLAN_MAX
+    while True:
+        prompt = plan_prompt(text, body.rstrip() + TASK_PLAN_CUT if cut else body, where)
+        quoted = prompt
+        for _ in range(TASK_ARG_QUOTES):  # each quote turns a ' into 4 more characters
+            quoted = shlex.quote(quoted)
+        if len(quoted.encode("utf-8", "replace")) <= TASK_ARG_MAX or not body:
+            return prompt
+        shorter = body[:len(body) * 9 // 10]
+        body, cut = shorter[:shorter.rfind("\n") + 1] or shorter, True  # at a line's end
 
 
 def plan_prompt(text, body, where):
@@ -3844,8 +3927,9 @@ def plan_prompt(text, body, where):
 
 
 def prompt_arg(prompt):
-    """The prompt as an argument claude takes as its prompt, not an option."""
-    return " " + prompt if prompt.startswith("-") else prompt
+    """The prompt as an argument claude takes as its prompt, not an option
+    nor, one word alone, one of its commands (`claude update`, `claude doctor`)."""
+    return " " + prompt if prompt.startswith("-") or ONE_WORD.fullmatch(prompt) else prompt
 
 
 def prompt_word(prompt):
@@ -4270,8 +4354,10 @@ def elect_notifier(cache_root, instance, interval_ms, now_ms):
         data = read_json(path)
         seen = {}
         for key, v in (data.items() if isinstance(data, dict) else []):
+            # (a copy noted "in the future" was noted before the clock was set back: it counts as gone, too,
+            # or a copy that has closed would stay the one that notifies until the clock catches up)
             if isinstance(v, dict) and number(v.get("seen")) is not None and number(v.get("since")) is not None \
-                    and now_ms - v["seen"] <= 3 * (number(v.get("interval")) or 2000) + INSTANCE_GRACE_MS:
+                    and abs(now_ms - v["seen"]) <= 3 * (number(v.get("interval")) or 2000) + INSTANCE_GRACE_MS:
                 seen[key] = v
         me = seen.get(instance)
         seen[instance] = {"since": me["since"] if me else now_ms, "seen": now_ms, "interval": interval_ms}
@@ -4394,7 +4480,10 @@ def snapshot_files(snapshot_root, profiles):
             with os.scandir(snapshot_root / name) as it:
                 for e in it:
                     if e.name.endswith(".json") and not e.name.startswith("."):
-                        t = e.stat().st_mtime
+                        try:
+                            t = e.stat().st_mtime
+                        except OSError:  # gone since it was listed (pruned by another copy): not the rest of the folder
+                            continue
                         if t >= t0:
                             files.append((t, Path(e.path)))
         except OSError:
@@ -4711,11 +4800,15 @@ def scan_transcripts(profile, cache, now):
         model = m.get("model") if isinstance(m.get("model"), str) and m.get("model") else "unknown"
         messages[key] = [day, model, *vals, int(shared), cwd, chat]
 
+    shared_chats = set()  # the chats whose transcripts are shared now
     for path, linked in transcript_files(profile):
         try:
             st = path.stat()
         except OSError:
             continue
+        chat = path.stem if path.parent.name != "subagents" else path.parent.parent.name
+        if st.st_nlink > 1 or linked:
+            shared_chats.add(chat)
         rec = old_files.get(str(path))
         offset = 0
         if rec and rec.get("ino") == st.st_ino and rec.get("offset", 0) <= st.st_size:
@@ -4723,7 +4816,6 @@ def scan_transcripts(profile, cache, now):
         if offset == 0 and st.st_mtime < cutoff_mtime:
             offset = st.st_size  # untouched for longer than we keep data
         elif offset < st.st_size:
-            chat = path.stem if path.parent.name != "subagents" else path.parent.parent.name
             try:
                 with open(path, "rb") as f:  # line by line: a first scan can be 50 MB
                     f.seek(offset)
@@ -4735,6 +4827,10 @@ def scan_transcripts(profile, cache, now):
             except OSError:
                 pass
         files[str(path)] = {"offset": offset, "ino": st.st_ino}
+
+    for v in messages.values():  # shared after its messages were read: the other account counts them all, too
+        if len(v) > 8 and not v[6] and v[8] in shared_chats:
+            v[6] = 1
 
     stats_from = (date.fromtimestamp(now) - timedelta(days=STATS_DAYS - 1)).isoformat()
     history = {d: v for d, v in (cache.get("history") or {}).items() if d >= stats_from}
@@ -5173,6 +5269,7 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
         for g in groups:
             g.setdefault("recent", [])
     for g in groups:
+        note_limit_hits(g)  # (of its listed chats and its recent ones)
         try:
             g["plans"] = account_plans(g, ctx, plans)
         except Exception as exc:
@@ -5248,7 +5345,7 @@ def vscode_app():
 
 def jsonc(text):
     """Parse a VS Code settings file: JSON with comments and trailing commas."""
-    out, i, n = [], 0, len(text)
+    out, i, n = [], 1 if text.startswith("\ufeff") else 0, len(text)  # (after a byte order mark)
     while i < n:
         c = text[i]
         if c == '"':
@@ -5263,10 +5360,15 @@ def jsonc(text):
         elif text.startswith("/*", i):
             j = text.find("*/", i + 2)
             i = n if j < 0 else j + 2
+        elif c == ",":
+            j = jsonc_skip(text, i + 1)
+            if j >= n or text[j] not in "}]":  # (a trailing comma goes; one in a string stays)
+                out.append(c)
+            i += 1
         else:
             out.append(c)
             i += 1
-    return json.loads(re.sub(r",(\s*[}\]])", r"\1", "".join(out)))
+    return json.loads("".join(out))
 
 
 def jsonc_skip(text, i):
@@ -5328,7 +5430,8 @@ def jsonc_set(text, key, value):
     key set to value, and everything else (comments, order, layout) as it
     was: the edit VS Code makes when you change one setting."""
     n = len(text)
-    i = jsonc_skip(text, 0)
+    eol = "\r\n" if "\r\n" in text else "\n"  # (new lines end as the file's do)
+    i = jsonc_skip(text, 1 if text.startswith("\ufeff") else 0)  # (a byte order mark stays)
     if i >= n or text[i] != "{":
         raise ValueError("not a JSON object")
     i = jsonc_skip(text, i + 1)
@@ -5346,7 +5449,7 @@ def jsonc_set(text, key, value):
         if name == key:
             line_start = text.rfind("\n", 0, i) + 1
             indent = text[line_start:i] if not text[line_start:i].strip() else ""
-            return text[:start] + json.dumps(value, indent=indent or 4).replace("\n", "\n" + indent) + text[end:]
+            return text[:start] + json.dumps(value, indent=indent or 4).replace("\n", eol + indent) + text[end:]
         last_end = end
         i = jsonc_skip(text, end)
         if i < n and text[i] == ",":
@@ -5356,13 +5459,13 @@ def jsonc_set(text, key, value):
     # Not there yet: after the last setting, indented like the first one
     line_start = text.rfind("\n", 0, first) + 1
     indent = text[line_start:first] if last_end is not None and not text[line_start:first].strip() else "    "
-    member = f'"{key}": ' + json.dumps(value, indent=indent).replace("\n", "\n" + indent)
+    member = f'"{key}": ' + json.dumps(value, indent=indent).replace("\n", eol + indent)
     if last_end is None:
-        return text[:i].rstrip() + "\n" + indent + member + "\n" + text[i:]
+        return text[:i].rstrip() + eol + indent + member + eol + text[i:]
     after = jsonc_skip(text, last_end)
     if after < n and text[after] == ",":  # a trailing comma already
-        return text[:after + 1] + "\n" + indent + member + text[after + 1:]
-    return text[:last_end] + ",\n" + indent + member + text[last_end:]
+        return text[:after + 1] + eol + indent + member + text[after + 1:]
+    return text[:last_end] + "," + eol + indent + member + text[last_end:]
 
 
 def config_dir_in_settings(path):
@@ -5413,7 +5516,8 @@ def set_config_dir_setting(path, value, home):
     and its permissions too."""
     shown = short_path(str(path), home)
     try:
-        text = path.read_text(encoding="utf-8")
+        with open(str(path), encoding="utf-8", newline="") as f:  # (its line ends as they are)
+            text = f.read()
     except FileNotFoundError:
         text = ""
     except (OSError, ValueError) as exc:
@@ -5433,14 +5537,21 @@ def set_config_dir_setting(path, value, home):
             raise ValueError("the change came out wrong")
     except ValueError as exc:
         return False, f"{shown} couldn't be changed ({exc}): switch the account in VS Code"
+    # a link (to your dotfiles, say) stays one: the file it points to changes
+    target = Path(os.path.realpath(str(path)))
+    tmp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        mode = path.stat().st_mode & 0o777 if path.exists() else 0o600
-        tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-        tmp.write_text(new, encoding="utf-8")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        mode = target.stat().st_mode & 0o777 if target.exists() else 0o600
+        with open(str(tmp), "w", encoding="utf-8", newline="") as f:
+            f.write(new)
         os.chmod(str(tmp), mode)
-        os.replace(str(tmp), str(path))
+        os.replace(str(tmp), str(target))
     except OSError as exc:
+        try:
+            tmp.unlink()  # (not left next to the settings)
+        except OSError:
+            pass
         return False, f"Can't write {shown}: {exc}"
     return True, ""
 
@@ -5487,7 +5598,7 @@ def vscode_running_config_dir():
         return False, None
     for pid in pids:
         try:
-            if Path(f"/proc/{pid}/comm").read_text().strip() not in names:
+            if Path(f"/proc/{pid}/comm").read_text(encoding="utf-8", errors="replace").strip() not in names:
                 continue
             argv = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
             env = dict(item.partition(b"=")[::2] for item in Path(f"/proc/{pid}/environ").read_bytes().split(b"\0") if item)

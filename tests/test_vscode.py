@@ -96,6 +96,47 @@ class SettingsTests(Home):
         self.settings('{"broken": ')
         self.assertIsNone(cs.vscode_setting_config_dir(self.home, "Code"))
 
+    def test_a_comma_in_a_string_is_no_trailing_comma(self):
+        self.assertEqual(cs.jsonc('{"a": "x, }", "b": ["1, ]", /* c */ ], // d\n}'), {"a": "x, }", "b": ["1, ]"]})
+        # nor does the switch change another variable that has one
+        path = self.config / "Code/User/settings.json"
+        self.settings('{"claudeCode.environmentVariables": [{"name": "OPTS", "value": "{\\"a\\": [1, ]}"}]}')
+        self.assertTrue(cs.set_config_dir_setting(path, "/h/.claude-y", self.home)[0])
+        self.assertEqual(json.loads(path.read_text())["claudeCode.environmentVariables"], [
+            {"name": "OPTS", "value": '{"a": [1, ]}'}, {"name": "CLAUDE_CONFIG_DIR", "value": "/h/.claude-y"}])
+
+    def test_a_byte_order_mark(self):
+        # (VS Code reads a settings file that starts with one; it stays)
+        path = self.config / "Code/User/settings.json"
+        self.settings('\ufeff{"claudeCode.environmentVariables": [{"name": "CLAUDE_CONFIG_DIR", "value": "/x/.claude-y"}]}')
+        self.assertEqual(cs.vscode_setting_config_dir(self.home, "Code"), "/x/.claude-y")
+        self.assertTrue(cs.set_config_dir_setting(path, "/h/.claude-z", self.home)[0])
+        self.assertTrue(path.read_text(encoding="utf-8").startswith("\ufeff{"))
+        self.assertEqual(cs.vscode_setting_config_dir(self.home, "Code"), "/h/.claude-z")
+
+    def test_windows_line_ends_stay(self):
+        path = self.config / "Code/User/settings.json"
+        for text in ('{\r\n    "a": 1\r\n}\r\n', '{\r\n    "claudeCode.environmentVariables": [\r\n    ],\r\n}\r\n'):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(text.encode())
+            self.assertTrue(cs.set_config_dir_setting(path, "/h/.claude-y", self.home)[0])
+            raw = path.read_bytes()
+            self.assertNotIn(b"\n", raw.replace(b"\r\n", b""), raw)
+            self.assertEqual(cs.config_dir_in_settings(path), "/h/.claude-y")
+
+    def test_a_linked_settings_file_stays_a_link(self):
+        # (your dotfiles: the switch changes the file the link points to)
+        path = self.config / "Code/User/settings.json"
+        dotfile = Path(self.tmp.name) / "dotfiles/settings.json"
+        dotfile.parent.mkdir(parents=True)
+        dotfile.write_text('{\n    "a": 1\n}\n')
+        path.parent.mkdir(parents=True)
+        path.symlink_to(dotfile)
+        self.assertTrue(cs.set_config_dir_setting(path, "/h/.claude-y", self.home)[0])
+        self.assertTrue(path.is_symlink())
+        self.assertEqual(cs.config_dir_in_settings(dotfile), "/h/.claude-y")
+        self.assertEqual(sorted(p.name for p in dotfile.parent.iterdir()), ["settings.json"])
+
 
 class SettingsEditTests(unittest.TestCase):
     """One setting changed in a file you edit by hand: the rest stays as it is."""

@@ -52,6 +52,9 @@ Rectangle {
             taskField.forceActiveFocus()
         }
     }
+    // (a box made while its list is open, e.g. a plan's after the plans were
+    // folded and unfolded, never turns visible: its field takes the task too)
+    Component.onCompleted: taskField.text = root.taskText
 
     Connections {   // (cleared once a chat starts)
         target: root

@@ -157,7 +157,9 @@ ColumnLayout {
         Layout.fillWidth: true
         Layout.leftMargin: Kirigami.Units.smallSpacing
         Layout.rightMargin: Kirigami.Units.smallSpacing
-        text: hostSection.stale ? i18n("%1 Showing what it said %2 ago.", hostSection.info.error,
+        // (an error may end without a full stop: "…Connection timed out Showing what it said…")
+        text: hostSection.stale ? i18n("%1 Showing what it said %2 ago.",
+                                       /[.!?]$/.test(hostSection.info.error) ? hostSection.info.error : hostSection.info.error + ".",
                                        root.duration(root.now - hostSection.info.updatedAt))
                                 : hostSection.info.error
         color: Kirigami.Theme.negativeTextColor

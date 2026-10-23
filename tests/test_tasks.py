@@ -25,7 +25,7 @@ spec.loader.exec_module(jump)
 cs = jump.cs
 sharing = jump.sharing
 
-from test_claude_status import Fixture, iso, session, write  # noqa: E402
+from test_claude_status import Fixture, iso, session, vscode_link_params, write  # noqa: E402
 
 
 def lines(*entries):
@@ -152,6 +152,57 @@ class LimitStopTests(unittest.TestCase):
     def test_login_and_unknown_limits_dont_reset(self):
         s = cs.limit_stop({"kind": "login", "window": None, "text": "Login expired", "at": 1}, None, self.NOW)
         self.assertEqual((s["resetsAt"], s["over"]), (None, False))
+
+    def group_at(self, pct, stops, updated=None):
+        w = {"key": "five_hour", "pct": pct, "reset": False, "resetsAt": self.NOW + 3 * 3600_000,
+             "forecast": {"evenPct": 40.0, "rate": 50.0, "atReset": 224.0, "fullAt": self.NOW + 1800_000, "basis": "hour"}}
+        return {"limits": {"updatedAt": updated or self.NOW - 1500_000, "windows": [w]},
+                "sessions": [{"stopped": s} for s in stops[:1]], "recent": [{"stopped": s} for s in stops[1:]]}
+
+    def test_a_limit_hit_after_the_numbers_fills_the_window(self):
+        # 74% as of 25 min ago, and a chat hit the session limit 12 min ago
+        g = self.group_at(74.0, [self.stop(self.NOW - 720_000)])
+        cs.note_limit_hits(g)
+        w = g["limits"]["windows"][0]
+        self.assertEqual((w["pct"], w["forecast"]["fullAt"], w["forecast"]["atReset"]), (100.0, None, 224.0))
+        # a recent chat (closed since) counts too
+        g = self.group_at(74.0, [None, self.stop(self.NOW - 720_000)])
+        cs.note_limit_hits(g)
+        self.assertEqual(g["limits"]["windows"][0]["pct"], 100.0)
+
+    def test_a_limit_hit_that_says_nothing_of_the_numbers(self):
+        before = self.NOW - 4 * 3600_000
+        for stop, updated in ((self.stop(self.NOW - 1800_000), None),  # before the numbers were read
+                              (self.stop(self.NOW - 3 * 3600_000), before),  # in the window before this one
+                              (self.stop(self.NOW - 720_000, window="seven_day"), None),  # of another window
+                              (self.stop(self.NOW - 720_000, window=None), None),
+                              ({"kind": "login", "window": None, "text": "Login expired", "at": self.NOW - 720_000}, None)):
+            g = self.group_at(74.0, [stop], updated)
+            cs.note_limit_hits(g)
+            self.assertEqual(g["limits"]["windows"][0]["pct"], 74.0, stop)
+            self.assertEqual(g["limits"]["windows"][0]["forecast"]["fullAt"], self.NOW + 1800_000)
+        g = {"limits": None, "sessions": [{"stopped": self.stop(self.NOW)}]}
+        cs.note_limit_hits(g)  # (no numbers at all)
+        self.assertIsNone(g["limits"])
+
+    def test_a_shared_chat_another_account_hit_the_limit_in(self):
+        # stopped by the other account's limit 12 min ago, then continued on
+        # this one (Continue on): its session here started after the stop
+        for shared in ({"profiles": ["work", "personal"]}, {"profiles": ["work", "personal"], "forkOf": "c0"}):
+            g = self.group_at(74.0, [self.stop(self.NOW - 720_000)])
+            g["sessions"][0].update(shared=shared, startedAt=self.NOW - 60_000)
+            cs.note_limit_hits(g)
+            self.assertEqual(g["limits"]["windows"][0]["pct"], 74.0, shared)
+        # one it hit while it ran here is this account's
+        g = self.group_at(74.0, [self.stop(self.NOW - 720_000)])
+        g["sessions"][0].update(shared={"profiles": ["work", "personal"]}, startedAt=self.NOW - 3600_000)
+        cs.note_limit_hits(g)
+        self.assertEqual(g["limits"]["windows"][0]["pct"], 100.0)
+        # and a chat only this account has stopped here, whenever its session started
+        g = self.group_at(74.0, [self.stop(self.NOW - 720_000)])
+        g["sessions"][0].update(shared=None, startedAt=self.NOW - 60_000)
+        cs.note_limit_hits(g)
+        self.assertEqual(g["limits"]["windows"][0]["pct"], 100.0)
 
 
 class RowTests(Fixture):
@@ -410,6 +461,21 @@ class TaskTests(TaskFixture):
         self.assertTrue(cs.task_prompt("", self.home / ".claude-work/plans/calm-red-owl.md", self.home)
                         .startswith("Implement this plan.\n"))
 
+    def test_a_long_plan_fits_in_an_ssh_hosts_terminal(self):
+        # every ' grows each time the prompt is quoted: in the host's command,
+        # its sh -c and the ssh line of the terminal (one argument: 128 KB)
+        import remote
+        plan = self.home / ".claude-work/plans/long-plan.md"
+        write(plan, "# Long plan\n\n" + "It's the user's step, don't skip it.\n" * 2400)  # 86 KB
+        prompt = cs.task_prompt("Go.", plan, self.home)
+        line = remote.posix(cs.task_command(self.profile, prompt, self.home))
+        self.assertLess(len(shlex.quote(line).encode()), 128 * 1024)
+        self.assertTrue(prompt.startswith("Go.\n\nThe plan (saved as ~/.claude-work/plans/long-plan.md):\n\n# Long plan\n"))
+        self.assertTrue(prompt.endswith("don't skip it.\n\n(The plan goes on in that file.)\n"), prompt[-80:])
+        # (a plan longer than TASK_PLAN_MAX is cut too, and says so)
+        write(plan, "x" * (cs.TASK_PLAN_MAX + 10))
+        self.assertTrue(cs.task_prompt("", plan, self.home).endswith("x\n\n(The plan goes on in that file.)\n"))
+
     def test_background(self):
         with mock.patch.dict(os.environ, {"CLAUDECODE": "1", "CLAUDE_CODE_DISABLE_AGENT_VIEW": "1"}):
             ok, message, job = cs.start_background(self.profile, str(self.folder), "--fix the tests",
@@ -422,6 +488,12 @@ class TaskTests(TaskFixture):
         self.assertEqual((call["cwd"], call["config"], call["session"]),
                          (str(self.folder), str((self.home / ".claude-work").resolve()), None))
         self.assertIsNone(call["noAgentView"])   # (Claude refuses --bg with it)
+
+    def test_a_one_word_task_isnt_one_of_claudes_commands(self):
+        # `claude update` would update Claude, not start a chat about it
+        self.assertEqual([cs.prompt_arg(p) for p in ("update", "doctor", "fix-it", "update the docs", "Fix it.")],
+                         [" update", " doctor", " fix-it", "update the docs", "Fix it."])
+        self.assertTrue(cs.task_command(self.profile, "install", self.home).endswith(" ' install'"))
 
     def test_background_needs_a_trusted_folder(self):
         for folder in (str(self.home), str(self.home / "repos")):
@@ -471,8 +543,11 @@ class TaskTests(TaskFixture):
             jump.main(["--new-chat", ".claude-work", "--bg", "--vscode", "--prompt", "x"])
 
     def test_vscode_link_types_the_task_in(self):
-        link = jump.vscode_task_link("fix it & ship")
-        self.assertEqual(link, "vscode://anthropic.claude-code/open?prompt=fix+it+%26+ship")
+        # whole, though VS Code decodes the link before the Claude extension does
+        task = "Run make && make test, then port the C++ parser (100% of it)\n#2: a=b?"
+        link = jump.vscode_task_link(task)
+        self.assertTrue(link.startswith("vscode://anthropic.claude-code/open?prompt="), link)
+        self.assertEqual(vscode_link_params(link), {"prompt": task})
         self.assertEqual(jump.vscode_task_link(""), "vscode://anthropic.claude-code/open")
 
 
@@ -576,7 +651,7 @@ class QueueTests(TaskFixture):
         answer = self.queue("--queue", ".claude-work", "--cwd", str(self.folder), "--at", str(at), "--prompt", "fix it",
                             "--plan", "calm-red-owl", "--plan-profile", ".claude-work", "--account", "work · Team")
         self.assertTrue(answer["ok"], answer)
-        self.assertRegex(answer["message"], r"^Queued: it starts at \d\d:\d\d, when the limit resets$")
+        self.assertRegex(answer["message"], r"^Queued: it starts (tomorrow )?at \d\d:\d\d, when the limit resets$")
         (task,) = cs.queued_tasks(self.cache_root(), int(time.time() * 1000))
         self.assertEqual((task["prompt"], task["plan"], task["planTitle"], task["account"], task["due"]),
                          ("fix it", "calm-red-owl", "Calm plan", "work · Team", False))
@@ -613,10 +688,13 @@ class QueueTests(TaskFixture):
         later = at + 3600_000
         answer = self.queue("--requeue", task["id"], "--at", str(later))
         self.assertTrue(answer["ok"])
-        self.assertRegex(answer["message"], r"^It waits for the usage limit: it starts at \d\d:\d\d$")
+        self.assertRegex(answer["message"], r"^It waits for the usage limit: it starts (tomorrow )?at \d\d:\d\d$")
         (back,) = cs.queued_tasks(self.cache_root(), at + 1)
         self.assertEqual((back["id"], back["startAt"], back["due"]), (task["id"], later, False))
         self.assertEqual(self.queue("--requeue", "gone0000", "--at", str(later)), {"ok": True, "message": ""})
+        # a weekly limit can reset days later: the day is said too
+        answer = self.queue("--requeue", task["id"], "--at", str(at + 3 * 86400_000))
+        self.assertRegex(answer["message"], r"^It waits for the usage limit: it starts on \w{3} \d\d \w{3} at \d\d:\d\d$")
 
     def test_a_task_at_a_time_you_pick(self):
         at = int((time.time() + 2 * 86400) * 1000)
@@ -663,7 +741,7 @@ class ContinueAfterResetTests(TaskFixture):
         answer = self.queue("--queue-continue", self.SID, "--profile", ".claude-work", "--at", str(at),
                             "--name", "Fix it", "--account", "work · Team")
         self.assertTrue(answer["ok"], answer)
-        self.assertRegex(answer["message"], r"^Queued: it goes on at \d\d:\d\d, when the limit resets$")
+        self.assertRegex(answer["message"], r"^Queued: it goes on (tomorrow )?at \d\d:\d\d, when the limit resets$")
         self.assertTrue(self.queue("--queue-continue", self.SID, "--profile", ".claude-work", "--at", str(at),
                                    "--name", "Fix it", "--account", "work · Team")["ok"])  # (twice: queued once)
         (task,) = cs.queued_tasks(self.cache_root(), int(time.time() * 1000))
@@ -782,6 +860,33 @@ class PlanFeedbackTests(TaskFixture):
         self.assertEqual(cs.apply_plan_tool("a a", "MultiEdit", {"edits": [{"old_string": "a", "new_string": "b", "replace_all": True}]}), "b b")
         self.assertEqual(cs.apply_plan_tool(None, "ExitPlanMode", {"plan": "# P\n"}), "# P\n")
 
+    def test_a_line_claude_took_out_goes_with_its_line_break(self):
+        # (as Claude's Edit does: an empty new_string takes the end of the line along)
+        self.assertEqual(cs.apply_plan_tool("# P\n\n1. Do it\n2. Test it\n", "Edit",
+                                            {"old_string": "1. Do it", "new_string": ""}), "# P\n\n2. Test it\n")
+        self.assertEqual(cs.apply_plan_tool("a\nb", "Edit", {"old_string": "b", "new_string": ""}), "a\n")
+        self.assertEqual(cs.apply_plan_tool("x\nyx\n", "MultiEdit", {"edits": [
+            {"old_string": "x", "new_string": "", "replace_all": True}]}), "y")
+        # so a plan Claude took a line out of, unchanged since: nothing to say
+        transcript = self.home / f".claude-work/projects/-repos-app/{self.SID}.jsonl"
+        pf = str(self.home / ".claude-work/plans/calm-red-owl.md")
+        with open(transcript, "a") as f:
+            f.write(lines(tool_use("t5", "Edit", {"file_path": pf, "old_string": "2. Test it well", "new_string": ""},
+                                   self.now - 500), tool_result("t5", self.now - 499)))
+        write(self.plan, "# Calm plan\n\n1. Do it\n")
+        self.assertEqual(cs.plan_feedback(self.plan, cs.claude_plan(transcript, "calm-red-owl"), [], self.home), "")
+
+    def test_a_long_message_fits_in_one_argument(self):
+        # (the command that reopens the chat has it in one argument, of 128 KB
+        # at most: a plan in Chinese takes three bytes a character)
+        old = "".join(f"{chr(0x4e00 + i)}先把这个模块的接口整理好，然后再写测试，最后更新文档和说明。\n" for i in range(2000))
+        write(self.plan, old.replace("模块", "组件"))
+        why = "为什么要这样做？" * 250
+        text = cs.plan_feedback(self.plan, old, [{"from": 1, "to": 1, "quote": "", "text": why}], self.home)
+        self.assertLessEqual(len(shlex.quote(text).encode()), 120_000)
+        self.assertIn("(more changes: read the file)", text)
+        self.assertTrue(text.endswith(why))
+
     def test_the_message_has_your_changes_and_comments(self):
         text = cs.plan_feedback(self.plan, "# Calm plan\n\n1. Do it\n2. Test it well\n",
                                 [{"from": 3, "to": 3, "quote": "1. Do it first", "text": "Why first?"}], self.home)
@@ -821,6 +926,21 @@ class PlanFeedbackTests(TaskFixture):
         answer = self.send("--print-command", comments=[{"from": 1, "to": 1, "quote": "# Calm plan", "text": "Rename it"}])
         self.assertEqual(answer["how"], "clipboard")
         self.assertIn("Rename it", answer["text"])
+
+    def test_a_shared_chat_open_on_another_account_comes_up_itself(self):
+        # its transcript is in both accounts, and personal (the first) isn't where it runs
+        w = self.home / ".claude-work"
+        there = self.home / f".claude-personal/projects/-repos-app/{self.SID}.jsonl"
+        there.parent.mkdir(parents=True)
+        os.link(w / f"projects/-repos-app/{self.SID}.jsonl", there)
+        write(w / "sessions/50.json", session(self.SID, cwd=str(self.folder), status="waiting", waitingFor="permission prompt"))
+        with mock.patch.object(jump, "copy_to_clipboard", return_value=True), \
+                mock.patch.object(jump, "jump_terminal", return_value=(True, "")) as up, \
+                mock.patch.object(jump, "resume_chat", return_value=(True, "")) as again:
+            answer = self.send()
+        self.assertEqual((answer["ok"], answer["how"]), (True, "clipboard"))
+        self.assertEqual(up.call_args[0][0]["sessionId"], self.SID)
+        again.assert_not_called()   # (no second claude --resume of it)
 
     def test_a_former_background_session_reopens_without_options(self):
         # (it keeps its own: an option would start a copy of it)
@@ -904,6 +1024,18 @@ class MemoryTests(Fixture):
             self.assertFalse(jump.open_memory(self.home, [], "/etc/passwd")[0])
         self.assertEqual((shown.call_count, edited.call_count), (1, 1))
 
+    def test_memories_open_with_projects_kept_elsewhere(self):
+        # (projects/ linked to a folder on another disk: its memories are still the profile's)
+        w = self.home / ".claude-work"
+        (self.home / "data/projects").mkdir(parents=True)
+        (w / "projects").symlink_to(self.home / "data/projects")
+        write(w / "projects/-repos-app/memory/notes.md", "---\nname: notes\ntype: project\n---\n")
+        listed = next(m for m in self.group(self.collect(with_tokens=False), "work")["memories"] if m["name"] == "notes")
+        profiles = cs.discover_profiles(self.home)
+        self.assertEqual(cs.memory_file(profiles, listed["path"]),
+                         (self.home / "data/projects/-repos-app/memory/notes.md").resolve())
+        self.assertIsNone(cs.memory_file(profiles, str(self.home / "data/notes.md")))
+
 
 class OverlapTests(Fixture):
     def test_two_chats_with_a_process_that_changed_the_same_files(self):
@@ -919,6 +1051,15 @@ class OverlapTests(Fixture):
         self.assertEqual([o["key"] for o in b["overlaps"]], ["a"])
         self.assertEqual((c["overlaps"], d["overlaps"]), (None, None))  # no process; the same chat
 
+    def test_a_chat_listed_twice_is_named_once(self):
+        rows = [{"key": k, "name": k.upper(), "sessionId": k, "chatId": chat, "profileDir": ".claude-work", "pid": pid,
+                 "cwd": "/srv/app", "overlaps": None} for k, chat, pid in (("a", "a", 1), ("d", "a", 4), ("b", "b", 2))]
+        changed = {"a": {"/srv/app/y.py"}, "d": {"/srv/app/y.py"}, "b": {"/srv/app/y.py"}}
+        cs.note_overlaps([{"sessions": rows}], changed, Path("/home/me"))
+        a, d, b = rows
+        self.assertEqual([o["key"] for o in b["overlaps"]], ["a"])
+        self.assertEqual(([o["key"] for o in a["overlaps"]], [o["key"] for o in d["overlaps"]]), (["b"], ["b"]))
+
     def test_rows_get_them_from_what_the_chats_changed(self):
         w = self.home / ".claude-work"
         write(w / "sessions/50.json", session("one", cwd="/srv/app"))
@@ -932,11 +1073,11 @@ class OverlapTests(Fixture):
 
 
 class MarkdownTests(Fixture):
-    def open(self, app, which=("okular", "xdg-open", "code")):
+    def open(self, app, which=("okular", "xdg-open", "code"), name="run.md", folder=None):
         started = []
         if app:
             write(self.cache / "claude-widget/settings.json", {"at": 1, "by": "x", "values": {"markdownApp": app}})
-        path = self.home / "run.md"
+        path = (folder or self.cache / "claude-widget/agent-runs") / name
         write(path, "# Run\n\nDone.\n")
         self.cache.mkdir(parents=True, exist_ok=True)
         with mock.patch.object(jump, "start_app", lambda args, cwd=None: started.append(args)), \
@@ -948,15 +1089,27 @@ class MarkdownTests(Fixture):
             return jump.open_markdown(path, self.home), started
 
     def test_okular_where_installed_else_a_page_in_the_browser(self):
-        self.assertEqual(self.open(None)[1], [["/usr/bin/okular", str(self.home / "run.md")]])
+        run = self.cache / "claude-widget/agent-runs/run.md"
+        self.assertEqual(self.open(None)[1], [["/usr/bin/okular", str(run)]])
         (ok, _), started = self.open(None, which=("xdg-open",))
         self.assertTrue(ok)
         self.assertEqual(started, [["/usr/bin/xdg-open", str(self.cache / "run.html")]])
         self.assertIn("<h1>Run</h1>", (self.cache / "run.html").read_text())
         self.assertEqual(self.open("okular", which=("xdg-open",))[1][0][1], str(self.cache / "run.html"))
         self.assertEqual(self.open("browser")[1][0][1], str(self.cache / "run.html"))
-        self.assertEqual(self.open("default")[1], [["/usr/bin/xdg-open", str(self.home / "run.md")]])
+        self.assertEqual(self.open("default")[1], [["/usr/bin/xdg-open", str(run)]])
         self.assertTrue(self.open("vscode")[1][0][1].startswith("vscode://wzaielamri.claude-status/markdown?path="))
+        # a run is named after its task: all of it reaches the extension
+        name = "Port C++ parser & tests (100%) (abcd1234).md"
+        self.assertEqual(vscode_link_params(self.open("vscode", name=name)[1][0][1]), {"path": str(run.parent / name)})
+        plans = self.home / ".claude-work/plans"
+        self.assertEqual(vscode_link_params(self.open("vscode", name="calm-owl.md", folder=plans)[1][0][1]),
+                         {"path": str(plans / "calm-owl.md")})
+        # the extension's link shows only those: a memory or a CLAUDE.md opens in VS Code itself
+        memory = self.home / ".claude-work/projects/-w-proj/memory"
+        self.assertEqual(self.open("vscode", name="user.md", folder=memory)[1], [["/usr/bin/code", str(memory / "user.md")]])
+        account = self.home / ".claude-work"
+        self.assertEqual(self.open("vscode", name="CLAUDE.md", folder=account)[1], [["/usr/bin/code", str(account / "CLAUDE.md")]])
         self.assertEqual(self.open("auto", which=())[0][0], False)  # nothing to show it with
 
     def edit(self, app, defaults, which=("xdg-open", "gtk-launch", "code")):
@@ -1012,3 +1165,22 @@ class MarkdownTests(Fixture):
         self.assertIn("<ol>", page)
         self.assertIn("&lt;b&gt;code&lt;/b&gt;", page)
         self.assertIn("<ol><li>One</li>", mp.body("Steps:\n1. One\n2. Two"))
+
+    def test_the_page_reads_as_markdown_means(self):
+        import markdown_page as mp
+        # bold and italics never reach into a link's address
+        self.assertEqual(mp.body("See [the *package*](https://e.com/pkg/__init__.py)"),
+                         '<p>See <a href="https://e.com/pkg/__init__.py" rel="noreferrer noopener">the <em>package</em></a></p>')
+        self.assertEqual(mp.body("[x](https://e.com/_a) b_c_"),
+                         '<p><a href="https://e.com/_a" rel="noreferrer noopener">x</a> b_c_</p>')
+        self.assertEqual(mp.body("**[x](https://e.com)** and [y](notes_a_b.md)"),
+                         '<p><strong><a href="https://e.com" rel="noreferrer noopener">x</a></strong> and y (notes_a_b.md)</p>')
+        # a fence with more after its language, and one inside another
+        page = mp.body('Intro\n\n```python title="setup.py"\nprint(1)\n```\n\n## Next step\n\nText after.')
+        self.assertIn('<pre><code class="language-python">print(1)</code></pre>', page)
+        self.assertIn("<h2>Next step</h2>", page)
+        self.assertIn("<pre><code>```py\nx\n</code></pre>", mp.body("````\n```py\nx\n\n````"))
+        # C# and F# keep their #; a closing run goes
+        self.assertEqual(mp.body("## Port the parser to C#"), "<h2>Port the parser to C#</h2>")
+        self.assertEqual(mp.body("## Done ##"), "<h2>Done</h2>")
+        self.assertIn("<title>Notes on F#</title>", mp.page("# Notes on F#"))

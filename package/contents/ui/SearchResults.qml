@@ -244,7 +244,10 @@ ColumnLayout {
                             Layout.preferredWidth: Math.round(Kirigami.Units.gridUnit * 0.5)
                             Layout.preferredHeight: Layout.preferredWidth
                             radius: width / 2
-                            color: hit.row ? root.stateColor(hit.row.state) : "transparent"
+                            // (red as in its row: a chat that failed, or that a usage limit stopped)
+                            color: !hit.row ? "transparent"
+                                   : hit.row.reason === "failed" || (!!hit.row.stopped && !hit.row.stopped.over) ? Kirigami.Theme.negativeTextColor
+                                   : root.stateColor(hit.row.state)
                         }
                         PlasmaComponents3.Label {
                             id: hitName

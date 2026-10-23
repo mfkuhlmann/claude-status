@@ -16,8 +16,9 @@ import html
 import re
 import sys
 
-FENCE = re.compile(r"^(\s*)(```+|~~~+)\s*([\w+#.-]*)\s*$")
-HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
+# (a fence's info string: its language, and maybe more after a space)
+FENCE = re.compile(r"^(\s*)(`{3,}|~{3,})\s*([^\s`]*)[^`]*$")
+HEADING = re.compile(r"^(#{1,6})\s+(.*?)(?:\s+#+)?\s*$")  # (C#: a closing run has a space before it)
 LIST_ITEM = re.compile(r"^(\s*)([-*+]|\d{1,9}[.)])\s+(.*)$")
 RULE = re.compile(r"^\s*([-*_])(\s*\1){2,}\s*$")
 TABLE_SEP = re.compile(r"^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$")
@@ -66,17 +67,27 @@ def inline(text):
 
 
 def spans(text):
-    t = html.escape(text, quote=True)
+    t = html.escape(text.replace("\0", ""), quote=True)
     # ![alt](src): not loaded
     t = re.sub(r"!\[([^\]]*)\]\([^)\s]*(?:\s+&quot;[^&]*&quot;)?\)",
                lambda m: f'<span class="image">[image: {m.group(1) or "untitled"}]</span>', t)
-    # [text](url): a link only to http(s)
+    # [text](url): a link only to http(s). Links are set aside while bold
+    # and italics are found, which never reach into an address (__init__.py)
+    links = []
+
     def link(m):
-        label, url = m.group(1), m.group(2)
+        label, url = emphasis(m.group(1)), m.group(2)
         if re.match(r"https?://", url):
-            return f'<a href="{url}" rel="noreferrer noopener">{label}</a>'
-        return f"{label} ({url})" if url and url != label else label
-    t = re.sub(r"\[([^\]]+)\]\(([^)\s]+)\)", link, t)
+            links.append(f'<a href="{url}" rel="noreferrer noopener">{label}</a>')
+        else:
+            links.append(f"{label} ({url})" if url and url != m.group(1) else label)
+        return f"\0{len(links) - 1}\0"
+    t = emphasis(re.sub(r"\[([^\]]+)\]\(([^)\s]+)\)", link, t))
+    return re.sub(r"\0(\d+)\0", lambda m: links[int(m.group(1))], t)
+
+
+def emphasis(t):
+    """**Bold**, *italics* and ~~struck~~ text of escaped text."""
     t = re.sub(r"(?<![\w*])(\*\*|__)(?=\S)(.+?)(?<=\S)\1(?![\w*])", r"<strong>\2</strong>", t)
     t = re.sub(r"(?<![\w*])\*(?=\S)(.+?)(?<=\S)\*(?![\w*])", r"<em>\1</em>", t)
     t = re.sub(r"(?<![\w_])_(?=\S)(.+?)(?<=\S)_(?![\w_])", r"<em>\1</em>", t)
@@ -136,7 +147,8 @@ def body(markdown):
             flush()
             mark, lang, code = fence.group(2), fence.group(3), []
             i += 1
-            while i < len(lines) and not lines[i].strip().startswith(mark[0] * len(mark)):
+            # (it ends at a line of its own mark alone: ```py inside a ``` block doesn't)
+            while i < len(lines) and not re.fullmatch(re.escape(mark[0]) + "{%d,}" % len(mark), lines[i].strip()):
                 code.append(lines[i])
                 i += 1
             i += 1

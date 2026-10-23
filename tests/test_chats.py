@@ -564,6 +564,20 @@ class PlacementTests(World):
         self.assertEqual(self.row(self.collect(), "U")["profileDir"], ".claude-work")
 
 
+class SharedPointerTests(unittest.TestCase):
+    def test_a_chat_listed_twice_gets_one_pointer(self):
+        # one shared chat open on two accounts at once, and shared with a third
+        def row(prof):
+            return {"key": f".claude-{prof}/X", "sessionId": "X", "chatId": "X", "name": "x", "cwdShort": "~/w",
+                    "state": "working", "reason": "", "since": 1, "profile": prof, "profileDir": f".claude-{prof}",
+                    "shared": {"profiles": ["personal", "work", "team"]}}
+        groups = [{"profiles": ["personal"], "sessions": [row("personal")]},
+                  {"profiles": ["work"], "sessions": [row("work")]}, {"profiles": ["team"], "sessions": []}]
+        cs.link_shared_elsewhere(groups)
+        self.assertEqual([(h["sessionId"], h["profile"]) for h in groups[2]["sharedHere"]], [("X", "personal")])
+        self.assertEqual((groups[0]["sharedHere"], groups[1]["sharedHere"]), ([], []))
+
+
 class RecentChatTests(World):
     def recent(self, r=None, **kw):
         r = r or self.collect(**kw)

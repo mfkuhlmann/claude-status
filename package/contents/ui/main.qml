@@ -33,9 +33,9 @@ PlasmoidItem {
     property var expandedRecent: ({})
     property string stopConfirmSession: ""
     property bool stopConfirmBusy: false   // the chat wasn't idle when you were asked (stop it anyway)
-    readonly property var emptyGroup: ({ id: "", name: "", title: "", plan: "", profiles: [], sessions: [],
-                                         limits: null, tokens: null, projects: [], chatProfile: "", sharedHere: [],
-                                         recent: [], plans: [] })
+    readonly property var emptyGroup: ({ id: "", name: "", title: "", plan: "", profiles: [], profileKeys: [],
+                                         sessions: [], limits: null, tokens: null, projects: [], chatProfile: "",
+                                         sharedHere: [], recent: [], plans: [] })
     readonly property var emptySession: ({ key: "", profileDir: "", sessionId: "", chatId: "", pid: null, name: "", cwd: "", cwdShort: "", profile: "",
                                            kind: "", entrypoint: "", state: "idle", reason: "", waitingFor: "",
                                            detail: "", since: null, startedAt: null, context: null, model: null,
@@ -86,13 +86,15 @@ PlasmoidItem {
     }
 
     // group as shown on host's section ("" here): limitsHidden when its usage
-    // shows elsewhere (or no host's does), limitsFrom when the numbers come
+    // shows elsewhere (or no host's does), with the account's numbers all the
+    // same in accountLimits (for limitReset), limitsFrom when the numbers come
     // from another machine
     function withUsage(group, host) {
         const mode = Plasmoid.configuration.sshUsage
         const owner = usageOwners[group.id]
         if (host && (mode === "none" || (mode !== "all" && owner && owner.host !== host)))
-            return Object.assign({}, group, { limits: null, limitsHidden: true })
+            return Object.assign({}, group, { limits: null, limitsHidden: true,
+                                              accountLimits: owner ? owner.limits : group.limits })
         if (mode === "all" || !owner || owner.from === host)
             return group
         return Object.assign({}, group, { limits: owner.limits, limitsFrom: owner.from })
@@ -757,7 +759,10 @@ PlasmoidItem {
                     onActivated: root.openFromNotification(notification)
                 }
             ]
-            onClosed: root.forgetNotification(notification)
+            onClosed: {
+                root.forgetNotification(notification)
+                notification.destroy()   // (QML's notifications don't delete themselves once closed: autoDelete false)
+            }
         }
     }
 
@@ -792,6 +797,7 @@ PlasmoidItem {
         const key = stdout.replace(/"generatedAt": *\d+/g, "").replace(/"forecast": *\{[^{}]*\}/g, "")
         if (status && time && key === lastOutputKey && Date.now() - lastFullUpdate < 30000) {
             now = Number(time[1])
+            syncSettings(status.sharedSettings || null)   // (a setting changed here is saved for the others now)
             return
         }
         let parsed = null
@@ -800,10 +806,12 @@ PlasmoidItem {
         } catch (e) {
             const lines = (stderr || "").trim().split("\n")
             errorText = i18n("Status script failed: %1", lines[lines.length - 1] || i18n("no output"))
+            lastOutputKey = ""   // (the next good check clears it, even if it says what the last good one did)
             return
         }
         if (!parsed.ok) {
             errorText = i18n("Status unavailable: %1", parsed.error)
+            lastOutputKey = ""
             return
         }
         errorText = parsed.errors.length ? parsed.errors.join("\n") : ""
@@ -821,12 +829,13 @@ PlasmoidItem {
 
     function celebrateResets(source, groupList) {
         const next = Object.assign({}, lastWindows)
+        const where = source ? " · " + source.slice("ssh:".length) : ""   // (a host's groups don't carry their host)
         for (const g of groupList) {
             for (const w of (g.limits ? g.limits.windows : [])) {
                 const key = source + "|" + g.id + "/" + w.key
                 if (key in lastWindows && lastWindows[key] >= 25 && w.pct < lastWindows[key] - 20) {
                     petEvent("reset", i18n("%1 limit reset!", w.label), "")
-                    noteAway("reset", w.label + (g.host ? " · " + g.host : ""))
+                    noteAway("reset", w.label + where)
                 }
                 next[key] = w.pct
             }
@@ -1373,6 +1382,14 @@ PlasmoidItem {
         lastStates = drop(lastStates)
         turnStarts = drop(turnStarts)
         primedSources = drop(primedSources)
+        // (else a limit that reset, or files two chats changed, while it was hidden is news once it's back)
+        lastStops = drop(lastStops)
+        lastOverlaps = drop(lastOverlaps)
+        const windows = Object.assign({}, lastWindows)
+        for (const key in windows)
+            if (key.startsWith(prefix))
+                delete windows[key]
+        lastWindows = windows
     }
 
     // A host's answer on this computer's clock: its times ("since", "last
@@ -1402,6 +1419,8 @@ PlasmoidItem {
             }
             for (const plan of g.plans || [])
                 shift(plan, ["updatedAt"])
+            for (const memory of g.memories || [])
+                shift(memory, ["updatedAt"])
             if (g.limits) {
                 shift(g.limits, ["updatedAt"])
                 for (const w of g.limits.windows || []) {
@@ -1895,7 +1914,8 @@ PlasmoidItem {
     // the latest of its full windows, else of the chats a limit stopped
     function limitReset(group, host) {
         let best = null
-        for (const w of (group.limits ? group.limits.windows : []))
+        const limits = group.limits || group.accountLimits   // (also where its usage isn't shown: withUsage)
+        for (const w of (limits ? limits.windows : []))
             if (w.pct >= 95 && w.resetsAt && (!best || w.resetsAt > best.at))
                 best = { at: w.resetsAt, label: w.label }
         if (!best)
@@ -2678,10 +2698,11 @@ PlasmoidItem {
         }
     }
 
+    // (the unit by what it rounds to: 999,960 is "1.0M", not "1000.0k")
     function formatTokens(n) {
-        if (n >= 1e9)
+        if (n >= 999.95e6)
             return (n / 1e9).toFixed(1) + "B"
-        if (n >= 1e6)
+        if (n >= 999.95e3)
             return (n / 1e6).toFixed(1) + "M"
         if (n >= 1e3)
             return (n / 1e3).toFixed(1) + "k"
