@@ -12,7 +12,7 @@ import type { Answer, Backend, FindAnswer } from "./backend";
 import { configDirArgs, setSshHosts, settings } from "./config";
 import { agentRunArgs } from "./agentRun";
 import { openComparison } from "./changes";
-import { claudePanelAvailable, localPanelProfileKey, openPanelChat } from "./claudePanel";
+import { claudePanelAvailable, filedUnder, localPanelConfigDir, localPanelProfileKey, openPanelChat } from "./claudePanel";
 import { isAgentRunFile, openAgentRunFile, showMarkdown } from "./agentRun";
 import type { Dashboard } from "./dashboard";
 import { canRaiseWindows, isGnome } from "./desktop";
@@ -198,7 +198,7 @@ export class Actions {
     const id = chat.chatId || chat.sessionId;
     const host = chat.host;
     const here = host ? true : chat.profileDir === localPanelProfileKey();
-    if (here && chat.cwd && this.windowHasFolder(chat.cwd, host)) {
+    if (here && chat.cwd && this.windowHasChat(chat.cwd, id, host)) {
       await vscode.env.openExternal(vscode.Uri.parse(CHAT_LINK + encodeURIComponent(id)));
       return;
     }
@@ -209,11 +209,19 @@ export class Actions {
   }
 
   // This window is on the machine of a chat (here, or the host it's connected
-  // to) and has its folder open
-  private windowHasFolder(folder: string, host?: string): boolean {
+  // to) and has its folder open: the chat's folder, one it's in (Claude's
+  // `cd`s take a chat into subfolders), or here the one it started in
+  private windowHasChat(folder: string, chatId: string, host?: string): boolean {
     const sameMachine = host ? host === this.dash.currentHost : !vscode.env.remoteName;
     const want = folder.replace(/\/+$/, "");
-    return sameMachine && (vscode.workspace.workspaceFolders ?? []).some((f) => f.uri.path.replace(/\/+$/, "") === want);
+    const configDir = host ? "" : localPanelConfigDir();
+    return (
+      sameMachine &&
+      (vscode.workspace.workspaceFolders ?? []).some((f) => {
+        const open = f.uri.path.replace(/\/+$/, "");
+        return want === open || want.startsWith(open + "/") || (!!configDir && filedUnder(configDir, open, chatId));
+      })
+    );
   }
 
   // The process ids from pid up to init on the host (to find its terminal here)

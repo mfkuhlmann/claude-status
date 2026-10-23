@@ -3,6 +3,9 @@
 // another account).
 
 import assert from "node:assert/strict";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { test } from "node:test";
 import {
   canEndChat,
@@ -113,4 +116,43 @@ test("a folder typed for an SSH host: its full path, or one in its home folder",
   assert.equal(typedFolder("project", "/home/me"), null, "it would start in the home folder");
   assert.equal(typedFolder("~other/x", "/home/me"), null);
   assert.equal(typedFolder("~/project", null), null, "the host's home isn't known");
+});
+
+test("a recent chat reopens in this window when it has the chat's project open", async () => {
+  // (Claude's `cd`s move a chat's folder into subfolders, or out of the
+  // folder it started in, which Claude Code files it under)
+  const stub = vscode as unknown as typeof import("./vscode-stub");
+  const config = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "claude-status-test-")), ".claude-work");
+  fs.mkdirSync(path.join(config, "projects", "-proj"), { recursive: true });
+  fs.writeFileSync(path.join(config, "projects", "-proj", "c2.jsonl"), "");
+  const saved = { env: process.env.CLAUDE_CONFIG_DIR, openExternal: stub.env.openExternal, folders: stub.workspace.workspaceFolders };
+  process.env.CLAUDE_CONFIG_DIR = config; // Claude Code's account here
+  const links: string[] = [];
+  (stub.env as { openExternal: unknown }).openExternal = async (uri: { path: string }) => (links.push(uri.path), true);
+  const setFolders = (...paths: string[]) =>
+    void ((stub.workspace as { workspaceFolders: unknown }).workspaceFolders = paths.map((p) => ({ uri: stub.Uri.file(p) })));
+  try {
+    const helpers: string[][] = [];
+    const actions = new Actions(
+      { action: async (_script: string, args: string[]) => (helpers.push(args), { ok: true, message: "" }) } as unknown as Backend,
+      { demo: false, currentHost: undefined } as unknown as Dashboard,
+      {} as Terminals,
+      { warn: () => undefined } as unknown as vscode.LogOutputChannel,
+      {} as AccountSwitch,
+    );
+    const reopen = (id: string, cwd: string) => actions.openInClaudeCode({ key: id, sessionId: id, profileDir: ".claude-work", name: id, cwd });
+    setFolders("/proj/");
+    await reopen("c1", "/proj/source"); // went into a subfolder
+    await reopen("c2", "/home/me"); // started in /proj, then went out of it
+    await reopen("c3", "/projector"); // another folder, that only starts the same
+    setFolders("/proj/source");
+    await reopen("c4", "/proj"); // this window has only a part of it
+    assert.deepEqual(links, ["vscode://anthropic.claude-code/open?session=c1", "vscode://anthropic.claude-code/open?session=c2"]);
+    assert.deepEqual(helpers.map((args) => args[1]), ["c3", "c4"], "VS Code opens the others' folders (jump.py)");
+  } finally {
+    if (saved.env === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = saved.env;
+    stub.env.openExternal = saved.openExternal;
+    (stub.workspace as { workspaceFolders: unknown }).workspaceFolders = saved.folders;
+  }
 });

@@ -39,8 +39,18 @@ export function profileKey(dir: string): string {
   }
 }
 
+export function localPanelConfigDir(): string {
+  return panelConfigDir(vscode.workspace.getConfiguration("claudeCode").get("environmentVariables"));
+}
+
 export function localPanelProfileKey(): string {
-  return profileKey(panelConfigDir(vscode.workspace.getConfiguration("claudeCode").get("environmentVariables")));
+  return profileKey(localPanelConfigDir());
+}
+
+// Claude Code files a chat under the folder it started in (projects/<the
+// folder, mangled> in the config dir), wherever Claude's `cd`s took it
+export function filedUnder(configDir: string, folder: string, chatId: string): boolean {
+  return fs.existsSync(path.join(configDir, "projects", folder.replace(/[^A-Za-z0-9]/g, "-"), `${chatId}.jsonl`));
 }
 
 // prompt: typed into the new chat's input, for you to send (the Claude

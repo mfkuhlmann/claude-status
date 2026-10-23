@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **A recent chat reopened in a Claude Code tab** opens in this window when
+  it has the chat's project open. Where Claude had gone into a subfolder
+  (`cd source`), or out of the folder the chat started in, a new VS Code
+  window opened just for that folder. When another window has the project,
+  that one comes up instead of a new one for the subfolder.
+
 ## 1.14.1
 
 - **Claude Code tab** in Recent chats stayed greyed out (*The Claude Code
