@@ -147,16 +147,25 @@ export function parsePath(d) {
 }
 
 // Adds a path to the context's current path
-export function tracePath(ctx, d) {
+// map(x, y) → [x, y]: moves every point (an affine map keeps the curves
+// exact); join: the path goes on from the current point (its M as a line)
+export function tracePath(ctx, d, map, join) {
+    const at = map || ((x, y) => [x, y]);
+    let first = true;
     for (const c of parsePath(d)) {
-        if (c[0] === 'M')
-            ctx.moveTo(c[1], c[2]);
-        else if (c[0] === 'L')
-            ctx.lineTo(c[1], c[2]);
-        else if (c[0] === 'C')
-            ctx.bezierCurveTo(c[1], c[2], c[3], c[4], c[5], c[6]);
-        else
+        if (c[0] === 'M' || c[0] === 'L') {
+            const p = at(c[1], c[2]);
+            if (c[0] === 'M' && !(join && first))
+                ctx.moveTo(p[0], p[1]);
+            else
+                ctx.lineTo(p[0], p[1]);
+        } else if (c[0] === 'C') {
+            const a = at(c[1], c[2]), b = at(c[3], c[4]), e = at(c[5], c[6]);
+            ctx.bezierCurveTo(a[0], a[1], b[0], b[1], e[0], e[1]);
+        } else {
             ctx.closePath();
+        }
+        first = false;
     }
 }
 

@@ -380,6 +380,8 @@ class Pet {
         this.timers.every('frame', 40, () => {
             const now = Date.now();
             this.talpa.tick(now);
+            if (this.gone)
+                return;   // (it dug away in that tick: removed)
             if (now - painted >= this.talpa.frameMs - 5) {
                 painted = now;
                 this.view.queue_repaint();

@@ -157,12 +157,48 @@ console.log(JSON.stringify({ scoot: length('scoot'), dig: length('dig'),
         self.assertIn("order: out.length", section)
         self.assertIn("shownChats.slice().sort((a, b) => a.order - b.order)", strip)
 
+    def test_whatever_is_in_the_burrow_has_its_hole_around_it(self):
+        # A new pet sank first while its hole shrank away, jumping out of the
+        # burrow closed the hole under it, digging in after a drop began in a
+        # hole still opening: bits of it showed where there was no hole
+        # (2026-10-23). Now, whenever some of it is down in the burrow (and
+        # not all of it, lamp included), the hole is all there.
+        result = run_node("""
+const t = new Talpa({ brain: false });
+t.onTravel = () => {};
+let now = 1000, bad = [];
+const watch = (name, ms) => {
+    for (let i = 0; i < ms / 20; i++) {
+        now += 20; t.tick(now);
+        const v = t.v;
+        if (v.depth > 0 && v.depth < 52 && v.hole < 0.95 && t.st.tunnel !== '1')
+            bad.push(name + ' at ' + (i * 20) + ' ms: depth ' + v.depth.toFixed(1) + ', hole ' + v.hole.toFixed(2));
+    }
+};
+t.tick(now); t.setMood('working'); watch('rest', 500);
+t.react('arrive'); watch('arrive', 3500);
+t.react('finished'); watch('finished', 2500);
+t.react('celebrate'); watch('celebrate', 4000);
+t.react('sneeze'); watch('sneeze', 3500);
+t.react('dig'); watch('dig', 4500);
+t.setHeld(true); watch('held', 600);
+t.land(30, null); watch('land', 3500);
+t.react('leave'); watch('leave', 3000);
+watch('after leaving', 3000);    // (down there until it arrives again)
+const away = t.v.depth;
+t.react('arrive'); watch('back', 3500);
+console.log(JSON.stringify({ bad: bad.slice(0, 5), away: away, back: t.v.depth }));""")
+        self.assertEqual(result["bad"], [])
+        self.assertGreater(result["away"], 60)
+        self.assertLess(result["back"], 15)
+
     def test_nothing_shows_under_the_burrows_lip(self):
         # Talpa and what it holds are cut along the same edge the lip is drawn
         # up to, so nothing peeks out between the lip's lumps
         art = (TALPA / "art.mjs").read_text()
-        cut = re.search(r"export const CUT = '[^']*H53\.5(A[^H]*)H", art).group(1)
-        self.assertIn("L53.5 55.6" + cut + "Z', DIRT", art)
+        edge = re.search(r"export const EDGE = '([^']*)'", art).group(1)
+        front = re.search(r"V55\.6(A[^V]*)V", edge).group(1)   # the opening's front edge
+        self.assertIn("L53.5 55.6" + front + "Z', DIRT", art)
 
     def test_notification_icons_use_colors_qt_can_read(self):
         # Qt's SVG renderer paints rgba() black: the notifications showed a

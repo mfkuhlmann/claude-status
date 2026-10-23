@@ -141,8 +141,8 @@ Item {
     onLeavingChanged: {
         if (leaving && !held)
             goAway()
-        else if (!leaving && departed) {
-            departed = false   // its chat came back: it pops up again
+        else if (!leaving && !held) {
+            departed = false   // its chat came back (also while it dug away): it pops up again
             arriving = true
             react("arrive", () => { pet.arriving = false })
         }
@@ -353,6 +353,7 @@ Item {
 
     TalpaView {
         id: view
+        visible: !pet.departed   // (dug away: not even back up for the moment before it's removed)
         box: pet.box
         x: pet.px - boxX - pet.box / 2
         y: pet.ground - pet.lift - floorY

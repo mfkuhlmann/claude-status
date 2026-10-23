@@ -10,9 +10,23 @@ export const INK = '#1b2143';
 export const HEART = 'M0 4.5C-6 .5-3-4.5 0-1.5 3-4.5 6 .5 0 4.5Z';
 export const STAR4 = 'M0-3.4L1-1 3.4 0 1 1 0 3.4-1 1-3.4 0-1-1Z';
 export const BODY = 'M19 54C13.5 54 12.6 47 13 40C13.8 27 21.5 20 32 20S50.2 27 51 40C51.4 47 50.5 54 45 54Z';
-// The creature (and what it holds) is cut along the burrow's front edge; the
-// lip covers that edge, so nothing shows below it
-export const CUT = 'M-40-60H104V55.6H53.5A21.5 2.2 0 0 1 10.5 55.6H-40Z';
+// What can be seen of the creature (and what it holds) while it's in its
+// burrow or its hole is there: whatever is above the mound, and what comes up
+// out of the opening (straight up from it, down to its front edge, which the
+// lip covers). So nothing shows beside the hole, on the mound, or below its
+// edge. The burrow's edge, from the floor on the right round to the left:
+export const EDGE = 'M59 56.6A27 6.2 0 0 0 53.5 52.85V55.6A21.5 2.2 0 0 1 10.5 55.6V52.85A27 6.2 0 0 0 5 56.6';
+
+// The cut, with the burrow's edge scaled like the hole is while it opens or
+// closes (sx, sy about 32, 56: see Talpa.draw)
+export function traceCut(ctx, sx, sy) {
+    ctx.moveTo(-40, -60);
+    ctx.lineTo(104, -60);
+    ctx.lineTo(104, 56.6);
+    tracePath(ctx, EDGE, (x, y) => [32 + (x - 32) * sx, 56 + (y - 56) * sy], true);
+    ctx.lineTo(-40, 56.6);
+    ctx.closePath();
+}
 export const FACE_Y = -2;    // the face sits a little higher on the Bean
 export const PLUME_Y = -5;   // and so does what's on its head
 
