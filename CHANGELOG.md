@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **A recent chat reopened in VS Code** comes up in the window of the folder it started in. Where Claude had gone into a subfolder (`cd source`), VS Code opened a new window just for that subfolder, next to the project's own window. A chat started in your home folder still opens where it went.
+
 ## 1.14.0 (2026-10-23)
 
 - **Talpa, a new pet of its own:** Clawd is gone. Talpa lives in a burrow: it stays half underground while it works and plays, digs over to another spot (towards your mouse) instead of walking, and only comes all the way out when you drag it out; dropped, it digs back in where it landed. A new chat's pet digs up out of the ground, and one whose chat leaves the list waves and digs away. Its lamp glows in the chat's state color, and it picks what to do at random from what fits the moment (typing, thinking, hunting bugs, checking tests, juggling subagents, calling you with a sign or a phone, sleeping, sneezing itself out of its burrow, balloons, peekaboo, …), so it's never the same twice. A chat's pet wears a calm version of the chat's color. It's one creature, drawn by the same code in the Plasma widget, the GNOME extension and the VS Code extension: it moves fully on every Plasma version now (no QtQuick.VectorImage module needed), and on GNOME too.

@@ -2108,6 +2108,27 @@ def chat_folder(path):
         nbytes *= 4
 
 
+def start_folder(path):
+    """The folder a chat started in (its first "cwd"), when Claude Code files
+    it under that folder (projects/<the folder, mangled>); later ones follow
+    Claude's `cd`s."""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(PEEK_TAIL_BYTES)
+    except OSError:
+        return None
+    for line in head.splitlines():  # (a cut last line doesn't parse)
+        if b'"cwd"' not in line:
+            continue
+        try:
+            cwd = json.loads(line).get("cwd")
+        except (ValueError, AttributeError):
+            continue
+        if isinstance(cwd, str) and cwd.startswith("/"):
+            return cwd if mangle(cwd) == path.parent.name else None
+    return None
+
+
 def shared_info(session_id, profile, all_profiles):
     """Is this chat shared across profiles? Returns {"profiles": [labels],
     "openIn": label holding it open or None}, or None."""

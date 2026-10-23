@@ -415,6 +415,28 @@ class ResumeTests(VscodeHome):
         self.assertEqual(self.raised, [("app", True)])
         self.assertEqual(self.opened, [["/usr/bin/xdg-open", f"vscode://anthropic.claude-code/open?session={self.CHAT}"]])
 
+    def moved(self, started, last):
+        """A chat Claude Code filed under the folder it started in, whose
+        last turns ran in another one (Claude's `cd`s)."""
+        sid = "5e550000-0000-4000-8000-000000000002"
+        transcript = self.home / ".claude-work/projects" / cs.mangle(str(started)) / f"{sid}.jsonl"
+        transcript.parent.mkdir(parents=True)
+        transcript.write_text("".join(json.dumps({"type": "user", "cwd": str(c), "sessionId": sid}) + "\n" for c in (started, last)))
+        return sid
+
+    def test_a_chat_that_went_into_a_subfolder_opens_its_project(self):
+        # (VS Code brings up the window that has the project open, instead of a new one for the subfolder)
+        sub = self.folder / "source"
+        sub.mkdir()
+        ok, message = self.resume(".claude-work", self.moved(self.folder, sub))
+        self.assertEqual((ok, message), (True, "Reopening the chat in VS Code (~/repos/app)"))
+        self.assertEqual(self.started, [["/usr/bin/code", str(self.folder)]])
+
+    def test_a_chat_started_in_the_home_folder_opens_where_it_went(self):
+        # (not all of your home folder in a VS Code window)
+        self.resume(".claude-work", self.moved(self.home, self.folder))
+        self.assertEqual(self.started, [["/usr/bin/code", str(self.folder)]])
+
     def test_refused_where_it_cant_open(self):
         self.assertIn("runs on work, not personal", self.resume(".claude-personal")[1])
         self.assertEqual(self.resume(".claude-work", "0ther000-0000-4000-8000-000000000001"),

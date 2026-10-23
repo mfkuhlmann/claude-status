@@ -697,7 +697,7 @@ class QueueTests(TaskFixture):
         self.assertRegex(answer["message"], r"^It waits for the usage limit: it starts on \w{3} \d\d \w{3} at \d\d:\d\d$")
 
     def test_a_task_at_a_time_you_pick(self):
-        at = int((time.time() + 2 * 86400) * 1000)
+        at = int((time.time() + 3 * 86400) * 1000)  # (48 hours after midnight can be tomorrow, when the clocks go back)
         answer = self.queue("--queue", ".claude-work", "--cwd", str(self.folder), "--at", str(at), "--prompt", "nightly check",
                             "--scheduled")
         self.assertTrue(answer["ok"], answer)

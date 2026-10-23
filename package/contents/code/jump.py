@@ -1186,8 +1186,9 @@ def new_chat_vscode(home, extra_dirs, dirname, folder=None, task=NO_TASK):
 
 def resume_vscode(home, extra_dirs, session_id, profile_dir):
     """Reopen a finished chat in VS Code's Claude extension: VS Code opens
-    the folder the chat last ran in, then the extension resumes the chat
-    there. Only on the profile VS Code's Claude runs on (vscode_for)."""
+    the folder the chat started in (the window that has it comes up), else
+    the one it last ran in, then the extension resumes the chat there. Only
+    on the profile VS Code's Claude runs on (vscode_for)."""
     code, profile = vscode_for(home, extra_dirs, profile_dir)
     if code is None:
         return False, profile
@@ -1195,6 +1196,11 @@ def resume_vscode(home, extra_dirs, session_id, profile_dir):
     if path is None:
         return False, f"That chat isn't on {profile.label}"
     folder = cs.chat_folder(path)
+    # (Claude's `cd`s move the last one into subfolders, which would get a
+    # window of their own; not all of your home folder, though)
+    started = cs.start_folder(path)
+    if started and started != str(home) and os.path.isdir(started):
+        folder = started
     if not folder or not os.path.isdir(folder):
         return False, f"The chat's folder {folder or '(unknown)'} isn't there any more; reopen it in a terminal"
     start_vscode_chat(code, folder, vscode_chat_link(session_id))
