@@ -225,6 +225,7 @@ export class Talpa {
         this.held = false;
         this.heldAt = 0;
         this.frameMs = 40;        // see tick()
+        this.away = false;        // it left (leave): it stays down there until it arrives again
         this.fx = [];
         this.v = { depth: DEPTH.half, depthFrom: DEPTH.half, depthTo: DEPTH.half, depthAt: -1e9, hole: 1, holeFrom: 1, holeTo: 1,
                    holeAt: -1e9, armL: 16, armR: -16, plume: 0, lx: 0, ly: 0, sip: 0 };
@@ -281,7 +282,10 @@ export class Talpa {
         this.cancel();
         this.held = true;
         this.heldAt = this.now;
-        this.apply({ depth: 'out', held: 1, arms: 'flail', eyes: 'wide', mouth: 'o', body: '', fx: dirt(8, 16) });
+        this.apply({ depth: 'out', hole: 0, held: 1, arms: 'flail', eyes: 'wide', mouth: 'o', body: '', fx: dirt(8, 16) });
+        // pulled out at once (a creature half in a hole that closes would show where there's no hole)
+        const v = this.v;
+        v.depth = v.depthFrom = v.depthTo = DEPTH.out;
     }
 
     // Dropped from `height` box units: lands, maybe dizzy, then digs in right there
@@ -289,8 +293,9 @@ export class Talpa {
         this.held = false;
         const high = height > 40;
         this.play({ steps: () => [
-            { depth: 'out', body: 'land', eyes: high ? 'spiral' : 'happy', mouth: high ? 'wavy' : 'smile', orbit: high ? 1 : 0, t: high ? 1800 : 700 },
-            { depth: 'out', eyes: 'open', mouth: 'flat', look: [-1.5, 0.5], t: 500 },
+            { depth: 'out', hole: 0, body: 'land', eyes: high ? 'spiral' : 'happy', mouth: high ? 'wavy' : 'smile', orbit: high ? 1 : 0,
+              t: high ? 1800 : 700 },
+            { depth: 'out', hole: 1, eyes: 'open', mouth: 'flat', look: [-1.5, 0.5], t: 500 },   // the hole opens under it first
             { body: 'spin', eyes: 'squint', fx: dirt(10), t: 700 },
             { eyes: 'happy', t: 500 }] }, done, false);
     }
@@ -312,6 +317,8 @@ export class Talpa {
     play(nameOrDef, done, auto) {
         const def = typeof nameOrDef === 'string' ? ACTIONS[nameOrDef] : nameOrDef;
         this.cancel();
+        if (nameOrDef === 'arrive')
+            this.away = false;
         if (!def) {
             if (done)
                 done(false);
@@ -335,6 +342,8 @@ export class Talpa {
         r.i += 1;
         if (r.i >= r.steps.length) {
             this.run = null;
+            if (r.name === 'leave')
+                this.away = true;
             this.apply({});
             const p = (MOODS[this.mood] || MOODS.idle).pause;
             this.nextBrain = this.now + random.rnd(p[0], p[1]);
@@ -344,7 +353,7 @@ export class Talpa {
         }
         const step = r.steps[r.i];
         r.until = this.now + (step.t || 600);
-        this.apply(step);
+        this.apply(step, step.snap === 1);
         if (step.travel && this.onTravel)
             this.onTravel(step.t || 1500);
     }
@@ -357,13 +366,19 @@ export class Talpa {
             if (st[k] !== prev[k] || (step[k] !== undefined && (k === 'body' || k === 'plume' || k === 'arms')))
                 this.since[k] = this.now;
         }
+        if (this.away && step.depth === undefined) {
+            st.depth = 'gone';   // (left: not back up by itself)
+            st.hole = '0';
+        }
         st.it = step.it || 1;
         st.look = step.look || this.base.look || null;
         if (step.gum)
             st.gum = String(step.gum);
         this.st = st;
         const depth = DEPTH[st.depth] !== undefined ? DEPTH[st.depth] : DEPTH.half;
-        const hole = st.depth === 'out' || st.hole === '0' ? 0 : 1;
+        // (out for a moment, a jump or a sneeze, its hole stays: only held or
+        // tunnelling it has none)
+        const hole = st.hole === '0' ? 0 : 1;
         const v = this.v;
         if (snap) {
             v.depth = v.depthFrom = v.depthTo = depth;
@@ -455,6 +470,10 @@ export class Talpa {
     }
 
     think() {
+        if (this.away) {
+            this.nextBrain = this.now + 2000;
+            return;
+        }
         const pool = Object.assign({}, (MOODS[this.mood] || MOODS.idle).pool);
         if (!this.travels || !this.onTravel)
             delete pool.dig;
@@ -504,11 +523,14 @@ export class Talpa {
             art.holeBack(ctx);
             ctx.restore();
         }
-        // the creature, cut along the burrow's front edge
+        // the creature, cut along the burrow (art.traceCut) while it's in it or
+        // its hole is there (out for a moment, its feet would hang in the hole)
         ctx.save();
-        if (st.depth !== 'out' || v.depth > 0) {
+        const holed = !tunneling && v.hole > 0.02;
+        if (st.depth !== 'out' || v.depth > 0 || holed) {
+            const h = holed ? Math.min(1.1, v.hole) : 1;
             ctx.beginPath();
-            tracePath(ctx, art.CUT);
+            art.traceCut(ctx, lerp(0.05, 1, h), lerp(0.2, 1, h));
             ctx.clip();
         }
         ctx.translate(0, v.depth);
@@ -546,7 +568,9 @@ export class Talpa {
             feet = [lerp(-18, 18, alt(now, 450)), lerp(-18, 18, alt(now + 225, 450)), 0, 0];
         else if (st.walk === '1')
             feet = [0, 0, kf((now % 500) / 500, [[0, 0], [0.25, -2.4], [0.5, 0], [1, 0]]), kf(((now + 250) % 500) / 500, [[0, 0], [0.25, -2.4], [0.5, 0], [1, 0]])];
-        art.feet(ctx, pal, feet);
+        // feet stand on the ground: over its hole they'd hang in it (unless it jumps clear)
+        if (st.tunnel === '1' || v.hole <= 0.02 || (move.wy || 0) < -3)
+            art.feet(ctx, pal, feet);
         // the torso: breathing, squash and stretch
         ctx.save();
         if (move.torso) {

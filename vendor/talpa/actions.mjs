@@ -224,7 +224,7 @@ export const ACTIONS = {
         { eyes: 'open', t: 300 }] },
 
     arrive: { steps: () => [
-        { depth: 'gone', hole: 0, t: 300 },
+        { depth: 'gone', hole: 0, snap: 1, t: 300 },   // (no sinking first: it isn't there yet)
         { depth: 'gone', hole: 1, fx: dirt(8), t: 450 },
         { depth: 'peek', hole: 1, look: [-1.6, 0], t: 600 },
         { depth: 'peek', hole: 1, look: [1.6, 0], t: 500 },
@@ -232,7 +232,8 @@ export const ACTIONS = {
     leave: { steps: () => [
         { depth: 'high', hole: 1, arms: 'wave', eyes: 'happy', t: 1100 },
         { depth: 'hidden', hole: 1, eyes: 'closed', fx: dirt(8), t: 600 },
-        { depth: 'gone', hole: 0, fx: dirt(4, 8), t: 900 }] }
+        { depth: 'gone', hole: 1, t: 450 },                     // all of it down, then
+        { depth: 'gone', hole: 0, fx: dirt(4, 8), t: 450 }] }   // the hole closes
 };
 
 // Moods: how it looks between actions (base) and what it picks (pool)
