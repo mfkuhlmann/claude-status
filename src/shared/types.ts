@@ -483,7 +483,7 @@ export interface ViewState {
 
 export type PetEventKind = "waiting" | "done" | "failed" | "stopped" | "reset" | "oops";
 
-// The Week tab: your last 7 days with Claude (the widget's week.py, read
+// The Recap tab: your last 7 days with Claude (the widget's week.py, read
 // from the chats' transcripts when the tab asks, never in the status checks)
 export interface WeekDay {
   day: string; // "2026-10-24"
@@ -636,7 +636,7 @@ export type WebviewMessage =
   | { type: "pickHosts" }
   | { type: "setupUsageBars" }
   | { type: "openUsagePage" }
-  | { type: "week"; back: number; account: string } // the Week tab wants these days' recap
+  | { type: "week"; back: number; account: string } // the Recap tab wants these days' recap
   | { type: "openWeekChat"; chatId: string; profileDir: string; name: string; cwd?: string } // one of the week's chats here
   | { type: "copy"; text: string }; // a tip's command, to the clipboard
 

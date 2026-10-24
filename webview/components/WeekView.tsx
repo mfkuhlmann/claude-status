@@ -21,7 +21,7 @@ import { weekAnswer } from "../util/stores";
 
 const REFRESH_MS = 10 * 60000; // while the tab is in sight
 
-// The Week tab: your last 7 days with Claude. How long you were at it and
+// The Recap tab: your last 7 days with Claude. How long you were at it and
 // how long Claude worked, a day per row on a timeline, what the same work
 // would cost at API prices, where it went, and what would use less of your
 // plan (the rules of Claude Code's own /usage). The extension runs the

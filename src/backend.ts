@@ -200,7 +200,7 @@ export class Backend {
     };
   }
 
-  // The Week tab's recap (week.py): read from the chats' transcripts (only
+  // The Recap tab's recap (week.py): read from the chats' transcripts (only
   // what they added since it last ran), and only when the tab asks
   async week(args: string[]): Promise<{ recap?: WeekRecap; error?: string }> {
     const r = await this.json(["week.py", ...args], 180000);

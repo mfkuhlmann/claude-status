@@ -1498,7 +1498,7 @@ body.vscode-high-contrast .top.scrolled {
 }
 
 /* ---------------------------------------------------------------------------
-   Tabs: your chats now, or your last 7 days (the Week tab) */
+   Tabs: your chats now, or your last 7 days (the Recap tab) */
 
 .tabs {
   display: flex;
@@ -1526,7 +1526,7 @@ body.vscode-high-contrast .top.scrolled {
 }
 
 /* ---------------------------------------------------------------------------
-   The Week tab. One hue for Claude's work (darker where several chats ran at
+   The Recap tab. One hue for Claude's work (darker where several chats ran at
    once), the text color for you, orange (as for a chat that needs you) for
    Claude waiting on your answer. */
 

@@ -470,7 +470,7 @@ export class Dashboard implements vscode.Disposable {
     return this.demo;
   }
 
-  // The Week tab's recap of these days, with the SSH hosts shown whose last
+  // The Recap tab's recap of these days, with the SSH hosts shown whose last
   // check answered (one out of reach would hold it up)
   async week(back: number, account: string): Promise<{ recap?: WeekRecap; error?: string }> {
     if (this.demoPhase !== null) return { recap: demoWeek(Date.now(), back, account) };

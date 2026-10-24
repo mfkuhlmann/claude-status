@@ -1,4 +1,4 @@
-// The Week tab: its words and numbers (src/shared/week.ts), and what the
+// The Recap tab: its words and numbers (src/shared/week.ts), and what the
 // extension takes from the page's Week messages.
 
 import assert from "node:assert/strict";

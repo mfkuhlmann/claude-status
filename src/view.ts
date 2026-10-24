@@ -14,7 +14,7 @@ import type { ChatRef, Group, HostMessage, PlanItem, WebviewMessage } from "./sh
 const AGENT_ID = /^[A-Za-z0-9_-]{1,100}$/;
 const CHAT_ID = /^[A-Za-z0-9_-]{1,80}$/;
 const PROFILE_DIR = /^[A-Za-z0-9._-]{1,100}$/;
-const TIP_COMMAND = /^\/[a-z][a-z-]{0,30}( [a-z0-9-]{1,30})?$/; // what a Week tab tip suggests, e.g. "/effort xhigh"
+const TIP_COMMAND = /^\/[a-z][a-z-]{0,30}( [a-z0-9-]{1,30})?$/; // what a Recap tab tip suggests, e.g. "/effort xhigh"
 
 export class ViewHost implements vscode.WebviewViewProvider, vscode.Disposable {
   static readonly viewId = "claudeStatus.view";

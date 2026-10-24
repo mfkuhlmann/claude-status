@@ -103,7 +103,7 @@ As an editor tab (**Claude Status: Open in Editor Tab**):
   tokens per day as bars (hover one for its chats and prompts), the totals,
   the busiest folders and the models used. The prompts come from Claude
   Code's prompt history, the tokens from the transcripts.
-- **Your week with Claude**: the view's **Week** tab recaps your last 7 days
+- **Your week with Claude**: the view's **Recap** tab shows your last 7 days
   (and the weeks before, a click back): how long you were at it and how long
   Claude worked, against the week before; a row per day on a timeline, with
   when you were at it, when Claude worked (darker where several chats worked
@@ -315,7 +315,7 @@ edits a file (`<config>/file-history`, to compare a chat's changes),
 the plans chats wrote (`<config>/plans`), Claude's memories
 (`<config>/projects/<folder>/memory`) and each account's `CLAUDE.md`,
 the account name and plan from `.claude.json`, and the status-line copies in
-`~/.cache/claude-widget/statusline`. The **Week** tab reads the transcripts
+`~/.cache/claude-widget/statusline`. The **Recap** tab reads the transcripts
 too, and keeps what it read in `~/.cache/claude-widget/week-1.json`; it calls
 no model. It writes only to
 `~/.cache/claude-widget` (caches, the list of chats you removed, the tasks

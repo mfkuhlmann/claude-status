@@ -381,7 +381,7 @@ export function demoState(now: number, phase = 0): ViewState {
   };
 }
 
-// The Week tab's recap of made-up days: mornings and afternoons of work, a
+// The Recap tab's recap of made-up days: mornings and afternoons of work, a
 // second chat at once now and then, one long wait for your answer
 export function demoWeek(now: number, back = 0, account = ""): WeekRecap {
   const today = new Date(now);

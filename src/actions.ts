@@ -718,7 +718,7 @@ export class Actions {
     else if (pick?.memory) await this.openMemory(pick.memory, pick.host);
   }
 
-  // One of the Week tab's chats (this computer's): as one the search found
+  // One of the Recap tab's chats (this computer's): as one the search found
   async openWeekChat(chatId: string, profileDir: string, name: string, cwd: string): Promise<void> {
     if (this.demoOnly()) return;
     await this.openFound({

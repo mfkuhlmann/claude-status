@@ -44,7 +44,7 @@ export function Header(props: {
         {(["chats", "week"] as const).map((t) => (
           <button key={t} type="button" role="tab" aria-selected={tab === t} class={"tab-btn" + (tab === t ? " on" : "")}
             onClick={() => setTab(t)}>
-            {t === "chats" ? "Chats" : "Week"}
+            {t === "chats" ? "Chats" : "Recap"}
           </button>
         ))}
       </div>

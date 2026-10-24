@@ -13,5 +13,5 @@ export const pageVisible = createStore(document.visibilityState !== "hidden");
 // Bumped when a pet's color changes, so the rows repaint their bars
 export const petColorsVersion = createStore(0);
 
-// The Week tab's last answer (the extension runs week.py when the tab asks)
+// The Recap tab's last answer (the extension runs week.py when the tab asks)
 export const weekAnswer = createStore<Extract<HostMessage, { type: "week" }> | null>(null);

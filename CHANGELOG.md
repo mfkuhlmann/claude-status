@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **A Week tab:** the view's new **Week** tab recaps your last 7 days with
+- **A Recap tab:** the view's new **Recap** tab shows your last 7 days with
   Claude: how long you were at it and how long Claude worked (its own count
   of each turn, without the time it waited for your answers), against the
   week before; a timeline with a row per day (when you were at it, when

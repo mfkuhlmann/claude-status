@@ -1,4 +1,4 @@
-// The Week tab's words and numbers (webview/components/WeekView.tsx), from
+// The Recap tab's words and numbers (webview/components/WeekView.tsx), from
 // the recap of the widget's week.py; here, so the tests can read them.
 
 import { clockText, dayLabel, plural } from "./model";
