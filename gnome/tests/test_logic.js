@@ -413,6 +413,54 @@ test("no interrupt once a chat's turn is over", () => {
     eq(L.canInterrupt({...s, reason: ''}), true);
 });
 
+// The Week tab (ui/weekView.js): its words, as on Plasma and in VS Code
+const MIN = 60000, HOUR = 60 * MIN;
+const weekRecap = (extra = {}) => ({
+    back: 0, backMax: 4, from: '2026-10-18', to: '2026-10-24', prices: {asOf: '2026-10-24', guessed: []},
+    sum: {youMs: 18 * HOUR, workedMs: 32 * HOUR + 6 * MIN, busyMs: 27 * HOUR, waitMs: 3 * HOUR + 18 * MIN, prompts: 219, cost: 906.4,
+        turns: 253, chats: 67, limits: 2, peakAtOnce: 3, busiestDay: '2026-10-20',
+        longestTurn: {workedMs: 73 * MIN, name: 'startup hang'}, tokens: {input: 10, output: 9e6, cacheRead: 2.4e9, cacheWrite5m: 1e7, cacheWrite1h: 3e7}},
+    previous: {youMs: 13 * HOUR + 16 * MIN, workedMs: 15 * HOUR, prompts: 203, cost: 397},
+    cacheSaved: 9010, sources: [{host: '', ok: true, error: ''}, {host: 'lab', ok: false, error: 'no answer'}], ...extra,
+});
+
+test('the week in hours, money and changes against the week before', () => {
+    eq(L.hoursText(45 * MIN), '45m');
+    eq(L.hoursText(32 * HOUR + 6 * MIN), '32h 6m');
+    eq([L.moneyText(906.4), L.moneyText(1234.5), L.moneyText(23.8), L.moneyText(0.004), L.moneyText(0)],
+        ['$906', '$1,235', '$23.80', '<$0.01', '$0']);
+    eq(L.weekDeltaText(18 * HOUR, 13 * HOUR + 16 * MIN, 'time'), '+4h 44m');
+    eq(L.weekDeltaText(397, 906, 'money'), '−$509');
+    eq(L.weekDeltaText(219, 219, 'count'), 'same as before');
+    eq(L.weekDeltaText(219, null, 'count'), '');
+});
+
+test("the week's days, tiles and facts", () => {
+    const r = weekRecap();
+    eq(L.weekPeriodText(r), 'Last 7 days · 18 Oct – 24 Oct');
+    eq(L.weekPeriodText({...r, back: 1, from: '2026-10-11', to: '2026-10-17'}), '11 Oct – 17 Oct');
+    const tiles = L.weekTiles(r);
+    eq(tiles.map(t => [t.label, t.value, t.delta]), [['You', '18h 0m', '+4h 44m'], ['Claude worked', '32h 6m', '+17h 6m'],
+        ['At API prices', '$906', '+$509'], ['Prompts', '219', '+16']]);
+    eq(L.weekTiles({...r, previous: {youMs: 0, workedMs: 0, prompts: 0, cost: 0}})[0].delta, '');
+    eq(L.weekFactsText(r.sum), 'longest turn 1h 13m (startup hang) · up to 3 chats at once · busiest day Tuesday · usage limits stopped you 2 times');
+    eq(L.weekFootText(r).split('\n')[1], "lab couldn't be read: no answer");
+    eq(L.weekArgs(1, 'abc', ['lab', 'gpu'], {lab: {ok: true, result: {}}, gpu: {ok: false, result: null}}, ['--config-dir', '/x']),
+        ['--back', '1', '--account', 'abc', '--host', 'lab', '--config-dir', '/x']);
+});
+
+test('pointing at a day says what went on then', () => {
+    const start = new Date(2026, 9, 24).getTime();
+    const at = h => start + h * HOUR;
+    const day = {day: '2026-10-24', start, end: start + 24 * HOUR, you: [[at(9), at(10)]], work: [[at(9.5), at(11), 2]],
+        wait: [[at(1), at(9)]]};
+    const now = at(18), px = 24 * HOUR / 400;
+    eq(L.weekHoverText(day, at(3), now, px), 'Sat 24 Oct, 03:00: Claude waited for your answer 01:00–09:00');
+    eq(L.weekHoverText(day, at(9.75), now, px), 'Sat 24 Oct, 09:45: Claude worked 09:30–11:00, 2 chats at once · you were at it 09:00–10:00');
+    eq(L.weekHoverText(day, at(14), now, px), 'Sat 24 Oct, 14:00: nothing went on');
+    eq(L.weekHoverText(day, at(20), now, px), 'Sat 24 Oct, 20:00: still to come');
+});
+
 print(`${count - failures}/${count} passed`);
 if (failures)
     System.exit(1);

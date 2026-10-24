@@ -189,3 +189,35 @@
 .claude-stats-meter { height: 5px; }
 .claude-stats-numbers { width: 9em; text-align: right; }
 .claude-recap { padding-top: 2px; }
+
+/* Tabs: your chats now, or your last 7 days */
+.claude-tab { padding: 1px 8px; border-radius: 99px; color: rgba(154, 153, 150, 1); }
+.claude-tab:hover { color: inherit; background-color: rgba(127, 127, 127, 0.15); }
+.claude-tab:checked { color: inherit; background-color: rgba(53, 132, 228, 0.2); }
+
+/* The Week tab */
+.claude-week { spacing: 10px; padding: 2px 4px 8px; }
+.claude-week-period { spacing: 4px; }
+.claude-week-span { font-weight: bold; }
+.claude-week-accounts { spacing: 4px; }
+.claude-chip { padding: 0 8px; border-radius: 99px; border: 1px solid rgba(127, 127, 127, 0.4); }
+.claude-chip:hover, .claude-chip:focus { background-color: rgba(127, 127, 127, 0.2); }
+.claude-chip-on { border-color: #3584e4; background-color: rgba(53, 132, 228, 0.18); }
+.claude-chip-code { font-family: monospace; font-size: 0.85em; border-radius: 4px; padding: 0 5px; }
+.claude-week-note { padding: 12px 4px; }
+.claude-week-tiles { spacing: 12px; }
+.claude-week-tile { spacing: 0; }
+.claude-week-value { font-size: 1.5em; font-weight: bold; }
+.claude-week-section { spacing: 3px; }
+.claude-week-heading { font-weight: bold; }
+.claude-week-head { spacing: 4px; }
+.claude-week-swatch { width: 12px; height: 6px; border-radius: 1px; margin-left: 4px; }
+.claude-week-swatch-you { background-color: rgba(154, 153, 150, 0.85); }
+.claude-week-row { spacing: 6px; }
+.claude-week-day { width: 3.6em; }
+.claude-week-num { width: 4em; text-align: right; }
+.claude-week-readout { padding-left: 4.2em; }
+.claude-week-name { width: 8em; }
+.claude-week-chat { spacing: 8px; }
+.claude-week-folder { max-width: 12em; }
+.claude-week-tip { spacing: 8px; }

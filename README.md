@@ -193,7 +193,7 @@ Then paste `statusline-snippet.sh` into your status-line script, right after the
 
 ## On GNOME
 
-The same dashboard as a GNOME Shell extension: Talpa in the top bar, the popup with your accounts, sessions, plan usage, SSH hosts, notifications and pets. It uses the same scripts as the Plasma widget.
+The same dashboard as a GNOME Shell extension: Talpa in the top bar, the popup with your accounts, sessions, plan usage, SSH hosts, notifications and pets, and its **Week** tab. It uses the same scripts as the Plasma widget.
 
 **Requirements:** GNOME Shell 49 or 50 (Ubuntu 26.04 LTS has 50), python3, jq (`sudo apt install jq`); zenity for *Choose folder…* (Ubuntu has it).
 

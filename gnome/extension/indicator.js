@@ -18,9 +18,11 @@ import {Runner} from './runner.js';
 import {Pets} from './ui/pets.js';
 import {buildGroupSection, buildHostSection} from './ui/groupSection.js';
 import {TalpaIcon} from './ui/talpaIcon.js';
+import {buildWeekView} from './ui/weekView.js';
 import {box, column, iconButton, label, paragraph, textButton, Tooltips} from './ui/widgets.js';
 
 const USAGE_PAGE = 'https://claude.ai/settings/usage';
+const WEEK_REFRESH_S = 600;   // the Week tab reads again while it's open
 
 export const Indicator = GObject.registerClass(
 class ClaudeStatusIndicator extends PanelMenu.Button {
@@ -50,7 +52,11 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         this._timers = {};
         // Popup state kept by row key (rows are rebuilt with new data)
         this.ui = {expandedAgents: {}, expandedAgent: {}, expandedRecent: {}, expandedPeek: {}, expandedStats: {}, stopConfirm: '',
-            stopConfirmBusy: false, shareConfirm: null, openMenu: null};
+            stopConfirmBusy: false, shareConfirm: null, openMenu: null, tab: 'chats'};
+        // The Week tab's days and what week.py said of them (it runs only
+        // while that tab is open: setTab, loadWeek)
+        this.week = {back: 0, account: '', recap: null, error: '', busy: false, copied: ''};
+        this._weekAsked = 0;
         // Turns that ended while the menu was closed (row key -> "done"), for
         // the hotkey; forgotten when the menu opens
         this._unseen = {};
@@ -890,6 +896,14 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         this._headerSpark = new TalpaIcon('claude-spark claude-spark-small');
         header.add_child(this._headerSpark);
         header.add_child(label('Claude Code', 'claude-title'));
+        // Your chats now, or your last 7 days with Claude (ui/weekView.js)
+        this._tabs = {};
+        for (const [tab, text] of [['chats', 'Chats'], ['week', 'Week']]) {
+            const b = new St.Button({style_class: 'claude-tab', can_focus: true, label: text, y_align: Clutter.ActorAlign.CENTER});
+            b.connect('clicked', () => this.setTab(tab));
+            this._tabs[tab] = b;
+            header.add_child(b);
+        }
         this._summary = label('', 'claude-summary', {x_expand: true, x_align: Clutter.ActorAlign.END});
         header.add_child(this._summary);
         const hostsContent = box('claude-button-box');
@@ -905,7 +919,11 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
             ? L.fmt('Showing Claude on %1. Click to pick hosts from ~/.ssh/config.', this.shownHosts.join(', '))
             : 'Show Claude sessions of your SSH hosts (from ~/.ssh/config) here too.']);
         header.add_child(hostsButton);
-        header.add_child(this.tips.add(iconButton('view-refresh-symbolic', () => this.refreshAll()), 'Refresh'));
+        header.add_child(this.tips.add(iconButton('view-refresh-symbolic', () => {
+            this.refreshAll();
+            if (this.ui.tab === 'week')
+                this.loadWeek();
+        }), 'Refresh'));
         popup.add_child(header);
 
         // The big Talpa (pets.js) stays put while the list scrolls
@@ -941,6 +959,8 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
                 this._loadHosts();
                 this.rerender();
                 this.refresh();  // it may have been checked a while ago (see _pollInterval)
+                if (this.ui.tab === 'week')
+                    this.loadWeek();
             } else {
                 this.tips.hide();
                 if (this._digestSeen)
@@ -948,8 +968,72 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
                 this.ui.openMenu = null;
                 this.ui.stopConfirm = '';
             }
-            this._pets.setActive(open);
+            this._pets.setActive(open && this.ui.tab === 'chats');
+            this._weekTimer();
             this._adjustPollTimer();
+        });
+    }
+
+    // ---------------------------------------------------------------- the week
+
+    setTab(tab) {
+        if (this.ui.tab === tab)
+            return;
+        this.ui.tab = tab;
+        this._pets.setActive(this.menu.isOpen && tab === 'chats');   // (not drawn while the week shows)
+        this._weekTimer();
+        if (tab === 'week')
+            this.loadWeek();
+        this._render(true);
+    }
+
+    setWeek({back = this.week.back, account = this.week.account}) {
+        this.week.back = Math.max(0, back);
+        this.week.account = account;
+        this.loadWeek();
+        this._render(true);
+    }
+
+    // Asks week.py for the days shown: it reads only what the chats'
+    // transcripts added since it last ran
+    async loadWeek() {
+        const asked = ++this._weekAsked;
+        const {back, account} = this.week;
+        this.week.busy = true;
+        this._render(true);
+        const out = await this._runner.run('week.py',
+            L.weekArgs(back, account, this.shownHosts, this.remote, this._configDirArgs), {poll: true});
+        if (this._destroyed || out.cancelled || asked !== this._weekAsked)
+            return;   // (other days were asked for since)
+        const result = L.helperResult(out.stdout, out.stderr);
+        this.week.busy = false;
+        if (result.ok) {
+            this.week.recap = result;
+            this.week.error = '';
+        } else {
+            this.week.error = result.message || result.error || 'no answer';
+        }
+        this._render(true);
+    }
+
+    // Every 10 minutes while the popup shows the Week tab
+    _weekTimer() {
+        this._clearTimer('week');
+        if (!this.menu.isOpen || this.ui.tab !== 'week')
+            return;
+        this._timers.week = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, WEEK_REFRESH_S, () => {
+            this.loadWeek();
+            return GLib.SOURCE_CONTINUE;
+        });
+    }
+
+    copyText(text) {
+        St.Clipboard.get_default().set_text(St.ClipboardType.CLIPBOARD, text);
+        this.week.copied = text;
+        this._render(true);
+        this._later('copied', 2000, () => {
+            this.week.copied = '';
+            this._render(true);
         });
     }
 
@@ -977,6 +1061,8 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         };
         const signature = JSON.stringify([this._status ? {...this._status, generatedAt: 0} : null, this._errorText,
             remote, this._sshHosts, this.ui, this._actionError, this._actionInfo, Math.floor(this.now / 60000),
+            this.ui.tab === 'week' ? [this.week.back, this.week.account, this.week.busy, this.week.error, this.week.copied,
+                this.week.recap ? this.week.recap.generatedAt : 0] : null,
             this._digest ? this._digest.body : null,
             this.petColors, this._settings.get_boolean('show-pet')], coarse);
         if (!force && signature === this._signature)
@@ -987,7 +1073,11 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         const c = L.counts(this.allGroups);
         const overall = L.overall(this.allGroups, c);
         this._headerSpark.setState(L.stateClass(overall), overall);
-        this._summary.text = this._pets.heroShown ? '' : L.summaryText(c);   // the big Talpa's headline says it
+        const week = this.ui.tab === 'week';
+        for (const [tab, b] of Object.entries(this._tabs))
+            b.checked = tab === this.ui.tab;   // (St.Button's :checked)
+        this._heroBin.visible = !week;
+        this._summary.text = this._pets.heroShown && !week ? '' : L.summaryText(c);   // the big Talpa's headline says it
         const hosts = this.shownHosts;
         this._hostsCount.text = hosts.length > 0 ? String(hosts.length) : '';
         this._undismissItem.label.text = L.fmt('Show removed sessions again (%1)', this._status?.dismissed || 0);
@@ -1013,6 +1103,11 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         const scrolled = adjustment.value;
         this._pets.detachStages();
         this._list.destroy_all_children();
+        if (week) {
+            // (the pets' stages wait, detached, for the Chats tab)
+            this._list.add_child(buildWeekView(this));
+            return;
+        }
         this.groups.forEach((g, i) => {
             this._list.add_child(buildGroupSection(this, g, {last: i === this.groups.length - 1, accounts: this.groups.length}));
         });

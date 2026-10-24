@@ -57,7 +57,7 @@ def transcript(profile, sid, folder, title, minutes_ago, tokens=4000, more=()):
                                     "cache_read_input_tokens": tokens * 30, "cache_creation_input_tokens": 900}}},
              *more]
     path = project / f"{sid}.jsonl"
-    write(path, "\n".join(json.dumps(line) for line in lines) + "\n")
+    write(path, "\n".join(json.dumps(line, separators=(",", ":")) for line in lines) + "\n")
     os.utime(path, (now - minutes_ago * 60, now - minutes_ago * 60))
 
 
@@ -186,7 +186,7 @@ for agent_id, kind, description, lines in [
     write(agents / f"agent-{agent_id}.meta.json", {"agentType": kind, "description": description,
                                                     "spawnDepth": 1, "toolUseId": "toolu_" + agent_id,
                                                     "requestShape": "background"})
-    write(agents / f"agent-{agent_id}.jsonl", "\n".join(json.dumps(line) for line in lines) + "\n")
+    write(agents / f"agent-{agent_id}.jsonl", "\n".join(json.dumps(line, separators=(",", ":")) for line in lines) + "\n")
 write(home / ".claude-work/jobs/job-lint/state.json", {
     "state": "failed", "tempo": "idle", "name": "lint everything", "cwd": str(home / "repos/api"),
     "sessionId": "9a1c7e2b-0000-4000-8000-000000000009", "detail": "eslint: 3 errors in src/routes.ts",
@@ -198,27 +198,34 @@ history(".claude-personal", ["notes/blog", "notes/garden"])
 
 # The last days, for the stats: earlier chats' replies (with their usage) and
 # your prompts, spread over two weeks
-def past_work(profile, folder, sid, days):
+def past_work(profile, folder, sid, days, title):
     """A finished chat in folder with a reply on each of days (days ago: output tokens)."""
     cwd = str(home / folder)
     os.makedirs(cwd, exist_ok=True)
-    lines = []
+    lines = [{"type": "ai-title", "aiTitle": title, "sessionId": sid}]
     for n, (ago, output) in enumerate(days):
         t = now - ago * 86400 - 3600
+        start = t - 600 - output % 7 * 300  # your prompt, then Claude's turn (for the Week tab)
+        lines.append({"type": "user", "cwd": cwd, "timestamp": iso(start), "uuid": f"u-{sid}-{n}",
+                      "origin": {"kind": "human"}, "message": {"role": "user", "content": "Go on with the next step"}})
         lines.append({"type": "assistant", "cwd": cwd, "timestamp": iso(t), "message": {
             "id": f"msg-{sid}-{n}", "model": "claude-haiku-5-5" if n % 5 == 4 else "claude-opus-5-5",
             "usage": {"input_tokens": 900, "output_tokens": output, "cache_read_input_tokens": output * 40,
                       "cache_creation_input_tokens": 700}}})
+        lines.append({"type": "system", "subtype": "turn_duration", "cwd": cwd, "timestamp": iso(t + 20),
+                      "durationMs": int((t + 20 - start) * 1000)})
     path = home / profile / "projects" / cwd.replace("/", "-") / f"{sid}.jsonl"
-    write(path, "\n".join(json.dumps(line) for line in lines) + "\n")
+    write(path, "\n".join(json.dumps(line, separators=(",", ":")) for line in lines) + "\n")
 
 
 past_work(".claude-work", "repos/parser", "9a1c7e2b-0000-4000-8000-000000000011",
-          [(13, 9000), (12, 30000), (9, 21000), (8, 52000), (6, 18000), (2, 41000), (1, 26000)])
+          [(13, 9000), (12, 30000), (9, 21000), (8, 52000), (6, 18000), (2, 41000), (1, 26000)], "Parser rewrite")
 past_work(".claude-work", "repos/site", "9a1c7e2b-0000-4000-8000-000000000012",
-          [(12, 8000), (7, 15000), (5, 12000), (2, 9000)])
-past_work(".claude-work", "repos/api", "9a1c7e2b-0000-4000-8000-000000000013", [(9, 6000), (3, 22000), (1, 14000)])
-past_work(".claude-personal", "notes/garden", "9a1c7e2b-0000-4000-8000-000000000014", [(10, 5000), (4, 3000)])
+          [(12, 8000), (7, 15000), (5, 12000), (2, 9000)], "Site redesign")
+past_work(".claude-work", "repos/api", "9a1c7e2b-0000-4000-8000-000000000013", [(9, 6000), (3, 22000), (1, 14000)],
+          "API pagination")
+past_work(".claude-personal", "notes/garden", "9a1c7e2b-0000-4000-8000-000000000014", [(10, 5000), (4, 3000)],
+          "Garden notes")
 with open(home / ".claude-work/history.jsonl", "a") as f:
     for ago, folder, n in ((13, "repos/parser", 3), (12, "repos/parser", 8), (12, "repos/site", 2), (9, "repos/api", 2),
                            (8, "repos/parser", 11), (7, "repos/site", 4), (6, "repos/parser", 5), (5, "repos/site", 3),

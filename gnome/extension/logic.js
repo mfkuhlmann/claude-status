@@ -1052,3 +1052,169 @@ export function chatRecapTooltip(stats, costUsd, now) {
         lines.push(fmt('At API prices this session would cost $%1 (from the status line; a plan pays differently).', costUsd.toFixed(2)));
     return lines.join('\n');
 }
+
+// ---------------------------------------------------------------- the week
+// The Week tab (ui/weekView.js), from the recap of week.py; as the Plasma
+// widget's WeekView.qml and the VS Code extension's src/shared/week.ts say it.
+
+const WEEKDAYS_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const MONTHS_LONG = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October',
+    'November', 'December'];
+
+function clock(ms) {
+    const d = new Date(ms);
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+// 3h 5m, 45m: a week of work reads better in hours than in days
+export function hoursText(ms) {
+    const m = Math.round(Math.max(0, ms) / 60000);
+    return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
+export function moneyText(usd) {
+    if (!usd)
+        return '$0';
+    if (usd < 0.01)
+        return '<$0.01';
+    const digits = usd >= 100 ? 0 : 2;
+    const [whole, cents] = usd.toFixed(digits).split('.');
+    return `$${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}${cents ? `.${cents}` : ''}`;
+}
+
+// "Sat 24 Oct"
+export function weekDayLabel(day) {
+    const d = dayDate(day);
+    return `${WEEKDAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}`;
+}
+
+// "Sat 24": a timeline row's day
+export function weekRowDay(day) {
+    const d = dayDate(day);
+    return `${WEEKDAYS[d.getDay()]} ${d.getDate()}`;
+}
+
+function shortDay(day) {
+    const d = dayDate(day);
+    return `${d.getDate()} ${MONTHS[d.getMonth()]}`;
+}
+
+function dateText(day) {
+    const d = dayDate(day);
+    return `${d.getDate()} ${MONTHS_LONG[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+export function weekPeriodText(recap) {
+    const span = `${shortDay(recap.from)} – ${shortDay(recap.to)}`;
+    return recap.back === 0 ? `Last 7 days · ${span}` : span;
+}
+
+// The 7 days before, when there was anything in them
+function previousOf(recap) {
+    const p = recap.previous;
+    return p && (p.workedMs || p.prompts || p.cost) ? p : null;
+}
+
+// The change against the 7 days before: "+4h 44m", "−$12"
+export function weekDeltaText(now, before, kind) {
+    if (before === null || before === undefined)
+        return '';
+    const d = now - before;
+    const abs = Math.abs(d);
+    if (kind === 'time' ? abs < 60000 : kind === 'money' ? abs < 0.01 : d === 0)
+        return 'same as before';
+    return (d > 0 ? '+' : '−') + (kind === 'time' ? hoursText(abs) : kind === 'money' ? moneyText(abs) : String(abs));
+}
+
+export function weekTiles(recap) {
+    const s = recap.sum;
+    const p = previousOf(recap);
+    const before = (v, kind) => (p ? `\nThe 7 days before: ${kind === 'time' ? hoursText(v) : kind === 'money' ? moneyText(v) : String(v)}` : '');
+    return [
+        {label: 'You', value: hoursText(s.youMs), delta: weekDeltaText(s.youMs, p ? p.youMs : null, 'time'),
+            tip: 'The time you spent writing to Claude, reading its replies and answering its questions, in all your chats and ' +
+                "accounts: the time between your prompts and its replies counts when it's under 15 minutes." + before(p ? p.youMs : 0, 'time')},
+        {label: 'Claude worked', value: hoursText(s.workedMs), delta: weekDeltaText(s.workedMs, p ? p.workedMs : null, 'time'),
+            tip: "Claude's own count of its turns (its “Worked for …”), all chats added up: chats working at the same time each " +
+                `count. On the clock it worked ${hoursText(s.busyMs)}, and it waited ${hoursText(s.waitMs)} for your answers.` +
+                before(p ? p.workedMs : 0, 'time')},
+        {label: 'At API prices', value: moneyText(s.cost), delta: weekDeltaText(s.cost, p ? p.cost : null, 'money'),
+            tip: `What the same tokens would cost on Claude's API, at its list prices of ${dateText(recap.prices.asOf)}. ` +
+                "Your plan isn't billed this way: this is the value of what you used." + before(p ? p.cost : 0, 'money')},
+        {label: 'Prompts', value: String(s.prompts), delta: weekDeltaText(s.prompts, p ? p.prompts : null, 'count'),
+            tip: `${plural(s.chats, 'In %1 chat', 'In %1 chats')} · ${plural(s.turns, "%1 turn of Claude's", "%1 turns of Claude's")}` +
+                before(p ? p.prompts : 0, 'count')},
+    ];
+}
+
+export function weekFactsText(s) {
+    const parts = [];
+    if (s.longestTurn && s.longestTurn.workedMs >= 60000)
+        parts.push(`longest turn ${hoursText(s.longestTurn.workedMs)} (${s.longestTurn.name || '?'})`);
+    if (s.peakAtOnce > 1)
+        parts.push(`up to ${s.peakAtOnce} chats at once`);
+    if (s.busiestDay)
+        parts.push(`busiest day ${WEEKDAYS_LONG[dayDate(s.busiestDay).getDay()]}`);
+    if (s.limits)
+        parts.push(s.limits === 1 ? 'a usage limit stopped you once' : `usage limits stopped you ${s.limits} times`);
+    return parts.join(' · ');
+}
+
+// What went on at ms, on its day's row. px: a pixel's ms, so a mark a pixel
+// or two wide can be hit
+export function weekHoverText(d, ms, now, px) {
+    const when = `${weekDayLabel(d.day)}, ${clock(ms)}: `;
+    if (ms > now)
+        return `${when}still to come`;
+    const at = list => list.find(s => s[0] <= ms && ms < s[1]) ||
+        list.find(s => s[1] - s[0] < 3 * px && s[0] - 2 * px <= ms && ms < s[1] + 2 * px);
+    const span = s => `${clock(s[0])}–${clock(s[1])}`;
+    const work = at(d.work), wait = at(d.wait), you = at(d.you);
+    const parts = [];
+    if (work)
+        parts.push(work[2] > 1 ? `Claude worked ${span(work)}, ${work[2]} chats at once` : `Claude worked ${span(work)}`);
+    else if (wait)
+        parts.push(`Claude waited for your answer ${span(wait)}`);
+    if (you)
+        parts.push(`you were at it ${span(you)}`);
+    return when + (parts.length ? parts.join(' · ') : 'nothing went on');
+}
+
+export function weekDayTip(d) {
+    const date = dayDate(d.day);
+    return [`${WEEKDAYS_LONG[date.getDay()]} ${date.getDate()} ${MONTHS_LONG[date.getMonth()]}`,
+        `You: ${hoursText(d.youMs)} · Claude worked ${hoursText(d.workedMs)} (on the clock ${hoursText(d.busyMs)}) · ` +
+        `it waited ${hoursText(d.waitMs)} for you\n${plural(d.prompts, '%1 prompt', '%1 prompts')} · ${moneyText(d.cost)} at API prices`];
+}
+
+export function weekCacheText(recap) {
+    const t = recap.sum.tokens;
+    const input = t.input + t.cacheRead + t.cacheWrite5m + t.cacheWrite1h;
+    if (!t.cacheRead)
+        return '';
+    return `${Math.round(100 * t.cacheRead / Math.max(1, input))}% of the ${formatTokens(input)} input tokens came from the cache: ` +
+        `it saved ${moneyText(recap.cacheSaved)}. Claude wrote ${formatTokens(t.output)} tokens.`;
+}
+
+export function weekShareText(share) {
+    return share < 0.01 ? '<1%' : `${Math.round(share * 100)}%`;
+}
+
+export function weekFootText(recap) {
+    const hosts = recap.sources.filter(s => s.host && s.ok).map(s => s.host);
+    const guessed = recap.prices.guessed.length ? ` (${recap.prices.guessed.join(', ')} at the price of its family's newest model)` : '';
+    const lines = [`Read from the chats on this computer${hosts.length ? ` and on ${hosts.join(', ')}` : ''}, without using any tokens. ` +
+        `Prices: Claude's API list prices of ${dateText(recap.prices.asOf)}${guessed}.`];
+    for (const s of recap.sources) {
+        if (!s.ok)
+            lines.push(`${s.host} couldn't be read: ${s.error}`);
+    }
+    return lines.join('\n');
+}
+
+// The arguments of week.py for those days: the SSH hosts shown whose last
+// check answered (one out of reach would hold it up)
+export function weekArgs(back, account, shownHosts, remote, configDirArgs) {
+    const hosts = shownHosts.filter(h => remote[h] && remote[h].ok && remote[h].result);
+    return ['--back', String(back), ...(account ? ['--account', account] : []), ...hosts.flatMap(h => ['--host', h]), ...configDirArgs];
+}
