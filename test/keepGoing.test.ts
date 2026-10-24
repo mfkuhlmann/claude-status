@@ -12,7 +12,7 @@ import { chatOptionArgs } from "../src/config";
 import { Dashboard } from "../src/dashboard";
 import type { Notifier } from "../src/notify";
 import { demoState } from "../src/shared/demo";
-import { keptChat, keptTitle, limitReset, resetAtText } from "../src/shared/model";
+import { clockText, keptChat, keptTitle, limitReset, resetAtText } from "../src/shared/model";
 import type { Group, KeptChat } from "../src/shared/types";
 
 const NOW = new Date(2026, 9, 24, 10, 0).getTime();
@@ -25,10 +25,13 @@ test("an account at the usage cap waits for that window, like one at its limit",
 });
 
 test("hovering over “resets in …” says when, with the day when that isn't today", () => {
+  // (in the locale's own clock: 14:20, or 02:20 PM)
   const at = new Date(2026, 9, 24, 14, 20).getTime();
-  assert.match(resetAtText(at, NOW), /^Resets at \d\d:\d\d$/);
-  assert.match(resetAtText(at + 86_400_000, NOW), /^Resets tomorrow at \d\d:\d\d$/);
-  assert.match(resetAtText(at + 3 * 86_400_000, NOW), /^Resets on .+ at \d\d:\d\d$/);
+  const tomorrow = new Date(2026, 9, 25, 14, 20).getTime();
+  const later = new Date(2026, 9, 27, 14, 20).getTime();
+  assert.equal(resetAtText(at, NOW), `Resets at ${clockText(at)}`);
+  assert.equal(resetAtText(tomorrow, NOW), `Resets tomorrow at ${clockText(tomorrow)}`);
+  assert.match(resetAtText(later, NOW), new RegExp(`^Resets on .+ at ${clockText(later)}$`));
 });
 
 test("the chats that keep going: found by their id, and what their tag says", () => {
