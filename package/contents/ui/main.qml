@@ -675,6 +675,55 @@ PlasmoidItem {
             text: i18n("Open Usage Page on claude.ai")
             icon.name: "internet-web-browser"
             onTriggered: Qt.openUrlExternally("https://claude.ai/settings/usage")
+        },
+        // The default account, as the settings' Accounts page makes it (up to four here)
+        PlasmaCore.Action {
+            isSeparator: true
+            visible: root.defaultChoices.length > 1
+        },
+        PlasmaCore.Action {
+            readonly property var account: root.defaultChoices[0] || null
+            visible: account !== null
+            text: account ? i18n("Default Account: %1", account.title) : ""
+            checkable: true
+            checked: account !== null && account.defaultHere === true
+            onTriggered: {
+                root.makeDefault(account)
+                checked = Qt.binding(() => account !== null && account.defaultHere === true)   // (it follows the status)
+            }
+        },
+        PlasmaCore.Action {
+            readonly property var account: root.defaultChoices[1] || null
+            visible: account !== null
+            text: account ? i18n("Default Account: %1", account.title) : ""
+            checkable: true
+            checked: account !== null && account.defaultHere === true
+            onTriggered: {
+                root.makeDefault(account)
+                checked = Qt.binding(() => account !== null && account.defaultHere === true)   // (it follows the status)
+            }
+        },
+        PlasmaCore.Action {
+            readonly property var account: root.defaultChoices[2] || null
+            visible: account !== null
+            text: account ? i18n("Default Account: %1", account.title) : ""
+            checkable: true
+            checked: account !== null && account.defaultHere === true
+            onTriggered: {
+                root.makeDefault(account)
+                checked = Qt.binding(() => account !== null && account.defaultHere === true)   // (it follows the status)
+            }
+        },
+        PlasmaCore.Action {
+            readonly property var account: root.defaultChoices[3] || null
+            visible: account !== null
+            text: account ? i18n("Default Account: %1", account.title) : ""
+            checkable: true
+            checked: account !== null && account.defaultHere === true
+            onTriggered: {
+                root.makeDefault(account)
+                checked = Qt.binding(() => account !== null && account.defaultHere === true)   // (it follows the status)
+            }
         }
     ]
 
@@ -2331,6 +2380,37 @@ PlasmoidItem {
         searchQuery = ""
         searchResults = ({})
         searchFolds = ({})
+    }
+
+    // ---------------------------------------------------------------- the default account
+    // Listed first, its usage in the panel, VS Code's Claude and plain claude
+    // run on it. The right-click menu can pick another: accounts.py --default,
+    // as the settings' Accounts page does, which refuses while the switch
+    // would cut a chat off (one working in VS Code's Claude, or any running
+    // through ~/.claude). It's said in a notification: the popup is closed then.
+
+    readonly property var defaultChoices: status && status.canDefault === true && groups.length > 1
+                                          ? groups.filter(g => !g.loggedOut && g.chatProfile) : []
+
+    function makeDefault(group) {
+        if (!group || group.defaultHere)
+            return
+        defaulter.connectSource("python3 -I " + shellQuote(codeDir + "accounts.py") + " --default " + shellQuote(group.chatProfile)
+                                + configDirArgs + " # " + Date.now())
+    }
+
+    P5Support.DataSource {
+        id: defaulter
+        engine: "executable"
+        connectedSources: []
+        onNewData: (source, data) => {
+            disconnectSource(source)
+            const result = root.helperResult(data)
+            root.notify("default-account", null, result.ok ? "started" : "error",
+                        result.ok ? i18n("Default account") : i18n("The default account didn't change"),
+                        result.message || i18n("no answer"), result.ok ? "user-identity" : "dialog-warning", "")
+            root.refresh()
+        }
     }
 
     // ---------------------------------------------------------------- the week

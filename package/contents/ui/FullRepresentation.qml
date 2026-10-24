@@ -40,15 +40,19 @@ PlasmaExtras.Representation {
             PlasmaComponents3.TabBar {
                 id: tabs
                 Layout.leftMargin: root.inTray ? 0 : Kirigami.Units.smallSpacing
+                // (squeezed, it shares out what's left, and "Recap" broke onto two lines)
+                Layout.minimumWidth: implicitWidth
                 // (set by a click, not by the bar's own index: a new popup
                 // starts at its first tab, which mustn't undo the one shown)
                 currentIndex: root.popupTab === "week" ? 1 : 0
 
                 PlasmaComponents3.TabButton {
+                    width: implicitWidth   // (else the bar gives each the same share)
                     text: i18n("Chats")
                     onClicked: root.popupTab = "chats"
                 }
                 PlasmaComponents3.TabButton {
+                    width: implicitWidth
                     text: i18n("Recap")
                     onClicked: root.popupTab = "week"
                 }
