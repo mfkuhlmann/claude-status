@@ -22,7 +22,7 @@ import {buildWeekView} from './ui/weekView.js';
 import {box, column, iconButton, label, paragraph, textButton, Tooltips} from './ui/widgets.js';
 
 const USAGE_PAGE = 'https://claude.ai/settings/usage';
-const WEEK_REFRESH_S = 600;   // the Week tab reads again while it's open
+const WEEK_REFRESH_S = 600;   // the Recap tab reads again while it's open
 
 export const Indicator = GObject.registerClass(
 class ClaudeStatusIndicator extends PanelMenu.Button {
@@ -53,7 +53,7 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         // Popup state kept by row key (rows are rebuilt with new data)
         this.ui = {expandedAgents: {}, expandedAgent: {}, expandedRecent: {}, expandedPeek: {}, expandedStats: {}, stopConfirm: '',
             stopConfirmBusy: false, shareConfirm: null, openMenu: null, tab: 'chats'};
-        // The Week tab's days and what week.py said of them (it runs only
+        // The Recap tab's days and what week.py said of them (it runs only
         // while that tab is open: setTab, loadWeek)
         this.week = {back: 0, account: '', recap: null, error: '', busy: false, copied: ''};
         this._weekAsked = 0;
@@ -898,7 +898,7 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         header.add_child(label('Claude Code', 'claude-title'));
         // Your chats now, or your last 7 days with Claude (ui/weekView.js)
         this._tabs = {};
-        for (const [tab, text] of [['chats', 'Chats'], ['week', 'Week']]) {
+        for (const [tab, text] of [['chats', 'Chats'], ['week', 'Recap']]) {
             const b = new St.Button({style_class: 'claude-tab', can_focus: true, label: text, y_align: Clutter.ActorAlign.CENTER});
             b.connect('clicked', () => this.setTab(tab));
             this._tabs[tab] = b;
@@ -1016,7 +1016,7 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         this._render(true);
     }
 
-    // Every 10 minutes while the popup shows the Week tab
+    // Every 10 minutes while the popup shows the Recap tab
     _weekTimer() {
         this._clearTimer('week');
         if (!this.menu.isOpen || this.ui.tab !== 'week')

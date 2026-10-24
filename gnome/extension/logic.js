@@ -1054,7 +1054,7 @@ export function chatRecapTooltip(stats, costUsd, now) {
 }
 
 // ---------------------------------------------------------------- the week
-// The Week tab (ui/weekView.js), from the recap of week.py; as the Plasma
+// The Recap tab (ui/weekView.js), from the recap of week.py; as the Plasma
 // widget's WeekView.qml and the VS Code extension's src/shared/week.ts say it.
 
 const WEEKDAYS_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];

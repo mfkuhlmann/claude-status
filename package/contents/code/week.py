@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Your week with Claude, for the widget's Week tab: how long you spent with
+"""Your week with Claude, for the widget's Recap tab: how long you spent with
 Claude and how long it worked, what the same work would cost at API prices,
 where it went, and what would make it use less of your plan.
 
@@ -7,7 +7,7 @@ All of it comes from the chat transcripts Claude Code keeps on this computer
 (and on the SSH hosts shown): nothing here starts Claude, calls a model or
 goes online. Each run reads only what the transcripts added since the last
 one (~/.cache/claude-widget/week-1.json), and the widget runs it only while
-its Week tab is open, never in its status checks.
+its Recap tab is open, never in its status checks.
 
     python3 -I week.py [--back N] [--account ID] [--host HOST]... [--config-dir DIR]... [--pretty]
 
@@ -887,7 +887,7 @@ def day_of(starts, ms):
 
 
 def recap(sources, back, account, now_ms, home):
-    """The Week tab: sources = [{"host", "chats" (chats_between), "accounts"}]."""
+    """The Recap tab: sources = [{"host", "chats" (chats_between), "accounts"}]."""
     days = week_days(back, now_ms)
     starts = [d[1] for d in days] + [days[-1][2]]
     w0, w1 = starts[0], min(starts[-1], now_ms)

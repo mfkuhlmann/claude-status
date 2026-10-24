@@ -5,7 +5,7 @@ import org.kde.plasma.core as PlasmaCore
 import org.kde.plasma.extras as PlasmaExtras
 import org.kde.kirigami as Kirigami
 
-// The Week tab (main.qml: loadWeek, week.py): your last 7 days with Claude.
+// The Recap tab (main.qml: loadWeek, week.py): your last 7 days with Claude.
 // How long you were at it and how long Claude worked, a day per row on a
 // timeline, what the same work would cost at API prices, where it went, and
 // what would make it use less of your plan (the rules of Claude Code's own

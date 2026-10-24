@@ -2334,7 +2334,7 @@ PlasmoidItem {
     }
 
     // ---------------------------------------------------------------- the week
-    // The popup's Week tab (WeekView.qml): week.py reads your chats of 7 days
+    // The popup's Recap tab (WeekView.qml): week.py reads your chats of 7 days
     // (only what their transcripts added since it last ran) when the tab opens
     // or you pick other days, then every 10 minutes while it's in sight. The
     // status checks never run it.

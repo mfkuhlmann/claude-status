@@ -1,4 +1,4 @@
-// The popup's Week tab: your last 7 days with Claude (week.py, which the
+// The popup's Recap tab: your last 7 days with Claude (week.py, which the
 // indicator runs only while this tab is open). How long you were at it and
 // how long Claude worked, a day per row on a timeline (drawn with Cairo),
 // what the same work would cost at API prices, where it went, and what would

@@ -49,7 +49,7 @@ PlasmaExtras.Representation {
                     onClicked: root.popupTab = "chats"
                 }
                 PlasmaComponents3.TabButton {
-                    text: i18n("Week")
+                    text: i18n("Recap")
                     onClicked: root.popupTab = "week"
                 }
                 Connections {
@@ -106,7 +106,7 @@ PlasmaExtras.Representation {
                     root.refresh()
                     for (const host of root.shownHosts)
                         root.pollHost(host)
-                    root.loadWeek()   // (on the Week tab)
+                    root.loadWeek()   // (on the Recap tab)
                 }
 
                 PlasmaCore.ToolTipArea {
