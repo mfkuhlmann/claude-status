@@ -3,9 +3,17 @@
 
 import type { JSX } from "preact";
 
-export type IconName = "refresh" | "add" | "stop" | "close" | "share" | "chevron" | "server" | "eye" | "external" | "play" | "back" | "search" | "logout" | "edit" | "send";
+export type IconName = "refresh" | "add" | "stop" | "close" | "share" | "chevron" | "server" | "eye" | "external" | "play" | "back" | "search" | "logout" | "edit" | "send" | "repeat";
 
 const shapes: Record<IconName, JSX.Element> = {
+  repeat: (
+    <>
+      <path d="M2.75 7.5V6.25a2.5 2.5 0 0 1 2.5-2.5h7.5" />
+      <path d="M10.75 1.75l2 2-2 2" />
+      <path d="M13.25 8.5v1.25a2.5 2.5 0 0 1-2.5 2.5h-7.5" />
+      <path d="M5.25 14.25l-2-2 2-2" />
+    </>
+  ),
   refresh: (
     <>
       <path d="M13.4 8.6A5.5 5.5 0 1 1 11.6 3.9" />

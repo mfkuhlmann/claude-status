@@ -6,6 +6,8 @@ import {
   handoverTarget,
   hasPeek,
   hasTurn,
+  keptChat,
+  keptTitle,
   machineStatus,
   modeHint,
   modeText,
@@ -14,6 +16,7 @@ import {
   petKeyOf,
   plural,
   queuedChat,
+  resetAtText,
   shareAccounts,
   stateText,
   tasksTitle,
@@ -79,8 +82,13 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
   // or by itself once the limit resets (queued; again: cancelled)
   const goOn = goOnAt(s);
   const goingOn = goOn || s.stopped ? queuedChat(view.status, s.chatId || s.sessionId, host) : null;
+  // it keeps going until it's done (after each usage limit, on by itself); one at work here can
+  const kept = host ? null : keptChat(view.status, s.chatId || s.sessionId);
+  const canKeep = !host && !kept && s.state === "working" && s.entrypoint !== "claude-vscode";
   const ending =
-    s.pid === null ? "" : s.kind === "bg" ? " This background session is stopped first (claude stop)." : " Claude here quits first (its terminal stays open).";
+    (s.pid === null ? "" : s.kind === "bg" ? " This background session is stopped first (claude stop)." : " Claude here quits first (its terminal stays open).") +
+    (host ? "" : " It goes on by itself after later limits too, until it's done.");
+  const resetsAt = s.stopped?.kind === "limit" && !s.stopped.over && s.stopped.resetsAt ? s.stopped.resetsAt : 0;
   const stopped = s.stopped && !s.stopped.over ? " stopped" : s.stopped ? " freed" : "";
 
   return (
@@ -167,7 +175,7 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
               onClick={host ? undefined : () => post({ type: "compareChanges", chat, turn: false })}
             />
           ) : null}
-          <span class="state-text" title={stateText(s, now)}>
+          <span class="state-text" title={stateText(s, now) + (resetsAt ? `\n${resetAtText(resetsAt, now)}` : "")}>
             {stateText(s, now)}
           </span>
         </div>
@@ -217,7 +225,7 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
           )
         ) : null}
 
-        {handover || goOn || goingOn ? (
+        {handover || goOn || goingOn || kept ? (
           <div class="handover small">
             {handover ? (
             <button
@@ -257,6 +265,11 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
                 ⏱ Go on at {clockText(goOn)}
               </button>
             ) : null}
+            {kept && !goingOn ? (
+              <button type="button" class="link" title={keptTitle(kept)} onClick={() => post({ type: "keepGoing", chat, on: false })}>
+                ↻ Keeps going{kept.error ? " (gave up)" : kept.note ? " (can't go on now)" : ""}
+              </button>
+            ) : null}
           </div>
         ) : null}
 
@@ -265,8 +278,16 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
         {showAgents && agents ? <AgentTree tree={agents.tree} now={now} rowKey={rowKey} chat={chat} host={host} /> : null}
       </div>
 
-      {share || remove || stop ? (
+      {share || remove || stop || canKeep ? (
         <div class="row-actions">
+          {canKeep ? (
+            <IconButton
+              icon="repeat"
+              label="Keep going after usage limits"
+              title="Keep going until it's done: when a usage limit stops this chat, it goes on by itself in the background a minute after the limit resets, and again after each later one, until a turn of it ends by itself. Claude here quits first then (its terminal stays open)."
+              onClick={() => post({ type: "keepGoing", chat, on: true })}
+            />
+          ) : null}
           {share ? (
             <IconButton
               icon="share"

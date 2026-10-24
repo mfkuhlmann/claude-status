@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+- **Keep going until it's done:** a chat at work on this computer can keep
+  going while you're away (the ↻ button on its row): when a usage limit
+  stops it, it goes on by itself in the background a minute after the limit
+  resets, and again after each later limit, however many that takes, until
+  a turn of it ends by itself. Its row says **↻ Keeps going**; click that to
+  stop it. **Go on at …** does the same now: it used to go on once, and a
+  chat that hit the next limit too just stayed stopped.
+- **Going on is checked:** when a go-on didn't take (nothing new in the chat
+  five minutes after it went on) or its turn broke off on an API error that
+  isn't a limit (the connection lost, say), it goes on again after a pause,
+  five times with longer and longer pauses, then says it gave up. A chat
+  waiting for your answer, one whose login expired and one open in a Claude
+  Code tab are left alone, and say why. (While the computer sleeps nothing
+  can run: a chat goes on when it wakes up.)
+- **A usage cap** (`claudeStatus.usageCap`): an account's chats at work on
+  this computer are stopped once one of its plan windows reaches the
+  percentage you set, once in that window. Queued tasks wait until it
+  resets, and chats that keep going go on then.
+- **Model and effort for new chats:** **New Chat…** has the model (Opus,
+  Sonnet, Fable, Haiku or Claude's default) and the reasoning effort (low to
+  max) a chat in a terminal or in the background starts with, Opus and extra
+  high to begin with (`claudeStatus.newChatModel`, `claudeStatus.newChatEffort`).
+  Also for queued tasks and SSH hosts; a Claude Code tab has its own model
+  setting.
+- **When a limit resets:** hovering over *resets in 2h 5m* (a plan window's,
+  or a chat's *Limit · resets in …*) shows the time it resets, with the day
+  when that isn't today.
+- The backend is the widget's at 633e0f2.
 - **A recent chat reopened in a Claude Code tab** opens in this window when
   it has the chat's project open. Where Claude had gone into a subfolder
   (`cd source`), or out of the folder the chat started in, a new VS Code

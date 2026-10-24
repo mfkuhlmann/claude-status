@@ -1,4 +1,4 @@
-import { forecastTitle, forecastWarning, resetText, usageLevel } from "../../src/shared/model";
+import { forecastTitle, forecastWarning, resetAtText, resetText, usageLevel } from "../../src/shared/model";
 import type { LimitWindow } from "../../src/shared/types";
 
 // One plan limit: label, bar, percent, when it resets. Its four cells sit in
@@ -8,10 +8,11 @@ import type { LimitWindow } from "../../src/shared/types";
 export function UsageBar({ window: w, now }: { window: LimitWindow; now: number }) {
   const pct = Math.min(100, Math.max(0, w.pct));
   const reset = resetText(w, now);
+  const resetAt = !w.reset && w.resetsAt && w.resetsAt > now ? resetAtText(w.resetsAt, now) : "";
   const f = w.reset ? null : (w.forecast ?? null);
   const ahead = f ? Math.min(100, Math.max(pct, f.atReset)) : pct;
   const warning = forecastWarning(w, now);
-  const title = [`${w.label}: ${Math.round(w.pct)}% used` + (reset ? ` · ${reset}` : ""), forecastTitle(w, now)]
+  const title = [`${w.label}: ${Math.round(w.pct)}% used` + (reset ? ` · ${reset}` : ""), resetAt ? resetAt + "." : "", forecastTitle(w, now)]
     .filter(Boolean)
     .join("\n");
   return (
@@ -35,7 +36,7 @@ export function UsageBar({ window: w, now }: { window: LimitWindow; now: number 
         {f ? <span class="meter-even" style={{ left: `${Math.min(100, Math.max(0, f.evenPct))}%` }} /> : null}
       </span>
       <span class="usage-pct">{Math.round(w.pct)}%</span>
-      <span class="usage-reset" title={reset}>
+      <span class="usage-reset" title={resetAt || reset}>
         {reset}
       </span>
       {warning ? (

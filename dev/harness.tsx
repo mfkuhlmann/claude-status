@@ -32,6 +32,17 @@ function sendState(): void {
       (groups[0] = { ...groups[0], defaultHere: true });
   // ?banner=0: without the "Demo data" line, for the README's screenshots
   if (params.get("banner") === "0") state.demo = false;
+  // ?keep=1: the first chat at work keeps going (after each usage limit), and one gave up
+  if (params.get("keep") === "1" && state.status) {
+    const chats = groups.flatMap((g) => g.sessions);
+    const working = chats.find((s) => s.state === "working");
+    const other = chats.find((s) => s !== working && s.state !== "working");
+    const kept = (chat: string, error = "") => ({ chat, profile: ".claude", name: "", since: Date.now(), wentOnAt: null, tries: 0, note: "", error });
+    state.status.keep = [
+      ...(working ? [kept(working.chatId || working.sessionId)] : []),
+      ...(other ? [kept(other.chatId || other.sessionId, "Gave up after 5 tries: it didn't go on")] : []),
+    ];
+  }
   send({ type: "state", state });
 }
 

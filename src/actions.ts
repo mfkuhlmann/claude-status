@@ -9,7 +9,7 @@ import * as os from "node:os";
 import * as vscode from "vscode";
 import type { AccountSwitch } from "./accountSwitch";
 import type { Answer, Backend, FindAnswer } from "./backend";
-import { configDirArgs, setSshHosts, settings } from "./config";
+import { chatOptionArgs, configDirArgs, setChatOptions, setSshHosts, settings } from "./config";
 import { agentRunArgs } from "./agentRun";
 import { openComparison } from "./changes";
 import { claudePanelAvailable, filedUnder, localPanelConfigDir, localPanelProfileKey, openPanelChat } from "./claudePanel";
@@ -42,6 +42,18 @@ import { attachClients, localAncestors, type Place, type Terminals } from "./ter
 import type { PlanReview } from "./planReview";
 
 const CHAT_LINK = "vscode://anthropic.claude-code/open?session=";
+
+// The models and reasoning efforts a new chat can start with (claude --model,
+// --effort; "": Claude's own default)
+const MODELS: [string, string][] = [["opus", "Opus"], ["sonnet", "Sonnet"], ["fable", "Fable"], ["haiku", "Haiku"], ["", "Claude's default model"]];
+const EFFORTS: [string, string][] = [["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"], ["max", "Max"], ["", "Claude's default effort"]];
+
+// "Opus · Extra high effort": what new chats start with
+export function chatOptionsText(model: string, effort: string): string {
+  const m = MODELS.find(([v]) => v === model)?.[1] ?? model;
+  const e = EFFORTS.find(([v]) => v === effort)?.[1] ?? effort;
+  return `${m} · ${effort ? `${e} effort` : e}`;
+}
 
 // The plain chat command inside "cd FOLDER 2>/dev/null; COMMAND" (how the
 // backend's in_folder() writes a command for a folder)
@@ -798,11 +810,17 @@ export class Actions {
     }
     const label = (f: Project) =>
       `$(${f.short === "~" ? "home" : "folder"}) ${f.short === "~" ? "Home folder (~)" : f.short}` + (plan && f.path === plan.cwd ? "  (the plan's)" : "");
-    type Item = vscode.QuickPickItem & { start?: "terminal" | "background" | "queue" | "schedule" | "panel" | "task"; folder?: Project; choose?: "dialog" | "type" };
+    type Item = vscode.QuickPickItem & { start?: "terminal" | "background" | "queue" | "schedule" | "panel" | "task" | "options"; folder?: Project; choose?: "dialog" | "type" };
     const canBrowse = !host || host === this.dash.currentHost;
     const items: Item[] = [];
     if (cli && !hasTask)
       items.push({ label: "$(sparkle) Start with a task…", description: "say what Claude should do: it starts right away, also in the background", start: "task" });
+    if (cli)
+      items.push({
+        label: `$(settings-gear) ${chatOptionsText(settings.newChatModel(), settings.newChatEffort())}`,
+        description: "the model and effort it starts with (not in a Claude Code tab): change…",
+        start: "options",
+      });
     if (cli) {
       items.push({ label: "In a terminal", kind: vscode.QuickPickItemKind.Separator });
       for (const f of folders) items.push({ label: label(f), start: "terminal", folder: f });
@@ -831,6 +849,11 @@ export class Actions {
       placeHolder: plan || task ? "Start it in…" : `New chat on ${where} in…`,
     });
     if (!pick?.start) return;
+    if (pick.start === "options") {
+      await this.pickChatOptions();
+      return this.newChat(group.id, host, plan, task, first);
+    }
+    const opts = chatOptionArgs();
     if (pick.start === "task") {
       const text = await vscode.window.showInputBox({
         title: `New chat on ${where}`,
@@ -875,7 +898,7 @@ export class Actions {
       const answer = await this.backend.action("jump.py", [
         "--queue", group.chatProfile, "--cwd", folder || "~", "--at", String(at), "--scheduled",
         ...(task ? ["--prompt", task] : []), ...(plan ? ["--plan", plan.slug, "--plan-profile", plan.profileDir] : []),
-        ...(host ? ["--host", host] : []), "--account", group.title, ...configDirArgs(),
+        ...(host ? ["--host", host] : []), "--account", group.title, ...opts, ...configDirArgs(),
       ]);
       if (this.report(answer, "Couldn't queue it")) this.dash.setActionInfo(answer.message);
       return this.refresh();
@@ -909,35 +932,68 @@ export class Actions {
       if (!reset) return this.fail("The usage limit has reset already: start it now instead.");
       const answer = await this.backend.action("jump.py", [
         "--queue", group.chatProfile, "--cwd", folder || "~", "--at", String(Math.round(reset.at + 60000)), ...taskArgs,
-        ...(host ? ["--host", host] : []), "--account", group.title, ...configDirArgs(),
+        ...(host ? ["--host", host] : []), "--account", group.title, ...opts, ...configDirArgs(),
       ]);
       if (this.report(answer, "Couldn't queue it")) this.dash.setActionInfo(answer.message);
       return this.refresh();
     }
     if (pick.start === "background") {
       const answer = host
-        ? await this.backend.action("remote.py", ["--task", host, group.chatProfile, folder || "~", ...(task ? ["--prompt", task] : []), ...(plan ? ["--plan", plan.slug, plan.profileDir] : []), "--bg"], 120000)
-        : await this.backend.action("jump.py", ["--new-chat", group.chatProfile, ...(folder ? ["--cwd", folder] : []), "--bg", ...taskArgs, ...configDirArgs()], 120000);
+        ? await this.backend.action("remote.py", ["--task", host, group.chatProfile, folder || "~", ...(task ? ["--prompt", task] : []), ...(plan ? ["--plan", plan.slug, plan.profileDir] : []), ...opts, "--bg"], 120000)
+        : await this.backend.action("jump.py", ["--new-chat", group.chatProfile, ...(folder ? ["--cwd", folder] : []), "--bg", ...taskArgs, ...opts, ...configDirArgs()], 120000);
       if (this.report(answer, "Couldn't start it in the background")) this.dash.setActionInfo(answer.message);
       return this.refresh(host);
     }
     // In a terminal: the widget's way (your desktop's terminal), or VS Code's
     if (settings.openIn() === "system" && !host) {
-      const args = ["--new-chat", group.chatProfile, ...(folder ? ["--cwd", folder] : ["--choose-folder"]), ...taskArgs, ...configDirArgs()];
+      const args = ["--new-chat", group.chatProfile, ...(folder ? ["--cwd", folder] : ["--choose-folder"]), ...taskArgs, ...opts, ...configDirArgs()];
       this.report(await this.backend.action("jump.py", args, 600000), "Couldn't open a new chat");
       return;
     }
     let command: string | undefined;
     if (hasTask) {
       const answer = host
-        ? await this.backend.action("remote.py", ["--task", host, group.chatProfile, folder || "~", ...(task ? ["--prompt", task] : []), ...(plan ? ["--plan", plan.slug, plan.profileDir] : []), "--print-command"])
-        : await this.backend.action("claude_status.py", ["--task-command", folder || os.homedir(), "--profile", group.chatProfile, ...taskArgs, ...configDirArgs()]);
+        ? await this.backend.action("remote.py", ["--task", host, group.chatProfile, folder || "~", ...(task ? ["--prompt", task] : []), ...(plan ? ["--plan", plan.slug, plan.profileDir] : []), ...opts, "--print-command"])
+        : await this.backend.action("claude_status.py", ["--task-command", folder || os.homedir(), "--profile", group.chatProfile, ...taskArgs, ...opts, ...configDirArgs()]);
       if (!this.report(answer, "Couldn't start it")) return;
       command = answer.command;
     } else {
-      command = pick.folder?.newChatCommand ?? (chat ? inFolder(folder, chat) : undefined);
+      // (the backend's command ends with claude itself: its options go after it)
+      const plain = pick.folder?.newChatCommand ?? (chat ? inFolder(folder, chat) : undefined);
+      command = plain ? plain + opts.map((w) => " " + shellQuote(w)).join("") : undefined;
     }
     if (command) await this.terminals.run(`new|${Date.now()}`, plan ? plan.title : "new chat", command, this.place(host));
+  }
+
+  // The model and effort new chats start with: picked, and kept for the next ones
+  private async pickChatOptions(): Promise<void> {
+    const model = await vscode.window.showQuickPick(
+      MODELS.map(([value, label]) => ({ label, value, description: value === settings.newChatModel() ? "now" : "" })),
+      { title: "New chats start with the model…", placeHolder: "the model (claude --model; /model changes it in the chat)" },
+    );
+    if (!model) return;
+    const effort = await vscode.window.showQuickPick(
+      EFFORTS.map(([value, label]) => ({ label, value, description: value === settings.newChatEffort() ? "now" : "" })),
+      { title: `…${model.label}, with the reasoning effort…`, placeHolder: "how hard it thinks (claude --effort; /effort changes it in the chat)" },
+    );
+    if (!effort) return;
+    await setChatOptions(model.value, effort.value);
+  }
+
+  // A chat of this computer keeps going until it's done (after each usage
+  // limit, on by itself when that resets), or not any more (its queued go-on
+  // is cancelled too)
+  async keepGoing(chat: ChatRef, on: boolean): Promise<void> {
+    if (this.demoOnly()) return;
+    const id = chat.chatId || chat.sessionId;
+    const answer = await this.backend.action(
+      "jump.py",
+      on
+        ? ["--keep-going", id, "--profile", chat.profileDir, ...(chat.cwd ? ["--cwd", chat.cwd] : []), "--name", chat.name, ...configDirArgs()]
+        : ["--keep-off", id, ...configDirArgs()],
+    );
+    if (this.report(answer, on ? "It can't keep going" : "Couldn't change it")) this.dash.setActionInfo(answer.message);
+    this.refresh();
   }
 
   // A chat a usage limit stopped goes on by itself at `at` (a minute after

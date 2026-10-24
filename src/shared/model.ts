@@ -1,7 +1,7 @@
 // The dashboard's derived values, shared by the extension (status bar,
 // notifications) and the webview. Ported from the widget's main.qml.
 
-import type { Agent, ChangeSummary, ChatRef, ChatStats, ClaudeCodeInfo, Counts, Group, HostState, Limits, LimitWindow, Memory, Overall, Overlap, PlanItem, QueuedTask, RecentChat, ReopenIn, Session, SharedPointer, SshUsage, StatsDay, Status, Stop, TaskProgress, UsageStats, ViewState } from "./types";
+import type { Agent, ChangeSummary, ChatRef, ChatStats, ClaudeCodeInfo, Counts, Group, HostState, KeptChat, Limits, LimitWindow, Memory, Overall, Overlap, PlanItem, QueuedTask, RecentChat, ReopenIn, Session, SharedPointer, SshUsage, StatsDay, Status, Stop, TaskProgress, UsageStats, ViewState } from "./types";
 
 // This computer's accounts and the hosts', for the counts, the badge and
 // what needs you. A host whose last check failed still shows what it said
@@ -565,19 +565,47 @@ export function laterAt(day: number, clock: string, now: Date): number {
   return at > now.getTime() ? at : 0;
 }
 
-// When a queued task starts, in words: "14:30" today, "tomorrow 09:00", "Fri 24 Oct 09:00"
-export function startText(ms: number, now: number): string {
+// Days from now's date to ms's (0 today, 1 tomorrow)
+function daysAway(ms: number, now: number): number {
   const d = new Date(ms);
   const t = new Date(now);
-  const days = Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() - new Date(t.getFullYear(), t.getMonth(), t.getDate()).getTime()) / 86_400_000);
-  return days <= 0 ? clockText(ms) : days === 1 ? `tomorrow ${clockText(ms)}` : `${dayText(d)} ${clockText(ms)}`;
+  return Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() - new Date(t.getFullYear(), t.getMonth(), t.getDate()).getTime()) / 86_400_000);
+}
+
+// When a queued task starts, in words: "14:30" today, "tomorrow 09:00", "Fri 24 Oct 09:00"
+export function startText(ms: number, now: number): string {
+  const days = daysAway(ms, now);
+  return days <= 0 ? clockText(ms) : days === 1 ? `tomorrow ${clockText(ms)}` : `${dayText(new Date(ms))} ${clockText(ms)}`;
+}
+
+// When a usage limit resets, for the title of its "resets in …"
+export function resetAtText(ms: number, now: number): string {
+  const days = daysAway(ms, now);
+  return days <= 0 ? `Resets at ${clockText(ms)}` : days === 1 ? `Resets tomorrow at ${clockText(ms)}` : `Resets on ${dayText(new Date(ms))} at ${clockText(ms)}`;
+}
+
+// The chat that keeps going (this computer's status lists them), or null
+export function keptChat(status: Pick<Status, "keep"> | null | undefined, chatId: string): KeptChat | null {
+  return status?.keep?.find((k) => k.chat === chatId) ?? null;
+}
+
+// What a chat that keeps going does, for its tag's title
+export function keptTitle(kept: KeptChat): string {
+  return [
+    "Keeps going until it's done: when a usage limit stops it, it goes on by itself in the background a minute after the limit resets, and again after each later one, until a turn of it ends by itself. When a go-on doesn't take or its turn breaks off (the connection lost), it tries again a few times.",
+    kept.error || kept.note,
+    "Click to stop it keeping going.",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 // When the usage limit an account is at resets (the latest of its full
-// windows, else of the chats a limit stopped), or null
-export function limitReset(g: Pick<Group, "limits" | "accountLimits" | "sessions">, now: number): { at: number; label: string } | null {
+// windows, or of one at the usage cap, else of the chats a limit stopped), or null
+export function limitReset(g: Pick<Group, "limits" | "accountLimits" | "sessions" | "cap">, now: number): { at: number; label: string } | null {
   let best: { at: number; label: string } | null = null;
   for (const w of usageOf(g)?.windows ?? []) if (w.pct >= 95 && w.resetsAt && (!best || w.resetsAt > best.at)) best = { at: w.resetsAt, label: w.label };
+  if (g.cap && (!best || g.cap.resetsAt > best.at)) best = { at: g.cap.resetsAt, label: g.cap.label };
   if (!best)
     for (const s of g.sessions)
       if (s.stopped?.kind === "limit" && !s.stopped.over && s.stopped.resetsAt && (!best || s.stopped.resetsAt > best.at))

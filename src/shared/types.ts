@@ -86,6 +86,22 @@ export interface QueuedTask {
   chat?: string | null; // goes on with this chat (one a usage limit stopped) instead
   name?: string; // that chat's name
   scheduled?: boolean; // it starts at a time you picked, not when a limit resets
+  why?: string; // a chat's go-on: "retry" (its turn broke off) or "cap" (the usage cap stopped it), else ""
+  model?: string | null; // a new chat's model and effort (claude --model, --effort)
+  effort?: string | null;
+}
+
+// A chat of this computer that keeps going until it's done: after each usage
+// limit that stops it, it goes on by itself (claude_status.py: look_after_kept)
+export interface KeptChat {
+  chat: string;
+  profile: string;
+  name: string;
+  since: number;
+  wentOnAt: number | null; // when it last went on by itself
+  tries: number; // how often it went on again after a go-on that didn't take, or a turn that broke off
+  note: string; // why it can't go on right now (open in a Claude Code tab, its login expired)
+  error: string; // it gave up: why
 }
 
 // The plan a chat made (claude_status.py: plan_of)
@@ -375,6 +391,9 @@ export interface Group {
   // With limitsHidden: the account's numbers all the same (the newest of its
   // machines'), for what weighs them (handoverTarget, limitReset)
   accountLimits?: Limits | null;
+  // One of its plan windows is at the usage cap (claudeStatus.usageCap): until
+  // it resets, queued tasks wait. Older backends leave it out.
+  cap?: { pct: number; label: string; key: string; resetsAt: number } | null;
 }
 
 export interface Status {
@@ -391,6 +410,7 @@ export interface Status {
   // Whether the claude command is on this machine (missing when unsure)
   cli?: { installed: boolean };
   queue?: QueuedTask[]; // this computer's status only: tasks waiting for a usage limit
+  keep?: KeptChat[]; // this computer's status only: the chats that keep going
 }
 
 export interface Counts {
@@ -509,6 +529,7 @@ export type WebviewMessage =
   | { type: "openOverlap"; chat: ChatRef } // the first other chat changing the same files
   | { type: "unqueue"; id: string }
   | { type: "queueContinue"; chat: ChatRef } // go on by itself once the limit resets
+  | { type: "keepGoing"; chat: ChatRef; on: boolean } // keep going after each usage limit (or not any more)
   | { type: "loginHost"; host: string }
   | { type: "disconnectHost"; host: string }
   | { type: "login"; groupId: string; host?: string }

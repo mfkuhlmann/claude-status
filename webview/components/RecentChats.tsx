@@ -5,6 +5,8 @@ import {
   claudeCodeHere,
   claudeCodeReopenHint,
   cliInstalled,
+  keptChat,
+  keptTitle,
   machineStatus,
   queuedChat,
   reopensInClaudeCode,
@@ -83,6 +85,8 @@ export function RecentChats({ group }: { group: Group }) {
               const chat = recentRef(c, group.host);
               const goOn = goOnAt(c);
               const goingOn = queuedChat(view.status, c.sessionId, group.host);
+              const kept = group.host ? null : keptChat(view.status, c.sessionId);
+              const later = group.host ? "" : " It goes on by itself after later limits too, until it's done.";
               return (
                 <li key={c.key} class={"recent-item" + (canOpen ? "" : " unavailable")}>
                   <button
@@ -109,15 +113,24 @@ export function RecentChats({ group }: { group: Group }) {
                     <Tag
                       text={`⏱ ${clockText(goingOn.startAt)}`}
                       active
-                      title={`Goes on by itself at ${clockText(goingOn.startAt)}, in the background, telling Claude that the limit has reset (if it didn't go on before then).\n\nClick to cancel it.`}
+                      title={`Goes on by itself at ${clockText(goingOn.startAt)}, in the background, telling Claude that the limit has reset (if it didn't go on before then).${later}\n\nClick to cancel it.`}
                       onClick={() => post({ type: "unqueue", id: goingOn.id })}
                     />
                   ) : c.stopped?.kind === "limit" && !c.stopped.over ? (
                     <Tag
                       text="limit"
                       warning
-                      title={`A usage limit stopped it\n${c.stopped.text}` + (goOn ? `\n\nClick to have it go on by itself in the background at ${clockText(goOn)}, a minute after the limit resets.` : "")}
+                      title={`A usage limit stopped it\n${c.stopped.text}` + (goOn ? `\n\nClick to have it go on by itself in the background at ${clockText(goOn)}, a minute after the limit resets.${later}` : "")}
                       onClick={goOn ? () => post({ type: "queueContinue", chat }) : undefined}
+                    />
+                  ) : null}
+                  {kept && !goingOn ? (
+                    <Tag
+                      text="↻"
+                      active={!kept.error}
+                      warning={!!kept.error || !!kept.note}
+                      title={keptTitle(kept)}
+                      onClick={() => post({ type: "keepGoing", chat, on: false })}
                     />
                   ) : null}
                   <Elided text={c.cwdShort || "~"} class="recent-folder small muted" title={c.cwd} />

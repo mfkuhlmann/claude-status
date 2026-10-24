@@ -449,6 +449,56 @@
           "markdownDescription": "Keep finished background chats listed for this many hours (0 = drop them right away).",
           "order": 25
         },
+        "claudeStatus.usageCap": {
+          "type": "integer",
+          "default": 0,
+          "minimum": 0,
+          "maximum": 100,
+          "markdownDescription": "A usage cap, in percent (0 = none): once one of an account's plan windows (5 hours, a week) reaches it, the account's chats at work on this computer are stopped, once in that window (in tmux and in a Claude Code tab the turn is interrupted, the chat stays open). Queued tasks wait until the window resets, and chats that keep going go on then. Chats you start or answer yourself afterwards aren't stopped again.",
+          "order": 31
+        },
+        "claudeStatus.newChatModel": {
+          "type": "string",
+          "enum": [
+            "opus",
+            "sonnet",
+            "fable",
+            "haiku",
+            ""
+          ],
+          "enumItemLabels": [
+            "Opus",
+            "Sonnet",
+            "Fable",
+            "Haiku",
+            "Claude's default"
+          ],
+          "default": "opus",
+          "markdownDescription": "The model new chats in a terminal or in the background start with (`claude --model`; **New Chat…** changes it). Not for a Claude Code tab: that has its own model setting.",
+          "order": 32
+        },
+        "claudeStatus.newChatEffort": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            ""
+          ],
+          "enumItemLabels": [
+            "Low",
+            "Medium",
+            "High",
+            "Extra high",
+            "Max",
+            "Claude's default"
+          ],
+          "default": "xhigh",
+          "markdownDescription": "The reasoning effort new chats in a terminal or in the background start with (`claude --effort`; **New Chat…** changes it).",
+          "order": 33
+        },
         "claudeStatus.pythonPath": {
           "scope": "machine",
           "type": "string",

@@ -46,7 +46,22 @@ export const settings = {
   awayDigest: () => cfg().get<boolean>("awayDigest", true),
   awayMinutes: () => num("awayMinutes", 5, 1, 240),
   python: () => expandHome(cfg().get<string>("pythonPath", "python3")?.trim() || "python3"),
+  usageCap: () => num("usageCap", 0, 0, 100),
+  newChatModel: () => (cfg().get<string>("newChatModel", "opus") ?? "").trim(),
+  newChatEffort: () => (cfg().get<string>("newChatEffort", "xhigh") ?? "").trim(),
 };
+
+// claude's options for the model and effort new chats start with (New Chat… picks them)
+export function chatOptionArgs(): string[] {
+  const model = settings.newChatModel();
+  const effort = settings.newChatEffort();
+  return [...(model ? ["--model", model] : []), ...(effort ? ["--effort", effort] : [])];
+}
+
+export async function setChatOptions(model: string, effort: string): Promise<void> {
+  await cfg().update("newChatModel", model, vscode.ConfigurationTarget.Global);
+  await cfg().update("newChatEffort", effort, vscode.ConfigurationTarget.Global);
+}
 
 export function viewSettings(): ViewSettings {
   return {

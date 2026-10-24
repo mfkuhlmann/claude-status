@@ -240,6 +240,9 @@ export class ViewHost implements vscode.WebviewViewProvider, vscode.Disposable {
       case "unqueue":
         if (this.dash.state().status?.queue?.some((q) => q.id === m.id)) void this.actions.unqueue(m.id);
         break;
+      case "keepGoing":
+        if (chat && !chat.host) void this.actions.keepGoing(chat, m.on === true); // (this computer's chats)
+        break;
       case "queueContinue": {
         // (found in the extension's own state: the row or recent chat, when it can go on, and its account)
         const state = this.dash.state();

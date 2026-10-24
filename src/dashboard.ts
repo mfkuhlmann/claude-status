@@ -194,6 +194,13 @@ export class Dashboard implements vscode.Disposable {
     }, wait);
   }
 
+  // This computer's check only: the usage cap, and (in the window that
+  // notifies) looking after the chats that keep going
+  private localArgs(): string[] {
+    const cap = settings.usageCap();
+    return [...(cap > 0 ? ["--usage-cap", String(Math.round(cap))] : []), ...(this.notifier.isLeader() ? ["--keep-going"] : [])];
+  }
+
   // Check this computer now (a check still running isn't doubled)
   async refresh(): Promise<void> {
     if (this.localBusy || this.demo || this.disposed) return;
@@ -202,7 +209,7 @@ export class Dashboard implements vscode.Disposable {
     if (!this.claudeCodeAvailable && Date.now() - this.claudeCodeCheckedAt >= HIDDEN_POLL_MS) void this.checkClaudeCode();
     this.localBusy = true;
     try {
-      const { status, error } = await this.backend.status([...configDirArgs(), ...statusArgs()]);
+      const { status, error } = await this.backend.status([...configDirArgs(), ...statusArgs(), ...this.localArgs()]);
       if (status) {
         this.errorText = status.errors.length ? status.errors.join("\n") : "";
         const opts = this.notifyOptions();
