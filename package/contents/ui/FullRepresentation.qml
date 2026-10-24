@@ -36,6 +36,29 @@ PlasmaExtras.Representation {
                 level: 3
                 text: i18n("Claude Code")
             }
+            // Your chats now, or your last 7 days with Claude (WeekView.qml)
+            PlasmaComponents3.TabBar {
+                id: tabs
+                Layout.leftMargin: root.inTray ? 0 : Kirigami.Units.smallSpacing
+                // (set by a click, not by the bar's own index: a new popup
+                // starts at its first tab, which mustn't undo the one shown)
+                currentIndex: root.popupTab === "week" ? 1 : 0
+
+                PlasmaComponents3.TabButton {
+                    text: i18n("Chats")
+                    onClicked: root.popupTab = "chats"
+                }
+                PlasmaComponents3.TabButton {
+                    text: i18n("Week")
+                    onClicked: root.popupTab = "week"
+                }
+                Connections {
+                    target: root
+                    function onPopupTabChanged() {
+                        tabs.currentIndex = root.popupTab === "week" ? 1 : 0
+                    }
+                }
+            }
             PlasmaComponents3.Label {
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
@@ -45,6 +68,7 @@ PlasmaExtras.Representation {
                 elide: Text.ElideRight
             }
             PlasmaComponents3.ToolButton {
+                visible: root.popupTab === "chats"
                 icon.name: "edit-find"
                 checkable: true
                 checked: root.searchOpen
@@ -82,6 +106,7 @@ PlasmaExtras.Representation {
                     root.refresh()
                     for (const host of root.shownHosts)
                         root.pollHost(host)
+                    root.loadWeek()   // (on the Week tab)
                 }
 
                 PlasmaCore.ToolTipArea {
@@ -100,7 +125,7 @@ PlasmaExtras.Representation {
         PetStrip {
             id: hero
             hero: true
-            visible: Plasmoid.configuration.showPet
+            visible: Plasmoid.configuration.showPet && root.popupTab === "chats"
             Layout.fillWidth: true
             Layout.preferredHeight: implicitHeight
             Layout.topMargin: Kirigami.Units.smallSpacing
@@ -111,7 +136,7 @@ PlasmaExtras.Representation {
         // Find a chat (the magnifier above): its words, then what matched
         PlasmaExtras.SearchField {
             id: searchField
-            visible: root.searchOpen
+            visible: root.searchOpen && root.popupTab === "chats"
             Layout.fillWidth: true
             Layout.leftMargin: Kirigami.Units.smallSpacing
             Layout.rightMargin: Kirigami.Units.smallSpacing
@@ -134,8 +159,18 @@ PlasmaExtras.Representation {
             }
         }
 
+        // (made only while its tab is open)
+        Loader {
+            active: root.popupTab === "week"
+            visible: active
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            source: "WeekView.qml"
+        }
+
         PlasmaComponents3.ScrollView {
             id: scroll
+            visible: root.popupTab === "chats"
             // Fixed implicit size: deriving it from the content would loop
             // through the popup's width.
             implicitWidth: Kirigami.Units.gridUnit * 28

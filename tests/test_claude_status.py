@@ -1228,10 +1228,10 @@ class SharedCopiesTests(Fixture):
 
 
 class OldPythonTests(unittest.TestCase):
-    """claude_status.py, sharing.py and accounts.py also run on SSH hosts, whose python3 may be as old as 3.7."""
+    """claude_status.py, sharing.py, accounts.py and week.py also run on SSH hosts, whose python3 may be as old as 3.7."""
 
     def test_no_syntax_or_calls_newer_than_37(self):
-        for name in ("claude_status.py", "sharing.py", "accounts.py"):
+        for name in ("claude_status.py", "sharing.py", "accounts.py", "week.py"):
             source = (ROOT / "package/contents/code" / name).read_text()
             # no := or f"{x=}" (3.7 itself parses only what it supports)
             tree = ast.parse(source, feature_version=(3, 7)) if sys.version_info >= (3, 8) else ast.parse(source)

@@ -1034,8 +1034,10 @@ PlasmoidItem {
     }
 
     function openFromNotification(n) {
-        if (!n.sessionId && !n.host)
+        if (!n.sessionId && !n.host) {
+            popupTab = "chats"
             root.expanded = true   // nothing waits for you, or what went wrong: show the popup
+        }
         else if (n.host && n.session)
             remoteShow(n.host, n.session)
         else if (n.host)
@@ -2329,6 +2331,68 @@ PlasmoidItem {
         searchQuery = ""
         searchResults = ({})
         searchFolds = ({})
+    }
+
+    // ---------------------------------------------------------------- the week
+    // The popup's Week tab (WeekView.qml): week.py reads your chats of 7 days
+    // (only what their transcripts added since it last ran) when the tab opens
+    // or you pick other days, then every 10 minutes while it's in sight. The
+    // status checks never run it.
+
+    property string popupTab: "chats"   // "chats" or "week"
+    property var weekRecap: null
+    property bool weekBusy: false
+    property string weekError: ""
+    property int weekBack: 0           // weeks before the last 7 days
+    property string weekAccount: ""   // an account's id, or "" for all
+    property string weekAsked: ""     // the command whose answer is awaited
+    readonly property bool weekShown: popupTab === "week" && dashboardShown && !coveredByWindow
+
+    onWeekShownChanged: {
+        if (weekShown)
+            loadWeek()
+    }
+    onWeekBackChanged: loadWeek()
+    onWeekAccountChanged: loadWeek()
+
+    Timer {
+        interval: 600000   // 10 minutes
+        repeat: true
+        running: root.weekShown
+        onTriggered: root.loadWeek()
+    }
+
+    function loadWeek() {
+        if (popupTab !== "week")
+            return
+        let cmd = "python3 -I " + shellQuote(codeDir + "week.py") + " --back " + weekBack
+        if (weekAccount)
+            cmd += " --account " + shellQuote(weekAccount)
+        for (const host of shownHosts)   // (the ones that answered their last check: no waiting on one out of reach)
+            if (remote[host] && remote[host].result && !remote[host].error)
+                cmd += " --host " + shellQuote(host)
+        weekAsked = cmd + configDirArgs + " # " + Date.now()
+        weekBusy = true
+        weekReader.connectSource(weekAsked)
+    }
+
+    P5Support.DataSource {
+        id: weekReader
+        engine: "executable"
+        connectedSources: []
+        onNewData: (source, data) => {
+            disconnectSource(source)
+            if (source !== root.weekAsked)
+                return   // an answer to days you asked for before
+            root.weekBusy = false
+            const result = root.helperResult(data)
+            if (result.ok) {
+                root.weekRecap = result
+                root.weekError = ""
+            } else {
+                root.weekError = result.message || result.error || i18n("no answer")
+            }
+        }
     }
 
     // ---------------------------------------------------------------- plans
