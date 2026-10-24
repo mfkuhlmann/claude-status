@@ -1016,7 +1016,7 @@ def recap(sources, back, account, now_ms, home):
         f["prompts"] += prompts
         f["chats"] += 1
         chat_rows.append({"name": chat_label(c) or c["id"][:8], "chatId": c["id"], "host": c["host"],
-                          "profileDir": c["profiles"][0] if c["profiles"] else "", "folder": f["path"],
+                          "profileDir": c["profiles"][0] if c["profiles"] else "", "folder": f["path"], "cwd": c["folder"],
                           "workedMs": int(work), "cost": round(cost, 4), "prompts": prompts})
     for f in folders.values():
         f["workedMs"] = int(f["workedMs"])

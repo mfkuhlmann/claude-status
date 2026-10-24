@@ -325,6 +325,7 @@ class RecapTests(Home):
         self.assertEqual(today["you"], [[t0 - week.PROMPT_LEAD_MS, t0 + 120_000]])
         self.assertEqual((r["sum"]["workedMs"], r["sum"]["youMs"], r["sum"]["prompts"]), (120_000, 180_000, 1))
         self.assertEqual(r["projects"][0]["name"], "app")
+        self.assertEqual((r["chats"][0]["chatId"], r["chats"][0]["cwd"]), ("chat-a", "/w/app"))
         self.assertEqual(r["models"][0]["model"], "Opus 5.5")
         self.assertEqual(self.recap(back=1)["sum"]["workedMs"], 0)
         self.assertEqual(self.recap(back=1)["to"], "2026-10-17")
