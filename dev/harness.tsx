@@ -2,7 +2,7 @@
 // "ready", then a new one every few seconds with the story moved on.
 
 import "../webview/main";
-import { demoState } from "../src/shared/demo";
+import { demoState, demoWeek } from "../src/shared/demo";
 import type { HostMessage } from "../src/shared/types";
 
 const params = new URLSearchParams(location.search);
@@ -49,6 +49,8 @@ function sendState(): void {
 setTimeout(() => {
   sendState();
   send({ type: "visible", visible: true });
+  // ?week=1: the Week tab, its days there from the start (a screenshot doesn't wait)
+  if (params.get("week") === "1") send({ type: "week", back: 0, account: "", recap: demoWeek(Date.now()), error: "" });
   // ?scroll=N: to see the top stay put over the list
   const scroll = Number(params.get("scroll"));
   if (scroll) setTimeout(() => window.scrollTo(0, scroll), 300);
@@ -60,3 +62,12 @@ setInterval(() => {
 }, 4000);
 
 setTimeout(() => send({ type: "petEvent", kind: "done", text: "Fix the date parser is done!", key: "demo-1" }), 2000);
+
+// The Week tab asks for its days: the made-up ones
+window.addEventListener("harness-post", (event) => {
+  const m = (event as CustomEvent).detail as { type: string; back?: number; account?: string };
+  if (m.type !== "week") return;
+  const back = m.back ?? 0;
+  const account = m.account ?? "";
+  send({ type: "week", back, account, recap: demoWeek(Date.now(), back, account), error: "" });
+});

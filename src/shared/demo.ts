@@ -2,7 +2,7 @@
 // Claude Code) and for the webview's dev harness. Nothing here is real: the
 // accounts, folders, hosts and chats are invented, times are relative to now.
 
-import type { Agent, ChatStats, Group, HostState, Session, Status, UsageStats, ViewState } from "./types";
+import type { Agent, ChatStats, Group, HostState, Session, Status, UsageStats, ViewState, WeekDay, WeekRecap } from "./types";
 
 const MIN = 60000;
 const HOUR = 60 * MIN;
@@ -378,5 +378,86 @@ export function demoState(now: number, phase = 0): ViewState {
     actionError: "",
     actionInfo: "",
     now,
+  };
+}
+
+// The Week tab's recap of made-up days: mornings and afternoons of work, a
+// second chat at once now and then, one long wait for your answer
+export function demoWeek(now: number, back = 0, account = ""): WeekRecap {
+  const today = new Date(now);
+  const midnight = (offset: number) =>
+    new Date(today.getFullYear(), today.getMonth(), today.getDate() - 7 * back - offset).getTime();
+  const isoDay = (t: number) => {
+    const d = new Date(t);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+  const scale = account ? 0.6 : 1;
+  const days: WeekDay[] = [];
+  for (let i = 6; i >= 0; i--) {
+    const start = midnight(i);
+    const end = midnight(i - 1);
+    const weekend = [0, 6].includes(new Date(start).getDay());
+    const h = (x: number) => start + x * HOUR;
+    const blocks: [number, number, number][] = weekend
+      ? [[10.5, 11.2, 1]]
+      : [[9.1, 9.9, 1], [10.2, 11.6, 1], [11.6, 12.1, 2], [14, 15.3, 1], [15.3, 15.8, 2], [16.4, 17.5, 1]];
+    const work = blocks.map(([a, b, n]) => [h(a), h(b), n] as [number, number, number]).filter((w) => w[0] < now);
+    const you: [number, number][] = (weekend ? [[10.4, 11.3]] : [[8.9, 10.4], [11.3, 12.4], [13.8, 14.6], [15.1, 16.1], [17.2, 17.6]])
+      .map(([a, b]) => [h(a), h(b)] as [number, number]).filter((y) => y[0] < now);
+    const wait: [number, number][] = !weekend && i === 2 ? [[h(18.2), h(21.5)]] : [];
+    const workedMs = work.reduce((sum, [a, b, n]) => sum + (Math.min(b, now) - a) * n, 0) * scale;
+    days.push({
+      day: isoDay(start), start, end, you, work: work.map(([a, b, n]) => [a, Math.min(b, now), n]), wait,
+      youMs: you.reduce((sum, [a, b]) => sum + Math.min(b, now) - a, 0) * scale, workedMs,
+      busyMs: workedMs * 0.85, waitMs: wait.reduce((sum, [a, b]) => sum + b - a, 0),
+      prompts: weekend ? 4 : Math.round(31 * scale), cost: Math.round((weekend ? 9 : 64) * scale * 100) / 100,
+    });
+  }
+  const total = (key: "youMs" | "workedMs" | "busyMs" | "waitMs" | "prompts" | "cost") => days.reduce((sum, d) => sum + d[key], 0);
+  const cost = total("cost");
+  return {
+    ok: true,
+    generatedAt: now,
+    back,
+    backMax: 4,
+    account,
+    accounts: [
+      { id: "0123456789ab", name: "personal", plan: "Max", hosts: [""] },
+      { id: "ba9876543210", name: "work", plan: "Team", hosts: ["", "build-server"] },
+    ],
+    from: days[0].day,
+    to: days[6].day,
+    days,
+    sum: {
+      youMs: total("youMs"), workedMs: total("workedMs"), busyMs: total("busyMs"), waitMs: total("waitMs"),
+      prompts: total("prompts"), cost, turns: 212, limits: 2, chats: 23, peakAtOnce: 2, busiestDay: days[3].day,
+      longestTurn: { workedMs: 48 * MIN, startedAt: days[3].start + 10 * HOUR, name: "Port the date parser", host: "" },
+      tokens: { input: 41_200, output: 2_310_000, cacheRead: 612_000_000, cacheWrite5m: 2_100_000, cacheWrite1h: 9_800_000, webSearches: 3 },
+    },
+    previous: { youMs: total("youMs") * 0.8, workedMs: total("workedMs") * 0.7, busyMs: 0, waitMs: 0, prompts: total("prompts") - 18, cost: cost * 0.75 },
+    projects: [
+      { name: "webapp", path: "~/projects/webapp", host: "", workedMs: total("workedMs") * 0.55, cost: cost * 0.55, prompts: 92, chats: 11 },
+      { name: "date-parser", path: "~/projects/date-parser", host: "", workedMs: total("workedMs") * 0.25, cost: cost * 0.27, prompts: 41, chats: 6 },
+      { name: "pipeline", path: "/srv/pipeline", host: "build-server", workedMs: total("workedMs") * 0.15, cost: cost * 0.14, prompts: 17, chats: 4 },
+      { name: "~", path: "~", host: "", workedMs: total("workedMs") * 0.05, cost: cost * 0.04, prompts: 9, chats: 2 },
+    ],
+    chats: [
+      { name: "Port the date parser", chatId: "demo-1", host: "", profileDir: ".claude", folder: "~/projects/date-parser", cwd: "/home/alice/projects/date-parser", workedMs: 3.2 * HOUR, cost: 41.2, prompts: 14 },
+      { name: "Release notes for 2.0", chatId: "demo-2", host: "", profileDir: ".claude", folder: "~/projects/webapp", cwd: "/home/alice/projects/webapp", workedMs: 2.4 * HOUR, cost: 29.9, prompts: 11 },
+      { name: "Nightly dependency check", chatId: "demo-3", host: "build-server", profileDir: ".claude", folder: "/srv/pipeline", workedMs: 1.6 * HOUR, cost: 17.3, prompts: 6 },
+    ],
+    models: [
+      { model: "Opus 5.5", cost: cost * 0.93, tokens: 590_000_000, requests: 2900, share: 0.93 },
+      { model: "Sonnet 5.5", cost: cost * 0.07, tokens: 35_000_000, requests: 410, share: 0.07 },
+    ],
+    cacheSaved: 2290,
+    tips: [
+      { key: "long_context", pct: 41, title: "Start fresh when you switch tasks", detail: "812 requests carried over 150k tokens of context", command: "/clear" },
+      { key: "max_effort", pct: 22, title: "Save max effort for hard tasks", detail: "22% of your usage ran at max effort", command: "/effort xhigh" },
+      { key: "cache_miss", pct: 12, title: "Compact before you step away", detail: "37 requests sent over 100k tokens the cache had let go", command: "/compact" },
+      { key: "waits", pct: null, title: "Let Claude go on without asking", detail: "it waited 3h 18m for your answers, 9 times · auto mode, or allow what you always allow", command: "/permissions" },
+    ],
+    prices: { asOf: "2026-10-24", guessed: [] },
+    sources: [{ host: "", ok: true, error: "" }, { host: "build-server", ok: true, error: "" }],
   };
 }

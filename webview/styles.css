@@ -1496,3 +1496,423 @@ body.vscode-high-contrast .top.scrolled {
 .agent-status.failed {
   color: var(--cs-failed);
 }
+
+/* ---------------------------------------------------------------------------
+   Tabs: your chats now, or your last 7 days (the Week tab) */
+
+.tabs {
+  display: flex;
+  flex: none;
+  gap: 2px;
+}
+
+.tab-btn {
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  padding: 1px 6px;
+  background: transparent;
+  color: var(--cs-muted);
+  cursor: pointer;
+}
+
+.tab-btn:hover {
+  color: var(--cs-fg);
+}
+
+.tab-btn.on {
+  color: var(--cs-fg);
+  border-bottom-color: var(--cs-working);
+}
+
+/* ---------------------------------------------------------------------------
+   The Week tab. One hue for Claude's work (darker where several chats ran at
+   once), the text color for you, orange (as for a chat that needs you) for
+   Claude waiting on your answer. */
+
+.week {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-bottom: 12px;
+}
+
+.week.busy {
+  opacity: 0.6; /* what it said before, while it reads again */
+}
+
+.week-period {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-top: 2px;
+}
+
+.week-span {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: center;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.icon-btn.flip .icon {
+  transform: rotate(180deg);
+}
+
+.icon-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+  background: transparent;
+}
+
+.week-accounts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.chip {
+  border: 1px solid var(--cs-tag-border);
+  border-radius: 10px;
+  padding: 0 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.chip:hover {
+  background: var(--cs-hover);
+}
+
+.chip.on {
+  border-color: var(--cs-working);
+  background: color-mix(in srgb, var(--cs-working) 18%, transparent);
+}
+
+.chip.code {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.85em;
+  border-radius: 4px;
+  padding: 0 5px;
+}
+
+.week-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px 12px;
+}
+
+.week {
+  container-type: inline-size;
+}
+
+/* a narrow sidebar: two by two */
+@container (max-width: 400px) {
+  .week-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.week-tile {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.week-tile-label,
+.week-tile-delta {
+  font-size: 0.85em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.week-tile-value {
+  font-size: 1.55em;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.week-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.week-section h2 {
+  font-size: 1em;
+  font-weight: 600;
+}
+
+.week-heading {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+.week-heading h2 {
+  flex: 1 1 auto;
+}
+
+.week-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.swatch {
+  display: inline-block;
+  width: 12px;
+  height: 6px;
+  border-radius: 1px;
+  margin-left: 4px;
+}
+
+.swatch.you,
+.week-you {
+  background: color-mix(in srgb, var(--cs-fg) 45%, transparent);
+}
+
+.swatch.work,
+.week-work {
+  background: var(--cs-working);
+}
+
+.swatch.wait,
+.week-wait {
+  background: var(--cs-waiting);
+}
+
+.week-row {
+  display: grid;
+  grid-template-columns: 3.4em minmax(0, 1fr) 3.9em 3.9em;
+  gap: 6px;
+  align-items: center;
+}
+
+.week-row.today .week-day {
+  font-weight: 600;
+}
+
+.week-day,
+.week-num {
+  white-space: nowrap;
+}
+
+.week-num {
+  text-align: right;
+}
+
+.week-hours {
+  position: relative;
+  height: 1.2em;
+}
+
+.week-hours span {
+  position: absolute;
+  transform: translateX(-50%);
+}
+
+.week-hours span:first-child {
+  transform: none;
+}
+
+.week-hours span:last-child {
+  transform: translateX(-100%);
+}
+
+.week-track {
+  position: relative;
+  height: 16px;
+  border-bottom: 1px solid var(--cs-track);
+  /* the quarters of the day */
+  background: linear-gradient(to right, transparent calc(25% - 0.5px), var(--cs-track) calc(25% - 0.5px),
+      var(--cs-track) calc(25% + 0.5px), transparent calc(25% + 0.5px), transparent calc(50% - 0.5px),
+      var(--cs-track) calc(50% - 0.5px), var(--cs-track) calc(50% + 0.5px), transparent calc(50% + 0.5px),
+      transparent calc(75% - 0.5px), var(--cs-track) calc(75% - 0.5px), var(--cs-track) calc(75% + 0.5px),
+      transparent calc(75% + 0.5px));
+}
+
+.week-you,
+.week-work,
+.week-wait {
+  position: absolute;
+  border-radius: 1px;
+}
+
+.week-you {
+  top: 1px;
+  height: 4px;
+}
+
+.week-work,
+.week-wait {
+  top: 7px;
+  height: 8px;
+}
+
+.week-work {
+  opacity: 0.55;
+}
+
+.week-work.two {
+  opacity: 0.8;
+}
+
+.week-work.many {
+  opacity: 1;
+}
+
+.week-wait {
+  opacity: 0.8;
+}
+
+.week-now,
+.week-cross {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--cs-fg);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.week-readout {
+  padding-left: calc(3.4em + 6px);
+  min-height: 1.4em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.week-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.week-bars li {
+  display: grid;
+  grid-template-columns: minmax(0, 8em) minmax(2em, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.week-bar-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.week-bar-meter {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--cs-track);
+}
+
+.week-bar-meter span {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--cs-fg) 40%, transparent);
+}
+
+.week-bar-meter.work span {
+  background: var(--cs-working);
+}
+
+.week-bar-value {
+  white-space: nowrap;
+}
+
+.week-chats {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.week-chat {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, auto) auto;
+  gap: 8px;
+  align-items: baseline;
+  width: 100%;
+  padding: 3px 4px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.week-chat:hover:not(:disabled) {
+  background: var(--cs-hover);
+}
+
+.week-chat:disabled {
+  cursor: default;
+}
+
+.week-chat-name,
+.week-chat-folder {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.week-chat-folder {
+  max-width: 12em;
+}
+
+.week-chat-value {
+  white-space: nowrap;
+}
+
+.week-tips {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.week-tip {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.week-tip-text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.week-tip-pct {
+  flex: none;
+  padding-top: 1px;
+}
+
+.week-tip .chip {
+  flex: none;
+}
+
+.week-foot {
+  white-space: pre-line;
+}

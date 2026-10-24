@@ -2,6 +2,8 @@ import { summaryText, tooltipLines } from "../../src/shared/model";
 import type { Counts, Group, HostState, Overall } from "../../src/shared/types";
 import { editorTab, post } from "../env";
 import { useViewVisible } from "../util/petStage";
+import { useStore } from "../util/store";
+import { setTab, uiState } from "../util/ui";
 import { IconButton } from "./IconButton";
 import { TalpaIcon } from "./TalpaIcon";
 
@@ -18,6 +20,7 @@ export function Header(props: {
   heroShown: boolean;
 }) {
   const visible = useViewVisible();
+  const tab = useStore(uiState).tab;
   const { overall, counts, groups, hosts } = props;
   // "No sessions running" only once something answered; until then the list
   // says it's looking
@@ -36,8 +39,17 @@ export function Header(props: {
       <h1 class="title" title={tooltipLines(groups, counts, hosts).join("\n")}>
         Claude Code
       </h1>
+      {/* Your chats now, or your last 7 days with Claude (WeekView.tsx) */}
+      <div class="tabs" role="tablist">
+        {(["chats", "week"] as const).map((t) => (
+          <button key={t} type="button" role="tab" aria-selected={tab === t} class={"tab-btn" + (tab === t ? " on" : "")}
+            onClick={() => setTab(t)}>
+            {t === "chats" ? "Chats" : "Week"}
+          </button>
+        ))}
+      </div>
       <span class="summary" title={tooltipLines(groups, counts, hosts).join("\n")}>
-        {props.heroShown ? "" : summary}
+        {props.heroShown && tab === "chats" ? "" : summary}
       </span>
       {editorTab ? (
         <div class="header-actions">

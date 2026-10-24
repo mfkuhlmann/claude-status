@@ -10,10 +10,10 @@ import { claudePanelAvailable, localPanelProfileKey } from "./claudePanel";
 import { settings, statusArgs, configDirArgs, viewSettings } from "./config";
 import type { Notifier } from "./notify";
 import { currentRemoteHost } from "./remoteHost";
-import { demoState } from "./shared/demo";
+import { demoState, demoWeek } from "./shared/demo";
 import { allGroups, chatsNeedingYou, limitReset, queuedWhat, shareUsage, toLocalClock, trackKey, type ChatSpot } from "./shared/model";
 import { chatRef } from "./notify";
-import type { ClaudeCodeInfo, DigestCard, HostState, PetEventKind, QueuedTask, Status, ViewState } from "./shared/types";
+import type { ClaudeCodeInfo, DigestCard, HostState, PetEventKind, QueuedTask, Status, ViewState, WeekRecap } from "./shared/types";
 import { mergeChanges, TransitionTracker, type Changes, type PetEvent } from "./transitions";
 
 const HIDDEN_POLL_MS = 10000;
@@ -468,6 +468,22 @@ export class Dashboard implements vscode.Disposable {
     }
     this.emit();
     return this.demo;
+  }
+
+  // The Week tab's recap of these days, with the SSH hosts shown whose last
+  // check answered (one out of reach would hold it up)
+  async week(back: number, account: string): Promise<{ recap?: WeekRecap; error?: string }> {
+    if (this.demoPhase !== null) return { recap: demoWeek(Date.now(), back, account) };
+    const hosts = this.shownHosts().filter((name) => {
+      const h = this.hosts.get(name);
+      return !!h && h.ok && !!h.result;
+    });
+    return this.backend.week([
+      "--back", String(back),
+      ...(account ? ["--account", account] : []),
+      ...hosts.flatMap((h) => ["--host", h]),
+      ...configDirArgs(),
+    ]);
   }
 
   state(): ViewState {

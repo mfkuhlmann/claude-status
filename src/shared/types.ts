@@ -483,6 +483,103 @@ export interface ViewState {
 
 export type PetEventKind = "waiting" | "done" | "failed" | "stopped" | "reset" | "oops";
 
+// The Week tab: your last 7 days with Claude (the widget's week.py, read
+// from the chats' transcripts when the tab asks, never in the status checks)
+export interface WeekDay {
+  day: string; // "2026-10-24"
+  start: number; // its local midnight
+  end: number; // the next one
+  you: [number, number][]; // when you were at it
+  work: [number, number, number][]; // when Claude worked: [from, to, chats at once]
+  wait: [number, number][]; // when it waited for your answer (and no chat worked)
+  youMs: number;
+  workedMs: number;
+  busyMs: number;
+  waitMs: number;
+  prompts: number;
+  cost: number;
+}
+
+export interface WeekNumbers {
+  youMs: number;
+  workedMs: number; // Claude's own count of its turns, all chats added up
+  busyMs: number; // that on the clock: chats at once count once
+  waitMs: number; // Claude waiting for your answers
+  prompts: number;
+  cost: number; // $ at API prices
+}
+
+export interface WeekSum extends WeekNumbers {
+  turns: number;
+  limits: number; // times a usage limit stopped you
+  chats: number;
+  peakAtOnce: number;
+  busiestDay: string | null;
+  longestTurn: { workedMs: number; startedAt: number; name: string; host: string } | null;
+  tokens: { input: number; output: number; cacheRead: number; cacheWrite5m: number; cacheWrite1h: number; webSearches: number };
+}
+
+export interface WeekProject {
+  name: string;
+  path: string;
+  host: string;
+  workedMs: number;
+  cost: number;
+  prompts: number;
+  chats: number;
+}
+
+export interface WeekChat {
+  name: string;
+  chatId: string;
+  host: string;
+  profileDir: string;
+  folder: string; // short, e.g. "~/repos/app"
+  cwd?: string; // where it started
+  workedMs: number;
+  cost: number;
+  prompts: number;
+}
+
+export interface WeekModel {
+  model: string; // "Opus 5.5"
+  cost: number;
+  tokens: number;
+  requests: number;
+  share: number; // of the cost, 0-1
+}
+
+// What would use less of your plan: Claude Code's /usage rules (pct: the
+// share of the week's usage it touches), how long Claude waited for you, the limits hit
+export interface WeekTip {
+  key: string;
+  pct: number | null;
+  title: string;
+  detail: string;
+  command: string; // e.g. "/compact", or ""
+}
+
+export interface WeekRecap {
+  ok: true;
+  generatedAt: number;
+  back: number; // weeks before the last 7 days
+  backMax: number;
+  account: string; // an account's id, or "" for all
+  accounts: { id: string; name: string; plan: string | null; hosts: string[] }[];
+  from: string;
+  to: string;
+  days: WeekDay[];
+  sum: WeekSum;
+  previous: WeekNumbers; // the 7 days before
+  projects: WeekProject[];
+  chats: WeekChat[];
+  models: WeekModel[];
+  cacheSaved: number;
+  tips: WeekTip[];
+  prices: { asOf: string; guessed: string[] };
+  sources: { host: string; ok: boolean; error: string }[];
+}
+
 export interface ChatRef {
   host?: string;
   key: string;
@@ -538,10 +635,14 @@ export type WebviewMessage =
   | { type: "hideHost"; host: string }
   | { type: "pickHosts" }
   | { type: "setupUsageBars" }
-  | { type: "openUsagePage" };
+  | { type: "openUsagePage" }
+  | { type: "week"; back: number; account: string } // the Week tab wants these days' recap
+  | { type: "openWeekChat"; chatId: string; profileDir: string; name: string; cwd?: string } // one of the week's chats here
+  | { type: "copy"; text: string }; // a tip's command, to the clipboard
 
 // extension -> webview
 export type HostMessage =
   | { type: "state"; state: ViewState }
   | { type: "petEvent"; kind: PetEventKind; text: string; key: string }
-  | { type: "visible"; visible: boolean };
+  | { type: "visible"; visible: boolean }
+  | { type: "week"; back: number; account: string; recap: WeekRecap | null; error: string };

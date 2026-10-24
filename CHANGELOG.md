@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **A Week tab:** the view's new **Week** tab recaps your last 7 days with
+  Claude: how long you were at it and how long Claude worked (its own count
+  of each turn, without the time it waited for your answers), against the
+  week before; a timeline with a row per day (when you were at it, when
+  Claude worked, darker where several chats worked at once, and when it
+  waited for you; point at it to see what went on then); the projects and
+  chats it worked on most; what the same work would cost at Claude's API
+  prices, by model, with what the cache saved; and what would use less of
+  your plan, with the rules of Claude Code's own `/usage` (*Start fresh when
+  you switch tasks*, *Save max effort for hard tasks*, …): each tip with the
+  share of the week's usage it touches and a command to copy. Step back a
+  week at a time (up to four), and look at all accounts or one. SSH hosts
+  shown count too. It reads the chats' transcripts, so it uses no tokens, and
+  only while the tab is open; the status checks don't change.
 - **Keep going until it's done:** a chat at work on this computer can keep
   going while you're away (the ↻ button on its row): when a usage limit
   stops it, it goes on by itself in the background a minute after the limit

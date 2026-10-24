@@ -81,7 +81,12 @@ export enum CommentMode {
   Preview = 1,
 }
 
-export const env = { remoteName: undefined as string | undefined, openExternal: async () => true };
+export const clipboardWrites: string[] = [];
+export const env = {
+  remoteName: undefined as string | undefined,
+  openExternal: async () => true,
+  clipboard: { writeText: async (text: string) => void clipboardWrites.push(text), readText: async () => clipboardWrites.at(-1) ?? "" },
+};
 
 export enum ConfigurationTarget {
   Global = 1,

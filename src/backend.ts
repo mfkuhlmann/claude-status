@@ -6,7 +6,7 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { isComparison, type Comparison } from "./changes";
-import type { FoundChat, FoundMemory, FoundPlan, FoundProject, Status } from "./shared/types";
+import type { FoundChat, FoundMemory, FoundPlan, FoundProject, Status, WeekRecap } from "./shared/types";
 
 export const REMOTE_MARK = "@@claude-status@@";
 const KILL_GRACE_MS = 3000;
@@ -198,6 +198,14 @@ export class Backend {
       ok: true, results: list<FoundChat>(r.results), more: !!r.more, message: "",
       projects: list<FoundProject>(r.projects), plans: list<FoundPlan>(r.plans), memories: list<FoundMemory>(r.memories),
     };
+  }
+
+  // The Week tab's recap (week.py): read from the chats' transcripts (only
+  // what they added since it last ran), and only when the tab asks
+  async week(args: string[]): Promise<{ recap?: WeekRecap; error?: string }> {
+    const r = await this.json(["week.py", ...args], 180000);
+    if (!r || !r.ok) return { error: String(r?.error ?? r?.message ?? "no answer") };
+    return { recap: r as WeekRecap };
   }
 
   // jump.py / remote.py actions; they print {"ok": bool, "message": str}

@@ -718,6 +718,15 @@ export class Actions {
     else if (pick?.memory) await this.openMemory(pick.memory, pick.host);
   }
 
+  // One of the Week tab's chats (this computer's): as one the search found
+  async openWeekChat(chatId: string, profileDir: string, name: string, cwd: string): Promise<void> {
+    if (this.demoOnly()) return;
+    await this.openFound({
+      key: `${profileDir}/${chatId}/chat`, sessionId: chatId, name, cwd, cwdShort: cwd, lastActive: 0, profile: "", profileDir,
+      groupId: "", account: "", shared: false, match: "",
+    });
+  }
+
   // A chat the search found: its row's chat when it's listed, else reopened
   // (in a terminal or a Claude Code tab, as the switch of Recent chats says)
   private async openFound(found: FoundChat, host?: string): Promise<void> {

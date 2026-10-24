@@ -5,7 +5,10 @@
 import { savedState, saveState } from "../env";
 import { createStore } from "./store";
 
+export type Tab = "chats" | "week";
+
 interface UiState {
+  tab: Tab; // the view's tab: your chats now, or your last 7 days
   agents: Record<string, true>;
   agentDetail: Record<string, true>; // by agentDetailKey(): row key + "|" + agent id
   peek: Record<string, true>;
@@ -23,6 +26,7 @@ const MAX_KEYS = 100;
 function load(): UiState {
   const saved = savedState<Record<string, unknown>>()[KEY] as Partial<UiState> | undefined;
   return {
+    tab: saved?.tab === "week" ? "week" : "chats",
     agents: { ...(saved?.agents ?? {}) },
     agentDetail: { ...(saved?.agentDetail ?? {}) },
     peek: { ...(saved?.peek ?? {}) },
@@ -47,6 +51,11 @@ function toggled(map: Record<string, true>, key: string): Record<string, true> {
 function persist(next: UiState): void {
   uiState.set(next);
   saveState({ ...savedState<Record<string, unknown>>(), [KEY]: next });
+}
+
+export function setTab(tab: Tab): void {
+  const s = uiState.get();
+  if (s.tab !== tab) persist({ ...s, tab });
 }
 
 export function toggleAgents(rowKey: string): void {

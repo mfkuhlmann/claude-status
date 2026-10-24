@@ -103,6 +103,20 @@ As an editor tab (**Claude Status: Open in Editor Tab**):
   tokens per day as bars (hover one for its chats and prompts), the totals,
   the busiest folders and the models used. The prompts come from Claude
   Code's prompt history, the tokens from the transcripts.
+- **Your week with Claude**: the view's **Week** tab recaps your last 7 days
+  (and the weeks before, a click back): how long you were at it and how long
+  Claude worked, against the week before; a row per day on a timeline, with
+  when you were at it, when Claude worked (darker where several chats worked
+  at once) and when it waited for your answer (point at a day to see what
+  went on then); the projects and chats it worked on most (click one to bring
+  it up); what the same work would cost at Claude's API prices, by model,
+  with what the cache saved; and what would use less of your plan: the tips
+  of Claude Code's own `/usage` (*Start fresh when you switch tasks*, *Save
+  max effort for hard tasks*, …), each with the share of the week's usage it
+  touches and a command to copy. For all your accounts or one, with the SSH
+  hosts shown. It's read from the chats' transcripts, so it uses no tokens,
+  and only while the tab is open: the first time takes a few seconds, after
+  that only what's new is read.
 - **A chat's recap**: the unfolded peek ends with the chat's numbers: your
   prompts, how long Claude worked (each turn from your prompt to its last
   step), its tool calls by tool, its tokens with its subagents', and what it
@@ -301,7 +315,9 @@ edits a file (`<config>/file-history`, to compare a chat's changes),
 the plans chats wrote (`<config>/plans`), Claude's memories
 (`<config>/projects/<folder>/memory`) and each account's `CLAUDE.md`,
 the account name and plan from `.claude.json`, and the status-line copies in
-`~/.cache/claude-widget/statusline`. It writes only to
+`~/.cache/claude-widget/statusline`. The **Week** tab reads the transcripts
+too, and keeps what it read in `~/.cache/claude-widget/week-1.json`; it calls
+no model. It writes only to
 `~/.cache/claude-widget` (caches, the list of chats you removed, the tasks
 you queue until they start, copies of the files a comparison shows, kept for
 a day) and, if you

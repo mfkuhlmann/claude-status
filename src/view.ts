@@ -8,9 +8,13 @@ import type { Actions } from "./actions";
 import { setReopenIn } from "./config";
 import type { Dashboard } from "./dashboard";
 import { findChatRef, findMemory, findPlan, goOnAt, machineStatus, shareAccounts } from "./shared/model";
+import { weekAsked } from "./shared/week";
 import type { ChatRef, Group, HostMessage, PlanItem, WebviewMessage } from "./shared/types";
 
 const AGENT_ID = /^[A-Za-z0-9_-]{1,100}$/;
+const CHAT_ID = /^[A-Za-z0-9_-]{1,80}$/;
+const PROFILE_DIR = /^[A-Za-z0-9._-]{1,100}$/;
+const TIP_COMMAND = /^\/[a-z][a-z-]{0,30}( [a-z0-9-]{1,30})?$/; // what a Week tab tip suggests, e.g. "/effort xhigh"
 
 export class ViewHost implements vscode.WebviewViewProvider, vscode.Disposable {
   static readonly viewId = "claudeStatus.view";
@@ -280,6 +284,21 @@ export class ViewHost implements vscode.WebviewViewProvider, vscode.Disposable {
         break;
       case "setupUsageBars":
         void vscode.commands.executeCommand("claudeStatus.setupUsageBars");
+        break;
+      case "week": {
+        const asked = weekAsked(m.back, m.account);
+        void this.dash.week(asked.back, asked.account).then(({ recap, error }) =>
+          webview.postMessage({ type: "week", ...asked, recap: recap ?? null, error: error ?? "" } satisfies HostMessage),
+        );
+        break;
+      }
+      case "openWeekChat":
+        if (typeof m.chatId === "string" && CHAT_ID.test(m.chatId) && typeof m.profileDir === "string" && PROFILE_DIR.test(m.profileDir))
+          void this.actions.openWeekChat(m.chatId, m.profileDir, text(m.name) ?? m.chatId.slice(0, 8),
+                                         typeof m.cwd === "string" && m.cwd.startsWith("/") ? m.cwd : "");
+        break;
+      case "copy":
+        if (typeof m.text === "string" && TIP_COMMAND.test(m.text)) void vscode.env.clipboard.writeText(m.text);
         break;
       case "openUsagePage":
         void vscode.commands.executeCommand("claudeStatus.openUsagePage");

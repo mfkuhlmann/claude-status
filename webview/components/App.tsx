@@ -16,12 +16,14 @@ import type { HeroInput } from "../pets/api";
 import { chatRefOf, contextFullText, groupKeyOf } from "../util/chat";
 import { useStore } from "../util/store";
 import { petColorsVersion, viewState } from "../util/stores";
+import { uiState } from "../util/ui";
 import { ViewContext } from "./context";
 import { GroupSection } from "./GroupSection";
 import { Header } from "./Header";
 import { HeroStage } from "./HeroStage";
 import { HostSection } from "./HostSection";
 import { Messages } from "./Messages";
+import { WeekView } from "./WeekView";
 
 const appClass = "app" + (editorTab ? " tab" : "");
 
@@ -65,6 +67,7 @@ export function App() {
   // pets changed color: repaint the bars next to their rows
   useStore(petColorsVersion);
   const scrolled = useScrolled();
+  const week = useStore(uiState).tab === "week";
 
   if (!state)
     return (
@@ -101,8 +104,15 @@ export function App() {
             unavailable={!state.status && !!state.errorText}
             heroShown={state.settings.showPet}
           />
-          {state.settings.showPet ? <HeroStage input={hero} /> : null}
+          {state.settings.showPet && !week ? <HeroStage input={hero} /> : null}
         </div>
+        {week ? (
+          <main class="content">
+            <Guarded what="the week">
+              <WeekView hosts={state.hosts.filter((h) => h.ok && !!h.result).map((h) => h.name)} />
+            </Guarded>
+          </main>
+        ) : (
         <main class="content">
           <Messages state={state} />
           {!state.status && !state.errorText ? <div class="empty muted">Looking for your chats…</div> : null}
@@ -131,6 +141,7 @@ export function App() {
             </div>
           ) : null}
         </main>
+        )}
       </div>
     </ViewContext.Provider>
   );
