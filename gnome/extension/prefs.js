@@ -7,6 +7,16 @@ import GLib from 'gi://GLib';
 import Gtk from 'gi://Gtk';
 import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
+// The Recap tab's currencies (those of the European Central Bank's reference rates)
+const CURRENCIES = [['USD', 'US dollars'], ['EUR', 'Euros'], ['GBP', 'Pounds sterling'], ['CHF', 'Swiss francs'], ['JPY', 'Japanese yen'],
+    ['CNY', 'Chinese yuan'], ['INR', 'Indian rupees'], ['CAD', 'Canadian dollars'], ['AUD', 'Australian dollars'],
+    ['NZD', 'New Zealand dollars'], ['SEK', 'Swedish kronor'], ['NOK', 'Norwegian kroner'], ['DKK', 'Danish kroner'],
+    ['PLN', 'Polish złoty'], ['CZK', 'Czech koruny'], ['HUF', 'Hungarian forints'], ['RON', 'Romanian lei'],
+    ['ISK', 'Icelandic krónur'], ['TRY', 'Turkish lira'], ['BRL', 'Brazilian reais'], ['MXN', 'Mexican pesos'],
+    ['ZAR', 'South African rand'], ['KRW', 'South Korean won'], ['SGD', 'Singapore dollars'], ['HKD', 'Hong Kong dollars'],
+    ['ILS', 'Israeli shekels'], ['IDR', 'Indonesian rupiah'], ['MYR', 'Malaysian ringgit'], ['PHP', 'Philippine pesos'],
+    ['THB', 'Thai baht']];
+
 // Sounds from the sound theme (comma separated: the first one found plays)
 const SOUNDS = [
     ['Message', 'message-new-instant'],
@@ -94,6 +104,7 @@ export default class ClaudeStatusPreferences extends ExtensionPreferences {
         look.add(needs(spin('chat-pets', 'Chat pets per account, at most', '0 keeps only the big Talpa', 0, 8, 1),
             'show-pet'));
         look.add(toggle('show-tokens', 'Show token totals', 'from local transcripts'));
+        look.add(this._currencyRow(settings));
         page.add(look);
 
         window.add(this._accountsPage(window, settings));
@@ -384,6 +395,27 @@ export default class ClaudeStatusPreferences extends ExtensionPreferences {
             settings.set_strv(key, text ? [text] : []);
         });
         row.connect('changed', () => row.remove_css_class('error'));
+        return row;
+    }
+
+    // The Recap tab's currency: Claude's API prices are in US dollars; another
+    // currency is at the European Central Bank's reference rate of the day
+    _currencyRow(settings) {
+        const row = new Adw.ComboRow({title: 'Recap amounts in',
+            subtitle: "Other than US dollars: at the European Central Bank's rate of the day, downloaded from ecb.europa.eu at most every 6 hours while the Recap tab is open. Nothing about your chats is sent.",
+            model: Gtk.StringList.new(CURRENCIES.map(([code, name]) => `${name} (${code})`))});
+        const sync = () => {
+            const i = CURRENCIES.findIndex(([code]) => code === settings.get_string('recap-currency'));
+            row.selected = Math.max(0, i);
+        };
+        sync();
+        row.connect('notify::selected', () => {
+            const code = CURRENCIES[row.selected] ? CURRENCIES[row.selected][0] : 'USD';
+            if (settings.get_string('recap-currency') !== code)
+                settings.set_string('recap-currency', code);
+        });
+        const id = settings.connect('changed::recap-currency', sync);
+        row.connect('destroy', () => settings.disconnect(id));
         return row;
     }
 

@@ -1072,14 +1072,32 @@ export function hoursText(ms) {
     return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
-export function moneyText(usd) {
-    if (!usd)
-        return '$0';
-    if (usd < 0.01)
-        return '<$0.01';
-    const digits = usd >= 100 ? 0 : 2;
-    const [whole, cents] = usd.toFixed(digits).split('.');
-    return `$${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}${cents ? `.${cents}` : ''}`;
+function grouped(n) {
+    return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+// The amounts are API prices in US dollars; in another currency (the
+// recap-currency setting) week.py sends the European Central Bank's rate of the day
+const USD = {code: 'USD', rate: 1};
+const SYMBOLS = {USD: '$', EUR: '€', GBP: '£', JPY: '¥', CNY: '¥', INR: '₹', KRW: '₩', ILS: '₪', TRY: '₺', PHP: '₱', THB: '฿'};
+const WHOLE_UNITS = ['JPY', 'KRW', 'HUF', 'ISK', 'IDR'];
+
+export function weekCurrency(recap) {
+    const c = recap ? recap.currency : null;
+    return c && !c.error && c.rate > 0 && /^[A-Z]{3}$/.test(c.code) ? c : USD;
+}
+
+export function moneyText(usd, cur = USD) {
+    const amount = (usd || 0) * cur.rate;
+    const symbol = SYMBOLS[cur.code];
+    const put = text => (symbol ? symbol + text : `${text} ${cur.code}`);
+    if (!amount)
+        return put('0');
+    const whole = amount >= 100 || WHOLE_UNITS.includes(cur.code);
+    if (amount < (whole ? 1 : 0.01))
+        return `<${put(whole ? '1' : '0.01')}`;
+    const [units, cents] = amount.toFixed(whole ? 0 : 2).split('.');
+    return put(`${grouped(units)}${cents ? `.${cents}` : ''}`);
 }
 
 // "Sat 24 Oct"
@@ -1092,6 +1110,11 @@ export function weekDayLabel(day) {
 export function weekRowDay(day) {
     const d = dayDate(day);
     return `${WEEKDAYS[d.getDay()]} ${d.getDate()}`;
+}
+
+// "Wed 14:05": when a turn started
+export function weekWhenText(ms) {
+    return `${WEEKDAYS[new Date(ms).getDay()]} ${clock(ms)}`;
 }
 
 function shortDay(day) {
@@ -1116,34 +1139,49 @@ function previousOf(recap) {
 }
 
 // The change against the 7 days before: "+4h 44m", "−$12"
-export function weekDeltaText(now, before, kind) {
+export function weekDeltaText(now, before, kind, cur = USD) {
     if (before === null || before === undefined)
         return '';
     const d = now - before;
     const abs = Math.abs(d);
     if (kind === 'time' ? abs < 60000 : kind === 'money' ? abs < 0.01 : d === 0)
         return 'same as before';
-    return (d > 0 ? '+' : '−') + (kind === 'time' ? hoursText(abs) : kind === 'money' ? moneyText(abs) : String(abs));
+    return (d > 0 ? '+' : '−') + (kind === 'time' ? hoursText(abs) : kind === 'money' ? moneyText(abs, cur) : String(abs));
+}
+
+// One number over the 5 weeks up to these days, these last (null: older than what's kept)
+export function weekTrend(recap, key) {
+    return (recap.trend || []).map(w => (w ? w[key] || 0 : null));
 }
 
 export function weekTiles(recap) {
     const s = recap.sum;
     const p = previousOf(recap);
-    const before = (v, kind) => (p ? `\nThe 7 days before: ${kind === 'time' ? hoursText(v) : kind === 'money' ? moneyText(v) : String(v)}` : '');
+    const cur = weekCurrency(recap);
+    const shown = (v, kind) => (kind === 'time' ? hoursText(v) : kind === 'money' ? moneyText(v, cur) : String(v));
+    const before = (v, kind) => (p ? `\nThe 7 days before: ${shown(v, kind)}` : '');
+    const weeks = (key, kind) => {
+        const values = weekTrend(recap, key);
+        return values.length > 1 ? `\nWeek by week, these 7 days last: ${values.map(v => (v === null ? '?' : shown(v, kind))).join(' · ')}` : '';
+    };
     return [
-        {label: 'You', value: hoursText(s.youMs), delta: weekDeltaText(s.youMs, p ? p.youMs : null, 'time'),
+        {label: 'You', value: hoursText(s.youMs), delta: weekDeltaText(s.youMs, p ? p.youMs : null, 'time'), trend: weekTrend(recap, 'youMs'),
             tip: 'The time you spent writing to Claude, reading its replies and answering its questions, in all your chats and ' +
-                "accounts: the time between your prompts and its replies counts when it's under 15 minutes." + before(p ? p.youMs : 0, 'time')},
+                "accounts: the time between your prompts and its replies counts when it's under 15 minutes." + before(p ? p.youMs : 0, 'time') +
+                weeks('youMs', 'time')},
         {label: 'Claude worked', value: hoursText(s.workedMs), delta: weekDeltaText(s.workedMs, p ? p.workedMs : null, 'time'),
+            trend: weekTrend(recap, 'workedMs'),
             tip: "Claude's own count of its turns (its “Worked for …”), all chats added up: chats working at the same time each " +
                 `count. On the clock it worked ${hoursText(s.busyMs)}, and it waited ${hoursText(s.waitMs)} for your answers.` +
-                before(p ? p.workedMs : 0, 'time')},
-        {label: 'At API prices', value: moneyText(s.cost), delta: weekDeltaText(s.cost, p ? p.cost : null, 'money'),
+                before(p ? p.workedMs : 0, 'time') + weeks('workedMs', 'time')},
+        {label: 'At API prices', value: moneyText(s.cost, cur), delta: weekDeltaText(s.cost, p ? p.cost : null, 'money', cur),
+            trend: weekTrend(recap, 'cost'),
             tip: `What the same tokens would cost on Claude's API, at its list prices of ${dateText(recap.prices.asOf)}. ` +
-                "Your plan isn't billed this way: this is the value of what you used." + before(p ? p.cost : 0, 'money')},
+                "Your plan isn't billed this way: this is the value of what you used." + before(p ? p.cost : 0, 'money') + weeks('cost', 'money')},
         {label: 'Prompts', value: String(s.prompts), delta: weekDeltaText(s.prompts, p ? p.prompts : null, 'count'),
+            trend: weekTrend(recap, 'prompts'),
             tip: `${plural(s.chats, 'In %1 chat', 'In %1 chats')} · ${plural(s.turns, "%1 turn of Claude's", "%1 turns of Claude's")}` +
-                before(p ? p.prompts : 0, 'count')},
+                before(p ? p.prompts : 0, 'count') + weeks('prompts', 'count')},
     ];
 }
 
@@ -1171,6 +1209,9 @@ export function weekHoverText(d, ms, now, px) {
     const span = s => `${clock(s[0])}–${clock(s[1])}`;
     const work = at(d.work), wait = at(d.wait), you = at(d.you);
     const parts = [];
+    const limit = (d.limits || []).find(t => Math.abs(t - ms) <= 3 * px);
+    if (limit !== undefined)
+        parts.push(`a usage limit stopped a chat at ${clock(limit)}`);
     if (work)
         parts.push(work[2] > 1 ? `Claude worked ${span(work)}, ${work[2]} chats at once` : `Claude worked ${span(work)}`);
     else if (wait)
@@ -1180,11 +1221,12 @@ export function weekHoverText(d, ms, now, px) {
     return when + (parts.length ? parts.join(' · ') : 'nothing went on');
 }
 
-export function weekDayTip(d) {
+export function weekDayTip(d, cur = USD) {
     const date = dayDate(d.day);
     return [`${WEEKDAYS_LONG[date.getDay()]} ${date.getDate()} ${MONTHS_LONG[date.getMonth()]}`,
         `You: ${hoursText(d.youMs)} · Claude worked ${hoursText(d.workedMs)} (on the clock ${hoursText(d.busyMs)}) · ` +
-        `it waited ${hoursText(d.waitMs)} for you\n${plural(d.prompts, '%1 prompt', '%1 prompts')} · ${moneyText(d.cost)} at API prices`];
+        `it waited ${hoursText(d.waitMs)} for you\n${plural(d.prompts, '%1 prompt', '%1 prompts')} · ${moneyText(d.cost, cur)} at API prices` +
+        (d.chats && d.chats.length ? '\nClick for its chats' : '')];
 }
 
 export function weekCacheText(recap) {
@@ -1193,11 +1235,82 @@ export function weekCacheText(recap) {
     if (!t.cacheRead)
         return '';
     return `${Math.round(100 * t.cacheRead / Math.max(1, input))}% of the ${formatTokens(input)} input tokens came from the cache: ` +
-        `it saved ${moneyText(recap.cacheSaved)}. Claude wrote ${formatTokens(t.output)} tokens.`;
+        `it saved ${moneyText(recap.cacheSaved, weekCurrency(recap))}. Claude wrote ${formatTokens(t.output)} tokens.`;
 }
 
 export function weekShareText(share) {
     return share < 0.01 ? '<1%' : `${Math.round(share * 100)}%`;
+}
+
+// What Claude did, in a line: its tool calls, commands, edits, subagents
+export function weekWorkText(w) {
+    if (!w || !w.toolCalls)
+        return '';
+    const n = (v, one, many) => (v === 1 ? one : many).replace('%1', grouped(v));
+    const parts = [n(w.toolCalls, '%1 tool call', '%1 tool calls')];
+    if (w.commands)
+        parts.push(n(w.commands, '%1 command run', '%1 commands run'));
+    if (w.edits)
+        parts.push(`${n(w.edits, '%1 edit', '%1 edits')} ${n(w.files, 'in %1 file', 'in %1 files')} (+${grouped(w.linesAdded)} −${grouped(w.linesRemoved)})`);
+    if (w.subagents)
+        parts.push(n(w.subagents, '%1 subagent started', '%1 subagents started'));
+    if (w.webSearches)
+        parts.push(n(w.webSearches, '%1 web search', '%1 web searches'));
+    if (w.webFetches)
+        parts.push(n(w.webFetches, '%1 page fetched', '%1 pages fetched'));
+    if (w.compactions)
+        parts.push(n(w.compactions, '%1 compaction', '%1 compactions'));
+    return parts.join(' · ');
+}
+
+export function weekToolsText(w) {
+    return w && w.tools && w.tools.length ? `Its tools: ${w.tools.map(([name, n]) => `${name} ${grouped(n)}`).join(' · ')}` : '';
+}
+
+// A plan window, from its start (its reset less its length) to its reset
+const WINDOW_MS = {five_hour: 5 * 3600000, seven_day: 7 * 86400000, seven_day_opus: 7 * 86400000, seven_day_sonnet: 7 * 86400000};
+
+export function weekWindowSpan(w) {
+    const from = w.resetsAt && WINDOW_MS[w.key] ? w.resetsAt - WINDOW_MS[w.key] : w.points.length ? w.points[0][0] : 0;
+    return [from, Math.max(w.resetsAt || 0, from + 1)];
+}
+
+export function weekResetText(ms, now) {
+    if (!ms)
+        return '';
+    return `resets ${ms - now < 86400000 ? clock(ms) : weekWhenText(ms)}`;
+}
+
+export function weekPromptsText(p) {
+    if (!p || !p.answered)
+        return '';
+    const answered = plural(p.answered, '%1 permission prompt', '%1 permission prompts');
+    return (p.refused ? `You answered ${answered} and refused ${p.refused} of them.` : `You answered ${answered}.`) +
+        (p.waitMs >= 60000 ? ` They waited for your answer ${hoursText(p.waitMs)} in all.` : '');
+}
+
+export function weekRuleMeta(r) {
+    return [plural(r.count, '%1 prompt', '%1 prompts'), r.waitMs >= 60000 ? `waited ${hoursText(r.waitMs)} for you` : '', `e.g. ${r.example}`]
+        .filter(Boolean).join(' · ');
+}
+
+export function weekColdText(recap) {
+    const cold = recap.spend ? recap.spend.cold : null;
+    if (!cold || !cold.count)
+        return '';
+    const cur = weekCurrency(recap);
+    const most = cold.chats.map(c => `${c.name} (${c.resumes || 0}×, ${moneyText(c.cost, cur)})`).join(', ');
+    return (cold.count === 1
+        ? 'You came back to a chat after its cache had expired (an hour without a reply) once: writing its context again cost ' +
+          `${moneyText(cold.cost, cur)} more than reading it from the cache.`
+        : `You came back to chats after their cache had expired (an hour without a reply) ${cold.count} times: writing their ` +
+          `context again cost ${moneyText(cold.cost, cur)} more than reading it from the cache.`) + (most ? ` Most in: ${most}.` : '');
+}
+
+export function weekCostliestText(recap) {
+    const chats = recap.spend ? recap.spend.chats : [];
+    const cur = weekCurrency(recap);
+    return chats.length ? `Costliest chats: ${chats.map(c => `${c.name} ${moneyText(c.cost, cur)}`).join(' · ')}` : '';
 }
 
 export function weekFootText(recap) {
@@ -1205,6 +1318,11 @@ export function weekFootText(recap) {
     const guessed = recap.prices.guessed.length ? ` (${recap.prices.guessed.join(', ')} at the price of its family's newest model)` : '';
     const lines = [`Read from the chats on this computer${hosts.length ? ` and on ${hosts.join(', ')}` : ''}, without using any tokens. ` +
         `Prices: Claude's API list prices of ${dateText(recap.prices.asOf)}${guessed}.`];
+    const c = recap.currency;
+    if (c && c.error)
+        lines.push(`Amounts in US dollars: ${c.error}.`);
+    else if (c && c.code !== 'USD' && c.date)
+        lines.push(`Amounts in ${c.code} at the European Central Bank's rate of ${dateText(c.date)}: 1 USD = ${c.rate.toFixed(4)} ${c.code}.`);
     for (const s of recap.sources) {
         if (!s.ok)
             lines.push(`${s.host} couldn't be read: ${s.error}`);
@@ -1213,8 +1331,15 @@ export function weekFootText(recap) {
 }
 
 // The arguments of week.py for those days: the SSH hosts shown whose last
-// check answered (one out of reach would hold it up)
-export function weekArgs(back, account, shownHosts, remote, configDirArgs) {
+// check answered (one out of reach would hold it up), the currency picked
+export function weekArgs(back, account, shownHosts, remote, configDirArgs, currency = 'USD') {
     const hosts = shownHosts.filter(h => remote[h] && remote[h].ok && remote[h].result);
-    return ['--back', String(back), ...(account ? ['--account', account] : []), ...hosts.flatMap(h => ['--host', h]), ...configDirArgs];
+    return ['--back', String(back), ...(account ? ['--account', account] : []),
+        ...(/^[A-Z]{3}$/.test(currency) && currency !== 'USD' ? ['--currency', currency] : []),
+        ...hosts.flatMap(h => ['--host', h]), ...configDirArgs];
+}
+
+// week.py's arguments to allow a rule the tab offers, or take one it added back
+export function weekRuleArgs(rule, allow) {
+    return allow ? ['--allow', rule.kind, rule.value, rule.project] : ['--undo', rule.id];
 }

@@ -55,7 +55,10 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
             stopConfirmBusy: false, shareConfirm: null, openMenu: null, tab: 'chats'};
         // The Recap tab's days and what week.py said of them (it runs only
         // while that tab is open: setTab, loadWeek)
-        this.week = {back: 0, account: '', recap: null, error: '', busy: false, copied: ''};
+        // (open: the day or project whose chats are unfolded; asking: the rule
+        // whose Allow asks first; ruleBusy, ruleMessage: one being written, what it did)
+        this.week = {back: 0, account: '', recap: null, error: '', busy: false, copied: '', open: '', asking: '', ruleBusy: '',
+            ruleMessage: ''};
         this._weekAsked = 0;
         // Turns that ended while the menu was closed (row key -> "done"), for
         // the hotkey; forgotten when the menu opens
@@ -78,6 +81,10 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
                 this._settings.connect(`changed::${key}`, () => this.refreshAll())),
             ...['show-usage-in-panel', 'show-pet', 'chat-pets'].map(key =>
                 this._settings.connect(`changed::${key}`, () => this.rerender())),
+            this._settings.connect('changed::recap-currency', () => {
+                if (this.menu.isOpen && this.ui.tab === 'week')
+                    this.loadWeek();
+            }),
         ];
         this._restartPollTimer();
         this._restartRemoteTimer();
@@ -1002,7 +1009,8 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         this.week.busy = true;
         this._render(true);
         const out = await this._runner.run('week.py',
-            L.weekArgs(back, account, this.shownHosts, this.remote, this._configDirArgs), {poll: true});
+            L.weekArgs(back, account, this.shownHosts, this.remote, this._configDirArgs, this._settings.get_string('recap-currency')),
+            {poll: true});
         if (this._destroyed || out.cancelled || asked !== this._weekAsked)
             return;   // (other days were asked for since)
         const result = L.helperResult(out.stdout, out.stderr);
@@ -1025,6 +1033,34 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
             this.loadWeek();
             return GLib.SOURCE_CONTINUE;
         });
+    }
+
+    // Unfolds a day's or a project's chats (or folds them), or asks first
+    // before a rule is allowed
+    weekUnfold(key) {
+        this.week.open = this.week.open === key ? '' : key;
+        this._render(true);
+    }
+
+    weekAsk(id) {
+        this.week.asking = id;
+        this._render(true);
+    }
+
+    // Allows a rule the Recap tab offers for the permission prompts you
+    // answered (into the chats' folder's .claude/settings.local.json), or
+    // takes one it added back; then reads the days again
+    async changeWeekRule(rule, allow) {
+        this.week.asking = '';
+        this.week.ruleBusy = rule.id;
+        this.week.ruleMessage = '';
+        this._render(true);
+        const result = await this._helper('week.py', L.weekRuleArgs(rule, allow));
+        if (this._destroyed)
+            return;
+        this.week.ruleBusy = '';
+        this.week.ruleMessage = result.ok ? result.message || '' : L.fmt('Nothing changed: %1', result.message || 'no answer');
+        this.loadWeek();
     }
 
     copyText(text) {
@@ -1062,6 +1098,7 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         const signature = JSON.stringify([this._status ? {...this._status, generatedAt: 0} : null, this._errorText,
             remote, this._sshHosts, this.ui, this._actionError, this._actionInfo, Math.floor(this.now / 60000),
             this.ui.tab === 'week' ? [this.week.back, this.week.account, this.week.busy, this.week.error, this.week.copied,
+                this.week.open, this.week.asking, this.week.ruleBusy, this.week.ruleMessage,
                 this.week.recap ? this.week.recap.generatedAt : 0] : null,
             this._digest ? this._digest.body : null,
             this.petColors, this._settings.get_boolean('show-pet')], coarse);

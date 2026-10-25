@@ -198,10 +198,11 @@ history(".claude-personal", ["notes/blog", "notes/garden"])
 
 # The last days, for the stats: earlier chats' replies (with their usage) and
 # your prompts, spread over two weeks
-def past_work(profile, folder, sid, days, title):
-    """A finished chat in folder with a reply on each of days (days ago: output tokens)."""
+def past_work(profile, folder, sid, days, title, asks=(), limit=False):
+    """A finished chat in folder with a reply on each of days (days ago: output tokens); on
+    the last, asks: [(tool, input, seconds you took to allow it)]; limit: one stopped the day before."""
     cwd = str(home / folder)
-    os.makedirs(cwd, exist_ok=True)
+    os.makedirs(cwd + "/.git", exist_ok=True)
     lines = [{"type": "ai-title", "aiTitle": title, "sessionId": sid}]
     for n, (ago, output) in enumerate(days):
         t = now - ago * 86400 - 3600
@@ -212,6 +213,22 @@ def past_work(profile, folder, sid, days, title):
             "id": f"msg-{sid}-{n}", "model": "claude-haiku-5-5" if n % 5 == 4 else "claude-opus-5-5",
             "usage": {"input_tokens": 900, "output_tokens": output, "cache_read_input_tokens": output * 40,
                       "cache_creation_input_tokens": 700}}})
+        # (for the Recap tab: permission prompts you answered, and a usage limit)
+        for k, (tool, inp, waited) in enumerate(asks if n == len(days) - 1 else ()):
+            at = start + 30 + k * 200
+            lines.append({"type": "assistant", "cwd": cwd, "timestamp": iso(at), "message": {
+                "id": f"msg-{sid}-{n}-ask{k}", "model": "claude-opus-5-5", "content": [
+                    {"type": "tool_use", "id": f"t-{sid}-{k}", "name": tool, "input": inp}],
+                "usage": {"input_tokens": 10, "output_tokens": 50, "cache_read_input_tokens": 4000}}})
+            lines.append({"type": "user", "cwd": cwd, "timestamp": iso(at + waited), "uuid": f"u-{sid}-{n}-ask{k}",
+                          "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": f"t-{sid}-{k}",
+                                                                    "content": "ok"}]},
+                          "permissionDecision": {"decision": "accept", "source": "user_temporary"}})
+        if limit and n == len(days) - 2:
+            lines.append({"type": "assistant", "cwd": cwd, "timestamp": iso(t - 120), "isApiErrorMessage": True, "message": {
+                "id": f"msg-{sid}-{n}-limit", "model": "<synthetic>", "role": "assistant",
+                "content": [{"type": "text", "text": "You've hit your session limit · resets 7pm"}],
+                "usage": {"input_tokens": 0, "output_tokens": 0}}})
         lines.append({"type": "system", "subtype": "turn_duration", "cwd": cwd, "timestamp": iso(t + 20),
                       "durationMs": int((t + 20 - start) * 1000)})
     path = home / profile / "projects" / cwd.replace("/", "-") / f"{sid}.jsonl"
@@ -219,9 +236,13 @@ def past_work(profile, folder, sid, days, title):
 
 
 past_work(".claude-work", "repos/parser", "9a1c7e2b-0000-4000-8000-000000000011",
-          [(13, 9000), (12, 30000), (9, 21000), (8, 52000), (6, 18000), (2, 41000), (1, 26000)], "Parser rewrite")
+          [(13, 9000), (12, 30000), (9, 21000), (8, 52000), (6, 18000), (2, 41000), (1, 26000)], "Parser rewrite",
+          [("Read", {"file_path": str(home / "repos/site/src/grammar.ts")}, 140),
+           ("Read", {"file_path": str(home / "repos/site/README.md")}, 40),
+           ("Bash", {"command": "git log --oneline -20"}, 25)], limit=True)
 past_work(".claude-work", "repos/site", "9a1c7e2b-0000-4000-8000-000000000012",
-          [(12, 8000), (7, 15000), (5, 12000), (2, 9000)], "Site redesign")
+          [(12, 8000), (7, 15000), (5, 12000), (2, 9000)], "Site redesign",
+          [("Edit", {"file_path": str(home / "repos/site/index.html"), "old_string": "a", "new_string": "b"}, 60)])
 past_work(".claude-work", "repos/api", "9a1c7e2b-0000-4000-8000-000000000013", [(9, 6000), (3, 22000), (1, 14000)],
           "API pagination")
 past_work(".claude-personal", "notes/garden", "9a1c7e2b-0000-4000-8000-000000000014", [(10, 5000), (4, 3000)],

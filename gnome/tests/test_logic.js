@@ -459,6 +459,44 @@ test('pointing at a day says what went on then', () => {
     eq(L.weekHoverText(day, at(9.75), now, px), 'Sat 24 Oct, 09:45: Claude worked 09:30–11:00, 2 chats at once · you were at it 09:00–10:00');
     eq(L.weekHoverText(day, at(14), now, px), 'Sat 24 Oct, 14:00: nothing went on');
     eq(L.weekHoverText(day, at(20), now, px), 'Sat 24 Oct, 20:00: still to come');
+    eq(L.weekHoverText({...day, limits: [at(10.5)]}, at(10.5), now, px),
+        'Sat 24 Oct, 10:30: a usage limit stopped a chat at 10:30 · Claude worked 09:30–11:00, 2 chats at once');
+});
+
+test('amounts in another currency, at the rate week.py sends', () => {
+    const eur = {code: 'EUR', rate: 0.8934};
+    eq([L.moneyText(941, eur), L.moneyText(23.8, eur), L.moneyText(0.004, eur), L.moneyText(12, {code: 'JPY', rate: 152.3}),
+        L.moneyText(12, {code: 'CHF', rate: 0.8})], ['€841', '€21.26', '<€0.01', '¥1,828', '9.60 CHF']);
+    const r = weekRecap({currency: {code: 'EUR', rate: 0.9, date: '2026-10-23', error: ''}});
+    eq(L.weekTiles(r)[2].value, '€816');
+    eq(L.weekFootText(r).split('\n')[1], "Amounts in EUR at the European Central Bank's rate of 23 October 2026: 1 USD = 0.9000 EUR.");
+    const failed = weekRecap({currency: {code: 'USD', rate: 1, date: '', error: 'no EUR rate from the European Central Bank yet'}});
+    eq(L.weekCurrency(failed).code, 'USD');
+    eq(L.weekArgs(0, '', [], {}, [], 'EUR'), ['--back', '0', '--currency', 'EUR']);
+    eq(L.weekArgs(0, '', [], {}, [], '../x'), ['--back', '0']);
+});
+
+test('trend lines, what Claude did, where the money went, the prompts you answered', () => {
+    const week = k => ({youMs: k * HOUR, workedMs: 2 * k * HOUR, busyMs: 0, waitMs: 0, prompts: 10 * k, cost: 100 * k, start: 0});
+    const r = weekRecap({trend: [null, week(1), week(2), week(3), week(4)]});
+    eq(L.weekTiles(r)[1].trend, [null, 2 * HOUR, 4 * HOUR, 6 * HOUR, 8 * HOUR]);
+    eq(L.weekTiles(r)[3].tip.split('\n').pop(), 'Week by week, these 7 days last: ? · 10 · 20 · 30 · 40');
+    eq(L.weekWorkText({toolCalls: 3184, commands: 1410, edits: 699, files: 143, linesAdded: 9412, linesRemoved: 2210, subagents: 1,
+        webSearches: 0, webFetches: 0, compactions: 2, tools: [['Bash', 1410]]}),
+    '3,184 tool calls · 1,410 commands run · 699 edits in 143 files (+9,412 −2,210) · 1 subagent started · 2 compactions');
+    eq(L.weekToolsText({tools: [['Bash', 1410], ['Read', 9]]}), 'Its tools: Bash 1,410 · Read 9');
+    const spend = {turns: [], chats: [{name: 'a', cost: 12}], cold: {count: 2, cost: 3.5, chats: [{name: 'b', resumes: 2, cost: 3.5}]}};
+    eq(L.weekColdText(weekRecap({spend})), 'You came back to chats after their cache had expired (an hour without a reply) 2 times: writing ' +
+        'their context again cost $3.50 more than reading it from the cache. Most in: b (2×, $3.50).');
+    eq(L.weekCostliestText(weekRecap({spend})), 'Costliest chats: a $12.00');
+    eq(L.weekPromptsText({answered: 1, refused: 0, waitMs: 2 * HOUR}), 'You answered 1 permission prompt. They waited for your answer 2h 0m in all.');
+    const rule = {kind: 'dir', value: '/h/lib', project: '/h/app', count: 3, waitMs: 30000, example: '~/lib/x', id: 'a1b2c3d4e5f6'};
+    eq(L.weekRuleMeta(rule), '3 prompts · e.g. ~/lib/x');
+    eq(L.weekRuleArgs(rule, true), ['--allow', 'dir', '/h/lib', '/h/app']);
+    eq(L.weekRuleArgs(rule, false), ['--undo', 'a1b2c3d4e5f6']);
+    const w = {key: 'five_hour', resetsAt: 10 * HOUR, points: [[HOUR, 5]]};
+    eq(L.weekWindowSpan(w), [5 * HOUR, 10 * HOUR]);
+    eq(L.weekResetText(10 * HOUR, 9 * HOUR), `resets ${new Date(10 * HOUR).getHours().toString().padStart(2, '0')}:00`);
 });
 
 print(`${count - failures}/${count} passed`);

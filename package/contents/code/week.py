@@ -4,12 +4,13 @@ Claude and how long it worked, what the same work would cost at API prices,
 where it went, and what would make it use less of your plan.
 
 All of it comes from the chat transcripts Claude Code keeps on this computer
-(and on the SSH hosts shown): nothing here starts Claude, calls a model or
-goes online. Each run reads only what the transcripts added since the last
-one (~/.cache/claude-widget/week-1.json), and the widget runs it only while
-its Recap tab is open, never in its status checks.
+(and on the SSH hosts shown): nothing here starts Claude or calls a model,
+and only --currency goes online (for the day's exchange rates). Each run
+reads only what the transcripts added since the last one
+(~/.cache/claude-widget/week-2.json), and the widget runs it only while its
+Recap tab is open, never in its status checks.
 
-    python3 -I week.py [--back N] [--account ID] [--host HOST]... [--config-dir DIR]... [--pretty]
+    python3 -I week.py [--back N] [--account ID] [--host HOST]... [--config-dir DIR]... [--currency C] [--pretty]
 
     --back N      the 7 days N weeks before the last 7 (BACK_MAX at most)
     --account ID  one account's chats (an id of claude_status.py's groups)

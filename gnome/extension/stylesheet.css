@@ -221,3 +221,10 @@
 .claude-week-chat { spacing: 8px; }
 .claude-week-folder { max-width: 12em; }
 .claude-week-tip { spacing: 8px; }
+.claude-week-trend { spacing: 2px; height: 12px; margin-top: 3px; }
+.claude-week-trend-bar { width: 7px; border-radius: 1px; background-color: rgba(154, 153, 150, 0.85); }
+.claude-week-trend-now { background-color: #3584e4; }
+.claude-week-swatch-limit { width: 2px; height: 12px; background-color: #e01b24; }
+.claude-week-sub { padding-left: 4.2em; }
+.claude-week-fold { icon-size: 12px; }
+.claude-week-more { padding-left: 22px; }
