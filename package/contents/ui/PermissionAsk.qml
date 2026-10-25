@@ -22,6 +22,14 @@ ColumnLayout {
     spacing: Kirigami.Units.smallSpacing
     onPermissionChanged: if (!permission) denying = false
 
+    // Deny…: its note field (optional), ready to type in
+    function denyWithNote() {
+        if (!canAnswer)
+            return
+        denying = true
+        noteField.forceActiveFocus()
+    }
+
     PlasmaComponents3.Label {
         textFormat: Text.PlainText
         Layout.fillWidth: true
@@ -93,10 +101,7 @@ ColumnLayout {
             enabled: !ask.busy
             icon.name: "dialog-cancel"
             text: i18n("Deny…")
-            onClicked: {
-                ask.denying = true
-                noteField.forceActiveFocus()
-            }
+            onClicked: ask.denyWithNote()
         }
         Item {
             Layout.fillWidth: true

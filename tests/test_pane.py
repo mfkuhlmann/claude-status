@@ -7,6 +7,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -224,6 +225,22 @@ SCREEN = """\
    4. No
  Esc to cancel · Tab to amend
 """
+
+
+class AskNotificationTests(unittest.TestCase):
+    """A permission prompt's notification (main.qml): its buttons in Claude's
+    own order, as in its row and its pane, and in VS Code's notification."""
+
+    def test_buttons_in_claudes_order(self):
+        main = (CODE.parent / "ui/main.qml").read_text()
+        block = main[main.index("id: askNotificationComponent"):]
+        block = block[:block.index("onClosed:")]
+        actions = re.search(r"actions: withAlways \? \[([^\]]*)\] : \[([^\]]*)\]", block)
+        self.assertEqual([a.strip() for a in actions.group(1).split(",")],
+                         ["allowAction", "alwaysAction", "denyAction", "noteAction"])
+        self.assertEqual([a.strip() for a in actions.group(2).split(",")], ["allowAction", "denyAction", "noteAction"])
+        # Plasma puts a reply button before all the others (its ActionContainer.qml)
+        self.assertNotIn("replyAction", block)
 
 
 class KeysTests(unittest.TestCase):

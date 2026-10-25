@@ -86,6 +86,12 @@ Window {
                 root.paneDraft = ""
             }
         }
+        function onPaneDenyingChanged() {   // (Deny with a note, from a notification)
+            if (root.paneDenying) {
+                askColumn.denyWithNote()
+                root.paneDenying = false
+            }
+        }
         function onPaneChatChanged() {
             if (root.paneChat && root.paneChat.tab)
                 pane.tab = root.paneChat.tab
