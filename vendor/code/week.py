@@ -4,12 +4,13 @@ Claude and how long it worked, what the same work would cost at API prices,
 where it went, and what would make it use less of your plan.
 
 All of it comes from the chat transcripts Claude Code keeps on this computer
-(and on the SSH hosts shown): nothing here starts Claude, calls a model or
-goes online. Each run reads only what the transcripts added since the last
-one (~/.cache/claude-widget/week-1.json), and the widget runs it only while
-its Recap tab is open, never in its status checks.
+(and on the SSH hosts shown): nothing here starts Claude or calls a model,
+and only --currency goes online (for the day's exchange rates). Each run
+reads only what the transcripts added since the last one
+(~/.cache/claude-widget/week-2.json), and the widget runs it only while its
+Recap tab is open, never in its status checks.
 
-    python3 -I week.py [--back N] [--account ID] [--host HOST]... [--config-dir DIR]... [--pretty]
+    python3 -I week.py [--back N] [--account ID] [--host HOST]... [--config-dir DIR]... [--currency C] [--pretty]
 
     --back N      the 7 days N weeks before the last 7 (BACK_MAX at most)
     --account ID  one account's chats (an id of claude_status.py's groups)
@@ -17,6 +18,10 @@ its Recap tab is open, never in its status checks.
                   (python3 -I - with claude_status.py loaded first) with
     --data        that host's chats of those days, for the computer asking
     --remote      the JSON after a marker line (login scripts may print first)
+    --currency C  amounts in C (EUR, …) at the European Central Bank's rate
+                  of the day (fetched at most every few hours, only then)
+    --allow KIND VALUE FOLDER   a rule its permission prompts offer, into
+                  FOLDER/.claude/settings.local.json; --undo ID takes it back
 
 What it reads, per turn of a chat: your prompt, Claude's own count of its
 work (the turn_duration record Claude Code writes when a turn ends, which
@@ -25,6 +30,7 @@ answer (permissionDecision), and each reply's token usage. A chat forked from
 another starts with a copy of its entries: those count once.
 """
 
+import difflib
 import json
 import os
 import re
@@ -32,6 +38,7 @@ import sys
 import time
 from datetime import date, timedelta
 from pathlib import Path
+from urllib.parse import urlparse
 
 sys.dont_write_bytecode = True  # no __pycache__ inside the installed widget...
 if os.path.isfile(globals().get("__file__") or ""):  # (on an SSH host it comes on stdin, after claude_status.py)
@@ -43,7 +50,8 @@ if os.path.isfile(globals().get("__file__") or ""):  # (on an SSH host it comes 
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # -I leaves the script dir off sys.path
 import claude_status as cs  # noqa: E402
 
-CACHE_FILE = "week-1.json"  # (a new layout gets a new name: an older copy of this file keeps its own)
+CACHE_FILE = "week-2.json"  # (a new layout gets a new name: an older copy of this file keeps its own)
+OLD_CACHE_FILES = ("week-1.json",)
 CACHE_LOCK = "week.lock"
 LOCK_WAIT_S = 30  # another run reading the transcripts: wait for it this long, then use the cache as it is
 KEEP_DAYS = 35  # what the cache keeps: this week and the four before it
@@ -59,7 +67,15 @@ JOIN_MS = 60_000  # the timeline joins stretches this close
 TOOLS_KEPT = 50  # tool calls a transcript's reading remembers until their results come
 GAPS_KEPT = 200
 USER_TOOLS = ("AskUserQuestion", "ExitPlanMode")  # tools that wait for your answer
-TOP_PROJECTS, TOP_CHATS = 6, 5
+EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
+FILE_TOOLS = ("Read", "Grep", "Glob", "NotebookRead", "LSP")
+SUBAGENT_TOOLS = ("Agent", "Task")
+FILES_KEPT = 100  # edited files a chat's hour remembers (to count them)
+EDIT_DIFF_LINES = 4000  # an edit bigger than this counts its lines without a diff
+COLD_MS = 60 * 60_000  # a reply this long after the chat's last one finds its cache gone (an hour on a plan)
+COLD_TOKENS = 20_000  # ...and writing this much of its context again is a cold resume
+TOP_PROJECTS, TOP_CHATS, TOP_DAY_CHATS, TOP_TURNS = 6, 5, 8, 5
+TREND_WEEKS = 5  # the trend lines: these 7 days and the four weeks before (what the cache keeps)
 
 # What Claude Code's /usage lists as "contributing to your limits usage" (a
 # scan of local transcripts like this one), with its thresholds: a request
@@ -311,7 +327,7 @@ def take_line(line, rec, counted):
         kind = "assistant"
     elif b'"type":"user"' in line:
         kind = "user"
-    elif b'"subtype":"turn_duration"' in line:
+    elif b'"subtype":"turn_duration"' in line or b'"subtype":"compact_boundary"' in line:
         kind = "system"
     elif not rec["sub"] and any(t in line for t in TITLE_LINES):
         kind = "title"
@@ -337,6 +353,8 @@ def take_line(line, rec, counted):
         take_reply(e, ts, rec, counted)
     elif e["type"] == "user":
         take_user(e, ts, rec, line)
+    elif e.get("subtype") == "compact_boundary":
+        hour_agg(data, ts)[1]["k"] += 1
     elif e.get("subtype") == "turn_duration" and not rec["sub"]:
         worked = cs.number(e.get("durationMs"))
         if worked is not None and worked >= 0:
@@ -407,26 +425,64 @@ def close_turn(state, data, end, worked=None):
                 left -= take
     waits = sorted(w for w in waits if w[1] - w[0] >= 1000)
     if end - start > 0 or worked > 0:
-        data["turns"].append([start, end, int(worked), waits])
+        data["turns"].append([start, end, int(worked), waits, turn.get("t") or {}])
 
 
 def tool_detail(name, inp):
-    """What a tool call was about, for a tip: a file read, a command run."""
+    """What a tool call was about: the file, folder, page or command."""
     if not isinstance(inp, dict):
         return ""
-    if name in ("Read", "NotebookRead") and isinstance(inp.get("file_path") or inp.get("notebook_path"), str):
-        return inp.get("file_path") or inp.get("notebook_path")
-    if name == "Bash" and isinstance(inp.get("command"), str):
-        return cs.clean_text(inp["command"].split("\n")[0], 60)
+    for key in ("file_path", "notebook_path", "path", "url", "command"):
+        value = inp.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip().split("\n")[0][:300] if key == "command" else value[:400]
     return ""
+
+
+def edit_lines(name, inp):
+    """(lines added, lines removed) by an edit tool call: what it replaced
+    against what it wrote (a file written whole counts as added)."""
+    if not isinstance(inp, dict):
+        return 0, 0
+    if name == "Edit":
+        pairs = [(inp.get("old_string"), inp.get("new_string"))]
+    elif name == "MultiEdit":
+        pairs = [(e.get("old_string"), e.get("new_string")) for e in inp.get("edits") or [] if isinstance(e, dict)]
+    else:
+        pairs = [("", inp.get("content") if name == "Write" else inp.get("new_source"))]
+    added = removed = 0
+    for old, new in pairs:
+        if not isinstance(old, str) or not isinstance(new, str):
+            continue
+        a, b = old.splitlines(), new.splitlines()
+        if len(a) + len(b) > EDIT_DIFF_LINES:
+            added, removed = added + len(b), removed + len(a)
+            continue
+        for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
+            if tag in ("replace", "delete"):
+                removed += i2 - i1
+            if tag in ("replace", "insert"):
+                added += j2 - j1
+    return added, removed
 
 
 def hour_agg(data, ts):
     h = str(ts // HOUR_MS)
     agg = data["hours"].get(h)
     if agg is None:
-        agg = data["hours"][h] = {"t": {}, "w": [0] * W_SIZE, "b": {}, "a": {}, "g": {}, "m": []}
+        agg = data["hours"][h] = new_hour()
     return h, agg
+
+
+def new_hour():
+    """A chat's hour: tokens by price key (t), weights (w), 5-minute buckets
+    (b), attributions (a), large results (g), reply ids (m), tool calls by
+    name (u), lines added and removed by edits (x), edited files (fe),
+    compactions (k), cold resumes (c: [ms, price key, 5-minute writes,
+    1-hour writes]) and the permission prompts you answered (p: [ms, tool,
+    what, reason, waited ms, allowed])."""
+    return {"t": {}, "w": [0] * W_SIZE, "b": {}, "a": {}, "g": {}, "m": [], "u": {}, "x": [0, 0], "fe": [], "k": 0,
+            "c": [], "p": []}
 
 
 def usage_values(u):
@@ -474,9 +530,9 @@ def take_reply(e, ts, rec, counted):
                 data["limits"].append(ts)
         turn_activity(state, ts)
     tools = state["tools"]
-    for c in blocks:
-        if c.get("type") == "tool_use" and isinstance(c.get("id"), str) and isinstance(c.get("name"), str):
-            tools[c["id"]] = [ts, c["name"], tool_detail(c["name"], c.get("input"))]
+    uses = [c for c in blocks if c.get("type") == "tool_use" and isinstance(c.get("id"), str) and isinstance(c.get("name"), str)]
+    for c in uses:
+        tools[c["id"]] = [ts, c["name"], tool_detail(c["name"], c.get("input"))]
     if len(tools) > TOOLS_KEPT:
         for k in sorted(tools, key=lambda k: tools[k][0])[:len(tools) - TOOLS_KEPT]:
             del tools[k]
@@ -494,7 +550,10 @@ def take_reply(e, ts, rec, counted):
         track_context(state["ctx"], mid, inp, out, read, write, sub)
         if last[1] is None:
             return  # (a reply counted in another transcript)
+        count_tools(data, last[1], uses)
         delta = [max(0, a - b) for a, b in zip(vals, last[3])]
+        if any(delta) and not rec["sub"]:
+            turn_tokens(state, last[2], delta)
         if any(delta):
             agg = rec["data"]["hours"].get(last[1])
             if agg is not None:
@@ -553,6 +612,14 @@ def take_reply(e, ts, rec, counted):
         a[W_BIG] += input_w * min(1.0, large / prompt)
     bucket = str((ts // BUCKET_MS) % (HOUR_MS // BUCKET_MS))
     agg["b"][bucket] = agg["b"].get(bucket, 0) + w
+    count_tools(data, h, uses)
+    if not rec["sub"]:
+        turn_tokens(state, key, vals)
+        # Back after an hour or more: the cache let the chat's context go, and
+        # the reply writes it all again (a cold resume)
+        if state.get("lastReq") and ts - state["lastReq"] > COLD_MS and vals[3] + vals[4] >= COLD_TOKENS:
+            agg["c"].append([ts, key, vals[3], vals[4]])
+        state["lastReq"] = ts
     for field, prefix in (("attributionPlugin", "plugin:"), ("attributionMcpServer", "mcp:")):
         if isinstance(e.get(field), str) and 0 < len(e[field]) <= 64:
             agg["a"][prefix + e[field]] = agg["a"].get(prefix + e[field], 0) + w
@@ -562,6 +629,34 @@ def take_reply(e, ts, rec, counted):
         k = ("agent:" if isinstance(agent, str) and agent else "skill:") + name
         agg["a"][k] = agg["a"].get(k, 0) + w
     state["msg"] = [mid, h, key, vals, flags, bucket]
+
+
+def count_tools(data, h, uses):
+    """The tool calls of a reply's block, in its hour: by name, and what the
+    edits changed (lines, files)."""
+    agg = data["hours"].get(h)
+    if agg is None:
+        return
+    for c in uses:
+        name = c["name"]
+        agg["u"][name] = agg["u"].get(name, 0) + 1
+        if name in EDIT_TOOLS:
+            added, removed = edit_lines(name, c.get("input"))
+            agg["x"][0] += added
+            agg["x"][1] += removed
+            path = tool_detail(name, c.get("input"))
+            if path and path not in agg["fe"] and len(agg["fe"]) < FILES_KEPT:
+                agg["fe"].append(path)
+
+
+def turn_tokens(state, key, vals):
+    """A reply's tokens on the turn going on: its cost, once it ends."""
+    turn = state["turn"]
+    if turn is None:
+        return
+    t = turn.setdefault("t", {}).setdefault(key, [0] * 6)
+    for i, v in enumerate(vals[:6]):
+        t[i] += v
 
 
 RESULT_FIELD = b'"type":"tool_result"'
@@ -587,6 +682,10 @@ def take_user(e, ts, rec, line):
             tool = state["tools"].pop(r.get("tool_use_id"), None) if isinstance(r.get("tool_use_id"), str) else None
             if tool is None:
                 continue
+            if yours and tool[1] not in USER_TOOLS:  # a permission prompt you answered
+                reason = pd.get("reasonCode") if isinstance(pd.get("reasonCode"), str) else ""
+                hour_agg(data, ts)[1]["p"].append([ts, tool[1], tool[2], reason, max(0, ts - tool[0]),
+                                                   1 if pd.get("decision") == "accept" else 0])
             if large:
                 _, agg = hour_agg(data, ts)
                 k = tool[1] + "|" + tool[2]
@@ -650,6 +749,11 @@ def cache_path(cache_root):
 
 
 def load_cache(cache_root):
+    for name in OLD_CACHE_FILES:  # (read again into the new layout)
+        try:
+            (cache_root / name).unlink()
+        except OSError:
+            pass
     data = cs.read_json(cache_path(cache_root))
     return data if isinstance(data, dict) and isinstance(data.get("files"), dict) else {"files": {}}
 
@@ -692,6 +796,14 @@ def merge_hour(into, agg):
         mine = into["t"].setdefault(key, [0] * 7)
         for i, v in enumerate(t[:7]):
             mine[i] += v
+    for name, n in agg.get("u", {}).items():
+        into["u"][name] = into["u"].get(name, 0) + n
+    for i, v in enumerate(agg.get("x", [])[:2]):
+        into["x"][i] += v
+    into["fe"] += [f for f in agg.get("fe", []) if f not in into["fe"]]
+    into["k"] += agg.get("k", 0)
+    into["c"] += agg.get("c", [])
+    into["p"] += agg.get("p", [])
     for i, v in enumerate(agg.get("w", [])[:W_SIZE]):
         into["w"][i] += v
     for field in ("b", "a"):
@@ -711,7 +823,7 @@ def live_turn(state):
     start, last = turn["start"], turn.get("stopped", turn["last"])
     waits = [[f, t, "y"] for f, t, k in turn.get("gaps", []) if k == "y" and t <= last]
     waits += [[f, t, "p"] for f, t, k in turn.get("gaps", []) if k == "o" and t - f >= SLEEP_MS and t <= last]
-    return [start, last, max(0, last - start - covered(waits)), sorted(waits)]
+    return [start, last, max(0, last - start - covered(waits)), sorted(waits), turn.get("t") or {}]
 
 
 def account_ids(profiles):
@@ -759,7 +871,7 @@ def chats_between(cache, profiles, since, until, home):
                 c["profiles"].append(p)
         for h, agg in data["hours"].items():
             if first_hour <= int(h) <= last_hour:
-                merge_hour(c["hours"].setdefault(h, {"t": {}, "w": [0] * W_SIZE, "b": {}, "a": {}, "g": {}}), agg)
+                merge_hour(c["hours"].setdefault(h, {k: v for k, v in new_hour().items() if k != "m"}), agg)
         if rec.get("sub"):
             continue
         turns = list(data["turns"])
@@ -886,12 +998,15 @@ def day_of(starts, ms):
     return None
 
 
-def recap(sources, back, account, now_ms, home):
-    """The Recap tab: sources = [{"host", "chats" (chats_between), "accounts"}]."""
+def recap(sources, back, account, now_ms, home, usage=None, added=()):
+    """The Recap tab: sources = [{"host", "chats" (chats_between), "accounts"}];
+    usage: this computer's plan windows now (plan_windows); added: the rules
+    this tab added (to undo them)."""
     days = week_days(back, now_ms)
     starts = [d[1] for d in days] + [days[-1][2]]
     w0, w1 = starts[0], min(starts[-1], now_ms)
-    p0 = midnight(date.fromisoformat(days[0][0]) - timedelta(days=7))
+    first_day = date.fromisoformat(days[0][0])
+    p0 = midnight(first_day - timedelta(days=7))
     chats, accounts = [], {}
     for src in sources:
         host = src.get("host") or ""
@@ -917,7 +1032,8 @@ def recap(sources, back, account, now_ms, home):
         longest = None
         near = lo - IDLE_MS  # (what came just before still joins your time at the start)
         for c in chats:
-            for s, e, work, gaps in c["turns"]:
+            for turn in c["turns"]:
+                s, e, work, gaps = turn[:4]
                 if e < near or s >= hi:
                     continue
                 parts = minus([s, e], gaps)
@@ -962,7 +1078,19 @@ def recap(sources, back, account, now_ms, home):
     running = at_once([s[:3] for s in clipped(parts["stretches"], w0, w1)])
     total["peakAtOnce"] = max((n for _, _, n in running), default=0)
 
-    # The timeline, a day per row
+    # The weeks before, for the trend lines (oldest first, these days last);
+    # one older than the cache keeps is unknown (null)
+    kept_from = now_ms - KEEP_DAYS * DAY_MS
+    trend = []
+    for k in range(TREND_WEEKS - 1, 0, -1):
+        lo, hi = midnight(first_day - timedelta(days=7 * k)), midnight(first_day - timedelta(days=7 * (k - 1)))
+        trend.append(dict(period(lo, hi, False), start=lo) if lo >= kept_from - DAY_MS else None)
+    trend.append({key: total[key] for key in ("youMs", "workedMs", "busyMs", "waitMs", "prompts", "cost")})
+    trend[-1]["start"] = w0
+
+    # The timeline, a day per row, with each day's chats (to unfold) and the
+    # moments a usage limit stopped one
+    hits = sorted({t for c in chats for t in c["limits"] if w0 <= t < w1})
     day_rows = []
     for i, (day, ds, de) in enumerate(days):
         if ds >= now_ms:
@@ -973,7 +1101,8 @@ def recap(sources, back, account, now_ms, home):
                "you": [s[:2] for s in merged(clipped(parts["yours"], ds, de), JOIN_MS)],
                "work": join_running(work),
                # (only while no chat worked: then Claude was idle, waiting for you)
-               "wait": [w for span in merged(clipped(parts["waits"], ds, de), JOIN_MS) for w in minus(span, work)]}
+               "wait": [w for span in merged(clipped(parts["waits"], ds, de), JOIN_MS) for w in minus(span, work)],
+               "limits": [t for t in hits if ds <= t < de]}
         row["youMs"] = int(overlap(parts["yours"], ds, de))
         row["busyMs"] = int(overlap(work, ds, de))
         row["workedMs"] = int(sum(w * max(0, min(b, de) - max(a, ds)) for a, b, _, w in parts["stretches"]))
@@ -981,10 +1110,11 @@ def recap(sources, back, account, now_ms, home):
         row["prompts"] = sum(1 for c in chats for p in c["prompts"] if ds <= p < de)
         row["cost"] = round(sum(request_cost(k, t) for c in chats for h, a in c["hours"].items()
                                 if ds <= int(h) * HOUR_MS < de for k, t in a["t"].items()), 4)
+        row["chats"] = chats_of(chats, parts["stretches"], ds, de, home)
         day_rows.append(row)
     total["busiestDay"] = max(day_rows, key=lambda r: r["workedMs"])["day"] if any(r["workedMs"] for r in day_rows) else None
 
-    # Where it went: folders, chats, models
+    # Where it went: folders (with their chats), chats, models
     folders, models, guessed, saved = {}, {}, set(), 0.0
     chat_rows = []
     for c in chats:
@@ -1008,19 +1138,19 @@ def recap(sources, back, account, now_ms, home):
             continue  # (nothing worth a line)
         folder = c.get("project") or c["folder"] or ""
         fkey = c["host"] + "|" + folder
-        f = folders.setdefault(fkey, {"name": ("~" if cs.short_path(folder, home) == "~" else os.path.basename(folder.rstrip("/")))
-                                      or folder or "?", "path": cs.short_path(folder, home) if not c["host"] else folder,
-                                      "host": c["host"], "workedMs": 0, "cost": 0.0, "prompts": 0, "chats": 0})
+        f = folders.setdefault(fkey, {"name": project_name(folder, home), "path": cs.short_path(folder, home) if not c["host"] else folder,
+                                      "host": c["host"], "workedMs": 0, "cost": 0.0, "prompts": 0, "chats": []})
+        row = chat_row(c, home, work, cost, prompts)
         f["workedMs"] += work
         f["cost"] += cost
         f["prompts"] += prompts
-        f["chats"] += 1
-        chat_rows.append({"name": chat_label(c) or c["id"][:8], "chatId": c["id"], "host": c["host"],
-                          "profileDir": c["profiles"][0] if c["profiles"] else "", "folder": f["path"], "cwd": c["folder"],
-                          "workedMs": int(work), "cost": round(cost, 4), "prompts": prompts})
+        f["chats"].append(row)
+        chat_rows.append(row)
     for f in folders.values():
         f["workedMs"] = int(f["workedMs"])
         f["cost"] = round(f["cost"], 4)
+        f["chatCount"] = len(f["chats"])
+        f["chats"] = sorted(f["chats"], key=lambda r: (-r["workedMs"], -r["cost"]))[:TOP_DAY_CHATS]
     for m in models.values():
         m["cost"] = round(m["cost"], 4)
         m["share"] = round(m["cost"] / total["cost"], 4) if total["cost"] else 0
@@ -1037,15 +1167,470 @@ def recap(sources, back, account, now_ms, home):
         "days": day_rows,
         "sum": total,
         "previous": previous,
+        "trend": trend,
         "projects": sorted(folders.values(), key=lambda f: (-f["workedMs"], -f["cost"]))[:TOP_PROJECTS],
         "chats": sorted(chat_rows, key=lambda r: (-r["workedMs"], -r["cost"]))[:TOP_CHATS],
         "models": sorted(models.values(), key=lambda m: -m["cost"]),
         "cacheSaved": round(saved, 2),
+        "spend": spending(chats, chat_rows, w0, w1, home),
+        "work": claude_did(chats, w0, w1),
+        "plan": plan_windows_of(usage or [], account) if back == 0 else [],
+        "prompts": permission_prompts(chats, w0, w1, home, added),
         "tips": tips(chats, w0, w1, total, parts["waits"]),
         "prices": {"asOf": PRICES_AS_OF, "guessed": sorted(guessed)},
         "sources": [{"host": s.get("host") or "", "ok": s.get("ok", True), "error": s.get("error") or ""}
                     for s in sources],
     }
+
+
+def project_name(folder, home):
+    return ("~" if cs.short_path(folder, home) == "~" else os.path.basename(folder.rstrip("/"))) or folder or "?"
+
+
+def chat_row(c, home, work, cost, prompts):
+    return {"name": chat_label(c) or c["id"][:8], "chatId": c["id"], "host": c["host"],
+            "profileDir": c["profiles"][0] if c["profiles"] else "", "folder": cs.short_path(c["folder"], home) if not c["host"]
+            else c["folder"], "cwd": c["folder"], "workedMs": int(work), "cost": round(cost, 4), "prompts": prompts}
+
+
+def chats_of(chats, stretches, lo, hi, home):
+    """The chats of [lo, hi) (a day), what Claude worked on most first:
+    their work, cost and prompts in it."""
+    work = {}
+    for a, b, key, rate in stretches:
+        work[key] = work.get(key, 0) + rate * max(0, min(b, hi) - max(a, lo))
+    rows = []
+    for c in chats:
+        cost = sum(request_cost(k, t) for h, agg in c["hours"].items() if lo <= int(h) * HOUR_MS < hi for k, t in agg["t"].items())
+        prompts = sum(1 for p in c["prompts"] if lo <= p < hi)
+        if work.get(c["key"], 0) >= 60_000 or cost >= 0.01 or prompts:
+            rows.append(chat_row(c, home, work.get(c["key"], 0), cost, prompts))
+    return sorted(rows, key=lambda r: (-r["workedMs"], -r["cost"]))[:TOP_DAY_CHATS]
+
+
+def turn_cost(tokens):
+    return sum(request_cost(key, list(t[:6]) + [1]) for key, t in (tokens or {}).items())
+
+
+def spending(chats, chat_rows, lo, hi, home):
+    """Where the money went: the turns that cost most (their own replies, not
+    their subagents'), the chats, and coming back to a chat after its cache
+    let go (a cold resume: its context written again, at the price of cache
+    writes rather than reads)."""
+    turns = []
+    for c in chats:
+        for turn in c["turns"]:
+            if lo <= turn[1] < hi and len(turn) > 4:
+                cost = turn_cost(turn[4])
+                if cost >= 0.01:
+                    turns.append(dict(chat_row(c, home, turn[2], cost, 0), startedAt=turn[0], endedAt=turn[1]))
+    cold, cold_cost, by_chat = 0, 0.0, {}
+    for c in chats:
+        for h, agg in c["hours"].items():
+            if not lo <= int(h) * HOUR_MS < hi:
+                continue
+            for ts, key, w5, w1 in agg.get("c", []):
+                p, _ = prices_of(key)
+                if p is None:
+                    continue
+                extra = (w5 * (p[1] - p[3]) + w1 * (p[2] - p[3])) / 1e6 * (US_ONLY if "u" in key.partition("|")[2] else 1)
+                cold += 1
+                cold_cost += extra
+                b = by_chat.setdefault(c["key"], dict(chat_row(c, home, 0, 0, 0), resumes=0, cost=0.0))
+                b["resumes"] += 1
+                b["cost"] += extra
+    for b in by_chat.values():
+        b["cost"] = round(b["cost"], 4)
+    return {
+        "turns": sorted(turns, key=lambda t: -t["cost"])[:TOP_TURNS],
+        "chats": sorted(chat_rows, key=lambda r: -r["cost"])[:3],
+        "cold": {"count": cold, "cost": round(cold_cost, 4),
+                 "chats": sorted(by_chat.values(), key=lambda b: -b["cost"])[:3]},
+    }
+
+
+def claude_did(chats, lo, hi):
+    """What Claude did: its tool calls (by tool; an MCP server's tools as one),
+    the commands it ran, its edits and the files and lines they changed, the
+    subagents it started, compactions, web searches."""
+    tools, files, added, removed, compactions = {}, set(), 0, 0, 0
+    searches = 0
+    for c in chats:
+        for h, agg in c["hours"].items():
+            if not lo <= int(h) * HOUR_MS < hi:
+                continue
+            for name, n in agg.get("u", {}).items():
+                label = "MCP: " + name.split("__")[1] if name.startswith("mcp__") and name.count("__") >= 2 else name
+                tools[label] = tools.get(label, 0) + n
+            files.update(agg.get("fe", []))
+            added += agg.get("x", [0, 0])[0]
+            removed += agg.get("x", [0, 0])[1]
+            compactions += agg.get("k", 0)
+            searches += sum(t[5] for t in agg["t"].values())
+    return {
+        "toolCalls": sum(tools.values()),
+        "tools": sorted(([n, c] for n, c in tools.items()), key=lambda nc: (-nc[1], nc[0]))[:8],
+        "commands": tools.get("Bash", 0),
+        "edits": sum(tools.get(t, 0) for t in EDIT_TOOLS),
+        "files": len(files),
+        "linesAdded": added,
+        "linesRemoved": removed,
+        "subagents": sum(tools.get(t, 0) for t in SUBAGENT_TOOLS),
+        "compactions": compactions,
+        "webSearches": max(searches, tools.get("WebSearch", 0)),  # (Claude Code's searches run in requests of their own)
+        "webFetches": tools.get("WebFetch", 0),
+    }
+
+
+# ---------------------------------------------------------------- permission prompts
+# The prompts you answered, and the rules that would have let the same go
+# without asking. A rule goes into the asking chats' own folder, its
+# .claude/settings.local.json (Claude reads it for chats started there; it's
+# not shared through git), never into your user settings. Only what's safe
+# to allow is offered: folders of your projects to read, edits in the
+# chat's own folder, read-only commands, pages of a site; never what Claude
+# flagged (safetyCheck), what you refused, nor anything under /tmp or a
+# Claude config folder.
+
+RULES_FILE = "rules.json"  # in the widget's cache: the rules this tab added, to undo them
+TOP_RULES = 6
+SAFE_COMMANDS = ("ls", "pwd", "wc", "head", "tail", "grep", "rg", "which", "file", "stat", "du", "df", "tree", "date",
+                 "uname", "journalctl")
+GIT_READS = ("status", "log", "diff", "show", "branch", "rev-parse", "ls-files", "blame")
+SHELL_SIGNS = set(";&|<>`$()\\\n{}*?!~")
+BASH_RULE = re.compile(r"^Bash\((git (%s)|%s) \*\)$" % ("|".join(GIT_READS), "|".join(SAFE_COMMANDS)))
+FETCH_RULE = re.compile(r"^WebFetch\(domain:[a-z0-9][a-z0-9.-]{0,252}\)$")
+PRIVATE_HOME = (".claude", ".ssh", ".gnupg", ".config", ".local", ".cache", ".mozilla", ".pki", ".password-store")
+
+
+def private_place(path, home):
+    """Somewhere no rule may reach: outside your home, the home folder itself,
+    a config or secrets folder, a temporary one."""
+    p, h = str(path).rstrip("/"), str(home).rstrip("/")
+    if not p.startswith(h + "/"):
+        return True
+    first = p[len(h) + 1:].split("/")[0]
+    return any(first == d or first.startswith(d + "-") or first.startswith(d + "_") for d in PRIVATE_HOME)
+
+
+def rule_for(tool, what, reason, folder, home):
+    """(kind, value) of the rule that would have let a prompt you allowed in a
+    chat started in folder go without asking, or None. kind: "dir" (a folder
+    to read in: permissions.additionalDirectories), "edits" (accept edits
+    in folder: permissions.defaultMode), "allow" (a permissions.allow rule)."""
+    if reason == "safetyCheck" or not folder or private_place(folder, home):
+        return None
+    inside = lambda path: path == folder or path.startswith(folder.rstrip("/") + "/")  # noqa: E731
+    if tool in FILE_TOOLS and what.startswith("/") and not inside(what):
+        path = Path(what)
+        try:
+            root = cs.git_root(path if path.is_dir() else path.parent)
+        except OSError:
+            root = None
+        if root is not None and not private_place(root, home) and not inside(str(root)):
+            return "dir", str(root)
+        return None
+    if tool in EDIT_TOOLS and what.startswith("/") and inside(what):
+        return "edits", folder
+    if tool == "Bash" and what and not (SHELL_SIGNS & set(what)):
+        words = what.split()
+        if words[0] == "git" and len(words) > 1 and words[1] in GIT_READS:
+            return "allow", "Bash(git %s *)" % words[1]
+        if words[0] in SAFE_COMMANDS:
+            return "allow", "Bash(%s *)" % words[0]
+        return None
+    if tool == "WebFetch" and what.startswith("https://"):
+        host = (urlparse(what).hostname or "").lower()
+        if host and FETCH_RULE.match("WebFetch(domain:%s)" % host):
+            return "allow", "WebFetch(domain:%s)" % host
+    return None
+
+
+def tilde(path, home):
+    """path from your home folder on, whole (where a rule goes must be clear)."""
+    p, h = str(path), str(home).rstrip("/")
+    return "~" + p[len(h):] if p == h or p.startswith(h + "/") else p
+
+
+def rule_id(kind, value, project):
+    return cs.short_id("%s\0%s\0%s" % (kind, value, project))
+
+
+def settings_paths(project):
+    base = Path(project) / ".claude"
+    return [base / "settings.local.json", base / "settings.json"]
+
+
+def in_settings(data, kind, value):
+    perms = data.get("permissions") if isinstance(data, dict) and isinstance(data.get("permissions"), dict) else {}
+    if kind == "dir":
+        dirs = perms.get("additionalDirectories")
+        return isinstance(dirs, list) and any(isinstance(d, str) and os.path.expanduser(d).rstrip("/") == value for d in dirs)
+    if kind == "edits":
+        return perms.get("defaultMode") in ("acceptEdits", "bypassPermissions", "dontAsk")
+    rules = perms.get("allow")
+    return isinstance(rules, list) and value in rules
+
+
+def rule_state(kind, value, project, home, added):
+    """"added" (by this tab: it can be undone), "allowed" (your settings
+    already let it through) or "new"."""
+    rid = rule_id(kind, value, project)
+    if any(a.get("id") == rid for a in added):
+        return "added"
+    files = settings_paths(project) + [p.real / "settings.json" for p in cs.discover_profiles(home)]
+    return "allowed" if any(in_settings(cs.read_json(f), kind, value) for f in files) else "new"
+
+
+def rule_title(kind, value, project, home):
+    where = project_name(project, home)
+    if kind == "dir":
+        return "Let chats in %s read %s" % (where, tilde(value, home))
+    if kind == "edits":
+        return "Let chats in %s edit their files without asking" % where
+    if value.startswith("Bash("):
+        return "Allow “%s” in %s" % (value[5:-3], where)
+    return "Allow pages from %s in %s" % (value[len("WebFetch(domain:"):-1], where)
+
+
+def rule_change(kind, value, project, home):
+    """What allowing it changes, in words."""
+    path = tilde(settings_paths(project)[0], home)
+    if kind == "dir":
+        return "adds %s to permissions.additionalDirectories in %s" % (tilde(value, home), path)
+    if kind == "edits":
+        return "sets permissions.defaultMode to acceptEdits in %s (chats started there accept edits)" % path
+    return "adds %s to permissions.allow in %s" % (value, path)
+
+
+def permission_prompts(chats, lo, hi, home, added=()):
+    """The permission prompts you answered in [lo, hi): how many, how long
+    Claude waited on them (prompts at once count their time once), by tool,
+    and the rules that would have let the most of them through (this
+    computer's chats)."""
+    answered = refused = 0
+    by_tool, rules, waits = {}, {}, []
+    for c in chats:
+        folder = c.get("folder") or ""
+        for h, agg in c["hours"].items():
+            if not lo <= int(h) * HOUR_MS < hi:
+                continue
+            for ts, tool, what, reason, wait, allowed in agg.get("p", []):
+                answered += 1
+                refused += 0 if allowed else 1
+                waits.append([ts - wait, ts])
+                by_tool[tool] = by_tool.get(tool, 0) + 1
+                rule = rule_for(tool, what, reason, folder, home) if allowed and not c["host"] else None
+                if rule is None:
+                    continue
+                r = rules.setdefault(rule + (folder,), {"kind": rule[0], "value": rule[1], "project": folder,
+                                                        "count": 0, "waits": [], "example": tilde(what, home)[:120]})
+                r["count"] += 1
+                r["waits"].append([ts - wait, ts])
+    for r in rules.values():
+        r["waitMs"] = int(covered(r.pop("waits")))
+    top = sorted(rules.values(), key=lambda r: (-r["count"], -r["waitMs"]))[:TOP_RULES]
+    for r in top:
+        r["id"] = rule_id(r["kind"], r["value"], r["project"])
+        r["state"] = rule_state(r["kind"], r["value"], r["project"], home, added)
+        r["title"] = rule_title(r["kind"], r["value"], r["project"], home)
+        r["change"] = rule_change(r["kind"], r["value"], r["project"], home)
+    return {"answered": answered, "refused": refused, "waitMs": int(covered(waits)),
+            "byTool": sorted(([t, n] for t, n in by_tool.items()), key=lambda tn: (-tn[1], tn[0]))[:6], "rules": top}
+
+
+def load_added(cache_root):
+    data = cs.read_json(cache_root / RULES_FILE)
+    return [a for a in data.get("added", [])] if isinstance(data, dict) and isinstance(data.get("added"), list) else []
+
+
+def known_folder(cache, project):
+    """Did a chat of yours start in project (the only places a rule goes)?"""
+    return any(isinstance(r, dict) and isinstance(r.get("data"), dict) and r["data"].get("folder") == project
+               for r in cache.get("files", {}).values())
+
+
+def write_settings(path, data):
+    path = Path(os.path.realpath(str(path)))  # (a link stays a link: its file changes)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(".%s.%d.tmp" % (path.name, os.getpid()))
+    with open(str(tmp), "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+        f.write("\n")
+    os.replace(str(tmp), str(path))
+
+
+def allow_rule(home, cache_root, kind, value, project):
+    """(ok, message, id): the rule goes into project's settings.local.json,
+    and is noted to undo it. Only a rule the Recap tab would offer: for a
+    folder a chat of yours started in, of a kind and shape it offers."""
+    project = os.path.normpath(project) if isinstance(project, str) and project.startswith("/") else ""
+    if not project or not os.path.isdir(project) or private_place(project, home):
+        return False, "Not a folder a rule can go to", None
+    if not known_folder(load_cache(cache_root), project):
+        return False, "No chat of yours started in %s" % tilde(project, home), None
+    if kind == "dir":
+        ok = (isinstance(value, str) and value.startswith("/") and os.path.isdir(value) and not private_place(value, home)
+              and cs.git_root(Path(value)) == Path(value))
+    elif kind == "edits":
+        ok = value == project
+    else:
+        ok = kind == "allow" and isinstance(value, str) and bool(BASH_RULE.match(value) or FETCH_RULE.match(value))
+    if not ok:
+        return False, "Not a rule the Recap tab offers", None
+    path = settings_paths(project)[0]
+    data = cs.read_json(path) if path.exists() else {}
+    if not isinstance(data, dict):
+        return False, "%s isn't JSON the widget can change: leave it as it is" % tilde(path, home), None
+    perms = data.get("permissions")
+    if perms is None:
+        perms = data["permissions"] = {}
+    if not isinstance(perms, dict):
+        return False, "permissions in %s isn't what Claude expects" % tilde(path, home), None
+    note = {"id": rule_id(kind, value, project), "kind": kind, "value": value, "project": project, "file": str(path),
+            "at": int(time.time() * 1000), "created": not path.exists()}
+    if in_settings(data, kind, value):
+        return True, "Already allowed in %s" % tilde(path, home), None
+    if kind == "dir":
+        perms.setdefault("additionalDirectories", []).append(value)
+    elif kind == "edits":
+        note["before"] = perms.get("defaultMode")
+        perms["defaultMode"] = "acceptEdits"
+    else:
+        perms.setdefault("allow", []).append(value)
+    write_settings(path, data)
+    added = [a for a in load_added(cache_root) if a.get("id") != note["id"]] + [note]
+    cs.write_json_atomic(cache_root / RULES_FILE, {"added": added})
+    return True, "%s: done (%s)" % (rule_title(kind, value, project, home), rule_change(kind, value, project, home)), note["id"]
+
+
+def undo_rule(home, cache_root, rid):
+    """(ok, message): takes back a rule this tab added, as it added it."""
+    added = load_added(cache_root)
+    note = next((a for a in added if a.get("id") == rid), None)
+    if note is None:
+        return False, "That rule wasn't added here"
+    path = Path(note["file"])
+    data = cs.read_json(path)
+    perms = data.get("permissions") if isinstance(data, dict) and isinstance(data.get("permissions"), dict) else None
+    if perms is not None:
+        if note["kind"] == "dir" and isinstance(perms.get("additionalDirectories"), list):
+            perms["additionalDirectories"] = [d for d in perms["additionalDirectories"] if d != note["value"]]
+            if not perms["additionalDirectories"]:
+                del perms["additionalDirectories"]
+        elif note["kind"] == "edits" and perms.get("defaultMode") == "acceptEdits":
+            if note.get("before"):
+                perms["defaultMode"] = note["before"]
+            else:
+                del perms["defaultMode"]
+        elif note["kind"] == "allow" and isinstance(perms.get("allow"), list):
+            perms["allow"] = [r for r in perms["allow"] if r != note["value"]]
+            if not perms["allow"]:
+                del perms["allow"]
+        if not perms:
+            del data["permissions"]
+        if not data and note.get("created"):
+            path.unlink()  # (the file this tab made, empty again)
+        else:
+            write_settings(path, data)
+    cs.write_json_atomic(cache_root / RULES_FILE, {"added": [a for a in added if a.get("id") != rid]})
+    return True, "Taken back: %s" % rule_title(note["kind"], note["value"], note["project"], home)
+
+
+# ---------------------------------------------------------------- plan limits
+
+
+def plan_windows(cache_root, profiles):
+    """This computer's accounts' plan windows now, with how each filled up
+    (the widget's usage history, usage.json): [{"account", "name", "windows":
+    [{"key", "label", "resetsAt", "pct", "points": [[ms, pct], ...]}]}]."""
+    data = cs.read_json(cache_root / "usage.json")
+    groups = data.get("groups") if isinstance(data, dict) and isinstance(data.get("groups"), dict) else {}
+    out = []
+    for gid, members in cs.group_profiles(profiles):
+        named = next((p for p in members if not p.is_default), members[0])
+        windows = []
+        for key, rec in (groups.get(cs.short_id(gid)) or {}).items():
+            points = [p for p in rec.get("points") or [] if isinstance(p, list) and len(p) == 2] if isinstance(rec, dict) else []
+            if not points or key not in cs.WINDOW_ORDER:
+                continue
+            step = max(1, len(points) // 60)  # (60 points draw it)
+            windows.append({"key": key, "label": cs.WINDOW_LABELS.get(key, key), "resetsAt": rec.get("resetsAt"),
+                            "pct": points[-1][1], "points": points[::step] + ([points[-1]] if (len(points) - 1) % step else [])})
+        windows.sort(key=lambda w: cs.WINDOW_ORDER.index(w["key"]))
+        if windows:
+            out.append({"account": cs.short_id(gid), "name": named.label, "windows": windows})
+    return out
+
+
+def plan_windows_of(plans, account):
+    return [p for p in plans if not account or p["account"] == account]
+
+
+# ---------------------------------------------------------------- currency
+# The amounts are API prices in US dollars. In another currency they're
+# turned at the European Central Bank's euro reference rates of the day
+# (fetched at most every 6 hours, and only then; the last rates serve when
+# that fails).
+
+RATES_URL = "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml"
+RATES_FILE = "rates.json"
+RATES_EVERY_S = 6 * 3600  # (the ECB publishes once a working day, around 16:00 CET)
+RATES_RETRY_S = 3600
+RATE_LINE = re.compile(r"currency=['\"]([A-Z]{3})['\"]\s+rate=['\"]([0-9]+(?:\.[0-9]+)?)['\"]")
+RATE_DAY = re.compile(r"time=['\"](\d{4}-\d{2}-\d{2})['\"]")
+
+
+def parse_rates(text):
+    """{"date", "rates": {code: units per euro}} of the ECB's daily XML, or None."""
+    day = RATE_DAY.search(text)
+    rates = {code: float(rate) for code, rate in RATE_LINE.findall(text) if float(rate) > 0}
+    if not day or "USD" not in rates:
+        return None
+    rates["EUR"] = 1.0
+    return {"date": day.group(1), "rates": rates}
+
+
+def exchange_rates(cache_root, now_s, fetch=None):
+    """The newest rates: the saved ones, fetched again when older than
+    RATES_EVERY_S (after a failed try, not again for RATES_RETRY_S: the tab
+    mustn't wait on a network that's down every time it reads)."""
+    data = cs.read_json(cache_root / RATES_FILE)
+    data = data if isinstance(data, dict) else {}
+    saved = data if isinstance(data.get("rates"), dict) and "USD" in data["rates"] else None
+    if (saved and now_s - (cs.number(data.get("fetchedAt")) or 0) < RATES_EVERY_S
+            or "triedAt" in data and now_s - (cs.number(data["triedAt"]) or 0) < RATES_RETRY_S):
+        return saved
+    try:
+        if fetch is None:
+            import urllib.request
+            with urllib.request.urlopen(RATES_URL, timeout=5) as r:  # noqa: S310 (a fixed https address)
+                text = r.read(200_000).decode("utf-8", "replace")
+        else:
+            text = fetch()
+        got = parse_rates(text)
+    except Exception:
+        got = None
+    if got is None:
+        data["triedAt"] = now_s
+    else:
+        data = saved = dict(got, fetchedAt=now_s)
+    try:
+        cs.write_json_atomic(cache_root / RATES_FILE, data)
+    except OSError:
+        pass
+    return saved
+
+
+def currency_of(code, cache_root, now_s, fetch=None):
+    """{"code", "rate" (per US dollar), "date", "error"} for showing the amounts in code."""
+    code = (code or "USD").upper()
+    if code == "USD" or not re.match(r"^[A-Z]{3}$", code):
+        return {"code": "USD", "rate": 1.0, "date": "", "error": ""}
+    rates = exchange_rates(cache_root, now_s, fetch)
+    if not rates or code not in rates["rates"]:
+        return {"code": "USD", "rate": 1.0, "date": "", "error": "no %s rate from the European Central Bank yet" % code}
+    return {"code": code, "rate": rates["rates"][code] / rates["rates"]["USD"], "date": rates["date"], "error": ""}
 
 
 def limit_episodes(hits):
@@ -1212,8 +1797,8 @@ def host_chats(host, back):
     chats = answer.get("chats") if isinstance(answer.get("chats"), dict) else {}
     if abs(shift) > 5000:  # its clock differs from this one's
         for c in chats.values():
-            c["turns"] = [[s + shift, e + shift, w, [[f + shift, t + shift, k] for f, t, k in g]]
-                          for s, e, w, g in c.get("turns", [])]
+            c["turns"] = [[t[0] + shift, t[1] + shift, t[2], [[f + shift, to + shift, k] for f, to, k in t[3]]] + list(t[4:])
+                          for t in c.get("turns", [])]
             c["prompts"] = [p + shift for p in c.get("prompts", [])]
             c["limits"] = [p + shift for p in c.get("limits", [])]
     return {"host": host, "ok": True, "chats": chats, "accounts": answer.get("accounts") or []}
@@ -1221,11 +1806,18 @@ def host_chats(host, back):
 
 def main(argv=None):
     args = sys.argv[1:] if argv is None else list(argv)
-    back, account, hosts, config_dirs = 0, "", [], []
+    back, account, hosts, config_dirs, currency = 0, "", [], [], "USD"
     pretty = remote = data = False
+    allow = undo = None
     while args:
         arg = args.pop(0)
-        if arg == "--back" and args and args[0].isdigit():
+        if arg == "--allow" and len(args) >= 3:
+            allow = [args.pop(0), args.pop(0), args.pop(0)]
+        elif arg == "--undo" and args:
+            undo = args.pop(0)
+        elif arg == "--currency" and args:
+            currency = args.pop(0)
+        elif arg == "--back" and args and args[0].isdigit():
             back = min(BACK_MAX, int(args.pop(0)))
         elif arg == "--account" and args:
             account = args.pop(0)
@@ -1244,11 +1836,25 @@ def main(argv=None):
     os.umask(0o077)  # cache files are private to the user
     home = Path.home()
     now_ms = int(time.time() * 1000)
+    cache_root = cs.cache_dir(home)
+    if allow or undo:  # (a button of the tab's permission prompts)
+        try:
+            if allow:
+                ok, message, rid = allow_rule(home, cache_root, *allow)
+                result = {"ok": ok, "message": message, "id": rid}
+            else:
+                ok, message = undo_rule(home, cache_root, undo)
+                result = {"ok": ok, "message": message}
+        except Exception as exc:
+            result = {"ok": False, "message": "{}: {}".format(type(exc).__name__, exc)}
+        sys.stdout.write(json.dumps(result) + "\n")
+        return
     try:
         profiles = cs.discover_profiles(home, config_dirs)
-        cache = updated_cache(cs.cache_dir(home), profiles, now_ms)
+        cache = updated_cache(cache_root, profiles, now_ms)
         days = week_days(back, now_ms)
-        since = midnight(date.fromisoformat(days[0][0]) - timedelta(days=7))
+        # (the weeks before these too: the trend lines)
+        since = midnight(date.fromisoformat(days[0][0]) - timedelta(days=7 * (TREND_WEEKS - 1)))
         chats = chats_between(cache, profiles, since, days[-1][2], home)
         _, accounts = account_ids(profiles)
         if data:  # ("now" as it answers: the computer asking sets this one's clock against its own)
@@ -1260,7 +1866,8 @@ def main(argv=None):
                 from concurrent.futures import ThreadPoolExecutor
                 with ThreadPoolExecutor(max_workers=min(8, len(hosts))) as pool:
                     sources += list(pool.map(lambda h: host_chats(h, back), hosts))
-            result = recap(sources, back, account, now_ms, home)
+            result = recap(sources, back, account, now_ms, home, plan_windows(cache_root, profiles), load_added(cache_root))
+            result["currency"] = currency_of(currency, cache_root, now_ms / 1000)
     except Exception as exc:  # the widget must always get parseable output
         result = {"ok": False, "error": "{}: {}".format(type(exc).__name__, exc), "generatedAt": now_ms}
     text = json.dumps(result, indent=2 if pretty and not remote else None)

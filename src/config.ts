@@ -31,6 +31,10 @@ export const settings = {
     const v = cfg().get<string>("sshUsage", "once");
     return v === "all" || v === "none" ? v : "once";
   },
+  recapCurrency: () => {
+    const v = cfg().get<string>("recapCurrency", "USD");
+    return typeof v === "string" && /^[A-Z]{3}$/.test(v) ? v : "USD";
+  },
   notifyWaiting: () => cfg().get<boolean>("notifyWaiting", true),
   notifyDone: () => cfg().get<boolean>("notifyDone", true),
   notifyDoneMinSeconds: () => num("notifyDoneMinSeconds", 30, 0, 3600),
@@ -70,6 +74,7 @@ export function viewSettings(): ViewSettings {
     showTokens: settings.showTokens(),
     recentChats: settings.recentChats(),
     reopenIn: settings.reopenIn(),
+    recapCurrency: settings.recapCurrency(),
   };
 }
 

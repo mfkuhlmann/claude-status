@@ -209,7 +209,7 @@ export class Backend {
   }
 
   // jump.py / remote.py actions; they print {"ok": bool, "message": str}
-  async action(scriptName: "jump.py" | "remote.py" | "claude_status.py", args: string[], timeoutMs = 90000): Promise<Answer> {
+  async action(scriptName: "jump.py" | "remote.py" | "claude_status.py" | "week.py", args: string[], timeoutMs = 90000): Promise<Answer> {
     const r = await this.json([scriptName, ...args], timeoutMs);
     if (!r) return { ok: false, message: "the helper gave no answer" };
     return {

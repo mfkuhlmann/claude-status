@@ -2,7 +2,7 @@
 // Claude Code) and for the webview's dev harness. Nothing here is real: the
 // accounts, folders, hosts and chats are invented, times are relative to now.
 
-import type { Agent, ChatStats, Group, HostState, Session, Status, UsageStats, ViewState, WeekDay, WeekRecap } from "./types";
+import type { Agent, ChatStats, Group, HostState, Session, Status, UsageStats, ViewState, WeekChat, WeekDay, WeekRecap } from "./types";
 
 const MIN = 60000;
 const HOUR = 60 * MIN;
@@ -381,8 +381,15 @@ export function demoState(now: number, phase = 0): ViewState {
   };
 }
 
+const DEMO_CHATS: WeekChat[] = [
+  { name: "Port the date parser", chatId: "demo-1", host: "", profileDir: ".claude", folder: "~/projects/date-parser", cwd: "/home/alice/projects/date-parser", workedMs: 3.2 * HOUR, cost: 41.2, prompts: 14 },
+  { name: "Release notes for 2.0", chatId: "demo-2", host: "", profileDir: ".claude", folder: "~/projects/webapp", cwd: "/home/alice/projects/webapp", workedMs: 2.4 * HOUR, cost: 29.9, prompts: 11 },
+  { name: "Nightly dependency check", chatId: "demo-3", host: "build-server", profileDir: ".claude", folder: "/srv/pipeline", workedMs: 1.6 * HOUR, cost: 17.3, prompts: 6 },
+];
+
 // The Recap tab's recap of made-up days: mornings and afternoons of work, a
-// second chat at once now and then, one long wait for your answer
+// second chat at once now and then, one long wait for your answer, two
+// usage limits, the rules the permission prompts you answered ask for
 export function demoWeek(now: number, back = 0, account = ""): WeekRecap {
   const today = new Date(now);
   const midnight = (offset: number) =>
@@ -405,16 +412,24 @@ export function demoWeek(now: number, back = 0, account = ""): WeekRecap {
     const you: [number, number][] = (weekend ? [[10.4, 11.3]] : [[8.9, 10.4], [11.3, 12.4], [13.8, 14.6], [15.1, 16.1], [17.2, 17.6]])
       .map(([a, b]) => [h(a), h(b)] as [number, number]).filter((y) => y[0] < now);
     const wait: [number, number][] = !weekend && i === 2 ? [[h(18.2), h(21.5)]] : [];
+    const limits = !weekend && i === 3 ? [h(11.4), h(15.6)].filter((t) => t < now) : [];
     const workedMs = work.reduce((sum, [a, b, n]) => sum + (Math.min(b, now) - a) * n, 0) * scale;
     days.push({
-      day: isoDay(start), start, end, you, work: work.map(([a, b, n]) => [a, Math.min(b, now), n]), wait,
+      day: isoDay(start), start, end, you, work: work.map(([a, b, n]) => [a, Math.min(b, now), n]), wait, limits,
       youMs: you.reduce((sum, [a, b]) => sum + Math.min(b, now) - a, 0) * scale, workedMs,
       busyMs: workedMs * 0.85, waitMs: wait.reduce((sum, [a, b]) => sum + b - a, 0),
       prompts: weekend ? 4 : Math.round(31 * scale), cost: Math.round((weekend ? 9 : 64) * scale * 100) / 100,
+      chats: work.length ? DEMO_CHATS.slice(0, weekend ? 1 : 3).map((c, k) => ({ ...c, workedMs: workedMs / (k + 2), cost: c.cost / 5 })) : [],
     });
   }
   const total = (key: "youMs" | "workedMs" | "busyMs" | "waitMs" | "prompts" | "cost") => days.reduce((sum, d) => sum + d[key], 0);
   const cost = total("cost");
+  const week = (k: number) => ({
+    youMs: total("youMs") * k, workedMs: total("workedMs") * k, busyMs: total("busyMs") * k, waitMs: total("waitMs") * k,
+    prompts: Math.round(total("prompts") * k), cost: cost * k, start: days[0].start - 7 * 86400000 * Math.round(1 / k),
+  });
+  const fill = (from: number, until: number, top: number): [number, number][] =>
+    Array.from({ length: 13 }, (_, k) => [from + ((Math.min(now, until) - from) * k) / 12, Math.round((top * k) / 12)] as [number, number]);
   return {
     ok: true,
     generatedAt: now,
@@ -436,21 +451,49 @@ export function demoWeek(now: number, back = 0, account = ""): WeekRecap {
     },
     previous: { youMs: total("youMs") * 0.8, workedMs: total("workedMs") * 0.7, busyMs: 0, waitMs: 0, prompts: total("prompts") - 18, cost: cost * 0.75 },
     projects: [
-      { name: "webapp", path: "~/projects/webapp", host: "", workedMs: total("workedMs") * 0.55, cost: cost * 0.55, prompts: 92, chats: 11 },
-      { name: "date-parser", path: "~/projects/date-parser", host: "", workedMs: total("workedMs") * 0.25, cost: cost * 0.27, prompts: 41, chats: 6 },
-      { name: "pipeline", path: "/srv/pipeline", host: "build-server", workedMs: total("workedMs") * 0.15, cost: cost * 0.14, prompts: 17, chats: 4 },
-      { name: "~", path: "~", host: "", workedMs: total("workedMs") * 0.05, cost: cost * 0.04, prompts: 9, chats: 2 },
+      { name: "webapp", path: "~/projects/webapp", host: "", workedMs: total("workedMs") * 0.55, cost: cost * 0.55, prompts: 92, chats: [DEMO_CHATS[1]], chatCount: 11 },
+      { name: "date-parser", path: "~/projects/date-parser", host: "", workedMs: total("workedMs") * 0.25, cost: cost * 0.27, prompts: 41, chats: [DEMO_CHATS[0]], chatCount: 6 },
+      { name: "pipeline", path: "/srv/pipeline", host: "build-server", workedMs: total("workedMs") * 0.15, cost: cost * 0.14, prompts: 17, chats: [DEMO_CHATS[2]], chatCount: 4 },
+      { name: "~", path: "~", host: "", workedMs: total("workedMs") * 0.05, cost: cost * 0.04, prompts: 9, chats: [], chatCount: 2 },
     ],
-    chats: [
-      { name: "Port the date parser", chatId: "demo-1", host: "", profileDir: ".claude", folder: "~/projects/date-parser", cwd: "/home/alice/projects/date-parser", workedMs: 3.2 * HOUR, cost: 41.2, prompts: 14 },
-      { name: "Release notes for 2.0", chatId: "demo-2", host: "", profileDir: ".claude", folder: "~/projects/webapp", cwd: "/home/alice/projects/webapp", workedMs: 2.4 * HOUR, cost: 29.9, prompts: 11 },
-      { name: "Nightly dependency check", chatId: "demo-3", host: "build-server", profileDir: ".claude", folder: "/srv/pipeline", workedMs: 1.6 * HOUR, cost: 17.3, prompts: 6 },
-    ],
+    chats: DEMO_CHATS,
     models: [
       { model: "Opus 5.5", cost: cost * 0.93, tokens: 590_000_000, requests: 2900, share: 0.93 },
       { model: "Sonnet 5.5", cost: cost * 0.07, tokens: 35_000_000, requests: 410, share: 0.07 },
     ],
     cacheSaved: 2290,
+    trend: back >= 3 ? [null, null, week(0.5), week(0.75), week(1)] : [week(0.4), week(0.55), week(0.6), week(0.75), week(1)],
+    spend: {
+      turns: [
+        { ...DEMO_CHATS[0], workedMs: 48 * MIN, cost: 14.8, prompts: 0, startedAt: days[3].start + 10 * HOUR, endedAt: days[3].start + 10.8 * HOUR },
+        { ...DEMO_CHATS[1], workedMs: 31 * MIN, cost: 9.6, prompts: 0, startedAt: days[4].start + 14 * HOUR, endedAt: days[4].start + 14.5 * HOUR },
+      ],
+      chats: DEMO_CHATS.slice(0, 2),
+      cold: { count: 5, cost: 11.4, chats: [{ ...DEMO_CHATS[1], resumes: 3, cost: 7.1 }] },
+    },
+    work: {
+      toolCalls: 3184, tools: [["Bash", 1410], ["Read", 902], ["Edit", 611], ["Write", 88], ["Agent", 21], ["WebFetch", 9]],
+      commands: 1410, edits: 699, files: 143, linesAdded: 9412, linesRemoved: 2210, subagents: 21, compactions: 3, webSearches: 6, webFetches: 9,
+    },
+    plan: back ? [] : [
+      { account: "0123456789ab", name: "personal", windows: [
+        { key: "seven_day", label: "7d", resetsAt: now + 2.5 * 86400000, pct: 58, points: fill(now - 4.5 * 86400000, now + 2.5 * 86400000, 58) },
+      ] },
+      { account: "ba9876543210", name: "work", windows: [
+        { key: "five_hour", label: "5h", resetsAt: now + 2 * HOUR, pct: 91, points: fill(now - 3 * HOUR, now + 2 * HOUR, 91) },
+      ] },
+    ],
+    prompts: {
+      answered: 148, refused: 2, waitMs: 3.3 * HOUR, byTool: [["Bash", 81], ["Edit", 39], ["Read", 24], ["WebFetch", 4]],
+      rules: [
+        { kind: "dir", value: "/home/alice/projects/shared-ui", project: "/home/alice/projects/webapp", count: 24, waitMs: 2.1 * HOUR,
+          example: "~/projects/shared-ui/src/button.tsx", id: "a1b2c3d4e5f6", state: "new", title: "Let chats in webapp read ~/projects/shared-ui",
+          change: "adds ~/projects/shared-ui to permissions.additionalDirectories in ~/projects/webapp/.claude/settings.local.json" },
+        { kind: "allow", value: "Bash(git log *)", project: "/home/alice/projects/date-parser", count: 11, waitMs: 14 * MIN,
+          example: "git log --oneline -20", id: "0f1e2d3c4b5a", state: "added", title: "Allow “git log” in date-parser",
+          change: "adds Bash(git log *) to permissions.allow in ~/projects/date-parser/.claude/settings.local.json" },
+      ],
+    },
     tips: [
       { key: "long_context", pct: 41, title: "Start fresh when you switch tasks", detail: "812 requests carried over 150k tokens of context", command: "/clear" },
       { key: "max_effort", pct: 22, title: "Save max effort for hard tasks", detail: "22% of your usage ran at max effort", command: "/effort xhigh" },

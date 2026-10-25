@@ -14,6 +14,7 @@ import { demoState, demoWeek } from "./shared/demo";
 import { allGroups, chatsNeedingYou, keptChat, limitReset, queuedWhat, shareUsage, toLocalClock, trackKey, type ChatSpot } from "./shared/model";
 import { chatRef } from "./notify";
 import type { ClaudeCodeInfo, DigestCard, HostState, PetEventKind, QueuedTask, Status, ViewState, WeekRecap } from "./shared/types";
+import type { WeekRuleAsk } from "./shared/week";
 import { mergeChanges, TransitionTracker, type Changes, type PetEvent } from "./transitions";
 
 const HIDDEN_POLL_MS = 10000;
@@ -479,12 +480,21 @@ export class Dashboard implements vscode.Disposable {
       const h = this.hosts.get(name);
       return !!h && h.ok && !!h.result;
     });
+    const currency = settings.recapCurrency();
     return this.backend.week([
       "--back", String(back),
       ...(account ? ["--account", account] : []),
+      ...(currency !== "USD" ? ["--currency", currency] : []),
       ...hosts.flatMap((h) => ["--host", h]),
       ...configDirArgs(),
     ]);
+  }
+
+  // A rule the Recap tab offers for permission prompts you answered: into
+  // the chats' folder's .claude/settings.local.json, or taken back
+  async weekRule(ask: WeekRuleAsk): Promise<{ ok: boolean; message: string }> {
+    if (this.demoPhase !== null) return { ok: false, message: "Not in the demo: nothing was changed" };
+    return this.backend.action("week.py", ask.allow ? ["--allow", ask.kind, ask.value, ask.project] : ["--undo", ask.id]);
   }
 
   state(): ViewState {
