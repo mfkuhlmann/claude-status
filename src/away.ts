@@ -27,7 +27,7 @@ export interface Digest {
 interface Happened {
   at: number;
   id: string;
-  kind: "finished" | "failed" | "stopped";
+  kind: "finished" | "failed" | "stopped" | "limit" | "login";
   name: string;
 }
 
@@ -41,14 +41,18 @@ export function digestOf(away: number, happened: Happened[], resets: string[], g
   const waiting: { session: Session; host?: string }[] = [];
   for (const g of groups) for (const s of g.sessions) if (s.state === "waiting") waiting.push({ session: s, host: g.host });
   waiting.sort((a, b) => (a.session.since ?? now) - (b.session.since ?? now));
-  // each chat once, as it last ended
+  // each chat once, as it last ended (a usage limit that showed a poll after
+  // its turn ended comes after the "finished")
   const last = new Map<string, Happened>();
   for (const h of happened) last.set(h.id, h);
   const ended = (kind: Happened["kind"]) => [...last.values()].filter((h) => h.kind === kind).map((h) => h.name);
   const finished = ended("finished");
   const failed = ended("failed");
   const stopped = ended("stopped");
-  if (!waiting.length && !finished.length && !failed.length && !stopped.length) return null;
+  const limited = ended("limit");
+  const loggedOut = ended("login");
+  if (!waiting.length && !finished.length && !failed.length && !stopped.length && !limited.length && !loggedOut.length)
+    return null;
   const parts: string[] = [];
   if (waiting.length) {
     const shown = waiting.map((w) => `${w.session.name} (waiting ${duration(now - (w.session.since ?? now))})`);
@@ -57,6 +61,8 @@ export function digestOf(away: number, happened: Happened[], resets: string[], g
   if (finished.length) parts.push(`Finished: ${names(finished)}`);
   if (failed.length) parts.push(`Failed: ${names(failed)}`);
   if (stopped.length) parts.push(`Stopped: ${names(stopped)}`);
+  if (limited.length) parts.push(`Hit the usage limit: ${names(limited)}`);
+  if (loggedOut.length) parts.push(`Login expired: ${names(loggedOut)}`);
   for (const r of [...new Set(resets)]) parts.push(r);
   const title = `While you were away (${duration(away)})`;
   return { away, title, lines: parts, message: `${title}: ${parts.join(" · ")}`, first: waiting[0] ?? null };
@@ -82,7 +88,8 @@ export class AwayTracker {
   note(changes: Pick<Changes, "finished">, resets: PetEvent[], now: number): void {
     if (this.sinceMs === null) return;
     for (const f of changes.finished) {
-      const kind = f.session.reason === "failed" ? "failed" : f.session.reason === "stopped" ? "stopped" : "finished";
+      const kind =
+        f.stop || (f.session.reason === "failed" ? "failed" : f.session.reason === "stopped" ? "stopped" : "finished");
       this.happened.push({ at: f.at, id: f.id, kind, name: f.session.name });
     }
     for (const r of resets) if (r.kind === "reset") this.resets.push({ at: now, text: r.text.replace(/!+$/, "") });

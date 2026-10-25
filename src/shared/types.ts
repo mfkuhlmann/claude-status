@@ -481,7 +481,7 @@ export interface ViewState {
   now: number;
 }
 
-export type PetEventKind = "waiting" | "done" | "failed" | "stopped" | "reset" | "oops";
+export type PetEventKind = "waiting" | "done" | "failed" | "stopped" | "limit" | "reset" | "oops";
 
 // The Recap tab: your last 7 days with Claude (the widget's week.py, read
 // from the chats' transcripts when the tab asks, never in the status checks)

@@ -57,7 +57,8 @@ As an editor tab (**Claude Status: Open in Editor Tab**):
   fills up as tasks get done; a chat in plan mode, auto mode, accept edits or
   don't ask says so, and one that bypasses permissions says so in red.
 - **Chats a usage limit stopped** say so in red, with when the limit resets;
-  their pet's battery runs low. Once it has reset, a notification says which
+  their pet's battery runs low, and the notification says the chat hit the
+  usage limit, not that it finished. Once it has reset, a notification says which
   chats can go on. Meanwhile **Continue on …** under the chat moves it to
   another account with room left (shared with it, then reopened there), or
   **⏱ Go on at 10:41** has it go on by itself in the background once the
@@ -134,7 +135,8 @@ As an editor tab (**Claude Status: Open in Editor Tab**):
   where `ssh` asks for it, so the extension never sees it; the checks then
   use that connection (until 30 minutes after their last use, logging out,
   or the host's **Disconnect** button).
-- **Notifications** (and a sound) when a chat needs you or finishes a long turn.
+- **Notifications** (and a sound) when a chat needs you or finishes a long turn,
+  or a usage limit stops it.
 - **The status bar**: how many chats need you, the 5-hour usage, and with
   two or more accounts which one VS Code's Claude runs on (**Claude: work**):
   click it to change the default account.

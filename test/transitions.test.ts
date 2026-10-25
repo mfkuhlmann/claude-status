@@ -74,6 +74,37 @@ test("finished turns are reported with how long they took", () => {
   assert.deepEqual([r.finished[0].id, r.finished[0].host, r.finished[0].took], [`ssh:lab|${s.profileDir}/${s.chatId}`, "lab", 120000]);
 });
 
+test("a turn a usage limit or the login broke off isn't finished", () => {
+  const limit = { kind: "limit" as const, window: "five_hour", text: "You've hit your session limit · resets 4am (Europe/Berlin)", at: NOW };
+  const login = { ...limit, kind: "login" as const, window: null, text: "Login expired · Please run /login" };
+  const t = new TransitionTracker();
+  const g = demoState(NOW).status!.groups[0];
+  const at = (since: number, rows: [string, SessionState, object?][]) => [{
+    ...g, sessions: rows.map(([id, state, extra]) => ({ ...g.sessions[0], key: id, chatId: id, sessionId: id, name: id, state, since, reason: "", stopped: null, ...extra })),
+  }];
+  const kept = { ...OPTS, kept: (chat: string) => chat === "a" };
+  t.track("", at(NOW, [["a", "working"], ["b", "working"], ["c", "working"], ["d", "working"], ["e", "working"]]), NOW, undefined, kept);
+  // a: its limit shows at once; b: the transcript isn't written yet; c (in the
+  // background) says it waits; d: finished; e: the login expired
+  let r = t.track("", at(NOW + 60000, [["a", "idle", { stopped: limit }], ["b", "idle"], ["c", "waiting"], ["d", "idle"],
+    ["e", "idle", { stopped: login }]]), NOW + 60000, undefined, kept);
+  assert.deepEqual(r.notices.map((n) => [n.session.name, n.kind, n.title]), [["a", "stopped", "a hit the usage limit"],
+    ["b", "done", "b finished"], ["c", "waiting", "c needs your input"], ["d", "done", "d finished"],
+    ["e", "stopped", "e stopped: the login expired"]]);
+  assert.match(r.notices[0].body, /^You've hit your session limit · resets 4am \(Europe\/Berlin\) · It goes on by itself after the reset · Took 1m/);
+  assert.deepEqual(r.petEvents.map((e) => e.kind), ["limit", "done", "waiting", "done", "stopped"]);
+  assert.deepEqual(r.finished.map((f) => [f.session.name, f.stop]), [["a", "limit"], ["b", ""], ["d", ""], ["e", "login"]]);
+  // a poll later b's and c's limits show: they're said so instead
+  const stoppedAll = (d: object | undefined): [string, SessionState, object?][] =>
+    [["a", "idle", { stopped: limit }], ["b", "idle", { stopped: limit }], ["c", "idle", { stopped: limit }], ["d", "idle", d], ["e", "idle", { stopped: login }]];
+  r = t.track("", at(NOW + 60000, stoppedAll(undefined)), NOW + 62000, undefined, kept);
+  assert.deepEqual(r.notices.map((n) => [n.session.name, n.kind]), [["b", "stopped"], ["c", "stopped"]]);
+  assert.deepEqual(r.finished.map((f) => [f.session.name, f.stop]), [["b", "limit"], ["c", "limit"]]);
+  assert.equal(r.sound, "failed");
+  // only one poll later: a limit that shows up after that is another turn's
+  assert.deepEqual(t.track("", at(NOW + 60000, stoppedAll({ stopped: limit })), NOW + 64000, undefined, kept).notices, []);
+});
+
 test("a chat keeps its notifications while its row changes, and a chat listed twice counts once", () => {
   const t = new TransitionTracker();
   const row = (state: SessionState, suffix: string, since: number) => {

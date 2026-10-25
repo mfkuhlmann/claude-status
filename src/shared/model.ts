@@ -198,7 +198,13 @@ export function countStates(groups: Group[]): Counts {
 // A chat a usage limit stopped, until it resets (whether a process still has
 // it open or not): it waits for the limit, not for you
 export function atLimit(s: Pick<Session, "state" | "stopped">): boolean {
-  return (s.state === "idle" || s.state === "done") && s.stopped?.kind === "limit" && !s.stopped.over;
+  return stopOf(s) === "limit";
+}
+
+// What stopped a chat's turn before it was through, while that holds: a usage
+// limit (until it resets) or an expired login, else ""
+export function stopOf(s: Pick<Session, "state" | "stopped">): Stop["kind"] | "" {
+  return (s.state === "idle" || s.state === "done") && s.stopped && !s.stopped.over ? s.stopped.kind : "";
 }
 
 export function overallState(groups: Group[], counts: Counts): Overall {

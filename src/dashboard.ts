@@ -11,7 +11,7 @@ import { settings, statusArgs, configDirArgs, viewSettings } from "./config";
 import type { Notifier } from "./notify";
 import { currentRemoteHost } from "./remoteHost";
 import { demoState, demoWeek } from "./shared/demo";
-import { allGroups, chatsNeedingYou, limitReset, queuedWhat, shareUsage, toLocalClock, trackKey, type ChatSpot } from "./shared/model";
+import { allGroups, chatsNeedingYou, keptChat, limitReset, queuedWhat, shareUsage, toLocalClock, trackKey, type ChatSpot } from "./shared/model";
 import { chatRef } from "./notify";
 import type { ClaudeCodeInfo, DigestCard, HostState, PetEventKind, QueuedTask, Status, ViewState, WeekRecap } from "./shared/types";
 import { mergeChanges, TransitionTracker, type Changes, type PetEvent } from "./transitions";
@@ -212,7 +212,7 @@ export class Dashboard implements vscode.Disposable {
       const { status, error } = await this.backend.status([...configDirArgs(), ...statusArgs(), ...this.localArgs()]);
       if (status) {
         this.errorText = status.errors.length ? status.errors.join("\n") : "";
-        const opts = this.notifyOptions();
+        const opts = { ...this.notifyOptions(), kept: (chat: string) => !!keptChat(status, chat) };
         const changes = mergeChanges(
           mergeChanges(
             this.tracker.track("", status.groups, status.generatedAt, undefined, opts),
@@ -374,9 +374,10 @@ export class Dashboard implements vscode.Disposable {
   // long enough to notify about) waits for you: the shortcut to the chat that
   // needs you goes there too
   private noteUnseen(changes: Changes): void {
+    for (const f of changes.finished) if (f.stop) this.unseen.delete(f.id); // (a limit broke it off: nothing to look at)
     if (this.visible && vscode.window.state.focused) return;
     const min = settings.notifyDoneMinSeconds() * 1000;
-    for (const f of changes.finished) if (f.took >= min) this.unseen.set(f.id, f.at);
+    for (const f of changes.finished) if (!f.stop && f.took >= min) this.unseen.set(f.id, f.at);
   }
 
   // The chats that need you, most urgent first (model.chatsNeedingYou)

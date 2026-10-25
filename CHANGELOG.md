@@ -43,6 +43,15 @@
 - **When a limit resets:** hovering over *resets in 2h 5m* (a plan window's,
   or a chat's *Limit · resets in …*) shows the time it resets, with the day
   when that isn't today.
+- **A chat a usage limit stops isn't "finished":** its notification said
+  *… finished*, the pet cheered and the summary for when you're back listed
+  it under *Finished*. Now it says *… hit the usage limit* with Claude's
+  message (which limit, when it resets), and *It goes on by itself after the
+  reset* for a chat that keeps going; the pet is out of steam, the sound is
+  the one for a failed turn, and the summary has a line *Hit the usage
+  limit: …*. A chat whose login expired says that. Claude writes a chat's
+  last message a moment after its turn ends, so now and then the limit
+  showed only on the next check: a second notification says so then.
 - The backend is the widget's at 633e0f2.
 - **A recent chat reopened in a Claude Code tab** opens in this window when
   it has the chat's project open. Where Claude had gone into a subfolder

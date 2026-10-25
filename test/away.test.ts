@@ -41,7 +41,7 @@ test("no digest for a short absence, for nothing new, or for time spent in anoth
   assert.equal(away.back(NOW + 2 * MIN, NOW, quiet, 5 * MIN), null, "short");
   away.leave(NOW);
   assert.equal(away.back(NOW + 60 * MIN, NOW, quiet, 5 * MIN), null, "nothing happened");
-  const finished = { finished: [{ id: "c0", session: quiet[0].sessions[0], took: MIN, at: NOW + 10 * MIN }] };
+  const finished = { finished: [{ id: "c0", session: quiet[0].sessions[0], took: MIN, at: NOW + 10 * MIN, stop: "" as const }] };
   away.leave(NOW);
   away.note(finished, [], NOW + 10 * MIN);
   assert.equal(away.back(NOW + 60 * MIN, NOW + 59 * MIN, quiet, 5 * MIN), null, "another VS Code window was in use until a minute ago");
@@ -51,11 +51,29 @@ test("no digest for a short absence, for nothing new, or for time spent in anoth
   assert.equal(away.since, null);
 });
 
+test("chats a usage limit or the login stopped are said so, also when the limit showed a poll late", () => {
+  const limit = { kind: "limit" as const, window: "five_hour", text: "You've hit your session limit · resets 4am (Europe/Berlin)", at: NOW };
+  const login = { ...limit, kind: "login" as const, window: null, text: "Login expired" };
+  const tracker = new TransitionTracker();
+  const away = new AwayTracker();
+  tracker.track("", groups([{ name: "parser", state: "working" }, { name: "deploy", state: "working" }, { name: "train", state: "working" }]), NOW, undefined, OPTS);
+  away.leave(NOW);
+  const later = NOW + 30 * MIN;
+  const at = (deployStopped: boolean) => groups([
+    { name: "parser", state: "idle", since: later, stopped: limit },
+    { name: "deploy", state: "idle", since: later, stopped: deployStopped ? limit : null },
+    { name: "train", state: "idle", since: later, stopped: login },
+  ]);
+  away.note(tracker.track("", at(false), later, undefined, OPTS), [], later);
+  away.note(tracker.track("", at(true), later + 2000, undefined, OPTS), [], later + 2000); // deploy's limit shows a poll later
+  assert.deepEqual(away.back(NOW + 72 * MIN, NOW, at(true), 5 * MIN)!.lines, ["Hit the usage limit: parser, deploy", "Login expired: train"]);
+});
+
 test("long lists are cut short", () => {
   const away = new AwayTracker();
   away.leave(NOW);
   const g = groups([{ state: "idle" }]);
-  away.note({ finished: ["a", "b", "c", "d", "e"].map((name, i) => ({ id: `c${i}`, session: { ...g[0].sessions[0], name }, took: MIN, at: NOW + MIN })) }, [], NOW);
+  away.note({ finished: ["a", "b", "c", "d", "e"].map((name, i) => ({ id: `c${i}`, session: { ...g[0].sessions[0], name }, took: MIN, at: NOW + MIN, stop: "" as const })) }, [], NOW);
   assert.deepEqual(away.back(NOW + 10 * MIN, 0, g, 5 * MIN)!.lines, ["Finished: a, b, c +2 more"]);
 });
 
@@ -70,12 +88,15 @@ test("while you're away, finished chats wait for the digest; chats that need you
   const backend = { sound: (s: string) => sounds.push(s) } as never;
   const notifier = new Notifier(backend, () => undefined);
   const g = groups([{ name: "parser", state: "idle" }, { name: "deploy", state: "waiting" }]);
-  const notice = (kind: "done" | "waiting", s: Session) => ({ key: s.key, kind, title: `${s.name} ${kind}`, body: "", session: s });
-  const changes = { notices: [notice("done", g[0].sessions[0]), notice("waiting", g[0].sessions[1])], petEvents: [], sound: "waiting" as const, finished: [] };
+  const notice = (kind: "done" | "waiting" | "stopped", s: Session) => ({ key: s.key, kind, title: `${s.name} ${kind}`, body: "", session: s });
+  const changes = {
+    notices: [notice("done", g[0].sessions[0]), notice("waiting", g[0].sessions[1]), notice("stopped", g[0].sessions[0])],
+    petEvents: [], sound: "waiting" as const, finished: [],
+  };
   vscode.recorded.messages.length = 0;
   notifier.handle({ ...changes, sound: "done" }, { holdDone: true });
   assert.deepEqual(vscode.recorded.messages, ["deploy waiting — "]);
   notifier.handle(changes, {});
-  assert.deepEqual(vscode.recorded.messages, ["deploy waiting — ", "parser done — ", "deploy waiting — "]);
+  assert.deepEqual(vscode.recorded.messages, ["deploy waiting — ", "parser done — ", "deploy waiting — ", "parser stopped — "]);
   notifier.dispose();
 });

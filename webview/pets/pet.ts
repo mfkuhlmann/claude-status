@@ -496,7 +496,7 @@ export class Pet {
   // Something happened to its chat (or, for the hero, to an account)
   event(kind: string, text: string): void {
     if (this.held || this.leaving) return; // (a reaction now would stop it digging away)
-    const action = ({ done: "finished", failed: "failed", stopped: "shrug", oops: "confused", reset: "charged" } as
+    const action = ({ done: "finished", failed: "failed", stopped: "shrug", limit: "battery", oops: "confused", reset: "charged" } as
       Record<string, string>)[kind];
     this.talpa.react(action || "alert");
     this.say(text);

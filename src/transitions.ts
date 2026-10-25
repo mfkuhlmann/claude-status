@@ -3,12 +3,12 @@
 // source is "" for this computer and "ssh:<host>" for an SSH host; each keeps
 // its own memory, so one poll never decides for another.
 
-import { duration, petKeyOf, plural, reasonText } from "./shared/model";
-import type { Group, PetEventKind, Session, SessionState } from "./shared/types";
+import { duration, petKeyOf, plural, reasonText, stopOf } from "./shared/model";
+import type { Group, PetEventKind, Session, SessionState, Stop } from "./shared/types";
 
 export interface Notice {
   key: string; // the row: one notification per row at a time
-  kind: "waiting" | "done";
+  kind: "waiting" | "done" | "stopped"; // stopped: a usage limit (or an expired login) broke its turn off
   title: string;
   body: string;
   session: Session;
@@ -31,6 +31,7 @@ export interface Finished {
   host?: string;
   took: number; // how long the turn ran, ms
   at: number;
+  stop: Stop["kind"] | ""; // what broke it off (stopOf): then it didn't finish
 }
 
 export interface Changes {
@@ -44,6 +45,7 @@ export interface NotifyOptions {
   notifyWaiting: boolean;
   notifyDone: boolean;
   notifyDoneMinSeconds: number;
+  kept?: (chatId: string) => boolean; // a chat of this computer that keeps going (goes on when a limit resets)
 }
 
 const SOUND_RANK: Record<SoundKind, number> = { "": 0, done: 1, failed: 2, waiting: 3 };
@@ -64,6 +66,7 @@ export class TransitionTracker {
   private lastOverlaps = new Map<string, Set<string>>(); // source -> pairs of rows changing the same files
   private lastStates = new Map<string, Map<string, SessionState>>();
   private turnStarts = new Map<string, Map<string, number>>();
+  private lastEnded = new Map<string, Map<string, number>>(); // the turns that ended at the last poll, told as finished: how long they took
   private lastWaitingAlert = new Map<string, number>();
   private lastWindows = new Map<string, number>();
 
@@ -71,8 +74,10 @@ export class TransitionTracker {
     const changes: Changes = { notices: [], petEvents: [], sound: "", finished: [] };
     const next = new Map<string, SessionState>();
     const starts = new Map<string, number>();
+    const ends = new Map<string, number>();
     const before = this.lastStates.get(source);
     const startedAt = this.turnStarts.get(source) ?? new Map<string, number>();
+    const ended = this.lastEnded.get(source) ?? new Map<string, number>();
     const primed = before !== undefined; // the first poll of a source only learns
     const where = host ? ` · ${host}` : "";
     const queueSound = (kind: SoundKind) => {
@@ -89,7 +94,16 @@ export class TransitionTracker {
         next.set(sid, s.state);
         // A turn runs from leaving idle/done until coming back to it.
         if (s.state === "working" || s.state === "waiting") starts.set(sid, startedAt.get(sid) ?? s.since ?? nowMs);
-        if (!primed || prev === s.state) continue;
+        if (!primed) continue;
+        const stop = stopOf(s);
+        const endedTook = ended.get(sid);
+        if (stop && endedTook !== undefined) {
+          // Claude writes its transcript a moment after the turn ends, so the
+          // usage limit that ended it can show a poll later: it didn't finish after all
+          this.turnEnded(changes, sid, s, host, endedTook, nowMs, opts, queueSound);
+          continue;
+        }
+        if (prev === s.state) continue;
         const pk = petKeyOf(s, host);
         if (s.state === "waiting") {
           // At most one "needs input" alert per session per minute
@@ -107,25 +121,11 @@ export class TransitionTracker {
             });
             queueSound("waiting");
           }
-        } else if (prev === "working" && (s.state === "idle" || s.state === "done")) {
-          if (s.reason === "failed") changes.petEvents.push({ kind: "failed", text: `${s.name} failed…`, key: pk });
-          else if (s.reason === "stopped") changes.petEvents.push({ kind: "stopped", text: `${s.name} was stopped.`, key: pk });
-          else changes.petEvents.push({ kind: "done", text: `${s.name} is done!`, key: pk });
+        } else if ((prev === "working" || (stop && prev === "waiting")) && (s.state === "idle" || s.state === "done")) {
+          // (a background session a limit stops can say it waits for a moment first)
           const took = (s.since ?? nowMs) - (startedAt.get(sid) ?? nowMs);
-          changes.finished.push({ id: sid, session: s, host, took, at: nowMs });
-          if (opts.notifyDone && took >= opts.notifyDoneMinSeconds * 1000) {
-            const title =
-              s.reason === "failed" ? `${s.name} failed` : s.reason === "stopped" ? `${s.name} was stopped` : `${s.name} finished`;
-            changes.notices.push({
-              key: sid,
-              kind: "done",
-              title,
-              body: `${s.detail ? s.detail + " · " : ""}Took ${duration(took)} · ${s.cwdShort}${where}`,
-              session: s,
-              host,
-            });
-            queueSound(s.reason === "failed" ? "failed" : "done");
-          }
+          this.turnEnded(changes, sid, s, host, took, nowMs, opts, queueSound);
+          if (!stop) ends.set(sid, took);
         }
       }
     }
@@ -133,7 +133,57 @@ export class TransitionTracker {
       if ((source ? key.startsWith(source + "|") : !key.includes("|")) && !next.has(key)) this.lastWaitingAlert.delete(key);
     this.lastStates.set(source, next);
     this.turnStarts.set(source, starts);
+    this.lastEnded.set(source, ends);
     return changes;
+  }
+
+  // A chat's turn ended (it was working, it's idle or done now) after took ms:
+  // its pet reacts and a notice says how. A turn a usage limit or an expired
+  // login broke off didn't finish.
+  private turnEnded(
+    changes: Changes,
+    sid: string,
+    s: Session,
+    host: string | undefined,
+    took: number,
+    nowMs: number,
+    opts: NotifyOptions,
+    queueSound: (kind: SoundKind) => void,
+  ): void {
+    const where = host ? ` · ${host}` : "";
+    const stop = stopOf(s);
+    const pk = petKeyOf(s, host);
+    if (stop === "limit") changes.petEvents.push({ kind: "limit", text: `${s.name} hit the usage limit.`, key: pk });
+    else if (stop === "login") changes.petEvents.push({ kind: "stopped", text: `${s.name}: the login expired.`, key: pk });
+    else if (s.reason === "failed") changes.petEvents.push({ kind: "failed", text: `${s.name} failed…`, key: pk });
+    else if (s.reason === "stopped") changes.petEvents.push({ kind: "stopped", text: `${s.name} was stopped.`, key: pk });
+    else changes.petEvents.push({ kind: "done", text: `${s.name} is done!`, key: pk });
+    changes.finished.push({ id: sid, session: s, host, took, at: nowMs, stop });
+    if (!opts.notifyDone || took < opts.notifyDoneMinSeconds * 1000) return;
+    if (stop) {
+      const kept = stop === "limit" && !host && !!opts.kept?.(s.chatId || s.sessionId);
+      changes.notices.push({
+        key: sid,
+        kind: "stopped",
+        title: stop === "limit" ? `${s.name} hit the usage limit` : `${s.name} stopped: the login expired`,
+        body: `${s.stopped?.text ?? ""} · ${kept ? "It goes on by itself after the reset · " : ""}Took ${duration(took)} · ${s.cwdShort}${where}`,
+        session: s,
+        host,
+      });
+      queueSound("failed");
+      return;
+    }
+    const title =
+      s.reason === "failed" ? `${s.name} failed` : s.reason === "stopped" ? `${s.name} was stopped` : `${s.name} finished`;
+    changes.notices.push({
+      key: sid,
+      kind: "done",
+      title,
+      body: `${s.detail ? s.detail + " · " : ""}Took ${duration(took)} · ${s.cwdShort}${where}`,
+      session: s,
+      host,
+    });
+    queueSound(s.reason === "failed" ? "failed" : "done");
   }
 
   // Chats a usage limit stopped whose limit has reset since the last poll:
@@ -219,6 +269,7 @@ export class TransitionTracker {
     this.lastOverlaps.delete(source);
     this.lastStates.delete(source);
     this.turnStarts.delete(source);
+    this.lastEnded.delete(source);
     const prefix = source + "|";
     for (const k of [...this.lastWindows.keys()]) if (k.startsWith(prefix)) this.lastWindows.delete(k);
   }

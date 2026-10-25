@@ -81,13 +81,13 @@ export class Notifier implements vscode.Disposable {
     return true;
   }
 
-  // holdDone: you're away; finished chats wait for the digest (away.ts)
+  // holdDone: you're away; finished (and stopped) chats wait for the digest (away.ts)
   handle(changes: Changes, opts: { holdDone?: boolean } = {}): void {
-    const notices = opts.holdDone ? changes.notices.filter((n) => n.kind !== "done") : changes.notices;
+    const notices = opts.holdDone ? changes.notices.filter((n) => n.kind === "waiting") : changes.notices;
     if (!notices.length || !this.isLeader()) return;
     for (const n of notices) {
       const text = `${n.title} — ${n.body}`;
-      const show = n.kind === "waiting" ? vscode.window.showWarningMessage : vscode.window.showInformationMessage;
+      const show = n.kind === "done" ? vscode.window.showInformationMessage : vscode.window.showWarningMessage;
       void show(text, "Open").then((choice) => {
         if (choice === "Open") this.open(chatRef(n.session, n.host));
       });
