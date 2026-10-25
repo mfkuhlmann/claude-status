@@ -602,29 +602,38 @@ ColumnLayout {
                     clickable: goingOn !== null || goOnAt > 0
                     tooltipTitle: goingOn ? i18n("Goes on by itself at %1", root.clockText(goingOn.startAt))
                                           : i18n("A usage limit stopped it")
-                    tooltip: (goingOn ? i18n("In the background, telling Claude that the limit has reset (if it didn't go on before then).")
+                    tooltip: (goingOn ? i18n("In the background, in the permission mode it had, telling Claude that the limit has reset (if it didn't go on before then).")
                               : (recentLine.chat.stopped ? recentLine.chat.stopped.text : "")
-                                + (goOnAt > 0 ? "\n\n" + i18n("Click to have it go on by itself in the background at %1, a minute after the limit resets.", root.clockText(goOnAt)) : ""))
-                             + (section.remoteHost || (!goingOn && !(goOnAt > 0)) ? "" : " " + i18n("It goes on by itself after later limits too, until it's done."))
+                                + (goOnAt > 0 ? "\n\n" + i18n("Click to have it go on by itself in the background at %1, a minute after the limit resets, once.", root.clockText(goOnAt))
+                                                + (section.remoteHost ? "" : " " + i18n("↻ beside it: after later limits too, until it's done.")) : ""))
                              + (goingOn ? "\n\n" + i18n("Click to cancel it.") : "")
                     onClicked: {
                         if (goingOn)
                             root.unqueue(goingOn)
                         else
-                            root.queueContinue(recentLine.chat, section.remoteHost, section.group.title)
+                            root.queueContinue(recentLine.chat, section.remoteHost, section.group.title, false)
                     }
                 }
-                // it keeps going, with no go-on queued now (e.g. it gave up); click: not any more
+                // it keeps going (click: not any more), or a limit stopped it and it can (click: it does)
                 Tag {
                     readonly property var kept: section.remoteHost ? null : root.keptChat(recentLine.chat.sessionId)
-                    visible: kept !== null && root.queuedChat(recentLine.chat.sessionId, section.remoteHost) === null
+                    readonly property bool canKeep: kept === null && !section.remoteHost && root.goOnAt(recentLine.chat) > 0
+                                                    && root.queuedChat(recentLine.chat.sessionId, section.remoteHost) === null
+                    visible: kept !== null || canKeep
                     text: i18nc("a chat that goes on by itself after usage limits", "↻")
                     active: kept !== null && !kept.error
                     warning: kept !== null && (!!kept.error || !!kept.note)
                     clickable: true
-                    tooltipTitle: i18n("Keeps going until it's done")
-                    tooltip: kept ? root.keptText(kept) : ""
-                    onClicked: root.keepGoing(recentLine.chat, false)
+                    tooltipTitle: kept ? i18n("Keeps going until it's done") : i18n("Keep going until it's done")
+                    tooltip: kept ? root.keptText(kept)
+                                  : i18n("Click to have it go on by itself in the background at %1, a minute after the limit resets, in the permission mode it had, and again after each later limit that stops it, until a turn of it ends by itself.",
+                                         root.clockText(root.goOnAt(recentLine.chat)))
+                    onClicked: {
+                        if (kept)
+                            root.keepGoing(recentLine.chat, false)
+                        else
+                            root.queueContinue(recentLine.chat, section.remoteHost, section.group.title, true)
+                    }
                 }
                 PlasmaComponents3.Label {
                     id: recentFolder

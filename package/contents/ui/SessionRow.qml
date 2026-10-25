@@ -314,7 +314,7 @@ RowLayout {
                     textFormat: Text.PlainText
                     anchors.fill: parent
                     mainText: i18n("Keep going until it's done")
-                    subText: i18n("When a usage limit stops this chat, it goes on by itself in the background a minute after the limit resets, and again after each later one, until a turn of it ends by itself. Claude here quits first then (its terminal stays open); open the chat from here to see it.")
+                    subText: i18n("When a usage limit stops this chat, it goes on by itself in the background a minute after the limit resets, in the permission mode it had, and again after each later one, until a turn of it ends by itself. Claude here quits first then (its terminal stays open); open the chat from here to see it.")
                 }
             }
             PlasmaComponents3.ToolButton {
@@ -549,26 +549,48 @@ RowLayout {
                         if (row.goingOn)
                             root.unqueue(row.goingOn)
                         else
-                            root.queueContinue(row.session, row.remoteHost, row.account)
+                            root.queueContinue(row.session, row.remoteHost, row.account, false)
                     }
 
                     PlasmaCore.ToolTipArea {
                         textFormat: Text.PlainText
                         anchors.fill: parent
                         mainText: row.goingOn ? i18n("Goes on by itself at %1", root.clockText(row.goingOn.startAt))
-                                              : i18n("Go on by itself after the limit resets")
+                                              : i18n("Go on once the limit resets")
                         subText: (row.goingOn ? "" : i18n("At %1, a minute after the limit resets, the chat goes on in the background, telling Claude that the limit has reset.", root.clockText(row.goOnAt)) + " ")
                                  + (row.session.pid === null || row.session.pid === undefined ? ""
                                     : row.session.kind === "bg" ? i18n("This background session is stopped first (claude stop).")
                                     : i18n("Claude here quits first (its terminal stays open); open the chat from here to see it.")) + " "
+                                 + i18n("It goes on in the permission mode it had.") + " "
                                  + i18n("If it went on before then, nothing happens.")
-                                 + (row.remoteHost ? "" : " " + i18n("It goes on by itself after later limits too, until it's done."))
-                                 + (row.goingOn ? "\n\n" + i18n("Click to cancel it.") : "")
+                                 + (row.goingOn ? "" : " " + (row.remoteHost ? i18n("This happens once.")
+                                                              : i18n("This happens once: to have it go on after later limits too, choose Keep going.")))
+                                 + (row.goingOn ? "\n\n" + (row.kept ? i18n("Click to cancel it: then it doesn't keep going either.")
+                                                                     : i18n("Click to cancel it.")) : "")
+                    }
+                }
+                // or go on then, and after each later limit too, until it's done
+                PlasmaComponents3.ToolButton {
+                    visible: row.goOnAt > 0 && row.goingOn === null && row.kept === null && !row.remoteHost
+                    icon.name: "media-playlist-repeat"
+                    text: i18n("Keep going")
+                    font: Kirigami.Theme.smallFont
+                    Layout.preferredHeight: stepLabel.implicitHeight + Kirigami.Units.smallSpacing
+                    onClicked: root.queueContinue(row.session, row.remoteHost, row.account, true)
+
+                    PlasmaCore.ToolTipArea {
+                        textFormat: Text.PlainText
+                        anchors.fill: parent
+                        mainText: i18n("Keep going until it's done")
+                        subText: i18n("At %1, a minute after the limit resets, the chat goes on in the background, in the permission mode it had, and again after each later limit that stops it, until a turn of it ends by itself.", root.clockText(row.goOnAt))
+                                 + " " + (row.session.pid === null || row.session.pid === undefined ? ""
+                                          : row.session.kind === "bg" ? i18n("This background session is stopped first (claude stop).")
+                                          : i18n("Claude here quits first (its terminal stays open); open the chat from here to see it."))
                     }
                 }
                 // it keeps going: after each usage limit, on by itself (click: not any more)
                 Tag {
-                    visible: row.kept !== null && row.goingOn === null
+                    visible: row.kept !== null
                     text: i18nc("a chat that goes on by itself after usage limits", "↻ keeps going")
                     active: row.kept !== null && !row.kept.error
                     warning: row.kept !== null && (!!row.kept.error || !!row.kept.note)

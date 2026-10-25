@@ -329,6 +329,8 @@ PlasmoidItem {
                                            ? " --model " + shellQuote(Plasmoid.configuration.newChatModel) : "")
                                           + (Plasmoid.configuration.newChatEffort
                                              ? " --effort " + shellQuote(Plasmoid.configuration.newChatEffort) : "")
+                                          + (Plasmoid.configuration.newChatMode
+                                             ? " --permission-mode " + shellQuote(Plasmoid.configuration.newChatMode) : "")
 
     // ---------------------------------------------------------------- several widgets
     // This widget can run several times, e.g. on a panel, in the system tray
@@ -345,7 +347,7 @@ PlasmoidItem {
         "notifyDoneMinSeconds", "notifySound", "soundVolume", "soundWaiting", "soundDone", "soundFailed", "recentChats",
         "sshHosts", "remotePollSeconds", "sshUsage", "keepDoneHours", "showUsageInPanel", "showPet", "chatPets", "showTokens",
         "newChatInVscode", "iconBlink", "awayDigest", "awayMinutes", "phoneWhileAway", "phoneFinished", "phoneDevice",
-        "markdownApp", "newChatModel", "newChatEffort", "usageCap"]
+        "markdownApp", "newChatModel", "newChatEffort", "newChatMode", "usageCap"]
     property real settingsSeenAt: 0     // the newest shared settings this copy has seen
     property string settingsSeen: ""    // its own settings as of the last check (to see changes)
 
@@ -2025,7 +2027,8 @@ PlasmoidItem {
         return stop.resetsAt + 60000
     }
 
-    function queueContinue(session, host, account) {
+    // (keep: and after later limits too, until it's done; this computer's chats only)
+    function queueContinue(session, host, account, keep) {
         const at = goOnAt(session)
         if (!at)
             return
@@ -2033,13 +2036,15 @@ PlasmoidItem {
                              + shellQuote(session.chatId || session.sessionId) + " --profile " + shellQuote(session.profileDir)
                              + " --at " + Math.round(at) + (session.cwd ? " --cwd " + shellQuote(session.cwd) : "")
                              + " --name " + shellQuote(session.name || "") + (host ? " --host " + shellQuote(host) : "")
+                             + (keep && !host ? " --keep" : "")
                              + " --account " + shellQuote(account) + configDirArgs + " # " + Date.now())
     }
 
     // ---------------------------------------------------------------- chats that keep going
     // A chat of this computer can keep going until it's done: after each usage
     // limit that stops it, it goes on by itself when that resets (claude_status.py:
-    // look_after_kept; jump.py --keep-going, --keep-off). Go on at … does it too.
+    // look_after_kept; jump.py --keep-going, --keep-off). One a limit stopped
+    // can start keeping going then (jump.py --queue-continue --keep).
 
     // The chat that keeps going ({chat, note, error, …}), or null
     function keptChat(chatId) {
@@ -2069,7 +2074,7 @@ PlasmoidItem {
             lines.push(kept.error)
         else if (kept.note)
             lines.push(kept.note)
-        lines.push(i18n("Click to stop it keeping going."))
+        lines.push(i18n("Click to stop it keeping going (a go-on that's queued already stays)."))
         return lines.join("\n\n")
     }
 
@@ -2764,7 +2769,8 @@ PlasmoidItem {
         }
         if (host) {
             if (background || (hasTask && !inVscode)) {
-                // remote.py --task HOST PROFILE FOLDER [--prompt TEXT] [--plan SLUG PROFILE] [--model M] [--effort E] [--bg]
+                // remote.py --task HOST PROFILE FOLDER [--prompt TEXT] [--plan SLUG PROFILE] [--model M] [--effort E]
+                //           [--permission-mode MODE] [--bg]
                 remoteAction(background ? "task" : "open", host, "--task " + shellQuote(host) + " " + shellQuote(group.chatProfile)
                              + " " + shellQuote(folder.path || "~") + (text ? " --prompt " + shellQuote(text) : "")
                              + (plan ? " --plan " + shellQuote(plan.slug) + " " + shellQuote(plan.profileDir) : "")

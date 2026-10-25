@@ -554,22 +554,27 @@ class TaskTests(TaskFixture):
             jump.main(["--new-chat", ".claude-work", "--cwd", str(self.folder), "--prompt", "write tests",
                        "--model", "claude-opus-5-5[1m]", "--effort", "max"])
             jump.main(["--new-chat", ".claude-work", "--cwd", str(self.folder), "--prompt", "go on", "--bg",
-                       "--model", "sonnet", "--effort", "high"])
+                       "--model", "sonnet", "--effort", "high", "--permission-mode", "plan"])
             jump.main(["--new-chat", ".claude-work", "--cwd", str(self.folder), "--model", "opus", "--effort", "extreme"])
             jump.main(["--new-chat", ".claude-work", "--cwd", str(self.folder), "--model", "opus; rm -rf ~"])
+            jump.main(["--new-chat", ".claude-work", "--cwd", str(self.folder), "--permission-mode", "yolo"])
+            jump.main(["--new-chat", ".claude-work", "--cwd", str(self.folder), "--permission-mode", "manual"])
         answers = [json.loads(l) for l in out.getvalue().splitlines()]
-        self.assertEqual([a["ok"] for a in answers], [True, True, True, False, False])
+        self.assertEqual([a["ok"] for a in answers], [True, True, True, False, False, False, True])
         self.assertIn("Not an effort level: extreme", answers[3]["message"])
         self.assertEqual(answers[4]["message"], "Not a model name: opus; rm -rf ~")
-        plain, task = (shlex.split(c) for c in opened)
+        self.assertIn("Not a permission mode: yolo", answers[5]["message"])
+        plain, task, manual = (shlex.split(c) for c in opened)
         self.assertEqual(plain[-4:], ["--model", "opus", "--effort", "xhigh"])
         self.assertEqual(task[-5:], ["--model", "claude-opus-5-5[1m]", "--effort", "max", "write tests"])
+        self.assertEqual(manual[-2:], ["--permission-mode", "default"], "(the name older Claude knows too)")
         call, = self.calls()
-        self.assertEqual(call["argv"], ["--bg", "--model", "sonnet", "--effort", "high", "go on"])
+        self.assertEqual(call["argv"], ["--bg", "--model", "sonnet", "--effort", "high", "--permission-mode", "plan", "go on"])
         # an SSH host's task, there: the same
         answer = cs.run_task(self.home, [], False, str(self.folder), ".claude-work", "go on", model="opus",
-                             effort="xhigh", claude="claude")
-        self.assertEqual(shlex.split(answer["command"])[-5:], ["--model", "opus", "--effort", "xhigh", "go on"])
+                             effort="xhigh", claude="claude", mode="auto")
+        self.assertEqual(shlex.split(answer["command"])[-7:], ["--model", "opus", "--effort", "xhigh",
+                                                               "--permission-mode", "auto", "go on"])
         # (Claude's own defaults when none was picked)
         self.assertNotIn("--model", cs.run_task(self.home, [], False, str(self.folder), ".claude-work", "go",
                                                 claude="claude")["command"])
@@ -716,20 +721,21 @@ class QueueTests(TaskFixture):
     def test_a_queued_task_starts_with_its_model_and_effort(self):
         at = str(int(time.time() * 1000))
         self.assertTrue(self.queue("--queue", ".claude-work", "--cwd", str(self.folder), "--at", at, "--prompt", "do it later",
-                                   "--model", "opus", "--effort", "xhigh")["ok"])
+                                   "--model", "opus", "--effort", "xhigh", "--permission-mode", "acceptEdits")["ok"])
         (task,) = cs.load_queue(self.cache_root())
-        self.assertEqual((task["model"], task["effort"]), ("opus", "xhigh"))
+        self.assertEqual((task["model"], task["effort"], task["mode"]), ("opus", "xhigh", "acceptEdits"))
         self.queue("--start-queued", task["id"])
-        self.assertEqual(self.calls()[0]["argv"], ["--bg", "--model", "opus", "--effort", "xhigh", "do it later"])
+        self.assertEqual(self.calls()[0]["argv"], ["--bg", "--model", "opus", "--effort", "xhigh",
+                                                   "--permission-mode", "acceptEdits", "do it later"])
         # an SSH host's: handed over to the host
         self.assertTrue(self.queue("--queue", ".claude", "--cwd", "/srv/app", "--at", at, "--prompt", "x", "--host", "lab",
-                                   "--model", "sonnet", "--effort", "low")["ok"])
+                                   "--model", "sonnet", "--effort", "low", "--permission-mode", "plan")["ok"])
         (task,) = cs.load_queue(self.cache_root())
         import remote
         with mock.patch.object(remote, "host_answer", return_value={"ok": True, "message": "Started"}) as ask:
             self.queue("--start-queued", task["id"])
         ask.assert_called_once_with("lab", ["--start-task", "/srv/app", "--profile", ".claude", "--prompt", "x",
-                                            "--model", "sonnet", "--effort", "low"])
+                                            "--model", "sonnet", "--effort", "low", "--permission-mode", "plan"])
         self.assertFalse(self.queue("--queue", ".claude-work", "--cwd", str(self.folder), "--at", at, "--prompt", "x",
                                     "--effort", "ultra")["ok"])
 
@@ -793,14 +799,16 @@ class ContinueAfterResetTests(TaskFixture):
         answer = self.queue("--queue-continue", self.SID, "--profile", ".claude-work", "--at", str(at),
                             "--name", "Fix it", "--account", "work · Team")
         self.assertTrue(answer["ok"], answer)
+        self.assertRegex(answer["message"], r"^Queued: it goes on (tomorrow )?at \d\d:\d\d, when the limit resets$")
+        self.assertEqual(cs.kept_chats(self.cache_root()), [], "once: it doesn't keep going")
+        answer = self.queue("--queue-continue", self.SID, "--profile", ".claude-work", "--at", str(at),
+                            "--name", "Fix it", "--account", "work · Team", "--keep")  # (twice: queued once)
         self.assertRegex(answer["message"], r"^Queued: it goes on (tomorrow )?at \d\d:\d\d, when the limit resets, "
                                             r"and after later limits too until it's done$")
-        self.assertTrue(self.queue("--queue-continue", self.SID, "--profile", ".claude-work", "--at", str(at),
-                                   "--name", "Fix it", "--account", "work · Team")["ok"])  # (twice: queued once)
         (task,) = cs.queued_tasks(self.cache_root(), int(time.time() * 1000))
         self.assertEqual((task["chat"], task["name"], task["folder"], task["prompt"], task["account"]),
                          (self.SID, "Fix it", str(self.folder), "", "work · Team"))
-        # it keeps going from then on (once, however often it was queued)
+        # with --keep, it keeps going from then on (once, however often it was queued)
         (kept,) = cs.kept_chats(self.cache_root())
         self.assertEqual((kept["chat"], kept["profile"], kept["name"], kept["wentOnAt"]), (self.SID, ".claude-work", "Fix it", None))
         self.assertEqual(self.queue("--start-queued", task["id"]),
@@ -810,6 +818,30 @@ class ContinueAfterResetTests(TaskFixture):
         self.assertEqual(call["cwd"], str(self.folder))
         self.assertEqual(cs.load_queue(self.cache_root()), [])
         self.assertIsNotNone(cs.kept_chats(self.cache_root())[0]["wentOnAt"])  # (when it went on: noted before it did)
+
+    def test_it_goes_on_in_its_own_permission_mode(self):
+        t = self.now - 120
+        write(self.home / f".claude-work/projects/-repos-app/{self.SID}.jsonl",
+              lines(prompt("fix it", t, cwd=str(self.folder), permissionMode="default"),
+                    {"type": "permission-mode", "permissionMode": "auto", "sessionId": self.SID},
+                    limit_error("You've hit your session limit", t + 1)))
+        go_on = lambda: cs.continue_chat(self.home, [], ".claude-work", self.SID, None, "", str(self.bin / "claude"))
+        self.assertTrue(go_on()["ok"])
+        self.assertEqual(self.calls()[-1]["argv"], ["--bg", "--resume", self.SID, "--permission-mode", "auto",
+                                                    cs.CONTINUE_PROMPT])
+        # its background session saved that: woken, it keeps it (options would start a copy)
+        write(self.home / f".claude-work/jobs/{self.SID[:8]}/state.json",
+              {"sessionId": self.SID, "respawnFlags": ["--permission-mode", "auto"]})
+        self.assertTrue(go_on()["ok"])
+        self.assertEqual(self.calls()[-1]["argv"], ["--bg", "--resume", self.SID, cs.CONTINUE_PROMPT])
+
+    def test_never_bypassing_permissions_by_itself(self):
+        t = self.now - 120
+        write(self.home / f".claude-work/projects/-repos-app/{self.SID}.jsonl",
+              lines(prompt("fix it", t, cwd=str(self.folder), permissionMode="bypassPermissions"),
+                    limit_error("You've hit your session limit", t + 1)))
+        self.assertTrue(cs.continue_chat(self.home, [], ".claude-work", self.SID, None, "", str(self.bin / "claude"))["ok"])
+        self.assertEqual(self.calls()[-1]["argv"], ["--bg", "--resume", self.SID, cs.CONTINUE_PROMPT])
 
     def test_a_chat_that_went_on_already_is_left_alone(self):
         self.stopped_chat(reply("Done.", self.now - 10))
@@ -843,6 +875,8 @@ class ContinueAfterResetTests(TaskFixture):
         self.assertEqual(self.queue("--queue-continue", "nope", "--profile", ".claude-work", "--at", at),
                          {"ok": False, "message": "That chat isn't on this account any more"})
         # on an SSH host: checked there, when it goes on
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):  # (kept here only)
+            self.queue("--queue-continue", self.SID, "--profile", ".claude", "--at", at, "--host", "lab", "--keep")
         self.assertTrue(self.queue("--queue-continue", self.SID, "--profile", ".claude", "--at", at, "--cwd", "/srv/app",
                                    "--host", "lab", "--name", "Fix it")["ok"])
         (task,) = cs.load_queue(self.cache_root())
@@ -1018,11 +1052,16 @@ class KeepGoingTests(TaskFixture):
     def test_turning_it_off_and_where_it_cant(self):
         self.say(self.limit(self.now - 60))
         at = str(self.reset + 60_000)
-        self.assertTrue(self.queue("--queue-continue", self.SID, "--profile", ".claude-work", "--at", at)["ok"])
+        self.assertTrue(self.queue("--queue-continue", self.SID, "--profile", ".claude-work", "--at", at, "--keep")["ok"])
+        self.assertEqual(len(self.kept()), 1)
+        answer = self.queue("--keep-off", self.SID)
+        self.assertRegex(answer["message"], r"^It goes on (tomorrow )?at \d\d:\d\d as queued, but not after later limits$")
+        self.assertEqual((self.kept(), len(cs.load_queue(self.cache_root()))), ([], 1), "its queued go-on stays")
+        (task,) = cs.load_queue(self.cache_root())
+        self.queue("--unqueue", task["id"])
         self.assertEqual(self.queue("--keep-off", self.SID), {"ok": True, "message": "It won't go on by itself any more"})
-        self.assertEqual((self.kept(), cs.load_queue(self.cache_root())), ([], []), "its queued go-on went too")
         # cancelling its go-on stops it keeping going (else it would be queued again at once)
-        self.assertTrue(self.queue("--queue-continue", self.SID, "--profile", ".claude-work", "--at", at)["ok"])
+        self.assertTrue(self.queue("--queue-continue", self.SID, "--profile", ".claude-work", "--at", at, "--keep")["ok"])
         (task,) = cs.load_queue(self.cache_root())
         self.queue("--unqueue", task["id"])
         self.assertEqual((self.kept(), self.look(self.now_ms)), ([], []))
