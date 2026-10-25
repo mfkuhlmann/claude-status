@@ -158,6 +158,41 @@ Rectangle {
             }
         }
 
+        // and the permission mode it starts in (kept for the next chat)
+        RowLayout {
+            Layout.leftMargin: Kirigami.Units.smallSpacing
+            visible: !box.inVscode || box.background
+            spacing: Kirigami.Units.smallSpacing
+
+            PlasmaComponents3.Label {
+                textFormat: Text.PlainText
+                text: i18n("Permissions:")
+                opacity: 0.8
+            }
+            PlasmaComponents3.ComboBox {
+                id: modeBox
+                readonly property var values: ["default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions", ""]
+                model: [i18nc("permission mode", "Manual (asks first)"), i18nc("permission mode", "Accept edits"),
+                        i18nc("permission mode", "Plan"), i18nc("permission mode", "Auto"), i18nc("permission mode", "Don't ask"),
+                        i18nc("permission mode", "Bypass permissions"), i18n("Claude's default")]
+                currentIndex: Math.max(0, values.indexOf(Plasmoid.configuration.newChatMode))
+                onActivated: Plasmoid.configuration.newChatMode = values[currentIndex]
+
+                PlasmaCore.ToolTipArea {
+                    textFormat: Text.PlainText
+                    anchors.fill: parent
+                    mainText: i18n("Permission mode")
+                    subText: (modeBox.values[modeBox.currentIndex] === "default"
+                              ? i18n("Manual: Claude asks you before it edits files or runs commands.")
+                              : modeBox.values[modeBox.currentIndex] === ""
+                              ? i18n("The mode your Claude settings start chats in.")
+                              : root.modeHint(modeBox.values[modeBox.currentIndex]))
+                             + "\n\n" + i18n("The chat starts in it (claude --permission-mode); Shift+Tab in the chat changes it. The next new chat starts in the same.")
+                             + " " + i18n("A background chat can start in auto mode or bypass permissions only once you turned that on in a terminal: Claude says so then.")
+                }
+            }
+        }
+
         PlasmaComponents3.CheckBox {
             Layout.leftMargin: Kirigami.Units.smallSpacing
             visible: box.hasTask

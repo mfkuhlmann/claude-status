@@ -22,6 +22,13 @@ ColumnLayout {
     readonly property var plans: group.plans || []
     readonly property var queued: root.queuedFor(group, remoteHost)
     readonly property bool plansOpen: !!root.expandedPlans[groupKey]
+    // the chats and plans you starred, however old (listed first while unfolded)
+    readonly property var starred: group.starred || []
+    readonly property var starredPlans: group.starredPlans || []
+    readonly property bool starredOpen: !!root.expandedStarred[groupKey + "|chats"]
+    readonly property bool starredPlansOpen: !!root.expandedStarred[groupKey + "|plans"]
+    readonly property var starredShown: starredOpen ? starred : []
+    readonly property var starredPlansShown: starredPlansOpen ? starredPlans : []
     readonly property var memories: group.memories || []
     readonly property bool memoriesOpen: !!root.expandedMemories[groupKey]
 
@@ -485,7 +492,7 @@ ColumnLayout {
 
     // Recent chats: this account's latest other chats, to pick one up again
     PlasmaComponents3.ToolButton {
-        visible: section.recent.length > 0
+        visible: section.recent.length > 0 || section.starred.length > 0
         Layout.leftMargin: Kirigami.Units.smallSpacing
         flat: true
         icon.name: section.recentOpen ? "arrow-down" : "arrow-right"
@@ -497,14 +504,14 @@ ColumnLayout {
             textFormat: Text.PlainText
             anchors.fill: parent
             mainText: i18n("Recent chats")
-            subText: i18n("This account's latest chats that aren't listed above. Click one to reopen it, in a terminal or in VS Code (the switch at the top of the list).")
+            subText: i18n("This account's latest chats that aren't listed above, and the ones you starred. Click one to reopen it, in a terminal or in VS Code (the switch at the top of the list).")
         }
     }
 
     // Where they reopen: the same Terminal | VS Code choice as for new chats
     OpenInSwitch {
         id: recentOpenIn
-        visible: section.recentOpen && section.recent.length > 0
+        visible: section.recentOpen && (section.recent.length > 0 || section.starred.length > 0)
         Layout.fillWidth: true
         Layout.leftMargin: Kirigami.Units.gridUnit
         Layout.rightMargin: Kirigami.Units.smallSpacing
@@ -513,15 +520,34 @@ ColumnLayout {
         resuming: true
     }
 
+    // the chats you starred: unfolded, they come first (a step further in)
+    PlasmaComponents3.ToolButton {
+        visible: section.recentOpen && section.starred.length > 0
+        Layout.leftMargin: Kirigami.Units.gridUnit
+        flat: true
+        icon.name: section.starredOpen ? "arrow-down" : "arrow-right"
+        text: i18nc("starred chats, how many", "★ Starred (%1)", section.starred.length)
+        font: Kirigami.Theme.smallFont
+        onClicked: root.toggleStarred(section.groupKey + "|chats", section.starredOpen)
+
+        PlasmaCore.ToolTipArea {
+            textFormat: Text.PlainText
+            anchors.fill: parent
+            mainText: i18n("Starred chats")
+            subText: i18n("The chats of this account you starred (☆ next to a chat), newest first, however old they are; not the ones listed above. Click a chat's ★ to unstar it.")
+        }
+    }
+
     Repeater {
-        model: section.recentOpen ? section.recent.length : 0
+        model: section.recentOpen ? section.starredShown.length + section.recent.length : 0
         delegate: ColumnLayout {
             id: recentLine
 
             required property int index
-            readonly property var chat: section.recent[index]
+            readonly property bool inStarred: index < section.starredShown.length
+            readonly property var chat: (inStarred ? section.starredShown[index] : section.recent[index - section.starredShown.length])
                                         || ({ key: "", sessionId: "", name: "", cwd: "", cwdShort: "", lastActive: 0, profileDir: "",
-                                              profile: "", shared: false, openCommand: "" })
+                                              profile: "", shared: false, openCommand: "", starred: false })
             readonly property string rowKey: (section.remoteHost ? section.remoteHost + "|" : "") + chat.key
             readonly property bool canOpen: recentOpenIn.inVscode
                                             || (recentOpenIn.terminalHere && (!section.remoteHost || !!chat.openCommand))
@@ -538,7 +564,7 @@ ColumnLayout {
             }
 
             Layout.fillWidth: true
-            Layout.leftMargin: Kirigami.Units.gridUnit
+            Layout.leftMargin: Kirigami.Units.gridUnit * (inStarred ? 2 : 1)
             Layout.rightMargin: Kirigami.Units.smallSpacing
             spacing: 0
 
@@ -602,29 +628,38 @@ ColumnLayout {
                     clickable: goingOn !== null || goOnAt > 0
                     tooltipTitle: goingOn ? i18n("Goes on by itself at %1", root.clockText(goingOn.startAt))
                                           : i18n("A usage limit stopped it")
-                    tooltip: (goingOn ? i18n("In the background, telling Claude that the limit has reset (if it didn't go on before then).")
+                    tooltip: (goingOn ? i18n("In the background, in the permission mode it had, telling Claude that the limit has reset (if it didn't go on before then).")
                               : (recentLine.chat.stopped ? recentLine.chat.stopped.text : "")
-                                + (goOnAt > 0 ? "\n\n" + i18n("Click to have it go on by itself in the background at %1, a minute after the limit resets.", root.clockText(goOnAt)) : ""))
-                             + (section.remoteHost || (!goingOn && !(goOnAt > 0)) ? "" : " " + i18n("It goes on by itself after later limits too, until it's done."))
+                                + (goOnAt > 0 ? "\n\n" + i18n("Click to have it go on by itself in the background at %1, a minute after the limit resets, once.", root.clockText(goOnAt))
+                                                + (section.remoteHost ? "" : " " + i18n("↻ beside it: after later limits too, until it's done.")) : ""))
                              + (goingOn ? "\n\n" + i18n("Click to cancel it.") : "")
                     onClicked: {
                         if (goingOn)
                             root.unqueue(goingOn)
                         else
-                            root.queueContinue(recentLine.chat, section.remoteHost, section.group.title)
+                            root.queueContinue(recentLine.chat, section.remoteHost, section.group.title, false)
                     }
                 }
-                // it keeps going, with no go-on queued now (e.g. it gave up); click: not any more
+                // it keeps going (click: not any more), or a limit stopped it and it can (click: it does)
                 Tag {
                     readonly property var kept: section.remoteHost ? null : root.keptChat(recentLine.chat.sessionId)
-                    visible: kept !== null && root.queuedChat(recentLine.chat.sessionId, section.remoteHost) === null
+                    readonly property bool canKeep: kept === null && !section.remoteHost && root.goOnAt(recentLine.chat) > 0
+                                                    && root.queuedChat(recentLine.chat.sessionId, section.remoteHost) === null
+                    visible: kept !== null || canKeep
                     text: i18nc("a chat that goes on by itself after usage limits", "↻")
                     active: kept !== null && !kept.error
                     warning: kept !== null && (!!kept.error || !!kept.note)
                     clickable: true
-                    tooltipTitle: i18n("Keeps going until it's done")
-                    tooltip: kept ? root.keptText(kept) : ""
-                    onClicked: root.keepGoing(recentLine.chat, false)
+                    tooltipTitle: kept ? i18n("Keeps going until it's done") : i18n("Keep going until it's done")
+                    tooltip: kept ? root.keptText(kept)
+                                  : i18n("Click to have it go on by itself in the background at %1, a minute after the limit resets, in the permission mode it had, and again after each later limit that stops it, until a turn of it ends by itself.",
+                                         root.clockText(root.goOnAt(recentLine.chat)))
+                    onClicked: {
+                        if (kept)
+                            root.keepGoing(recentLine.chat, false)
+                        else
+                            root.queueContinue(recentLine.chat, section.remoteHost, section.group.title, true)
+                    }
                 }
                 PlasmaComponents3.Label {
                     id: recentFolder
@@ -642,6 +677,23 @@ ColumnLayout {
                         active: !!recentLine.chat.cwd
                         mainText: i18n("Folder")
                         subText: (section.remoteHost ? section.remoteHost + ":" : "") + recentLine.chat.cwd
+                    }
+                }
+                PlasmaComponents3.ToolButton {
+                    // star it (it stays listed under Starred) or unstar it
+                    opacity: recentLine.chat.starred || recentHover.hovered ? 1 : 0
+                    icon.name: recentLine.chat.starred ? "starred-symbolic" : "non-starred-symbolic"
+                    display: PlasmaComponents3.AbstractButton.IconOnly
+                    text: recentLine.chat.starred ? i18n("Unstar") : i18n("Star")
+                    Layout.preferredHeight: recentName.implicitHeight
+                    Layout.preferredWidth: Layout.preferredHeight
+                    onClicked: root.setStar("chats", recentLine.chat.sessionId, section.remoteHost, !recentLine.chat.starred)
+
+                    PlasmaCore.ToolTipArea {
+                        textFormat: Text.PlainText
+                        anchors.fill: parent
+                        mainText: recentLine.chat.starred ? i18n("Starred") : i18n("Star this chat")
+                        subText: root.starHint("chats", !!recentLine.chat.starred)
                     }
                 }
                 PlasmaComponents3.ToolButton {
@@ -678,7 +730,7 @@ ColumnLayout {
     // open one, carry it out in a new chat, continue the chat that made it,
     // or share it with your other accounts
     PlasmaComponents3.ToolButton {
-        visible: section.plans.length > 0
+        visible: section.plans.length > 0 || section.starredPlans.length > 0
         Layout.leftMargin: Kirigami.Units.smallSpacing
         flat: true
         icon.name: section.plansOpen ? "arrow-down" : "arrow-right"
@@ -690,21 +742,41 @@ ColumnLayout {
             textFormat: Text.PlainText
             anchors.fill: parent
             mainText: i18n("Plans")
-            subText: i18n("The plans this account's chats wrote in plan mode, newest first. Click one to open it; carry it out in a new chat, go back to the chat that made it, or share it with your other accounts.")
+            subText: i18n("The plans this account's chats wrote in plan mode, newest first, and the ones you starred. Click one to open it; carry it out in a new chat, go back to the chat that made it, or share it with your other accounts.")
+        }
+    }
+
+    // the plans you starred: unfolded, they come first (a step further in)
+    PlasmaComponents3.ToolButton {
+        visible: section.plansOpen && section.starredPlans.length > 0
+        Layout.leftMargin: Kirigami.Units.gridUnit
+        flat: true
+        icon.name: section.starredPlansOpen ? "arrow-down" : "arrow-right"
+        text: i18nc("starred plans, how many", "★ Starred (%1)", section.starredPlans.length)
+        font: Kirigami.Theme.smallFont
+        onClicked: root.toggleStarred(section.groupKey + "|plans", section.starredPlansOpen)
+
+        PlasmaCore.ToolTipArea {
+            textFormat: Text.PlainText
+            anchors.fill: parent
+            mainText: i18n("Starred plans")
+            subText: i18n("The plans of this account you starred (☆ next to a plan), newest first, however old they are. Click a plan's ★ to unstar it.")
         }
     }
 
     Repeater {
-        model: section.plansOpen ? section.plans.length : 0
+        model: section.plansOpen ? section.starredPlansShown.length + section.plans.length : 0
         delegate: ColumnLayout {
             id: planLine
 
             required property int index
-            readonly property var plan: section.plans[index] || root.emptyPlan
+            readonly property bool inStarred: index < section.starredPlansShown.length
+            readonly property var plan: (inStarred ? section.starredPlansShown[index] : section.plans[index - section.starredPlansShown.length])
+                                        || root.emptyPlan
             readonly property string composerKey: (section.remoteHost ? section.remoteHost + "|" : "") + plan.key
 
             Layout.fillWidth: true
-            Layout.leftMargin: Kirigami.Units.gridUnit
+            Layout.leftMargin: Kirigami.Units.gridUnit * (inStarred ? 2 : 1)
             Layout.rightMargin: Kirigami.Units.smallSpacing
             spacing: Kirigami.Units.smallSpacing / 2
 
@@ -773,6 +845,23 @@ ColumnLayout {
                         active: !!planLine.plan.cwd
                         mainText: i18n("Folder")
                         subText: (section.remoteHost ? section.remoteHost + ":" : "") + planLine.plan.cwd
+                    }
+                }
+                PlasmaComponents3.ToolButton {
+                    // star it (it stays listed under Starred) or unstar it
+                    opacity: planLine.plan.starred || planHover.hovered ? 1 : 0
+                    icon.name: planLine.plan.starred ? "starred-symbolic" : "non-starred-symbolic"
+                    display: PlasmaComponents3.AbstractButton.IconOnly
+                    text: planLine.plan.starred ? i18n("Unstar") : i18n("Star")
+                    Layout.preferredHeight: planName.implicitHeight
+                    Layout.preferredWidth: Layout.preferredHeight
+                    onClicked: root.setStar("plans", planLine.plan.slug, section.remoteHost, !planLine.plan.starred)
+
+                    PlasmaCore.ToolTipArea {
+                        textFormat: Text.PlainText
+                        anchors.fill: parent
+                        mainText: planLine.plan.starred ? i18n("Starred") : i18n("Star this plan")
+                        subText: root.starHint("plans", !!planLine.plan.starred)
                     }
                 }
                 // the plan's Markdown file itself, to change it (an SSH host's: in VS Code, over Remote-SSH)

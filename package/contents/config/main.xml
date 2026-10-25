@@ -151,6 +151,10 @@
       <label>The currency of the Recap tab's amounts (USD, or another at the European Central Bank's rate of the day)</label>
       <default>USD</default>
     </entry>
+    <entry name="newChatMode" type="String">
+      <label>The permission mode new chats start in, picked in the new-chat box (default, acceptEdits, plan, auto, dontAsk, bypassPermissions; empty: Claude's default)</label>
+      <default></default>
+    </entry>
     <entry name="usageCap" type="Int">
       <label>Stop what an account has at work once one of its plan windows reaches this percent (0: never)</label>
       <default>0</default>

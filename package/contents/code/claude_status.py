@@ -2731,19 +2731,22 @@ def read_chat_info(path, size):
     return clean_text(name, 80), cwd, messages
 
 
-def recent_chats(groups, ctx, limit=RECENT_CHATS):
+def recent_chats(groups, ctx, limit=RECENT_CHATS, starred=frozenset()):
     """Each account's latest chats that aren't listed as a session already
-    (group["recent"]). A chat shared across accounts shows up under the one
-    it was used on last; of a chat and its copies (same first entry), only
-    the newest; a shared chat that moved on to a listed copy, not at all."""
+    (group["recent"]), and of those its starred ones (ids in starred),
+    however old (group["starred"]). A chat shared across accounts shows up
+    under the one it was used on last; of a chat and its copies (same first
+    entry), only the newest; a shared chat that moved on to a listed copy,
+    not at all."""
     listed = {i for g in groups for s in g["sessions"] for i in (s["sessionId"], s.get("chatId"), s.get("jobSessionId")) if i}
     listed |= getattr(ctx, "moved_on", set())
     by_key = {p.key: p for p in ctx.profiles}
     group_of = {key: g for g in groups for key in g["profileKeys"]}
     candidates = [c for c in all_transcripts(ctx) if c[1].key in group_of and c[2].stem not in listed]
     for g in groups:
-        g["recent"] = []
-    if limit <= 0:
+        g["recent"], g["starred"] = [], []
+    wanted = set(starred)  # (starred chats not found yet)
+    if limit <= 0 and not wanted:
         return
     seen, firsts = set(), set()
     # A listed chat's older copies (they start with the same entry) are that
@@ -2756,8 +2759,12 @@ def recent_chats(groups, ctx, limit=RECENT_CHATS):
             if first:
                 firsts.add(first)
     for t, p, f, st in candidates:
-        if all(len(g["recent"]) >= limit for g in groups):
+        full = all(len(g["recent"]) >= limit for g in groups)
+        if full and not wanted:
             break
+        star = f.stem in wanted
+        if full and not star:
+            continue
         inode = (st.st_dev, st.st_ino)
         if inode in seen:
             continue
@@ -2780,9 +2787,10 @@ def recent_chats(groups, ctx, limit=RECENT_CHATS):
                 if home.key not in group_of:
                     home = p
         g = group_of[home.key]
-        if len(g["recent"]) >= limit:
+        room = len(g["recent"]) < limit
+        if not room and not star:
             continue
-        g["recent"].append({
+        chat = {
             "key": f"{home.key}/{f.stem}/recent",
             "sessionId": f.stem,
             "name": name or f.stem[:8],
@@ -2792,8 +2800,14 @@ def recent_chats(groups, ctx, limit=RECENT_CHATS):
             "profile": home.label,
             "profileDir": home.key,
             "shared": bool(shared),
+            "starred": star,
             **recent_extras(ctx, f, g),
-        })
+        }
+        if room:
+            g["recent"].append(chat)
+        if star:
+            wanted.discard(f.stem)
+            g["starred"].append(dict(chat, key=f"{home.key}/{f.stem}/starred"))
 
 
 def recent_extras(ctx, path, group):
@@ -2968,14 +2982,15 @@ def change_queue(cache_root, add=None, take=None, put_back=None, once=False):
 
 
 def queue_entry(profile, folder, prompt, start_at, host="", account="", plan=None, plan_profile=None,
-                plan_title="", now_ms=None, chat=None, name="", scheduled=False, why="", model=None, effort=None):
+                plan_title="", now_ms=None, chat=None, name="", scheduled=False, why="", model=None, effort=None,
+                mode=None):
     """A task to queue (checked), or ValueError. With chat (its id), it goes
     on with that chat (one a usage limit stopped: continue_chat), named name;
     why: "retry" (its turn broke off) or "cap" (stopped at the usage cap) goes
     on whatever its newest turn is (keep_going). scheduled: it starts at a
-    time you picked, not when a limit resets. model, effort: a new chat's
-    (chat_options)."""
-    chat_options(model, effort)  # (checked)
+    time you picked, not when a limit resets. model, effort, mode: a new
+    chat's (chat_options)."""
+    chat_options(model, effort, mode)  # (checked)
     if not isinstance(profile, str) or not profile or not isinstance(folder, str):
         raise ValueError("A queued task needs an account and a folder")
     if chat is not None and not valid_id(chat):
@@ -2996,6 +3011,7 @@ def queue_entry(profile, folder, prompt, start_at, host="", account="", plan=Non
         "chat": chat, "name": clean_text(name, 80) if chat else "", "scheduled": bool(scheduled) and chat is None,
         "why": why if chat and why in ("retry", "cap") else "",
         "model": (model or None) if chat is None else None, "effort": (effort or None) if chat is None else None,
+        "mode": (mode or None) if chat is None else None,
     }
 
 
@@ -3456,11 +3472,12 @@ def all_transcripts(ctx):
     return found
 
 
-def account_plans(group, ctx, limit=PLANS_LISTED):
+def account_plans(group, ctx, limit=PLANS_LISTED, starred=frozenset()):
     """The plans of an account's profiles, newest first: [{"key", "slug",
     "title", "path", "profileDir", "profile", "updatedAt", "shared", "chatId",
-    "cwd", "cwdShort"}], the chat being the one that made it (where it's
-    still there; None else)."""
+    "cwd", "cwdShort", "starred"}], the chat being the one that made it
+    (where it's still there; None else). The first limit of them, then the
+    starred ones (slugs in starred) that are older."""
     by_key = {p.key: p for p in ctx.profiles}
     found, seen = [], set()
     for key in group["profileKeys"]:
@@ -3479,7 +3496,7 @@ def account_plans(group, ctx, limit=PLANS_LISTED):
             seen.add((st.st_dev, st.st_ino))
             found.append((st.st_mtime, p, f, st))
     found.sort(key=lambda c: -c[0])
-    found = found[:limit]
+    found = [c for i, c in enumerate(found) if i < limit or c[2].stem in starred]
     plans = []
     for t, p, f, st in found:
         plans.append({
@@ -3494,6 +3511,7 @@ def account_plans(group, ctx, limit=PLANS_LISTED):
             "shared": st.st_nlink > 1 and any(q.real != p.real and same_file(plan_path(q, f.stem), st)
                                               for q in ctx.profiles),
             "chatId": None, "chatProfileDir": None, "cwd": "", "cwdShort": "", "edited": False,
+            "starred": f.stem in starred,
         })
     if plans:
         find_plan_chats(plans, ctx)
@@ -4170,11 +4188,15 @@ def resume_command(profile, session_id, home=None, folder=None, claude="claude")
 
 MODEL_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9._\[\]-]{0,79}$")  # an alias (opus, sonnet, fable) or a model's full name
 EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
+# claude --permission-mode's ("manual" is newer Claude's name for "default",
+# which older ones on SSH hosts know only by that)
+PERMISSION_MODES = ("default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions")
 
 
-def chat_options(model=None, effort=None):
-    """claude's options for a new chat's model and reasoning effort (none
-    for Claude's own defaults); ValueError for one that isn't."""
+def chat_options(model=None, effort=None, mode=None):
+    """claude's options for a new chat's model, reasoning effort and
+    permission mode (none for Claude's own defaults); ValueError for one
+    that isn't."""
     words = []
     if model:
         if not MODEL_NAME.match(model):
@@ -4184,6 +4206,11 @@ def chat_options(model=None, effort=None):
         if effort not in EFFORT_LEVELS:
             raise ValueError(f"Not an effort level: {effort} (it's low, medium, high, xhigh or max)")
         words += ["--effort", effort]
+    if mode:
+        mode = "default" if mode == "manual" else mode
+        if mode not in PERMISSION_MODES:
+            raise ValueError(f"Not a permission mode: {mode} (it's {', '.join(PERMISSION_MODES)})")
+        words += ["--permission-mode", mode]
     return words
 
 
@@ -4300,9 +4327,9 @@ def start_background(profile, folder, prompt, home=None, claude="claude", wait=B
     e.g. systemd-run's, so a background service it starts lives on its own
     (not in the widget's group of processes, which a restart of the desktop
     shell ends: jump.scope_prefix). resume: the id of a chat it goes on
-    with (claude --bg --resume: the same chat, if nothing has it open; with
-    options too, Claude would start a copy of it). options: a new one's, e.g.
-    chat_options'."""
+    with (claude --bg --resume: the same chat, if nothing has it open).
+    options: claude's, e.g. chat_options' (going on with a chat: only
+    go_on_options', else Claude would start a copy of it)."""
     import subprocess
     home = home or Path.home()
     if not prompt.strip():
@@ -4322,7 +4349,7 @@ def start_background(profile, folder, prompt, home=None, claude="claude", wait=B
     folder_bin = os.path.dirname(claude)
     if folder_bin and os.path.isfile(os.path.join(folder_bin, "node")):
         env["PATH"] = folder_bin + os.pathsep + env.get("PATH", "")
-    argv = [*prefix, claude, "--bg", *(["--resume", resume] if resume else options), prompt_arg(prompt)]
+    argv = [*prefix, claude, "--bg", *(["--resume", resume] if resume else []), *options, prompt_arg(prompt)]
     try:
         r = subprocess.run(argv, cwd=folder, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                            stderr=subprocess.PIPE, timeout=wait)
@@ -4341,16 +4368,17 @@ def start_background(profile, folder, prompt, home=None, claude="claude", wait=B
 
 
 def run_task(home, extra_dirs, background, folder, profile_key, text, plan_slug=None, plan_profile=None,
-             claude=None, model=None, effort=None):
+             claude=None, model=None, effort=None, mode=None):
     """A task on the profile profile_key in folder (here or on an SSH host,
-    --start-task / --task-command), with that model and effort: started in
+    --start-task / --task-command), with that model, effort and permission
+    mode: started in
     the background, or the shell command that starts it in a terminal.
     {"ok", "message", "id" | "command"}."""
     profiles = discover_profiles(home, extra_dirs)
     profile = next((p for p in profiles if matches_profile(p, profile_key)), None)
     if profile is None:
         return {"ok": False, "message": f"No Claude profile called {profile_key}"}
-    options = chat_options(model, effort)
+    options = chat_options(model, effort, mode)
     plan = None
     if plan_slug:
         plan = find_plan(profiles, plan_slug, plan_profile)
@@ -4368,6 +4396,24 @@ def run_task(home, extra_dirs, background, folder, profile_key, text, plan_slug=
 
 
 CONTINUE_PROMPT = "The usage limit has reset: go on where you stopped."
+# The permission modes a chat goes on in, as it was. Not bypassPermissions:
+# Claude refuses to start a background session in it unless you accepted it
+# in a way it counts (and a go-on that doesn't start is worse than one that
+# asks before it acts).
+GO_ON_MODES = ("default", "manual", "acceptEdits", "plan", "auto", "dontAsk")
+
+
+def go_on_options(profile, chat_id, mode):
+    """claude's options for going on with a chat in the background (claude
+    --bg --resume), whose permission mode is mode: that mode, so the
+    background session it becomes saves it and goes on in it each time it's
+    woken (with none, the first go-on keeps the chat's mode but the session
+    saves none, and the next wakes up in Claude's default one). None when a
+    background session of it is there already: Claude wakes that one with
+    the options it saved, and with any given here it would start a copy."""
+    if mode not in GO_ON_MODES or (profile.path / "jobs" / chat_id[:8]).exists():
+        return []
+    return ["--permission-mode", mode]
 
 
 def continue_chat(home, extra_dirs, profile_key, chat_id, folder=None, text="", claude=None, prefix=(),
@@ -4375,9 +4421,10 @@ def continue_chat(home, extra_dirs, profile_key, chat_id, folder=None, text="", 
     """Go on with a chat a usage limit stopped, now that the limit has reset
     (a queued one: jump.py --start-queued; here or on an SSH host,
     --continue-chat): in the background on its account, with text (else
-    CONTINUE_PROMPT) as your next message. A session that has it open idle
-    ends first (end_for_handover), then claude --bg --resume goes on with the
-    same chat. {"ok", "message", "id"}; ok with no message when it went on
+    CONTINUE_PROMPT) as your next message, in its permission mode
+    (go_on_options). A session that has it open idle ends first
+    (end_for_handover), then claude --bg --resume goes on with the same
+    chat. {"ok", "message", "id"}; ok with no message when it went on
     already (its newest turn isn't the limit's any more): nothing to do.
     force: go on whatever its newest turn (a chat that keeps going whose turn
     broke off, or that the usage cap stopped)."""
@@ -4388,7 +4435,8 @@ def continue_chat(home, extra_dirs, profile_key, chat_id, folder=None, text="", 
     path = transcript_path(profile, chat_id)
     if path is None:
         return {"ok": False, "message": "That chat isn't on this account any more"}
-    if not force and ((chat_peek(path) or {}).get("stopped") or {}).get("kind") != "limit":
+    peek = chat_peek(path) or {}
+    if not force and (peek.get("stopped") or {}).get("kind") != "limit":
         return {"ok": True, "message": ""}
     if not (isinstance(folder, str) and os.path.isdir(folder)):
         folder = chat_folder(path) or str(home)
@@ -4401,7 +4449,8 @@ def continue_chat(home, extra_dirs, profile_key, chat_id, folder=None, text="", 
     while any(e.get("sessionId") == chat_id for e, _, _ in live_entries_all(profiles)) and time.time() < deadline:
         time.sleep(0.2)
     ok, message, job = start_background(profile, folder, (text or "").strip() or CONTINUE_PROMPT, home, claude,
-                                        prefix=prefix, resume=chat_id)
+                                        prefix=prefix, resume=chat_id,
+                                        options=go_on_options(profile, chat_id, peek.get("mode")))
     if ok:
         message = f"Went on in the background on {profile.label}" + (f" ({job})" if job else "")
     return {"ok": ok, "message": message, "id": job}
@@ -5432,6 +5481,51 @@ def cache_dir(home):
     return Path(os.environ.get("XDG_CACHE_HOME") or home / ".cache") / "claude-widget"
 
 
+# ---------------------------------------------------------------- starred chats and plans
+#
+# Chats and plans you starred stay at hand: each account lists its starred
+# ones however old they are (group["starred"], group["starredPlans"]). The
+# stars are this computer's (stars.json in the widget's cache, an SSH host's
+# under its name): the status run on a host gets that host's from here
+# (remote.status: --starred-chats, --starred-plans).
+
+STAR_KINDS = ("chats", "plans")
+
+
+def load_stars(cache_root):
+    """{"chats": [{"id", "host"}], "plans": [{"id", "host"}]}: what you
+    starred, in the order you did ("host": "" for this computer's)."""
+    data = read_json(cache_root / "stars.json")
+    data = data if isinstance(data, dict) else {}
+    valid = {"chats": valid_id, "plans": lambda v: isinstance(v, str) and bool(PLAN_SLUG.match(v))}
+    out = {}
+    for kind in STAR_KINDS:
+        items = data.get(kind) if isinstance(data.get(kind), list) else []
+        out[kind] = [{"id": i["id"], "host": i.get("host") or ""} for i in items
+                     if isinstance(i, dict) and valid[kind](i.get("id")) and isinstance(i.get("host") or "", str)]
+    return out
+
+
+def change_stars(cache_root, kind, item_id, host="", on=True):
+    """Star a chat or a plan (kind "chats" or "plans"), or (not on) not any
+    more, under a lock: every copy of the widget writes stars.json."""
+    private_dir(cache_root)
+    with open(cache_root / "stars.lock", "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        stars = load_stars(cache_root)
+        items = [i for i in stars[kind] if (i["id"], i["host"]) != (item_id, host or "")]
+        if on:
+            items.append({"id": item_id, "host": host or ""})
+        if items != stars[kind]:
+            stars[kind] = items
+            write_json_atomic(cache_root / "stars.json", stars)
+
+
+def starred_of(stars, host=""):
+    """{"chats": ids, "plans": slugs} starred of this computer (or of host)."""
+    return {kind: {i["id"] for i in stars[kind] if i["host"] == (host or "")} for kind in STAR_KINDS}
+
+
 def load_dismissed(cache_root):
     """Finished sessions the user removed from the widget's list: {session id: when}."""
     data = read_json(cache_root / "dismissed.json")
@@ -5477,7 +5571,9 @@ class Context:
 
 
 def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_done_hours=KEEP_DONE_HOURS,
-            recent=RECENT_CHATS, plans=PLANS_LISTED, usage_cap=0):
+            recent=RECENT_CHATS, plans=PLANS_LISTED, usage_cap=0, starred=None):
+    """starred: {"chats", "plans"} starred here (starred_of), else this
+    computer's from the cache."""
     now = time.time() if now is None else now
     now_ms = int(now * 1000)
     snapshot_root = cache_root / "statusline"
@@ -5624,20 +5720,31 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
     except Exception as exc:
         errors.append(f"chats changing the same files: {exc}")
     try:
+        if starred is None:
+            starred = starred_of(load_stars(cache_root))
+    except Exception as exc:
+        errors.append(f"starred chats and plans: {exc}")
+        starred = {kind: set() for kind in STAR_KINDS}
+    try:
         # a finished session you removed from the list is still one of your
         # recent chats: it shows there
-        recent_chats(groups, ctx, recent)
+        recent_chats(groups, ctx, recent, starred["chats"])
     except Exception as exc:
         errors.append(f"recent chats: {exc}")
         for g in groups:
             g.setdefault("recent", [])
+            g.setdefault("starred", [])
     for g in groups:
+        for s in g["sessions"]:
+            s["starred"] = (s.get("chatId") or s["sessionId"]) in starred["chats"]
         note_limit_hits(g)  # (of its listed chats and its recent ones)
         try:
-            g["plans"] = account_plans(g, ctx, plans)
+            listed = account_plans(g, ctx, plans, starred["plans"])
+            g["plans"] = listed[:max(0, plans)]
+            g["starredPlans"] = [dict(pl, key=pl["key"][:-len("/plan")] + "/starred") for pl in listed if pl["starred"]]
         except Exception as exc:
             errors.append(f"{g['title']}: plans: {exc}")
-            g["plans"] = []
+            g["plans"], g["starredPlans"] = [], []
         try:
             g["memories"] = account_memories(g, ctx)
         except Exception as exc:
@@ -6232,7 +6339,8 @@ USAGE = """usage: claude_status.py [--config-dir DIR]... [--done-hours H] [--rec
        claude_status.py --vscode-account CONFIG_DIR|- [--vscode-server FOLDER]
        claude_status.py --find QUERY [--limit N] [--remote]
        claude_status.py --start-task|--task-command FOLDER --profile PROFILE [--prompt TEXT]
-                        [--plan SLUG [--plan-profile PROFILE]] [--model MODEL] [--effort LEVEL] [--remote]
+                        [--plan SLUG [--plan-profile PROFILE]] [--model MODEL] [--effort LEVEL]
+                        [--permission-mode MODE] [--remote]
        claude_status.py --plan-text SLUG [--profile PROFILE] [--remote]
        claude_status.py --continue-chat CHAT_ID --profile PROFILE [--folder F] [--prompt TEXT] [--remote]
   --config-dir DIR  extra Claude config dir (repeatable)
@@ -6275,7 +6383,8 @@ def main(argv=None):
     task_folder, task_action, prompt, plan_slug, plan_profile, plan_text = None, None, "", None, None, None
     continue_id, continue_folder = None, None
     vscode_account, vscode_server = None, VSCODE_SERVERS["Code"]
-    keep_going, usage_cap, model, effort = False, 0, None, None
+    keep_going, usage_cap, model, effort, mode = False, 0, None, None, None
+    starred_chats, starred_plans = set(), set()
     while args:
         arg = args.pop(0)
         if arg == "--config-dir" and args:
@@ -6302,6 +6411,8 @@ def main(argv=None):
             model = args.pop(0)
         elif arg == "--effort" and args:
             effort = args.pop(0)
+        elif arg == "--permission-mode" and args:
+            mode = args.pop(0)
         elif arg == "--plan" and args:
             plan_slug = args.pop(0)
         elif arg == "--plan-profile" and args:
@@ -6343,6 +6454,8 @@ def main(argv=None):
             remote = True
         elif arg == "--local":
             local = True
+        elif arg in ("--starred-chats", "--starred-plans") and args:
+            (starred_chats if arg == "--starred-chats" else starred_plans).update(i for i in args.pop(0).split(",") if i)
         elif arg == "--dismiss" and args:
             dismiss = args.pop(0)
         elif arg == "--undismiss-all":
@@ -6386,7 +6499,7 @@ def main(argv=None):
     elif task_action is not None:
         try:
             result = run_task(home, config_dirs, task_action == "--start-task", task_folder, profile_key, prompt,
-                              plan_slug, plan_profile, model=model, effort=effort)
+                              plan_slug, plan_profile, model=model, effort=effort, mode=mode)
         except Exception as exc:
             result = {"ok": False, "message": f"{type(exc).__name__}: {exc}"}
     elif agent_run_id is not None:
@@ -6415,7 +6528,9 @@ def main(argv=None):
     else:
         try:
             result = collect(home, cache_root, config_dirs, with_tokens=with_tokens, keep_done_hours=done_hours,
-                             recent=recent, plans=plans, usage_cap=usage_cap if not remote or local else 0)
+                             recent=recent, plans=plans, usage_cap=usage_cap if not remote or local else 0,
+                             # (on an SSH host: the host's stars, from the computer that asks)
+                             starred={"chats": starred_chats, "plans": starred_plans} if remote and not local else None)
             try:
                 add_vscode(result, home, config_dirs, remote and not local, cache_root)
             except Exception as exc:

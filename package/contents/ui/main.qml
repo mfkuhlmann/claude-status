@@ -47,7 +47,7 @@ PlasmoidItem {
                                          profileDir: "", groupId: "", account: "", shared: false, match: "", openCommand: "" })
     readonly property var emptyPlan: ({ key: "", slug: "", title: "", path: "", profileDir: "", profile: "", updatedAt: 0,
                                         shared: false, chatId: null, chatProfileDir: null, cwd: "", cwdShort: "", edited: false,
-                                        openCommand: null })
+                                        openCommand: null, starred: false })
     readonly property var emptyTask: ({ subject: "", status: "pending" })
     readonly property var emptyDay: ({ day: "", total: 0, output: 0, messages: 0, chats: 0, prompts: 0 })
     readonly property var emptyProject: ({ name: "", path: "", total: 0, output: 0, prompts: 0 })
@@ -336,6 +336,8 @@ PlasmoidItem {
                                            ? " --model " + shellQuote(Plasmoid.configuration.newChatModel) : "")
                                           + (Plasmoid.configuration.newChatEffort
                                              ? " --effort " + shellQuote(Plasmoid.configuration.newChatEffort) : "")
+                                          + (Plasmoid.configuration.newChatMode
+                                             ? " --permission-mode " + shellQuote(Plasmoid.configuration.newChatMode) : "")
 
     // ---------------------------------------------------------------- several widgets
     // This widget can run several times, e.g. on a panel, in the system tray
@@ -352,7 +354,7 @@ PlasmoidItem {
         "notifyDoneMinSeconds", "notifySound", "soundVolume", "soundWaiting", "soundDone", "soundFailed", "recentChats",
         "sshHosts", "remotePollSeconds", "sshUsage", "keepDoneHours", "showUsageInPanel", "showPet", "chatPets", "showTokens",
         "newChatInVscode", "iconBlink", "awayDigest", "awayMinutes", "phoneWhileAway", "phoneFinished", "phoneDevice",
-        "markdownApp", "newChatModel", "newChatEffort", "usageCap"]
+        "markdownApp", "newChatModel", "newChatEffort", "newChatMode", "usageCap"]
     property real settingsSeenAt: 0     // the newest shared settings this copy has seen
     property string settingsSeen: ""    // its own settings as of the last check (to see changes)
 
@@ -2085,7 +2087,8 @@ PlasmoidItem {
         return stop.resetsAt + 60000
     }
 
-    function queueContinue(session, host, account) {
+    // (keep: and after later limits too, until it's done; this computer's chats only)
+    function queueContinue(session, host, account, keep) {
         const at = goOnAt(session)
         if (!at)
             return
@@ -2093,13 +2096,15 @@ PlasmoidItem {
                              + shellQuote(session.chatId || session.sessionId) + " --profile " + shellQuote(session.profileDir)
                              + " --at " + Math.round(at) + (session.cwd ? " --cwd " + shellQuote(session.cwd) : "")
                              + " --name " + shellQuote(session.name || "") + (host ? " --host " + shellQuote(host) : "")
+                             + (keep && !host ? " --keep" : "")
                              + " --account " + shellQuote(account) + configDirArgs + " # " + Date.now())
     }
 
     // ---------------------------------------------------------------- chats that keep going
     // A chat of this computer can keep going until it's done: after each usage
     // limit that stops it, it goes on by itself when that resets (claude_status.py:
-    // look_after_kept; jump.py --keep-going, --keep-off). Go on at … does it too.
+    // look_after_kept; jump.py --keep-going, --keep-off). One a limit stopped
+    // can start keeping going then (jump.py --queue-continue --keep).
 
     // The chat that keeps going ({chat, note, error, …}), or null
     function keptChat(chatId) {
@@ -2129,7 +2134,7 @@ PlasmoidItem {
             lines.push(kept.error)
         else if (kept.note)
             lines.push(kept.note)
-        lines.push(i18n("Click to stop it keeping going."))
+        lines.push(i18n("Click to stop it keeping going (a go-on that's queued already stays)."))
         return lines.join("\n\n")
     }
 
@@ -2578,6 +2583,56 @@ PlasmoidItem {
         expandedPlans = Object.assign({}, expandedPlans, { [groupKey]: !wasOpen })
     }
 
+    // ---------------------------------------------------------------- starred chats and plans
+    // Chats and plans you star stay at hand: each account lists its starred
+    // ones under Recent chats and under Plans, however old they are (jump.py
+    // --star, kept in the widget's cache; an SSH host's too, kept here).
+
+    property var expandedStarred: ({})   // groupKey + "|chats" or "|plans" -> unfolded
+
+    function toggleStarred(key, wasOpen) {
+        expandedStarred = Object.assign({}, expandedStarred, { [key]: !wasOpen })
+    }
+
+    property var starRuns: ({})   // command -> the host whose chat or plan it stars ("": here)
+
+    // kind: "chats" (id: the chat's) or "plans" (id: the plan's slug)
+    function setStar(kind, id, host, on) {
+        if (!id)
+            return
+        const cmd = "python3 -I " + shellQuote(codeDir + "jump.py") + " "
+                    + (kind === "plans" ? (on ? "--star-plan " : "--unstar-plan ") : (on ? "--star " : "--unstar "))
+                    + shellQuote(id) + (host ? " --host " + shellQuote(host) : "") + configDirArgs + " # " + Date.now()
+        starRuns[cmd] = host || ""
+        starrer.connectSource(cmd)
+    }
+
+    function starHint(kind, starred) {
+        return starred ? i18n("Click to unstar it.")
+                       : kind === "plans" ? i18n("A starred plan stays listed under Plans → Starred, however old it is.")
+                                          : i18n("A starred chat stays listed under Recent chats → Starred, however old it is.")
+    }
+
+    P5Support.DataSource {
+        id: starrer
+        engine: "executable"
+        connectedSources: []
+        onNewData: (source, data) => {
+            disconnectSource(source)
+            const host = root.starRuns[source] || ""
+            delete root.starRuns[source]
+            const result = root.helperResult(data)
+            if (!result.ok) {
+                root.actionError = i18n("Couldn't star it: %1", result.message)
+                actionErrorTimer.restart()
+            }
+            if (host)
+                root.pollHost(host)
+            else
+                root.refresh()
+        }
+    }
+
     property var expandedMemories: ({})   // accounts showing their memories
 
     // A memory's icon by its kind (claude_status.py: account_memories)
@@ -2855,7 +2910,8 @@ PlasmoidItem {
         }
         if (host) {
             if (background || (hasTask && !inVscode)) {
-                // remote.py --task HOST PROFILE FOLDER [--prompt TEXT] [--plan SLUG PROFILE] [--model M] [--effort E] [--bg]
+                // remote.py --task HOST PROFILE FOLDER [--prompt TEXT] [--plan SLUG PROFILE] [--model M] [--effort E]
+                //           [--permission-mode MODE] [--bg]
                 remoteAction(background ? "task" : "open", host, "--task " + shellQuote(host) + " " + shellQuote(group.chatProfile)
                              + " " + shellQuote(folder.path || "~") + (text ? " --prompt " + shellQuote(text) : "")
                              + (plan ? " --plan " + shellQuote(plan.slug) + " " + shellQuote(plan.profileDir) : "")

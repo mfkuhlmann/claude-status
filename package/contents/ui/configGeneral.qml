@@ -16,6 +16,7 @@ KCM.SimpleKCM {
         cfg_newChatInVscode = Plasmoid.configuration.newChatInVscode
         cfg_newChatModel = Plasmoid.configuration.newChatModel
         cfg_newChatEffort = Plasmoid.configuration.newChatEffort
+        cfg_newChatMode = Plasmoid.configuration.newChatMode
         cfg_sshHosts = Plasmoid.configuration.sshHosts
     }
 
@@ -35,8 +36,9 @@ KCM.SimpleKCM {
     property alias cfg_showUsageInPanel: showUsage.checked
     property alias cfg_iconBlink: iconBlink.checked
     property bool cfg_newChatInVscode   // set with the Terminal | VS Code switch in the popup
-    property string cfg_newChatModel    // these two in the popup's new-chat box
+    property string cfg_newChatModel    // these three in the popup's new-chat box
     property string cfg_newChatEffort
+    property string cfg_newChatMode
     property int cfg_usageCap
     property alias cfg_showTokens: showTokens.checked
     property alias cfg_showPet: showPet.checked
@@ -73,6 +75,7 @@ KCM.SimpleKCM {
     property bool cfg_newChatInVscodeDefault
     property string cfg_newChatModelDefault
     property string cfg_newChatEffortDefault
+    property string cfg_newChatModeDefault
     property int cfg_usageCapDefault
     property bool cfg_showTokensDefault
     property bool cfg_showPetDefault
