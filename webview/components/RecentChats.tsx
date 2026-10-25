@@ -13,6 +13,7 @@ import {
   stopText,
   terminalReopenHint,
 } from "../../src/shared/model";
+import { reviewPending, testsText } from "../../src/shared/pane";
 import type { Group, RecentChat, ReopenIn } from "../../src/shared/types";
 import { post } from "../env";
 import { canShareRecent, groupKeyOf, recentRef, shareTitle } from "../util/chat";
@@ -108,6 +109,11 @@ export function RecentChats({ group }: { group: Group }) {
     const kept = group.host ? null : keptChat(view.status, c.sessionId);
     const later = group.host ? "" : " Once: ↻ beside it goes on after later limits too, until it's done.";
     const canKeep = !group.host && !kept && !goingOn && goOn > 0;
+    // a click opens its tab (else the chat itself, as the switch above says)
+    const paneFirst = view.settings.clickOpensPane !== false;
+    const reopenIt = () => post(inCode ? { type: "openInClaudeCode", chat } : { type: "openWindow", chat });
+    const toReview = reviewPending({ ...c, chatId: c.sessionId, state: "done" }, view.status, group.host);
+    const tests = testsText(c.review);
     return (
       <li key={c.key} class={"recent-item" + (canOpen ? "" : " unavailable")}>
         <button
@@ -121,10 +127,19 @@ export function RecentChats({ group }: { group: Group }) {
             (c.stopped ? `\n\n${stopText(c.stopped)}` : "") +
             (c.recap?.text ? `\n\nRecap: ${c.recap.text}` : "")
           }
-          onClick={() => canOpen && post(inCode ? { type: "openInClaudeCode", chat } : { type: "open", chat })}
+          onClick={() => (paneFirst ? post({ type: "openPane", chat }) : canOpen && reopenIt())}
         >
           {c.name}
         </button>
+        {toReview ? (
+          <Tag
+            text="to review"
+            active
+            title="It changed files. Click to see what it changed, against how the files were before the chat: undo it, commit only its files, or mark it reviewed."
+            onClick={() => post({ type: "openPane", chat, tab: "review" })}
+          />
+        ) : null}
+        {toReview && tests ? <Tag text={tests.text} title={tests.title} active={tests.ok === true} warning={tests.ok === false} /> : null}
         {c.shared ? (
           <span class="muted" title="Shared between accounts">
             ⇄
@@ -168,6 +183,9 @@ export function RecentChats({ group }: { group: Group }) {
         <Elided text={c.cwdShort || "~"} class="recent-folder small muted" title={c.cwd} />
         <span class="small muted nowrap">· {ago(view.now - c.lastActive)}</span>
         <div class="row-actions">
+          {paneFirst && canOpen ? (
+            <IconButton icon="external" label="Reopen this chat" title={reopen} onClick={reopenIt} />
+          ) : null}
           {c.starred ? null : (
             <IconButton
               icon="star"

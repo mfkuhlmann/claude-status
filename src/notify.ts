@@ -6,6 +6,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import type { Backend } from "./backend";
+import type { ChatPanes } from "./chatPane";
 import { cacheDir, settings } from "./config";
 import { gnomeSoundTheme } from "./desktop";
 import type { Digest } from "./away";
@@ -44,6 +45,7 @@ function pidAlive(pid: number): boolean {
 export class Notifier implements vscode.Disposable {
   private leaderFile = path.join(cacheDir(), "vscode-notify.json");
   private subscription: vscode.Disposable;
+  panes?: ChatPanes; // the chats' tabs: replies and answers go through them (set once they're there)
 
   constructor(
     private backend: Backend,
@@ -88,8 +90,24 @@ export class Notifier implements vscode.Disposable {
     for (const n of notices) {
       const text = `${n.title} — ${n.body}`;
       const show = n.kind === "done" ? vscode.window.showInformationMessage : vscode.window.showWarningMessage;
-      void show(text, "Open").then((choice) => {
-        if (choice === "Open") this.open(chatRef(n.session, n.host));
+      const chat = chatRef(n.session, n.host);
+      const p = n.kind === "waiting" ? n.session.permission : null;
+      const asks = !!p && (p.answer === "hook" || p.answer === "keys") && !!this.panes;
+      // a permission prompt: answer it here; a chat that waits or finished: reply here
+      const buttons = asks
+        ? ["Allow once", ...(p!.answer === "keys" || p!.always ? ["Always allow"] : []), "Deny", "Open"]
+        : this.panes && (n.kind === "done" || (n.kind === "waiting" && !p)) ? ["Reply…", "Open"] : ["Open"];
+      void show(text, ...buttons).then(async (choice) => {
+        const panes = this.panes;
+        if (choice === "Open") {
+          if (panes && settings.clickOpensPane()) panes.open(chat, "chat");
+          else this.open(chat);
+        } else if (panes && (choice === "Allow once" || choice === "Always allow" || choice === "Deny")) {
+          await panes.answer(chat, choice === "Allow once" ? "allow" : choice === "Always allow" ? "always" : "deny");
+        } else if (panes && choice === "Reply…") {
+          const reply = await vscode.window.showInputBox({ title: `Reply to ${n.session.name}`, prompt: "Sent the way the chat takes it", ignoreFocusOut: true });
+          if (reply?.trim()) await panes.reply(chat, reply);
+        }
       });
     }
     const sound = opts.holdDone && changes.sound !== "waiting" ? "" : changes.sound;

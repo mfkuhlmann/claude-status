@@ -49,6 +49,12 @@ export interface NotifyOptions {
 }
 
 const SOUND_RANK: Record<SoundKind, number> = { "": 0, done: 1, failed: 2, waiting: 3 };
+
+// What a chat waiting for a permission asks, in a line
+export function askText(s: Session): string {
+  const p = s.permission;
+  return p ? p.command || (p.file ? `Change ${p.file}` : p.line) : "";
+}
 const WAITING_QUIET_MS = 60000;
 
 // b's notices, pet events and finished chats after a's; the more urgent sound
@@ -69,6 +75,7 @@ export class TransitionTracker {
   private lastEnded = new Map<string, Map<string, number>>(); // the turns that ended at the last poll, told as finished: how long they took
   private lastWaitingAlert = new Map<string, number>();
   private lastWindows = new Map<string, number>();
+  private toldAsks = new Set<string>(); // chats told about with Allow / Deny buttons while they wait
 
   track(source: string, groups: Group[], nowMs: number, host: string | undefined, opts: NotifyOptions): Changes {
     const changes: Changes = { notices: [], petEvents: [], sound: "", finished: [] };
@@ -103,6 +110,14 @@ export class TransitionTracker {
           this.turnEnded(changes, sid, s, host, endedTook, nowMs, opts, queueSound);
           continue;
         }
+        const asks = s.state === "waiting" && !!s.permission && (s.permission.answer === "hook" || s.permission.answer === "keys");
+        if (s.state !== "waiting") this.toldAsks.delete(sid);
+        if (prev === "waiting" && asks && !this.toldAsks.has(sid) && opts.notifyWaiting) {
+          // (the hook's request came a poll after the chat began to wait: now with its buttons)
+          this.toldAsks.add(sid);
+          changes.notices.push({ key: sid, kind: "waiting", title: `${s.name} asks for a permission`,
+                                 body: `${askText(s)} · ${s.cwdShort}${where}`, session: s, host });
+        }
         if (prev === s.state) continue;
         const pk = petKeyOf(s, host);
         if (s.state === "waiting") {
@@ -110,12 +125,13 @@ export class TransitionTracker {
           if (nowMs - (this.lastWaitingAlert.get(sid) ?? 0) < WAITING_QUIET_MS) continue;
           this.lastWaitingAlert.set(sid, nowMs);
           changes.petEvents.push({ kind: "waiting", text: `${s.name} needs you!`, key: pk });
+          if (asks) this.toldAsks.add(sid);
           if (opts.notifyWaiting) {
             changes.notices.push({
               key: sid,
               kind: "waiting",
-              title: `${s.name} needs your input`,
-              body: `${s.detail || reasonText(s.reason)} · ${s.cwdShort}${where}`,
+              title: s.permission ? `${s.name} asks for a permission` : `${s.name} needs your input`,
+              body: `${s.permission ? askText(s) : s.detail || reasonText(s.reason)} · ${s.cwdShort}${where}`,
               session: s,
               host,
             });

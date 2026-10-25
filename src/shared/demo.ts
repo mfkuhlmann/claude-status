@@ -171,6 +171,9 @@ function personal(now: number, phase: number): Group {
         plan: { slug: "brave-green-otter", title: "Release 2.0", path: "/home/alice/.claude/plans/brave-green-otter.md", updatedAt: now - 2 * HOUR, edited: true },
         changes: { count: 1, files: ["CHANGELOG.md"] },
         stats: chatStats(now, 2, 6, [["Bash", 7], ["Read", 4], ["Write", 1]], 2_100_000),
+        reply: "tmux",
+        permission: { tool: "Bash", line: "Bash: git tag v2.0.0", command: "git tag v2.0.0", file: "", diff: [],
+                      always: "Bash(git tag v2.0.0)", request: "demo-request", answer: "hook" },
       }),
       session(now, {
         key: "demo-3",
@@ -184,6 +187,8 @@ function personal(now: number, phase: number): Group {
         since: now - 3 * HOUR,
         context: 9,
         detail: "All dependencies are up to date",
+        changes: { count: 2, files: ["package.json", "package-lock.json"] },
+        review: { editedAt: now - 3 * HOUR - 5 * MIN, tests: { command: "npm test", ok: true, at: now - 3 * HOUR - 2 * MIN } },
       }),
     ],
     limits: {
@@ -355,6 +360,8 @@ export function demoState(now: number, phase = 0): ViewState {
     dismissed: 0,
     canShare: false,
     errors: [],
+    reviewed: {},
+    reviewedSince: now - 24 * HOUR,
     queue: [
       {
         id: "demo-q1", host: "", profile: ".claude", account: "personal · Max", folder: "/home/alice/projects/webapp",

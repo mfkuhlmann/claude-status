@@ -288,6 +288,17 @@ export class Dashboard implements vscode.Disposable {
     if (this.demo || !this.notifier.isLeader()) return;
     const groups = allGroups(status, this.state().hosts);
     for (const t of status.queue ?? []) {
+      if (t.afterTurn) {
+        // a reply for when the chat's turn ends: now it has (or the chat isn't listed)
+        const known = !t.host || !!this.hosts.get(t.host)?.result;
+        const row = groups
+          .filter((g) => (g.host ?? "") === (t.host || ""))
+          .flatMap((g) => g.sessions)
+          .find((s) => s.chatId === t.chat || s.sessionId === t.chat);
+        if (known && !t.error && !this.starting.has(t.id) && (!row || (row.state !== "working" && row.state !== "waiting")))
+          void this.startQueued(t);
+        continue;
+      }
       if (!t.due || this.starting.has(t.id)) continue;
       const group = groups.find((g) => (g.host ?? "") === (t.host || "") && (g.profileKeys ?? []).includes(t.profile));
       const reset = group ? limitReset(group, Date.now()) : null;
@@ -314,7 +325,12 @@ export class Dashboard implements vscode.Disposable {
     try {
       const answer = await this.backend.action("jump.py", ["--start-queued", t.id, ...configDirArgs()], 120000);
       const what = queuedWhat(t).split("\n")[0];
-      if (answer.ok && answer.message) {
+      if (t.afterTurn) {
+        // your reply, sent as the chat's turn ended
+        if (answer.ok && answer.message && settings.notifyDone() && this.notifier.isLeader() && !this.visible)
+          void vscode.window.showInformationMessage(`Sent to ${t.name || "the chat"}: ${t.prompt} — ${answer.message}`);
+        else if (!answer.ok) this.setActionError(`Couldn't send your reply to ${t.name || "the chat"}: ${answer.message}`);
+      } else if (answer.ok && answer.message) {
         // ("": another window, or the widget, started it)
         this.petEvent("reset", `Started: ${what}`);
         if (settings.notifyDone() && this.notifier.isLeader())

@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+- **Chat with any chat from the view:** a click on a chat opens it in an
+  editor tab: its conversation as it goes, Claude's replies rendered and each
+  tool call folded into one line (*▸ Bash: pytest ✓*, click it for what it ran
+  and got), with a box to reply: **Send**, or **Send when this turn ends**.
+  The message goes the way the chat takes one: typed into its terminal in
+  this window or its tmux pane, into its Claude Code tab's input, or the chat
+  goes on with it in the background (`claude --bg --resume`, the same chat; a
+  running background session stops first). A chat in a terminal outside VS
+  Code takes no text from outside, so you choose there: it goes on in the
+  background, or the message goes to the clipboard and its terminal comes
+  up. Also for SSH hosts' chats; a notification takes a reply (**Reply…**).
+  The window button beside a chat still opens the chat itself, and
+  `claudeStatus.clickOpensPane` makes a click do that again.
+- **Answer permission prompts from the view:** a chat waiting for a
+  permission shows the command, or the file and its change, with **Allow
+  once**, **Always allow** and **Deny** (a note for Claude optional), in its
+  row, its tab and its notification. That takes **Claude Status: Answer
+  Permission Prompts from Claude Status…**, which adds a hook to Claude's
+  settings (here and on the SSH hosts shown); Claude still asks in the chat
+  too, and the first answer counts. Chats in tmux can be answered without it.
+- **Review what a chat did:** the tab's **Review** lists the files a chat
+  changed with their added and removed lines and diffs, against the files
+  before the chat, with **Diff**, **Undo** (a file, or all), **Commit these
+  files…** (only the chat's, with a message from its name and recap that you
+  edit) and **Mark reviewed**. Finished chats that changed files say **to
+  review** until then, with whether tests passed after their last edit.
+
 - **A Recap tab:** the view's new **Recap** tab shows your last 7 days with
   Claude: how long you were at it and how long Claude worked (its own count
   of each turn, without the time it waited for your answers), against the

@@ -25,6 +25,7 @@ export const settings = {
   remotePollSeconds: () => num("remotePollSeconds", 30, 10, 600),
   sshHosts: () => [...new Set((cfg().get<string[]>("sshHosts", []) ?? []).map((h) => String(h).trim()).filter(Boolean))], // (a host twice would be two rows)
   includeCurrentRemote: () => cfg().get<boolean>("includeCurrentRemote", true),
+  clickOpensPane: () => cfg().get<boolean>("clickOpensPane", true) !== false,
   openIn: () => (cfg().get<string>("openIn", "vscode") === "system" ? "system" : "vscode"),
   reopenIn: (): ReopenIn => (cfg().get<string>("reopenIn", "terminal") === "claudeCode" ? "claudeCode" : "terminal"),
   sshUsage: (): SshUsage => {
@@ -81,6 +82,7 @@ export function viewSettings(): ViewSettings {
     reopenIn: settings.reopenIn(),
     recapCurrency: settings.recapCurrency(),
     recapRules: settings.recapRules(),
+    clickOpensPane: settings.clickOpensPane(),
   };
 }
 

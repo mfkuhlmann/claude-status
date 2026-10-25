@@ -2125,3 +2125,397 @@ body.vscode-high-contrast .top.scrolled {
 .week-section .error {
   color: var(--cs-failed);
 }
+
+/* ---------------------------------------------------------------------------
+   The chat tab (webview/chat.tsx) and what a waiting chat asks (AskBox, also
+   in its row): VS Code's own button and input colors. */
+
+.btn {
+  padding: 3px 10px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 2px;
+  background: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #fff);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--vscode-button-hoverBackground, #1177bb);
+}
+
+.btn.secondary {
+  background: var(--vscode-button-secondaryBackground, color-mix(in srgb, var(--cs-fg) 14%, transparent));
+  color: var(--vscode-button-secondaryForeground, inherit);
+}
+
+.btn.secondary:hover:not(:disabled) {
+  background: var(--vscode-button-secondaryHoverBackground, color-mix(in srgb, var(--cs-fg) 22%, transparent));
+}
+
+.btn.small {
+  padding: 1px 6px;
+  font-size: 0.85em;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.mono {
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.bad {
+  color: var(--cs-failed);
+}
+
+.add {
+  color: var(--cs-idle);
+}
+
+.del {
+  color: var(--cs-failed);
+}
+
+.ask-box {
+  margin: 6px 0 4px;
+  padding: 6px 8px;
+  border: 1px solid var(--cs-waiting);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--cs-waiting) 8%, transparent);
+}
+
+.ask-title {
+  font-weight: 600;
+}
+
+.ask-command,
+.pane-diff,
+.pane-tool-detail {
+  margin: 4px 0;
+  padding: 4px 6px;
+  border-radius: 3px;
+  background: var(--vscode-textCodeBlock-background, var(--cs-hover));
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.9em;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+}
+
+.pane-diff > .add {
+  color: var(--cs-idle);
+}
+
+.pane-diff > .del {
+  color: var(--cs-failed);
+}
+
+.pane-diff > .hunk {
+  color: var(--cs-working);
+}
+
+.ask-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-top: 4px;
+}
+
+.ask-note,
+.pane-reply {
+  flex: 1 1 12em;
+  box-sizing: border-box;
+  padding: 3px 6px;
+  border: 1px solid var(--vscode-input-border, var(--cs-border));
+  border-radius: 2px;
+  background: var(--vscode-input-background, transparent);
+  color: var(--vscode-input-foreground, inherit);
+  font: inherit;
+}
+
+body.chat-page {
+  background: var(--vscode-editor-background, transparent);
+}
+
+.pane {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  height: 100vh;
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 10px 14px;
+}
+
+.pane-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pane-head .state-dot {
+  align-self: center;
+  margin-top: 0;
+}
+
+.pane-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 1.15em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pane-state.waiting {
+  color: var(--cs-waiting);
+  font-weight: 600;
+}
+
+.pane-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--cs-border);
+}
+
+.pane-tabs button {
+  padding: 4px 12px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  cursor: pointer;
+}
+
+.pane-tabs button.on {
+  border-bottom-color: var(--cs-working);
+}
+
+.pane-info {
+  color: var(--cs-idle);
+}
+
+.pane-info.bad {
+  color: var(--cs-failed);
+}
+
+.pane-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-right: 4px;
+}
+
+.pane-more {
+  align-self: center;
+}
+
+.center {
+  text-align: center;
+}
+
+.pane-you {
+  align-self: flex-end;
+  max-width: 85%;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--cs-working) 15%, transparent);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.pane-claude {
+  word-break: break-word;
+}
+
+.md > * + * {
+  margin-top: 6px;
+}
+
+.md p,
+.md ul,
+.md ol,
+.md blockquote {
+  margin: 0;
+}
+
+.md ul,
+.md ol {
+  padding-left: 1.4em;
+}
+
+.md-heading {
+  margin: 8px 0 2px;
+  font-size: 1em;
+}
+
+.md-code {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 3px;
+  background: var(--vscode-textCodeBlock-background, var(--cs-hover));
+  overflow-x: auto;
+}
+
+.md-code code {
+  padding: 0;
+  background: none;
+}
+
+.md blockquote {
+  padding-left: 8px;
+  border-left: 3px solid var(--cs-border);
+  color: var(--cs-muted);
+}
+
+.md-table {
+  overflow-x: auto;
+}
+
+.md-table table {
+  border-collapse: collapse;
+}
+
+.md-table th,
+.md-table td {
+  padding: 2px 8px;
+  border: 1px solid var(--cs-border);
+  text-align: left;
+}
+
+.pane-tool-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.pane-fold {
+  color: var(--cs-muted);
+}
+
+.pane-tool-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.9em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pane-tool-mark {
+  font-weight: 700;
+  color: var(--cs-waiting);
+}
+
+.pane-tool-mark.ok {
+  color: var(--cs-idle);
+}
+
+.pane-tool-mark.error {
+  color: var(--cs-failed);
+}
+
+.pane-tool-detail {
+  margin-left: 1.2em;
+}
+
+.pane-note {
+  color: var(--cs-muted);
+  font-size: 0.85em;
+  font-style: italic;
+  text-align: center;
+}
+
+.pane-note.bad {
+  color: var(--cs-failed);
+}
+
+.pane-activity {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pane-queued {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--cs-working);
+}
+
+.pane-queued span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pane-reply {
+  flex: none;
+  resize: vertical;
+}
+
+.md a {
+  color: var(--cs-link);
+}
+
+.pane-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.pane-buttons .spacer {
+  flex: 1 1 auto;
+}
+
+.review-head,
+.review-line,
+.confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.review-head strong {
+  flex: 1 1 auto;
+}
+
+.review-line .pane-tool-line {
+  flex: 1 1 12em;
+  width: auto;
+  min-width: 0;
+}
+
+.confirm {
+  margin: 4px 0;
+  color: var(--cs-waiting);
+}
+
+.confirm span {
+  flex: 1 1 14em;
+}
+
+.commit-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}

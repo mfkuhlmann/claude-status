@@ -22,6 +22,7 @@ import {
   tasksTitle,
   usageLevel,
 } from "../../src/shared/model";
+import { reviewPending, testsText } from "../../src/shared/pane";
 import type { Session } from "../../src/shared/types";
 import { post } from "../env";
 import { pets } from "../pets";
@@ -29,6 +30,7 @@ import { canRemove, canShare, canStop, chatRefOf, isBackground, openHint, rowKey
 import { useStore } from "../util/store";
 import { toggleAgents, togglePeek, uiState } from "../util/ui";
 import { AgentTree } from "./AgentTree";
+import { AskBox } from "./AskBox";
 import { useView } from "./context";
 import { Elided } from "./Elided";
 import { IconButton } from "./IconButton";
@@ -89,6 +91,11 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
     (s.pid === null ? "" : s.kind === "bg" ? " This background session is stopped first (claude stop)." : " Claude here quits first (its terminal stays open).") +
     " It goes on in the permission mode it had.";
   const resetsAt = s.stopped?.kind === "limit" && !s.stopped.over && s.stopped.resetsAt ? s.stopped.resetsAt : 0;
+  // a click on its name opens its tab (else the chat itself)
+  const paneFirst = view.settings.clickOpensPane !== false;
+  // it changed files and is done: to review until you mark it reviewed
+  const toReview = reviewPending(s, view.status, host);
+  const tests = testsText(s.review);
   const stopped = s.stopped && !s.stopped.over ? " stopped" : s.stopped ? " freed" : "";
 
   return (
@@ -98,7 +105,12 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
       <span class="state-dot" aria-hidden="true" />
       <div class="session-main">
         <div class="session-line">
-          <button type="button" class="link session-name" title={openHint(s, host)} onClick={() => post({ type: "open", chat })}>
+          <button
+            type="button"
+            class="link session-name"
+            title={paneFirst ? "Open this chat in a tab: its conversation as it goes, a box to reply, and what it changed" : openHint(s, host)}
+            onClick={() => post({ type: "open", chat })}
+          >
             {s.name}
           </button>
           {s.starred ? (
@@ -185,6 +197,15 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
               onClick={host ? undefined : () => post({ type: "compareChanges", chat, turn: false })}
             />
           ) : null}
+          {toReview ? (
+            <Tag
+              text="to review"
+              active
+              title="It changed files and its turn is over. Click to see what it changed, against how the files were before the chat: undo it, commit only its files, or mark it reviewed."
+              onClick={() => post({ type: "openPane", chat, tab: "review" })}
+            />
+          ) : null}
+          {toReview && tests ? <Tag text={tests.text} title={tests.title} active={tests.ok === true} warning={tests.ok === false} /> : null}
           <span class="state-text" title={stateText(s, now) + (resetsAt ? `\n${resetAtText(resetsAt, now)}` : "")}>
             {stateText(s, now)}
           </span>
@@ -293,13 +314,24 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
           </div>
         ) : null}
 
+        {s.state === "waiting" && s.permission ? (
+          <AskBox ask={s.permission} max={6} onAnswer={(decision, note) => post({ type: "answerPermission", chat, decision, note })} />
+        ) : null}
+
         {showPeek ? <PeekPanel session={s} host={host} chat={chat} /> : null}
 
         {showAgents && agents ? <AgentTree tree={agents.tree} now={now} rowKey={rowKey} chat={chat} host={host} /> : null}
       </div>
 
-      {share || remove || stop || canKeep || !s.starred ? (
+      {
         <div class="row-actions">
+          {/* the other way to open it than a click on its name: its window, or its tab */}
+          <IconButton
+            icon={paneFirst ? "external" : "chat"}
+            label={paneFirst ? "Open its window" : "Open in a tab"}
+            title={paneFirst ? openHint(s, host) : "Open this chat in a tab: its conversation as it goes, a box to reply, and what it changed."}
+            onClick={() => post(paneFirst ? { type: "openWindow", chat } : { type: "openPane", chat })}
+          />
           {s.starred ? null : (
             <IconButton
               icon="star"
@@ -356,7 +388,7 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
             )
           ) : null}
         </div>
-      ) : null}
+      }
     </div>
   );
 }

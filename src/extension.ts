@@ -10,6 +10,8 @@ import { AccountSwitch } from "./accountSwitch";
 import { Actions } from "./actions";
 import { Backend } from "./backend";
 import { openChangesLink } from "./changes";
+import { ChatPanes } from "./chatPane";
+import { answerPermissionsHere } from "./relay";
 import { extraConfigDirs, settings } from "./config";
 import { markdownLinkFile, openAgentRunFile } from "./agentRun";
 import { Dashboard } from "./dashboard";
@@ -37,6 +39,10 @@ export function activate(context: vscode.ExtensionContext): void {
   const a = actions;
   const review = new PlanReview(extraConfigDirs);
   a.planReview = review;
+  // each chat's tab: its conversation, a reply box, what it asks, its review
+  const panes = new ChatPanes(context.extensionUri, backend, dash, actions, terminals, log);
+  view.panes = panes;
+  notifier.panes = panes;
 
   // Send Feedback to Claude, for a plan's file (the editor's, or the active one)
   const sendFeedback = (uri?: vscode.Uri) => {
@@ -120,6 +126,8 @@ export function activate(context: vscode.ExtensionContext): void {
       void vscode.window.showInformationMessage(on ? "Claude Status shows made-up demo chats now." : "Claude Status shows your chats again.");
     }),
     vscode.commands.registerCommand("claudeStatus.showLog", () => log.show()),
+    vscode.commands.registerCommand("claudeStatus.answerPermissions", () => answerPermissionsHere(backend, dash)),
+    panes,
   );
   statusBar.update(dash.state());
   void dash.start();

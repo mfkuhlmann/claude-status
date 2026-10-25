@@ -5,7 +5,8 @@
 import * as crypto from "node:crypto";
 import * as vscode from "vscode";
 import type { Actions } from "./actions";
-import { setReopenIn } from "./config";
+import type { ChatPanes } from "./chatPane";
+import { setReopenIn, settings } from "./config";
 import type { Dashboard } from "./dashboard";
 import { findChatRef, findMemory, findPlan, goOnAt, machineStatus, shareAccounts } from "./shared/model";
 import { permsHost, weekAsked, weekRevokeAsked, weekRuleAsked } from "./shared/week";
@@ -23,6 +24,7 @@ export class ViewHost implements vscode.WebviewViewProvider, vscode.Disposable {
   private panel: vscode.WebviewPanel | undefined;
   private view: vscode.WebviewView | undefined;
   private disposables: vscode.Disposable[] = [];
+  panes?: ChatPanes; // the chats' tabs (set once they're there)
 
   constructor(
     private extensionUri: vscode.Uri,
@@ -148,7 +150,19 @@ export class ViewHost implements vscode.WebviewViewProvider, vscode.Disposable {
         void webview.postMessage({ type: "visible", visible: this.isVisible(webview) } satisfies HostMessage);
         break;
       case "open":
+        // (a click on a chat: its tab, unless clicks open the chat itself)
+        if (chat && this.panes && settings.clickOpensPane()) this.panes.open(chat, "chat");
+        else if (chat) void this.actions.open(chat);
+        break;
+      case "openPane":
+        if (chat && this.panes) this.panes.open(chat, m.tab === "review" ? "review" : "chat");
+        break;
+      case "openWindow":
         if (chat) void this.actions.open(chat);
+        break;
+      case "answerPermission":
+        if (chat && this.panes && (m.decision === "allow" || m.decision === "always" || m.decision === "deny"))
+          void this.panes.answer(chat, m.decision, typeof m.note === "string" ? m.note : "");
         break;
       case "openInClaudeCode":
         if (chat) void this.actions.openInClaudeCode(chat);

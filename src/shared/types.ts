@@ -89,6 +89,11 @@ export interface QueuedTask {
   why?: string; // a chat's go-on: "retry" (its turn broke off) or "cap" (the usage cap stopped it), else ""
   model?: string | null; // a new chat's model and effort (claude --model, --effort)
   effort?: string | null;
+  // a reply for when the chat's turn ends (pane.py --send --after-turn):
+  // sent once the chat isn't working any more, the way `how` says
+  afterTurn?: boolean;
+  how?: string;
+  session?: string | null;
 }
 
 // A chat of this computer that keeps going until it's done: after each usage
@@ -200,6 +205,35 @@ export interface Session {
   // --remote: the process of the VS Code terminal it runs in (that terminal's
   // processId, on the machine the session is on), if it does
   vscodeTerminal?: number | null;
+  // How it takes a message from the chat tab (claude_status.py: reply_route);
+  // older backends leave these out
+  reply?: ReplyRoute;
+  review?: Review | null; // it changed files: its last edit, and tests since
+  permission?: PermissionAsk | null; // what it asks while it waits for a permission
+}
+
+// "tmux": typed into its pane; "vscode": its Claude Code tab's input;
+// "background": claude --bg --resume (no process, or a background session);
+// "terminal": a terminal that takes no text from outside
+export type ReplyRoute = "tmux" | "vscode" | "background" | "terminal";
+
+// A chat that changed files: when it last edited one, and the newest test run
+// after that (claude_status.py: TestsCache.review)
+export interface Review {
+  editedAt: number | null;
+  tests: { command: string; ok: boolean; at: number | null } | null;
+}
+
+// What a chat waiting for a permission asks (claude_status.py: note_permissions)
+export interface PermissionAsk {
+  tool: string;
+  line: string; // e.g. "Bash: npm publish"
+  command: string; // a Bash command, or ""
+  file: string; // the file it would change, or ""
+  diff: string[]; // the change, as unified diff lines
+  always: string; // what Always allow lets through, or "" (nothing to remember)
+  request: string | null; // the hook's request, which the extension can answer
+  answer: "hook" | "keys" | ""; // how it can be answered from here ("": only in the chat)
 }
 
 // A chat's numbers (claude_status.py: stats_summary): your prompts, its tool
@@ -291,6 +325,8 @@ export interface RecentChat {
   recap?: { text: string; at: number | null } | null;
   stopped?: Stop | null;
   starred?: boolean; // you starred it
+  changes?: ChangeSummary | null; // the files it changed (older backends leave it out)
+  review?: Review | null;
 }
 
 // A chat "Find a Chat" found (claude_status.py: find_chats)
@@ -416,6 +452,10 @@ export interface Status {
   cli?: { installed: boolean };
   queue?: QueuedTask[]; // this computer's status only: tasks waiting for a usage limit
   keep?: KeptChat[]; // this computer's status only: the chats that keep going
+  // this computer's status only: chats marked reviewed ("[host|]chat id" ->
+  // when; 0: marked not reviewed), and since when chats are to review at all
+  reviewed?: Record<string, number>;
+  reviewedSince?: number;
 }
 
 export interface Counts {
@@ -451,6 +491,7 @@ export interface ViewSettings {
   reopenIn: ReopenIn; // where recent chats reopen (the switch above them)
   recapCurrency?: string; // the Recap tab's amounts: "USD", "EUR", …
   recapRules?: boolean; // the Recap tab suggests rules for the permission prompts you answered
+  clickOpensPane?: boolean; // a click on a chat opens its tab (else the chat itself)
 }
 
 export type ReopenIn = "terminal" | "claudeCode";
@@ -699,10 +740,15 @@ export interface ChatRef {
   plan?: { slug: string; path: string } | null; // the plan it made
 }
 
+export type Decision = "allow" | "always" | "deny";
+
 // webview -> extension
 export type WebviewMessage =
   | { type: "ready" }
   | { type: "open"; chat: ChatRef }
+  | { type: "openPane"; chat: ChatRef; tab?: "chat" | "review" } // the chat's tab: its conversation, a reply box, its review
+  | { type: "openWindow"; chat: ChatRef } // its own terminal or Claude Code tab, whatever a click does
+  | { type: "answerPermission"; chat: ChatRef; decision: Decision; note?: string } // what a waiting chat asks
   | { type: "openInClaudeCode"; chat: ChatRef }
   | { type: "setReopenIn"; where: ReopenIn }
   | { type: "stop"; chat: ChatRef }

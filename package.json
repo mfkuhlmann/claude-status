@@ -127,6 +127,11 @@
         "category": "Claude Status"
       },
       {
+        "command": "claudeStatus.answerPermissions",
+        "title": "Answer Permission Prompts from Claude Status…",
+        "category": "Claude Status"
+      },
+      {
         "command": "claudeStatus.switchAccount",
         "title": "Default Claude Account…",
         "category": "Claude Status",
@@ -316,6 +321,12 @@
           },
           "default": [],
           "markdownDescription": "More Claude Code config folders to read. `~/.claude`, every `~/.claude-*` folder and `$CLAUDE_CONFIG_DIR` are found without this.",
+          "order": 5
+        },
+        "claudeStatus.clickOpensPane": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "A click on a chat opens it in an editor tab: its conversation as it goes, a box to reply, what it asks for (Allow / Deny), and what it changed (Undo, Commit, Mark reviewed). Off: a click opens the chat itself, as `#claudeStatus.openIn#` says (the tab is then a button beside it).",
           "order": 5
         },
         "claudeStatus.openIn": {

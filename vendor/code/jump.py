@@ -96,6 +96,18 @@ if (best) {
 }
 """
 
+# The chat pane's window (ChatPane.qml), put beside the widget's popup: a
+# window can't place itself on Wayland, KWin can
+KWIN_PLACE_SCRIPT = """\
+const want = %s;
+for (const w of workspace.windowList()) {
+    if (w.normalWindow && want.pids.indexOf(w.pid) >= 0 && w.caption.indexOf(want.caption) === 0) {
+        w.frameGeometry = {x: want.x, y: want.y, width: want.width, height: want.height};
+        break;
+    }
+}
+"""
+
 
 # ---------------------------------------------------------------- helpers
 
@@ -174,12 +186,20 @@ def raise_window(pids, caption="", require=False, prefer=""):
     return raise_window_kwin(want) or raise_window_gnome(want)
 
 
-def raise_window_kwin(want):
+def place_window(caption, x, y, width, height):
+    """Put the window whose title starts with caption, of the program that
+    runs this (plasmashell), at x, y (width × height): KWin does it (the chat
+    pane beside the popup)."""
+    want = {"pids": ancestors(os.getppid()), "caption": caption, "x": x, "y": y, "width": width, "height": height}
+    return raise_window_kwin(want, KWIN_PLACE_SCRIPT)
+
+
+def raise_window_kwin(want, script=KWIN_SCRIPT):
     fd, path = tempfile.mkstemp(prefix="claude-status-", suffix=".js")
     name = f"claude-status-jump-{os.getpid()}"
     try:
         with os.fdopen(fd, "w") as f:
-            f.write(KWIN_SCRIPT % json.dumps(want))
+            f.write(script % json.dumps(want))
         script_id = dbus_call("org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting.loadScript", path, name)
         if not isinstance(script_id, int) or script_id < 0:
             return False
@@ -1103,7 +1123,23 @@ def start_queued(home, extra_dirs, task_id):
     task = Task(entry.get("prompt") or "", entry.get("plan"), entry.get("planProfile"), entry.get("model"),
                 entry.get("effort"), entry.get("mode"))
     try:
-        if entry.get("chat") and entry.get("host"):
+        if entry.get("afterTurn"):  # a message for when the chat's turn ended (pane.py --send --after-turn)
+            how = entry.get("how") or "auto"
+            args = ["--send", entry["chat"], "--profile", entry["profile"], "--text", task.text, "--how", how]
+            if entry.get("session"):
+                args += ["--session", entry["session"]]
+            if entry.get("host"):
+                import remote
+                answer = remote.host_answer(entry["host"], args, name="pane.py")
+            else:
+                import pane
+                answer = pane.send(home, extra_dirs, entry["profile"], entry["chat"], task.text, entry.get("session"),
+                                   how, claude_path(home))
+            ok, message = bool(answer.get("ok")) and answer.get("how") != "ask", answer.get("message") or ""
+            if answer.get("how") == "vscode" and answer.get("link") and shutil.which("xdg-open"):
+                subprocess.Popen([shutil.which("xdg-open"), answer["link"]], stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        elif entry.get("chat") and entry.get("host"):
             import remote
             answer = remote.continue_chat(entry["host"], entry["profile"], entry["chat"], entry.get("folder") or "",
                                           task.text)
@@ -2001,6 +2037,14 @@ def main(argv=None):
     if argv is None:
         signal.signal(signal.SIGTERM, stop_on_term)
     args = sys.argv[1:] if argv is None else list(argv)
+    if args[:1] == ["--place-window"] and len(args) == 3:  # --place-window CAPTION X,Y,W,H
+        try:
+            x, y, w, h = (int(float(v)) for v in args[2].split(","))
+        except ValueError:
+            sys.exit(USAGE)
+        ok = place_window(args[1], x, y, w, h)
+        print(json.dumps({"ok": bool(ok), "message": "" if ok else "KWin didn't take it"}))
+        return
     extra, session_id, action, folder, profile_dir = [], None, jump, None, None
     remote_host, name_arg, choose, vscode, print_command = None, "", False, False, False
     busy, settings_json, settings_by, unless_default = False, None, "", False

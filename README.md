@@ -212,10 +212,44 @@ Other hosts: **Claude Status: Show Claude on SSH Hosts…** lists the ones in
 `~/.ssh/config`. A host needs key-based login (the check never asks for a
 password) and `python3` 3.7 or newer; nothing is installed there.
 
-Clicking a chat opens it on the machine it's on: in VS Code's terminal here,
-on the window's host, or through `ssh -t` for another host. A chat already
-running in one of this window's terminals is brought to the front; a chat of
-the Claude Code extension is revealed in it.
+**Clicking a chat opens it in an editor tab:** the conversation as it goes,
+Claude's replies rendered and each tool call folded into one line
+(*▸ Bash: pytest ✓*; click it for what it ran and got), with a box to reply:
+**Send**, or **Send when this turn ends** (kept, and sent once the turn is
+over). Your message goes the way the chat can take it: typed into its
+terminal when it runs in one of this window's terminals, or into its tmux
+pane; put into the input of its Claude Code tab (press Enter there); or, for
+a background session or a chat that isn't open, the chat goes on with it in
+the background (`claude --bg --resume`, the same chat; a running background
+session stops first). A terminal outside VS Code takes no text from outside,
+so there you choose: send it, and Claude there quits and the chat goes on in
+the background, or copy it and open its terminal. An SSH host's chats work
+the same way. A notification takes a reply too (**Reply…**).
+
+**Permission prompts:** a chat waiting for a permission shows the command, or
+the file and its change, with **Allow once**, **Always allow** and **Deny**
+(with a note for Claude), in its row, its tab and its notification. That
+needs **Claude Status: Answer Permission Prompts from Claude Status…**: it
+adds a hook to each Claude profile's `settings.json` (and on the SSH hosts
+shown) that hands each request to Claude Status. Claude still asks in the chat
+too; whichever you answer first counts. **Always allow** saves the rule
+Claude suggests, as its own *don't ask again* does. Chats in tmux can be
+answered without the hook, with their dialog's keys.
+
+**Review:** the tab's **Review** lists the files a chat changed with their
+added and removed lines, against how they were before the chat (from Claude's
+own backups), each with its diff, **Diff** (VS Code's diff editor) and
+**Undo**; **Undo all** puts them all back. **Commit these files…** commits
+only this chat's files (yours stay as they are) with a message made from its
+name and Claude's recap, that you edit first. Finished chats that changed
+files say **to review** until you **Mark reviewed** (or until they change
+files again), with whether tests ran and passed after their last edit.
+
+The window button beside a chat opens the chat itself, on the machine it's
+on (with `claudeStatus.clickOpensPane` off, so does a click): in VS Code's
+terminal here, on the window's host, or through `ssh -t` for another host. A
+chat already running in one of this window's terminals is brought to the
+front; a chat of the Claude Code extension is revealed in it.
 
 **New chat** (＋) asks where: in a terminal, in one of the account's recent
 folders or any other, or as a Claude Code chat tab in this window. **Start
@@ -317,6 +351,7 @@ code --install-extension claude-status-*.vsix
 | `claudeStatus.sshUsage` | `once` | Plan usage on hosts' accounts: an account on this computer and a host (or two hosts) shows it once, where it's listed first, with the newest numbers; `all`: under every copy; `none`: on no host |
 | `claudeStatus.pollInterval` | `2000` | ms between checks of this computer while the view is open (10 s when hidden) |
 | `claudeStatus.extraConfigDirs` | `[]` | More Claude Code config folders |
+| `claudeStatus.clickOpensPane` | `true` | A click on a chat opens its tab (conversation, reply, permission prompt, review); `false`: the chat itself |
 | `claudeStatus.openIn` | `vscode` | `system`: open chats in your desktop's terminal app instead |
 | `claudeStatus.reopenIn` | `terminal` | `claudeCode`: reopen recent chats in a Claude Code tab (the switch above them) |
 | `claudeStatus.notifyWaiting` / `notifyDone` | `true` | Notifications; turn them off here if the Plasma or GNOME widget notifies too |
@@ -357,7 +392,16 @@ there, never your user settings), and `~/.cache/claude-widget/rules.json`
 remembers it so **Undo** can take it back. **Revoke…** on one of the
 permissions you gave takes that one entry out of the settings file it's in
 (your user settings or a folder's `.claude/settings.local.json`; never a
-folder's `.claude/settings.json`, which git shares). It writes only to
+folder's `.claude/settings.json`, which git shares). A chat's tab reads its
+transcript; what you send there goes to Claude as your message. Answering
+permission prompts takes the hook you turn on with **Answer Permission
+Prompts from Claude Status…** (`~/.local/share/claude-widget/permission-hook.py`,
+named in each profile's `settings.json`; it writes each request to
+`~/.cache/claude-widget/permissions` while it waits, and removes it once
+answered), or the dialog's keys in tmux. **Undo** writes a chat's files back
+as they were before it (a file it made is removed), **Commit** runs
+`git add` and `git commit` on only the chat's files, and **Mark reviewed** is
+kept in `~/.cache/claude-widget/reviewed.json`. It writes only to
 `~/.cache/claude-widget` (caches, the list of chats you removed, the tasks
 you queue until they start, copies of the files a comparison shows, kept for
 a day) and, if you

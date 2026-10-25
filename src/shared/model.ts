@@ -102,12 +102,16 @@ export function toLocalClock(result: Status, offset: number): Status {
       shift(s.stopped as unknown as Record<string, unknown>, ["at", "resetsAt"]);
       shift(s.plan as unknown as Record<string, unknown>, ["updatedAt"]);
       shift(s.stats as unknown as Record<string, unknown>, ["startedAt", "lastAt"]);
+      shift(s.review as unknown as Record<string, unknown>, ["editedAt"]);
+      shift(s.review?.tests as unknown as Record<string, unknown>, ["at"]);
       for (const a of s.agents?.tree ?? []) shift(a as unknown as Record<string, unknown>, ["started", "updated"]);
     }
     for (const c of [...(g.recent ?? []), ...(g.starred ?? [])]) {
       shift(c as unknown as Record<string, unknown>, ["lastActive"]);
       shift(c.recap as unknown as Record<string, unknown>, ["at"]);
       shift(c.stopped as unknown as Record<string, unknown>, ["at", "resetsAt"]);
+      shift(c.review as unknown as Record<string, unknown>, ["editedAt"]);
+      shift(c.review?.tests as unknown as Record<string, unknown>, ["at"]);
     }
     for (const c of g.sharedHere ?? []) shift(c as unknown as Record<string, unknown>, ["lastActive", "since"]);
     for (const p of [...(g.plans ?? []), ...(g.starredPlans ?? [])]) shift(p as unknown as Record<string, unknown>, ["updatedAt"]);

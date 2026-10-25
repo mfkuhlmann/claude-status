@@ -80,7 +80,7 @@ test("a turn a usage limit or the login broke off isn't finished", () => {
   const t = new TransitionTracker();
   const g = demoState(NOW).status!.groups[0];
   const at = (since: number, rows: [string, SessionState, object?][]) => [{
-    ...g, sessions: rows.map(([id, state, extra]) => ({ ...g.sessions[0], key: id, chatId: id, sessionId: id, name: id, state, since, reason: "", stopped: null, ...extra })),
+    ...g, sessions: rows.map(([id, state, extra]) => ({ ...g.sessions[0], key: id, chatId: id, sessionId: id, name: id, state, since, reason: "", stopped: null, permission: null, ...extra })),
   }];
   const kept = { ...OPTS, kept: (chat: string) => chat === "a" };
   t.track("", at(NOW, [["a", "working"], ["b", "working"], ["c", "working"], ["d", "working"], ["e", "working"]]), NOW, undefined, kept);

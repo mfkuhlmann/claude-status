@@ -39,6 +39,8 @@ const builds = harness
       platform: "node",
       format: "cjs",
       target: "node18",
+      jsx: "automatic",
+      jsxImportSource: "preact",
       alias: { vscode: "./test/vscode-stub.ts" },
     }]
   : [
@@ -53,7 +55,7 @@ const builds = harness
       },
       {
         ...common,
-        entryPoints: { webview: "webview/main.tsx", "webview-style": "webview/styles.css" },
+        entryPoints: { webview: "webview/main.tsx", chat: "webview/chat.tsx", "webview-style": "webview/styles.css" },
         outdir: "dist",
         platform: "browser",
         format: "iife",

@@ -236,6 +236,12 @@ export class Backend {
     return (await this.json(argv, timeoutMs)) ?? { ok: false, message: "the helper gave no answer" };
   }
 
+  // The chat tab's helper (pane.py): a chat's conversation, a reply to it,
+  // an answer to its permission prompt, its review; its whole answer
+  async pane(args: string[], timeoutMs = 90000): Promise<Record<string, any>> {
+    return (await this.json(["pane.py", ...args], timeoutMs)) ?? { ok: false, message: "the helper gave no answer" };
+  }
+
   // What a chat changed (jump.py --changes --list): the files, with copies of
   // what they were before it (or before its last turn)
   async changes(chatId: string, profileDir: string, turn: boolean, extra: string[] = []): Promise<{ message: string; comparison?: Comparison }> {
