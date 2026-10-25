@@ -148,7 +148,7 @@
       <default>xhigh</default>
     </entry>
     <entry name="recapRules" type="Bool">
-      <label>The Recap tab suggests rules for the permission prompts you answered, each with an Allow button</label>
+      <label>The Permissions tab suggests rules for the permission prompts you answered, each with an Allow button</label>
       <default>true</default>
     </entry>
     <entry name="recapCurrency" type="String">

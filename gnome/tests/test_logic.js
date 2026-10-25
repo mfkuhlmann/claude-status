@@ -539,6 +539,7 @@ test('trend lines, what Claude did, where the money went, the prompts you answer
     const grant = {id: 'f6d8dba1ebf0', place: 'chats started in app', where: '~/app/.claude/settings.local.json'};
     eq(L.weekGrantMeta(grant), 'chats started in app · ~/app/.claude/settings.local.json');
     eq(L.weekRevokeArgs(grant, ['--config-dir', '/x']), ['--revoke', 'f6d8dba1ebf0', '--config-dir', '/x']);
+    eq(L.permsArgs(['--config-dir', '/x']), ['--permissions', '--config-dir', '/x']);
     const many = Array.from({length: 11}, (_, i) => ({...grant, id: String(i)}));
     eq([L.weekGrantedShown(many, false).length, L.weekGrantedShown(many, true).length], [L.WEEK_GRANTED_FEW, 11]);
     eq(L.weekGrantedIntro([]), 'Nothing lets chats on this computer skip a permission prompt: they ask you each time.');

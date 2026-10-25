@@ -7,6 +7,7 @@ import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
+import Pango from 'gi://Pango';
 import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
@@ -18,6 +19,7 @@ import {Runner} from './runner.js';
 import {Pets} from './ui/pets.js';
 import {buildGroupSection, buildHostSection} from './ui/groupSection.js';
 import {TalpaIcon} from './ui/talpaIcon.js';
+import {buildPermsView} from './ui/permsView.js';
 import {buildWeekView} from './ui/weekView.js';
 import {box, column, iconButton, label, paragraph, textButton, Tooltips} from './ui/widgets.js';
 
@@ -55,13 +57,17 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
             stopConfirmBusy: false, shareConfirm: null, openMenu: null, tab: 'chats'};
         // The Recap tab's days and what week.py said of them (it runs only
         // while that tab is open: setTab, loadWeek)
-        // (open: the day or project whose chats are unfolded; asking: the rule
-        // whose Allow asks first; ruleBusy, ruleMessage: one being written, what it did;
-        // rules: suggest rules (the recap-rules setting); revoking: the permission
-        // you gave whose Revoke asks first; ruleRevoked: the message is a revoke's;
-        // allGranted: all those permissions shown, not the first few)
-        this.week = {back: 0, account: '', recap: null, error: '', busy: false, copied: '', open: '', asking: '', ruleBusy: '',
-            ruleMessage: '', rules: this._settings.get_boolean('recap-rules'), revoking: '', ruleRevoked: false, allGranted: false};
+        // (open: the day or project whose chats are unfolded)
+        this.week = {back: 0, account: '', recap: null, error: '', busy: false, copied: '', open: ''};
+        // The Permissions tab and what week.py --permissions said (it runs only
+        // while that tab is open: setTab, loadPerms)
+        // (asking: the rule whose Allow asks first; ruleBusy, ruleMessage: one
+        // being written, what it did; rules: suggest rules (the recap-rules
+        // setting); revoking: the permission you gave whose Revoke asks first;
+        // ruleRevoked: the message is a revoke's; allGranted: all those
+        // permissions shown, not the first few)
+        this.perms = {data: null, error: '', busy: false, asking: '', ruleBusy: '', ruleMessage: '',
+            rules: this._settings.get_boolean('recap-rules'), revoking: '', ruleRevoked: false, allGranted: false};
         this._weekAsked = 0;
         // Turns that ended while the menu was closed (row key -> "done"), for
         // the hotkey; forgotten when the menu opens
@@ -85,7 +91,7 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
             ...['show-usage-in-panel', 'show-pet', 'chat-pets'].map(key =>
                 this._settings.connect(`changed::${key}`, () => this.rerender())),
             this._settings.connect('changed::recap-rules', () => {
-                this.week.rules = this._settings.get_boolean('recap-rules');
+                this.perms.rules = this._settings.get_boolean('recap-rules');
                 this.rerender();
             }),
             this._settings.connect('changed::recap-currency', () => {
@@ -911,11 +917,18 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         const header = box('claude-header', {x_expand: true});
         this._headerSpark = new TalpaIcon('claude-spark claude-spark-small');
         header.add_child(this._headerSpark);
-        header.add_child(label('Claude Code', 'claude-title'));
-        // Your chats now, or your last 7 days with Claude (ui/weekView.js)
+        // (the title and the tabs keep their whole names: the summary gives way)
+        const whole = actor => {
+            actor.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
+            return actor;
+        };
+        header.add_child(whole(label('Claude Code', 'claude-title')));
+        // Your chats now, your last 7 days with Claude (ui/weekView.js), or the
+        // permissions you gave (ui/permsView.js)
         this._tabs = {};
-        for (const [tab, text] of [['chats', 'Chats'], ['week', 'Recap']]) {
-            const b = new St.Button({style_class: 'claude-tab', can_focus: true, label: text, y_align: Clutter.ActorAlign.CENTER});
+        for (const [tab, text] of [['chats', 'Chats'], ['week', 'Recap'], ['perms', 'Permissions']]) {
+            const b = new St.Button({style_class: 'claude-tab', can_focus: true, child: whole(new St.Label({text})),
+                y_align: Clutter.ActorAlign.CENTER});
             b.connect('clicked', () => this.setTab(tab));
             this._tabs[tab] = b;
             header.add_child(b);
@@ -937,8 +950,7 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         header.add_child(hostsButton);
         header.add_child(this.tips.add(iconButton('view-refresh-symbolic', () => {
             this.refreshAll();
-            if (this.ui.tab === 'week')
-                this.loadWeek();
+            this._loadTab();
         }), 'Refresh'));
         popup.add_child(header);
 
@@ -975,8 +987,7 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
                 this._loadHosts();
                 this.rerender();
                 this.refresh();  // it may have been checked a while ago (see _pollInterval)
-                if (this.ui.tab === 'week')
-                    this.loadWeek();
+                this._loadTab();
             } else {
                 this.tips.hide();
                 if (this._digestSeen)
@@ -996,11 +1007,18 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         if (this.ui.tab === tab)
             return;
         this.ui.tab = tab;
-        this._pets.setActive(this.menu.isOpen && tab === 'chats');   // (not drawn while the week shows)
+        this._pets.setActive(this.menu.isOpen && tab === 'chats');   // (not drawn while another tab shows)
         this._weekTimer();
-        if (tab === 'week')
-            this.loadWeek();
+        this._loadTab();
         this._render(true);
+    }
+
+    // What the Recap or Permissions tab shows, read again
+    _loadTab() {
+        if (this.ui.tab === 'week')
+            this.loadWeek();
+        else if (this.ui.tab === 'perms')
+            this.loadPerms();
     }
 
     setWeek({back = this.week.back, account = this.week.account}) {
@@ -1033,70 +1051,92 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         this._render(true);
     }
 
-    // Every 10 minutes while the popup shows the Recap tab
+    // Every 10 minutes while the popup shows the Recap or Permissions tab
     _weekTimer() {
         this._clearTimer('week');
-        if (!this.menu.isOpen || this.ui.tab !== 'week')
+        if (!this.menu.isOpen || this.ui.tab === 'chats')
             return;
         this._timers.week = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, WEEK_REFRESH_S, () => {
-            this.loadWeek();
+            this._loadTab();
             return GLib.SOURCE_CONTINUE;
         });
     }
 
-    // Unfolds a day's or a project's chats (or folds them), or asks first
-    // before a rule is allowed
+    // Unfolds a day's or a project's chats (or folds them)
     weekUnfold(key) {
         this.week.open = this.week.open === key ? '' : key;
         this._render(true);
     }
 
-    weekAsk(id) {
-        this.week.asking = id;
+    // ---------------------------------------------------------------- permissions
+
+    // Asks week.py --permissions for the permissions you gave and the
+    // prompts of the last 7 days
+    async loadPerms() {
+        if (this.perms.busy)
+            return;
+        this.perms.busy = true;
+        this._render(true);
+        const out = await this._runner.run('week.py', L.permsArgs(this._configDirArgs), {poll: true});
+        if (this._destroyed || out.cancelled)
+            return;
+        const result = L.helperResult(out.stdout, out.stderr);
+        this.perms.busy = false;
+        if (result.ok) {
+            this.perms.data = result;
+            this.perms.error = '';
+        } else {
+            this.perms.error = result.message || result.error || 'no answer';
+        }
         this._render(true);
     }
 
-    // Allows a rule the Recap tab offers for the permission prompts you
-    // answered (into the chats' folder's .claude/settings.local.json), or
-    // takes one it added back; then reads the days again
-    async changeWeekRule(rule, allow) {
-        this.week.asking = '';
-        this.week.ruleBusy = rule.id;
-        this.week.ruleMessage = '';
-        this.week.ruleRevoked = false;
+    permsAsk(id) {
+        this.perms.asking = id;
+        this._render(true);
+    }
+
+    // Allows a rule the tab offers for the permission prompts you answered
+    // (into the chats' folder's .claude/settings.local.json), or takes one it
+    // added back; then reads them again
+    async changeRule(rule, allow) {
+        this.perms.asking = '';
+        this.perms.ruleBusy = rule.id;
+        this.perms.ruleMessage = '';
+        this.perms.ruleRevoked = false;
         this._render(true);
         const result = await this._helper('week.py', L.weekRuleArgs(rule, allow));
         if (this._destroyed)
             return;
-        this.week.ruleBusy = '';
-        this.week.ruleMessage = result.ok ? result.message || '' : L.fmt('Nothing changed: %1', result.message || 'no answer');
-        this.loadWeek();
+        this.perms.ruleBusy = '';
+        this.perms.ruleMessage = result.ok ? result.message || '' : L.fmt('Nothing changed: %1', result.message || 'no answer');
+        this.loadPerms();
     }
 
-    weekRevokeAsk(id) {
-        this.week.revoking = id;
+    permsRevokeAsk(id) {
+        this.perms.revoking = id;
         this._render(true);
     }
 
-    weekShowAllGranted() {
-        this.week.allGranted = true;
+    permsShowAllGranted() {
+        this.perms.allGranted = true;
         this._render(true);
     }
 
-    // Takes one of the permissions you gave (the Recap's list of what lets
-    // chats go without asking) out of its file; then reads the days again
-    async revokeWeekGrant(grant) {
-        this.week.revoking = '';
-        this.week.ruleBusy = grant.id;
-        this.week.ruleMessage = '';
-        this.week.ruleRevoked = true;
+    // Takes one of the permissions you gave (what lets chats go without
+    // asking) out of its file; then reads them again
+    async revokeGrant(grant) {
+        this.perms.revoking = '';
+        this.perms.ruleBusy = grant.id;
+        this.perms.ruleMessage = '';
+        this.perms.ruleRevoked = true;
         this._render(true);
         const result = await this._helper('week.py', L.weekRevokeArgs(grant, this._configDirArgs));
         if (this._destroyed)
             return;
-        this.week.ruleBusy = '';
-        this.week.ruleMessage = result.ok ? result.message || '' : L.fmt('Nothing changed: %1', result.message || 'no answer');
-        this.loadWeek();
+        this.perms.ruleBusy = '';
+        this.perms.ruleMessage = result.ok ? result.message || '' : L.fmt('Nothing changed: %1', result.message || 'no answer');
+        this.loadPerms();
     }
 
     copyText(text) {
@@ -1134,9 +1174,8 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         const signature = JSON.stringify([this._status ? {...this._status, generatedAt: 0} : null, this._errorText,
             remote, this._sshHosts, this.ui, this._actionError, this._actionInfo, Math.floor(this.now / 60000),
             this.ui.tab === 'week' ? [this.week.back, this.week.account, this.week.busy, this.week.error, this.week.copied,
-                this.week.open, this.week.asking, this.week.ruleBusy, this.week.ruleMessage, this.week.rules, this.week.revoking,
-                this.week.allGranted,
-                this.week.recap ? this.week.recap.generatedAt : 0] : null,
+                this.week.open, this.week.recap ? this.week.recap.generatedAt : 0] : null,
+            this.ui.tab === 'perms' ? {...this.perms, data: this.perms.data ? this.perms.data.generatedAt : 0} : null,
             this._digest ? this._digest.body : null,
             this.petColors, this._settings.get_boolean('show-pet')], coarse);
         if (!force && signature === this._signature)
@@ -1147,11 +1186,11 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         const c = L.counts(this.allGroups);
         const overall = L.overall(this.allGroups, c);
         this._headerSpark.setState(L.stateClass(overall), overall);
-        const week = this.ui.tab === 'week';
+        const chats = this.ui.tab === 'chats';
         for (const [tab, b] of Object.entries(this._tabs))
             b.checked = tab === this.ui.tab;   // (St.Button's :checked)
-        this._heroBin.visible = !week;
-        this._summary.text = this._pets.heroShown && !week ? '' : L.summaryText(c);   // the big Talpa's headline says it
+        this._heroBin.visible = chats;
+        this._summary.text = this._pets.heroShown && chats ? '' : L.summaryText(c);   // the big Talpa's headline says it
         const hosts = this.shownHosts;
         this._hostsCount.text = hosts.length > 0 ? String(hosts.length) : '';
         this._undismissItem.label.text = L.fmt('Show removed sessions again (%1)', this._status?.dismissed || 0);
@@ -1177,9 +1216,9 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         const scrolled = adjustment.value;
         this._pets.detachStages();
         this._list.destroy_all_children();
-        if (week) {
+        if (!chats) {
             // (the pets' stages wait, detached, for the Chats tab)
-            this._list.add_child(buildWeekView(this));
+            this._list.add_child(this.ui.tab === 'week' ? buildWeekView(this) : buildPermsView(this));
             return;
         }
         this.groups.forEach((g, i) => {

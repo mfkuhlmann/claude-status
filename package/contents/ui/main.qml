@@ -2480,7 +2480,7 @@ PlasmoidItem {
     // or you pick other days, then every 10 minutes while it's in sight. The
     // status checks never run it.
 
-    property string popupTab: "chats"   // "chats" or "week"
+    property string popupTab: "chats"   // "chats", "week" (Recap) or "perms" (Permissions)
     property var weekRecap: null
     property bool weekBusy: false
     property string weekError: ""
@@ -2489,10 +2489,6 @@ PlasmoidItem {
     property string weekAsked: ""     // the command whose answer is awaited
     readonly property bool weekShown: popupTab === "week" && dashboardShown && !coveredByWindow
     readonly property string weekCurrency: Plasmoid.configuration.recapCurrency || "USD"
-    readonly property bool weekRules: Plasmoid.configuration.recapRules   // suggest rules for the prompts you answered
-    property string weekRuleBusy: ""     // the rule being written or taken back: its id
-    property string weekRuleMessage: ""  // what the last one did
-    property bool weekRuleRevoked: false // (the last one revoked a permission you gave: its message goes there)
 
     onWeekShownChanged: {
         if (weekShown)
@@ -2544,25 +2540,77 @@ PlasmoidItem {
         }
     }
 
-    // A rule the Recap tab offers for permission prompts you answered:
-    // allow (into the chats' folder's .claude/settings.local.json), or take
-    // back one it added
-    function changeWeekRule(rule, allow) {
+    // ---------------------------------------------------------------- permissions
+    // The popup's Permissions tab (PermsView.qml): week.py --permissions
+    // reads the permissions you gave (your settings, the .claude settings of
+    // the folders Claude ran in) and the permission prompts you answered in
+    // the last 7 days when the tab opens, then every 10 minutes while it's in
+    // sight. Allow, Undo and Revoke change one entry of a settings file.
+
+    property var permsData: null
+    property bool permsBusy: false
+    property string permsError: ""
+    readonly property bool permsShown: popupTab === "perms" && dashboardShown && !coveredByWindow
+    readonly property bool suggestRules: Plasmoid.configuration.recapRules   // suggest rules for the prompts you answered
+    property string ruleBusy: ""     // the rule being written or taken back: its id
+    property string ruleMessage: ""  // what the last one did
+    property bool ruleRevoked: false // (the last one revoked a permission you gave: its message goes there)
+
+    onPermsShownChanged: {
+        if (permsShown)
+            loadPerms()
+    }
+
+    Timer {
+        interval: 600000   // 10 minutes
+        repeat: true
+        running: root.permsShown
+        onTriggered: root.loadPerms()
+    }
+
+    function loadPerms() {
+        if (popupTab !== "perms" || permsBusy)
+            return
+        permsBusy = true
+        permsReader.connectSource("python3 -I " + shellQuote(codeDir + "week.py") + " --permissions" + configDirArgs + " # " + Date.now())
+    }
+
+    P5Support.DataSource {
+        id: permsReader
+        engine: "executable"
+        connectedSources: []
+        onNewData: (source, data) => {
+            disconnectSource(source)
+            root.permsBusy = false
+            const result = root.helperResult(data)
+            if (result.ok) {
+                root.permsData = result
+                root.permsError = ""
+            } else {
+                root.permsError = result.message || result.error || i18n("no answer")
+            }
+        }
+    }
+
+    // A rule the Permissions tab offers for prompts you answered: allow
+    // (into the chats' folder's .claude/settings.local.json), or take back
+    // one it added
+    function changeRule(rule, allow) {
         let cmd = "python3 -I " + shellQuote(codeDir + "week.py")
         cmd += allow ? " --allow " + shellQuote(rule.kind) + " " + shellQuote(rule.value) + " " + shellQuote(rule.project)
                      : " --undo " + shellQuote(rule.id)
-        weekRuleBusy = rule.id
-        weekRuleMessage = ""
-        weekRuleRevoked = false
+        ruleBusy = rule.id
+        ruleMessage = ""
+        ruleRevoked = false
         ruleWriter.connectSource(cmd + " # " + Date.now())
     }
 
-    // Takes one of the permissions you gave (the Recap's list of what lets
-    // chats go without asking) out of its file
-    function revokeWeekGrant(grant) {
-        weekRuleBusy = grant.id
-        weekRuleMessage = ""
-        weekRuleRevoked = true
+    // Takes one of the permissions you gave (what lets chats go without
+    // asking) out of its file
+    function revokeGrant(grant) {
+        ruleBusy = grant.id
+        ruleMessage = ""
+        ruleRevoked = true
         ruleWriter.connectSource("python3 -I " + shellQuote(codeDir + "week.py") + " --revoke " + shellQuote(grant.id)
                                  + configDirArgs + " # " + Date.now())
     }
@@ -2573,10 +2621,10 @@ PlasmoidItem {
         connectedSources: []
         onNewData: (source, data) => {
             disconnectSource(source)
-            root.weekRuleBusy = ""
+            root.ruleBusy = ""
             const result = root.helperResult(data)
-            root.weekRuleMessage = result.ok ? result.message || "" : i18n("Nothing changed: %1", result.message || i18n("no answer"))
-            root.loadWeek()
+            root.ruleMessage = result.ok ? result.message || "" : i18n("Nothing changed: %1", result.message || i18n("no answer"))
+            root.loadPerms()
         }
     }
 

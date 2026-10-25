@@ -22,8 +22,11 @@ Recap tab is open, never in its status checks.
                   of the day (fetched at most every few hours, only then)
     --allow KIND VALUE FOLDER   a rule its permission prompts offer, into
                   FOLDER/.claude/settings.local.json; --undo ID takes it back
-    --revoke ID   takes a rule of the recap's "granted" list (the rules and
-                  modes that let chats go without asking) out of its file
+    --permissions the widget's Permissions tab instead: the permission prompts
+                  you answered in the last 7 days on this computer, the rules
+                  that would have let them through, and the permissions you
+                  gave (every rule and mode that lets chats go without asking)
+    --revoke ID   takes one of those permissions out of its file
 
 What it reads, per turn of a chat: your prompt, Claude's own count of its
 work (the turn_duration record Claude Code writes when a turn ends, which
@@ -1642,6 +1645,18 @@ def added_note(added, real, kind, value):
     return None
 
 
+def permissions(cache, profiles, now_ms, home, added=()):
+    """The Permissions tab: the prompts you answered in the last 7 days on
+    this computer, with the rules that would have let them through, and the
+    permissions you gave."""
+    days = week_days(0, now_ms)
+    lo, hi = days[0][1], min(days[-1][2], now_ms)
+    chats = [dict(c, id=cid, host="", key="|" + cid) for cid, c in chats_between(cache, profiles, lo, days[-1][2], home).items()]
+    return {"ok": True, "generatedAt": now_ms, "from": days[0][0], "to": days[-1][0],
+            "prompts": permission_prompts(chats, lo, hi, home, added),
+            "granted": granted_rules(home, rule_folders(home, cache, profiles), profiles, added)}
+
+
 def revoke_rule(home, cache_root, profiles, rid):
     """(ok, message): takes a rule or mode of granted_rules out of its file
     (one the Recap's Allow put there as Undo does: as it was before)."""
@@ -1941,7 +1956,7 @@ def host_chats(host, back):
 def main(argv=None):
     args = sys.argv[1:] if argv is None else list(argv)
     back, account, hosts, config_dirs, currency = 0, "", [], [], "USD"
-    pretty = remote = data = False
+    pretty = remote = data = perms = False
     allow = undo = revoke = None
     while args:
         arg = args.pop(0)
@@ -1967,6 +1982,8 @@ def main(argv=None):
             remote = True
         elif arg == "--data":
             data = True
+        elif arg == "--permissions":
+            perms = True
         else:
             sys.exit(__doc__)
     os.umask(0o077)  # cache files are private to the user
@@ -1991,6 +2008,10 @@ def main(argv=None):
     try:
         profiles = cs.discover_profiles(home, config_dirs)
         cache = updated_cache(cache_root, profiles, now_ms)
+        if perms:
+            sys.stdout.write(json.dumps(permissions(cache, profiles, now_ms, home, load_added(cache_root)),
+                                        indent=2 if pretty else None) + "\n")
+            return
         days = week_days(back, now_ms)
         # (the weeks before these too: the trend lines)
         since = midnight(date.fromisoformat(days[0][0]) - timedelta(days=7 * (TREND_WEEKS - 1)))
@@ -2005,10 +2026,8 @@ def main(argv=None):
                 from concurrent.futures import ThreadPoolExecutor
                 with ThreadPoolExecutor(max_workers=min(8, len(hosts))) as pool:
                     sources += list(pool.map(lambda h: host_chats(h, back), hosts))
-            added = load_added(cache_root)
-            result = recap(sources, back, account, now_ms, home, plan_windows(cache_root, profiles), added)
+            result = recap(sources, back, account, now_ms, home, plan_windows(cache_root, profiles), load_added(cache_root))
             result["currency"] = currency_of(currency, cache_root, now_ms / 1000)
-            result["granted"] = granted_rules(home, rule_folders(home, cache, profiles), profiles, added)
     except Exception as exc:  # the widget must always get parseable output
         result = {"ok": False, "error": "{}: {}".format(type(exc).__name__, exc), "generatedAt": now_ms}
     text = json.dumps(result, indent=2 if pretty and not remote else None)

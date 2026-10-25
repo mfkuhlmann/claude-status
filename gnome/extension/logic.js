@@ -1417,6 +1417,12 @@ export function weekGrantMeta(g) {
     return `${g.place} · ${g.where}`;
 }
 
+// week.py's arguments for the Permissions tab (with the extra Claude
+// folders, as the others)
+export function permsArgs(configDirArgs) {
+    return ['--permissions', ...configDirArgs];
+}
+
 // week.py's arguments to take one of them out of its file (with the extra
 // Claude folders, so it finds the same list)
 export function weekRevokeArgs(grant, configDirArgs) {

@@ -36,7 +36,8 @@ PlasmaExtras.Representation {
                 level: 3
                 text: i18n("Claude Code")
             }
-            // Your chats now, or your last 7 days with Claude (WeekView.qml)
+            // Your chats now, your last 7 days with Claude (WeekView.qml), or
+            // the permissions you gave (PermsView.qml)
             PlasmaComponents3.TabBar {
                 id: tabs
                 Layout.leftMargin: root.inTray ? 0 : Kirigami.Units.smallSpacing
@@ -44,7 +45,7 @@ PlasmaExtras.Representation {
                 Layout.minimumWidth: implicitWidth
                 // (set by a click, not by the bar's own index: a new popup
                 // starts at its first tab, which mustn't undo the one shown)
-                currentIndex: root.popupTab === "week" ? 1 : 0
+                currentIndex: ["chats", "week", "perms"].indexOf(root.popupTab)
 
                 PlasmaComponents3.TabButton {
                     width: implicitWidth   // (else the bar gives each the same share)
@@ -56,10 +57,15 @@ PlasmaExtras.Representation {
                     text: i18n("Recap")
                     onClicked: root.popupTab = "week"
                 }
+                PlasmaComponents3.TabButton {
+                    width: implicitWidth
+                    text: i18n("Permissions")
+                    onClicked: root.popupTab = "perms"
+                }
                 Connections {
                     target: root
                     function onPopupTabChanged() {
-                        tabs.currentIndex = root.popupTab === "week" ? 1 : 0
+                        tabs.currentIndex = ["chats", "week", "perms"].indexOf(root.popupTab)
                     }
                 }
             }
@@ -163,13 +169,20 @@ PlasmaExtras.Representation {
             }
         }
 
-        // (made only while its tab is open)
+        // (made only while their tab is open)
         Loader {
             active: root.popupTab === "week"
             visible: active
             Layout.fillWidth: true
             Layout.fillHeight: true
             source: "WeekView.qml"
+        }
+        Loader {
+            active: root.popupTab === "perms"
+            visible: active
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            source: "PermsView.qml"
         }
 
         PlasmaComponents3.ScrollView {

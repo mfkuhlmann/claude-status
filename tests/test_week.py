@@ -696,6 +696,15 @@ class GrantedTests(Projects):
         self.assertEqual(week.revoke_rule(self.home, self.cache_root, self.profiles(), "0123456789ab"),
                          (False, "That rule isn't in your settings any more"))
 
+    def test_the_permissions_tab_has_this_weeks_prompts_and_the_permissions_you_gave(self):
+        self.asked()
+        out = week.permissions(self.scan(), self.profiles(), self.now, self.home)
+        self.assertEqual((out["prompts"]["answered"], out["prompts"]["refused"]), (10, 1))
+        self.assertEqual([r["value"] for r in out["prompts"]["rules"]][:1], [str(self.lib)])
+        self.assertEqual([(g["kind"], g["value"]) for g in out["granted"]], [(g["kind"], g["value"]) for g in self.granted()])
+        later = self.now + 8 * week.DAY_MS  # (a week on, those prompts are gone)
+        self.assertEqual(week.permissions(self.scan(), self.profiles(), later, self.home)["prompts"]["answered"], 0)
+
     def test_revoking_a_rule_the_recap_allowed_puts_back_what_was_before(self):
         self.asked()
         week.updated_cache(self.cache_root, self.profiles(), self.now)
