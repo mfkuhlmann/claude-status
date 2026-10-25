@@ -228,12 +228,12 @@ the same way. A notification takes a reply too (**Reply…**).
 
 **Permission prompts:** a chat waiting for a permission shows the command, or
 the file and its change, with **Allow once**, **Always allow** and **Deny**
-(with a note for Claude), in its row, its tab and its notification. That
-needs **Claude Status: Answer Permission Prompts from Claude Status…**: it
-adds a hook to each Claude profile's `settings.json` (and on the SSH hosts
-shown) that hands each request to Claude Status. Claude still asks in the chat
-too; whichever you answer first counts. **Always allow** saves the rule
-Claude suggests, as its own *don't ask again* does. Chats in tmux can be
+(with a note for Claude), in Claude's own order, in its row, its tab and its
+notification. That needs **Claude Status: Answer Permission Prompts from
+Claude Status…**: it adds a hook to each Claude profile's `settings.json`
+(and on the SSH hosts shown) that hands each request to Claude Status. Claude
+still asks in the chat too; whichever you answer first counts. **Always
+allow** saves the rule Claude suggests, as its own *don't ask again* does. Chats in tmux can be
 answered without the hook, with their dialog's keys.
 
 **Review:** the tab's **Review** lists the files a chat changed with their

@@ -93,9 +93,10 @@ export class Notifier implements vscode.Disposable {
       const chat = chatRef(n.session, n.host);
       const p = n.kind === "waiting" ? n.session.permission : null;
       const asks = !!p && (p.answer === "hook" || p.answer === "keys") && !!this.panes;
-      // a permission prompt: answer it here; a chat that waits or finished: reply here
+      // a permission prompt: answer it here, in Claude's own order (Yes, Yes
+      // and don't ask again, No); a chat that waits or finished: reply here
       const buttons = asks
-        ? ["Allow once", ...(p!.answer === "keys" || p!.always ? ["Always allow"] : []), "Deny", "Open"]
+        ? ["Allow once", ...(p!.answer === "keys" || p!.always ? ["Always allow"] : []), "Deny", "Deny with a note…", "Open"]
         : this.panes && (n.kind === "done" || (n.kind === "waiting" && !p)) ? ["Reply…", "Open"] : ["Open"];
       void show(text, ...buttons).then(async (choice) => {
         const panes = this.panes;
@@ -104,6 +105,9 @@ export class Notifier implements vscode.Disposable {
           else this.open(chat);
         } else if (panes && (choice === "Allow once" || choice === "Always allow" || choice === "Deny")) {
           await panes.answer(chat, choice === "Allow once" ? "allow" : choice === "Always allow" ? "always" : "deny");
+        } else if (panes && choice === "Deny with a note…") {
+          const note = await vscode.window.showInputBox({ title: `Deny ${n.session.name}`, prompt: "What should Claude do instead? (optional)", ignoreFocusOut: true });
+          if (note !== undefined) await panes.answer(chat, "deny", note.trim());
         } else if (panes && choice === "Reply…") {
           const reply = await vscode.window.showInputBox({ title: `Reply to ${n.session.name}`, prompt: "Sent the way the chat takes it", ignoreFocusOut: true });
           if (reply?.trim()) await panes.reply(chat, reply);

@@ -19,11 +19,12 @@
   click on the chat's name does.
 - **Answer permission prompts from the view:** a chat waiting for a
   permission shows the command, or the file and its change, with **Allow
-  once**, **Always allow** and **Deny** (a note for Claude optional), in its
-  row, its tab and its notification. That takes **Claude Status: Answer
-  Permission Prompts from Claude Status…**, which adds a hook to Claude's
-  settings (here and on the SSH hosts shown); Claude still asks in the chat
-  too, and the first answer counts. Chats in tmux can be answered without it.
+  once**, **Always allow** and **Deny** (a note for Claude optional), in
+  Claude's own order, in its row, its tab and its notification. That takes
+  **Claude Status: Answer Permission Prompts from Claude Status…**, which adds
+  a hook to Claude's settings (here and on the SSH hosts shown); Claude still
+  asks in the chat too, and the first answer counts. Chats in tmux can be
+  answered without it.
 - **Review what a chat did:** the tab's **Review** lists the files a chat
   changed with their added and removed lines and diffs, against the files
   before the chat, with **Diff**, **Undo** (a file, or all), **Commit these
