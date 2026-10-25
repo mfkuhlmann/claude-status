@@ -57,8 +57,8 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
             stopConfirmBusy: false, shareConfirm: null, openMenu: null, tab: 'chats'};
         // The Recap tab's days and what week.py said of them (it runs only
         // while that tab is open: setTab, loadWeek)
-        // (open: the day or project whose chats are unfolded)
-        this.week = {back: 0, account: '', recap: null, error: '', busy: false, copied: '', open: ''};
+        // (span: day, week or all; open: the day or project whose chats are unfolded)
+        this.week = {span: 'week', back: 0, account: '', recap: null, error: '', busy: false, copied: '', open: ''};
         // The Permissions tab and what week.py --permissions said (it runs only
         // while that tab is open: setTab, loadPerms)
         // (asking: the rule whose Allow asks first; ruleBusy, ruleMessage: one
@@ -1021,7 +1021,10 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
             this.loadPerms();
     }
 
-    setWeek({back = this.week.back, account = this.week.account}) {
+    setWeek({back = this.week.back, account = this.week.account, span = this.week.span}) {
+        if (span !== this.week.span)
+            back = 0;   // (a new span starts at today's)
+        this.week.span = span;
         this.week.back = Math.max(0, back);
         this.week.account = account;
         this.loadWeek();
@@ -1032,11 +1035,11 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
     // transcripts added since it last ran
     async loadWeek() {
         const asked = ++this._weekAsked;
-        const {back, account} = this.week;
+        const {back, account, span} = this.week;
         this.week.busy = true;
         this._render(true);
         const out = await this._runner.run('week.py',
-            L.weekArgs(back, account, this.shownHosts, this.remote, this._configDirArgs, this._settings.get_string('recap-currency')),
+            L.weekArgs(back, account, this.shownHosts, this.remote, this._configDirArgs, this._settings.get_string('recap-currency'), span),
             {poll: true});
         if (this._destroyed || out.cancelled || asked !== this._weekAsked)
             return;   // (other days were asked for since)
@@ -1173,7 +1176,7 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         };
         const signature = JSON.stringify([this._status ? {...this._status, generatedAt: 0} : null, this._errorText,
             remote, this._sshHosts, this.ui, this._actionError, this._actionInfo, Math.floor(this.now / 60000),
-            this.ui.tab === 'week' ? [this.week.back, this.week.account, this.week.busy, this.week.error, this.week.copied,
+            this.ui.tab === 'week' ? [this.week.span, this.week.back, this.week.account, this.week.busy, this.week.error, this.week.copied,
                 this.week.open, this.week.recap ? this.week.recap.generatedAt : 0] : null,
             this.ui.tab === 'perms' ? {...this.perms, data: this.perms.data ? this.perms.data.generatedAt : 0} : null,
             this._digest ? this._digest.body : null,

@@ -1161,9 +1161,9 @@ export function weekDayLabel(day) {
 }
 
 // "Sat 24": a timeline row's day
-export function weekRowDay(day) {
+export function weekRowDay(day, weeks = false) {
     const d = dayDate(day);
-    return `${WEEKDAYS[d.getDay()]} ${d.getDate()}`;
+    return weeks ? shortDay(day) : `${WEEKDAYS[d.getDay()]} ${d.getDate()}`;
 }
 
 // "Wed 14:05": when a turn started
@@ -1182,8 +1182,19 @@ function dateText(day) {
 }
 
 export function weekPeriodText(recap) {
+    if (recap.span === 'day') {
+        const day = `${WEEKDAYS[dayDate(recap.from).getDay()]} ${shortDay(recap.from)}`;
+        return recap.back === 0 ? `Today · ${day}` : recap.back === 1 ? `Yesterday · ${day}` : day;
+    }
+    if (recap.span === 'all')
+        return recap.first ? `Everything since ${dateText(recap.first)}` : 'Everything';
     const span = `${shortDay(recap.from)} – ${shortDay(recap.to)}`;
     return recap.back === 0 ? `Last 7 days · ${span}` : span;
+}
+
+// What the period line says before the answer for a span comes
+export function weekPeriodWaiting(span, back) {
+    return back !== 0 ? '' : span === 'day' ? 'Today' : span === 'all' ? 'Everything' : 'Last 7 days';
 }
 
 // The 7 days before, when there was anything in them
@@ -1213,10 +1224,12 @@ export function weekTiles(recap) {
     const p = previousOf(recap);
     const cur = weekCurrency(recap);
     const shown = (v, kind) => (kind === 'time' ? hoursText(v) : kind === 'money' ? moneyText(v, cur) : String(v));
-    const before = (v, kind) => (p ? `\nThe 7 days before: ${shown(v, kind)}` : '');
+    const day = recap.span === 'day';
+    const before = (v, kind) => (p ? `\n${day ? 'The day before' : 'The 7 days before'}: ${shown(v, kind)}` : '');
     const weeks = (key, kind) => {
         const values = weekTrend(recap, key);
-        return values.length > 1 ? `\nWeek by week, these 7 days last: ${values.map(v => (v === null ? '?' : shown(v, kind))).join(' · ')}` : '';
+        return values.length > 1 ? `\n${day ? 'Day by day, this day last' : 'Week by week, these 7 days last'}: ` +
+            `${values.map(v => (v === null ? '?' : shown(v, kind))).join(' · ')}` : '';
     };
     return [
         {label: 'You', value: hoursText(s.youMs), delta: weekDeltaText(s.youMs, p ? p.youMs : null, 'time'), trend: weekTrend(recap, 'youMs'),
@@ -1277,7 +1290,9 @@ export function weekHoverText(d, ms, now, px) {
 
 export function weekDayTip(d, cur = USD) {
     const date = dayDate(d.day);
-    return [`${WEEKDAYS_LONG[date.getDay()]} ${date.getDate()} ${MONTHS_LONG[date.getMonth()]}`,
+    const to = d.to ? dayDate(d.to) : null;   // (Overall: a row per 7 days)
+    return [to ? `${date.getDate()} ${MONTHS_LONG[date.getMonth()]} – ${to.getDate()} ${MONTHS_LONG[to.getMonth()]}`
+        : `${WEEKDAYS_LONG[date.getDay()]} ${date.getDate()} ${MONTHS_LONG[date.getMonth()]}`,
         `You: ${hoursText(d.youMs)} · Claude worked ${hoursText(d.workedMs)} (on the clock ${hoursText(d.busyMs)}) · ` +
         `it waited ${hoursText(d.waitMs)} for you\n${plural(d.prompts, '%1 prompt', '%1 prompts')} · ${moneyText(d.cost, cur)} at API prices` +
         (d.chats && d.chats.length ? '\nClick for its chats' : '')];
@@ -1386,9 +1401,9 @@ export function weekFootText(recap) {
 
 // The arguments of week.py for those days: the SSH hosts shown whose last
 // check answered (one out of reach would hold it up), the currency picked
-export function weekArgs(back, account, shownHosts, remote, configDirArgs, currency = 'USD') {
+export function weekArgs(back, account, shownHosts, remote, configDirArgs, currency = 'USD', span = 'week') {
     const hosts = shownHosts.filter(h => remote[h] && remote[h].ok && remote[h].result);
-    return ['--back', String(back), ...(account ? ['--account', account] : []),
+    return ['--span', ['day', 'week', 'all'].includes(span) ? span : 'week', '--back', String(back), ...(account ? ['--account', account] : []),
         ...(/^[A-Z]{3}$/.test(currency) && currency !== 'USD' ? ['--currency', currency] : []),
         ...hosts.flatMap(h => ['--host', h]), ...configDirArgs];
 }

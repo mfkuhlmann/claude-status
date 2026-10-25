@@ -132,11 +132,12 @@ class Home(unittest.TestCase):
         cache = self.scan(cache)
         return week.chats_between(cache, self.profiles(), self.now - days * week.DAY_MS, self.now + week.DAY_MS, self.home)
 
-    def recap(self, account="", back=0, extra=(), days=14, usage=None, added=()):
-        chats = self.chats(days=days)
+    def recap(self, account="", back=0, extra=(), days=14, usage=None, added=(), span="week"):
+        cache = self.scan()
+        chats = week.chats_between(cache, self.profiles(), self.now - days * week.DAY_MS, self.now + week.DAY_MS, self.home)
         _, accounts = week.account_ids(self.profiles())
         return week.recap([{"host": "", "chats": chats, "accounts": accounts}, *extra], back, account, self.now,
-                          self.home, usage, added)
+                          self.home, usage, added, span, week.first_activity(cache))
 
 
 class PriceTests(unittest.TestCase):
@@ -405,10 +406,73 @@ class RecapTests(Home):
         old = t0 - 21 * week.DAY_MS
         self.write(Transcript().prompt(old).reply(old + 1000, "b").duration(old + 30_000, 30_000), "chat-b")
         r = self.recap(days=40)
-        self.assertEqual([w["workedMs"] for w in r["trend"]], [0, 30_000, 0, 0, 60_000])
+        self.assertEqual([w and w["workedMs"] for w in r["trend"]], [None, 30_000, 0, 0, 60_000])  # (None: before the first chat)
         self.assertEqual(r["trend"][-1]["start"], r["days"][0]["start"])
         self.assertEqual(r["trend"][3]["workedMs"], r["previous"]["workedMs"])
-        self.assertEqual(self.recap(back=4, days=40)["trend"][:4], [None] * 4)  # (older than the cache keeps)
+        self.assertEqual(self.recap(back=4, days=40)["trend"][:4], [None] * 4)  # (before the first chat kept)
+
+    def test_a_day_and_everything(self):
+        t0 = self.t0
+        self.write(Transcript().prompt(t0).reply(t0 + 1000, "a").duration(t0 + 60_000, 60_000), "chat-a")
+        yesterday = t0 - week.DAY_MS
+        self.write(Transcript().prompt(yesterday).reply(yesterday + 1000, "b").duration(yesterday + 30_000, 30_000), "chat-b")
+        old = t0 - 16 * week.DAY_MS
+        self.write(Transcript().prompt(old).reply(old + 1000, "c").duration(old + 20_000, 20_000), "chat-c")
+        day = self.recap(span="day", days=40)
+        self.assertEqual((day["span"], day["from"], day["to"], len(day["days"])), ("day", "2026-10-24", "2026-10-24", 1))
+        self.assertEqual((day["sum"]["workedMs"], day["previous"]["workedMs"]), (60_000, 30_000))  # (the day before)
+        self.assertEqual([t and t["workedMs"] for t in day["trend"]], [0, 0, 0, 30_000, 60_000])
+        self.assertEqual(day["backMax"], 16)  # (back to the first chat's day)
+        self.assertEqual(self.recap(span="day", back=1, days=40)["sum"]["workedMs"], 30_000)
+        everything = self.recap(span="all", days=40)
+        self.assertEqual((everything["from"], everything["to"], everything["first"]), ("2026-10-08", "2026-10-24", "2026-10-08"))
+        self.assertEqual(everything["sum"]["workedMs"], 110_000)
+        self.assertIsNone(everything["previous"])
+        self.assertEqual(everything["trend"], [])
+        # a row per 7 days, newest first, ending today, back to the first chat
+        self.assertEqual([(r["day"], r["to"], r["workedMs"]) for r in everything["days"]],
+                         [("2026-10-18", "2026-10-24", 90_000), ("2026-10-11", "2026-10-17", 0), ("2026-10-04", "2026-10-10", 20_000)])
+        self.assertEqual(sum(r["workedMs"] for r in everything["days"]), everything["sum"]["workedMs"])
+
+
+class HistoryTests(Home):
+    """What the cache read stays after Claude deletes a transcript, unless
+    the history is off; deleting it starts again from the transcripts."""
+
+    def setUp(self):
+        super().setUp()
+        t0 = self.t0
+        self.kept = self.write(Transcript().prompt(t0).reply(t0 + 1000, "a").duration(t0 + 60_000, 60_000), "chat-a")
+        self.deleted = self.write(Transcript().prompt(t0).reply(t0 + 2000, "b").duration(t0 + 30_000, 30_000), "chat-b")
+        week.updated_cache(self.cache_root, self.profiles(), self.now)
+
+    def worked(self):
+        cache = week.updated_cache(self.cache_root, self.profiles(), self.now)
+        chats = week.chats_between(cache, self.profiles(), 0, self.now + week.DAY_MS, self.home)
+        return sorted((k, sum(t[2] for t in c["turns"])) for k, c in chats.items())
+
+    def test_a_deleted_transcript_stays_in_the_history(self):
+        self.deleted.unlink()  # (Claude's cleanup)
+        self.assertEqual(self.worked(), [("chat-a", 60_000), ("chat-b", 30_000)])
+        self.assertEqual(week.history_status(self.cache_root)["deletedChats"], 1)
+        self.assertEqual(self.worked(), [("chat-a", 60_000), ("chat-b", 30_000)])  # (and on the next read)
+
+    def test_off_it_keeps_only_what_claude_has(self):
+        self.deleted.unlink()
+        self.worked()
+        self.assertEqual(week.set_history(self.cache_root, False)[0], True)
+        self.assertEqual(self.worked(), [("chat-a", 60_000)])
+        self.assertFalse(week.history_status(self.cache_root)["keep"])
+        self.assertTrue(week.set_history(self.cache_root, True)[0])
+        self.assertTrue(week.history_status(self.cache_root)["keep"])
+
+    def test_forget_starts_again_from_the_transcripts(self):
+        self.deleted.unlink()
+        self.worked()
+        self.assertTrue(week.forget_history(self.cache_root)[0])
+        self.assertFalse((self.cache_root / week.CACHE_FILE).exists())
+        self.assertEqual(self.worked(), [("chat-a", 60_000)])
+        self.assertEqual(week.history_status(self.cache_root)["since"], "2026-10-24")
 
 
 class TipTests(Home):

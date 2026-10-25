@@ -2484,7 +2484,8 @@ PlasmoidItem {
     property var weekRecap: null
     property bool weekBusy: false
     property string weekError: ""
-    property int weekBack: 0           // weeks before the last 7 days
+    property string weekSpan: "week"  // "day", "week" (the last 7 days) or "all" (everything kept)
+    property int weekBack: 0           // days (or weeks) before today's
     property string weekAccount: ""   // an account's id, or "" for all
     property string weekAsked: ""     // the command whose answer is awaited
     readonly property bool weekShown: popupTab === "week" && dashboardShown && !coveredByWindow
@@ -2494,9 +2495,16 @@ PlasmoidItem {
         if (weekShown)
             loadWeek()
     }
-    onWeekBackChanged: loadWeek()
-    onWeekAccountChanged: loadWeek()
-    onWeekCurrencyChanged: loadWeek()
+    // (a new span starts at today's: both change at once, it reads once)
+    onWeekSpanChanged: Qt.callLater(loadWeek)
+    onWeekBackChanged: Qt.callLater(loadWeek)
+    onWeekAccountChanged: Qt.callLater(loadWeek)
+    onWeekCurrencyChanged: Qt.callLater(loadWeek)
+
+    function setWeekSpan(span) {
+        weekSpan = span
+        weekBack = 0
+    }
 
     Timer {
         interval: 600000   // 10 minutes
@@ -2508,7 +2516,7 @@ PlasmoidItem {
     function loadWeek() {
         if (popupTab !== "week")
             return
-        let cmd = "python3 -I " + shellQuote(codeDir + "week.py") + " --back " + weekBack
+        let cmd = "python3 -I " + shellQuote(codeDir + "week.py") + " --span " + weekSpan + " --back " + weekBack
         if (weekAccount)
             cmd += " --account " + shellQuote(weekAccount)
         if (weekCurrency !== "USD")

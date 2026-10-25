@@ -38,19 +38,29 @@ export function buildWeekView(ctx) {
     if (week.busy && recap)
         view.opacity = 160;   // what it said before, while it reads again
 
-    // The 7 days shown, a week back or on, and whose chats
+    // A day, 7 days or everything kept
+    const spans = box('claude-week-accounts', {x_align: Clutter.ActorAlign.CENTER});
+    for (const [span, text] of [['day', 'Day'], ['week', 'Week'], ['all', 'Overall']])
+        spans.add_child(textButton(text, () => ctx.setWeek({span}), `claude-chip${week.span === span ? ' claude-chip-on' : ''}`));
+    view.add_child(spans);
+
+    // The days shown, one back or on, and whose chats
+    const shown = recap && recap.span === week.span;
     const period = box('claude-week-period', {x_expand: true});
+    const day = week.span === 'day';
     const before = iconButton('go-previous-symbolic', () => ctx.setWeek({back: week.back + 1}));
-    before.reactive = before.can_focus = !!recap && week.back < recap.backMax;
+    before.reactive = before.can_focus = shown && week.back < recap.backMax;
     before.opacity = before.reactive ? 255 : 90;
-    ctx.tips.add(before, 'The week before');
+    before.visible = week.span !== 'all';
+    ctx.tips.add(before, day ? 'The day before' : 'The week before');
     period.add_child(before);
-    period.add_child(label(recap ? L.weekPeriodText({...recap, back: week.back}) : week.back === 0 ? 'Last 7 days' : '',
+    period.add_child(label(shown ? L.weekPeriodText({...recap, back: week.back}) : L.weekPeriodWaiting(week.span, week.back),
         'claude-week-span', {x_expand: true, x_align: Clutter.ActorAlign.CENTER}));
     const after = iconButton('go-next-symbolic', () => ctx.setWeek({back: week.back - 1}));
     after.reactive = after.can_focus = week.back > 0;
     after.opacity = after.reactive ? 255 : 90;
-    ctx.tips.add(after, 'The week after');
+    after.visible = week.span !== 'all';
+    ctx.tips.add(after, day ? 'The day after' : 'The week after');
     period.add_child(after);
     view.add_child(period);
 
@@ -72,7 +82,9 @@ export function buildWeekView(ctx) {
     const s = recap ? recap.sum : null;
     const hasData = !!s && (s.workedMs > 0 || s.prompts > 0 || s.cost > 0);
     if (recap && !hasData)
-        view.add_child(paragraph('No Claude in these days: none of your chats here (or on the SSH hosts shown) has a prompt or a reply in them.',
+        view.add_child(paragraph(recap.span === 'day' ? 'No Claude on this day: none of your chats here (or on the SSH hosts shown) has a prompt or a reply on it.'
+            : recap.span === 'all' ? 'No Claude yet: none of your chats here (or on the SSH hosts shown) has a prompt or a reply.'
+                : 'No Claude in these days: none of your chats here (or on the SSH hosts shown) has a prompt or a reply in them.',
             'claude-dim claude-week-note'));
     if (!hasData)
         return view;
@@ -163,10 +175,12 @@ function chatLine(ctx, c, cur, where = null, sub = false) {
 // usage limit stopped a chat. Click a day for its chats.
 function buildTimeline(ctx, recap, cur) {
     const section = column('claude-week-section', {x_expand: true});
-    section.add_child(heading('Day by day'));
+    const weeks = recap.span === 'all';   // (a row per 7 days, with their numbers)
+    section.add_child(heading(weeks ? 'Week by week' : recap.span === 'day' ? 'Through the day' : 'Day by day'));
     const legend = box('claude-week-head', {x_expand: true});
-    const keys = [['claude-week-swatch-you', 'You'], ['claude-bg-working', 'Claude working'], ['claude-bg-waiting', 'Waiting for you']];
-    if (recap.days.some(d => d.limits && d.limits.length))
+    const keys = weeks ? [['claude-week-swatch-you', 'You'], ['claude-bg-working', 'Claude worked']]
+        : [['claude-week-swatch-you', 'You'], ['claude-bg-working', 'Claude working'], ['claude-bg-waiting', 'Waiting for you']];
+    if (!weeks && recap.days.some(d => d.limits && d.limits.length))
         keys.push(['claude-week-swatch-limit', 'A usage limit stopped a chat']);
     for (const [cls, text] of keys) {
         legend.add_child(new St.Widget({style_class: `claude-week-swatch ${cls}`, y_align: Clutter.ActorAlign.CENTER}));
@@ -177,7 +191,7 @@ function buildTimeline(ctx, recap, cur) {
     const axis = box('claude-week-row', {x_expand: true});
     axis.add_child(label('', 'claude-week-day'));
     const hours = box('claude-week-hours', {x_expand: true});
-    [0, 6, 12, 18, 24].forEach((h, i) => {
+    (weeks ? [] : [0, 6, 12, 18, 24]).forEach((h, i) => {
         hours.add_child(label(String(h), 'claude-small claude-dim', {x_expand: i < 4}));
     });
     axis.add_child(hours);
@@ -185,20 +199,23 @@ function buildTimeline(ctx, recap, cur) {
     axis.add_child(label('Claude', 'claude-small claude-dim claude-week-num'));
     section.add_child(axis);
 
-    const hint = 'Point at a day to see what went on then; click it for its chats.';
+    const hint = weeks ? 'Click a week for its chats.' : 'Point at a day to see what went on then; click it for its chats.';
     const readout = label(hint, 'claude-small claude-dim claude-week-readout', {x_expand: true});
     const areas = [];
-    const last = recap.days.length - 1;
+    const last = weeks ? 0 : recap.days.length - 1;
+    const most = Math.max(1, ...recap.days.map(d => Math.max(d.youMs, d.workedMs)));
     recap.days.forEach((d, i) => {
         const today = i === last && recap.back === 0;
         const open = ctx.week.open === `day:${d.day}` && d.chats && d.chats.length > 0;
         const row = box('claude-week-row', {x_expand: true});
-        const dayLabel = label(L.weekRowDay(d.day), `claude-small claude-week-day${today || open ? ' claude-strong' : ''}`);
+        const dayLabel = label(L.weekRowDay(d.day, weeks), `claude-small claude-week-day${today || open ? ' claude-strong' : ''}`);
         row.add_child(dayLabel);
         const area = new St.DrawingArea({x_expand: true, height: ROW_PX, reactive: true, track_hover: true});
-        area._week = {day: d, today, hoverX: -1};
-        area.connect('repaint', a => paintDay(a, recap.generatedAt));
+        area._week = {day: d, today, hoverX: -1, most};
+        area.connect('repaint', a => (weeks ? paintWeek(a) : paintDay(a, recap.generatedAt)));
         area.connect('motion-event', (a, event) => {
+            if (weeks)
+                return Clutter.EVENT_PROPAGATE;
             const [x, y] = event.get_coords();
             const [ok, lx] = a.transform_stage_point(x, y);
             if (!ok)
@@ -244,6 +261,25 @@ function buildTimeline(ctx, recap, cur) {
     });
     section.add_child(readout);
     return section;
+}
+
+// Overall's row: the 7 days' time, yours and Claude's, against the busiest 7 days
+function paintWeek(area) {
+    const {day: d, most} = area._week;
+    const cr = area.get_context();
+    const [w, h] = area.get_surface_size();
+    cr.setSourceRGBA(...GRID);
+    cr.rectangle(0, h - 1, w, 1);
+    cr.fill();
+    cr.setSourceRGBA(...YOU);
+    if (d.youMs > 0)
+        cr.rectangle(0, 1, Math.max(1, w * d.youMs / most), 4);
+    cr.fill();
+    cr.setSourceRGBA(...WORK, 1);
+    if (d.workedMs > 0)
+        cr.rectangle(0, 7, Math.max(1, w * d.workedMs / most), 9);
+    cr.fill();
+    cr.$dispose();
 }
 
 function paintDay(area, now) {
@@ -423,7 +459,7 @@ function buildTips(ctx, recap) {
     const section = column('claude-week-section', {x_expand: true});
     section.add_child(heading('What could use less of your plan'));
     if (!recap.tips.length)
-        section.add_child(paragraph("Nothing stands out: no habit takes a tenth of this week's usage.", 'claude-dim'));
+        section.add_child(paragraph('Nothing stands out: no habit takes a tenth of the usage shown.', 'claude-dim'));
     for (const t of recap.tips) {
         const line = box('claude-week-tip', {x_expand: true});
         const text = column('', {x_expand: true});
@@ -433,7 +469,7 @@ function buildTips(ctx, recap) {
         line.add_child(text);
         if (t.pct !== null && t.pct !== undefined) {
             const pct = label(`${t.pct}%`, 'claude-small', {y_align: Clutter.ActorAlign.START});
-            ctx.tips.add(pct, [`${t.pct}% of this week's usage`, "Of the usage of these 7 days, as Claude Code's /usage weighs it " +
+            ctx.tips.add(pct, [`${t.pct}% of the usage shown`, "Of the usage of these days, as Claude Code's /usage weighs it " +
                 "toward your plan's limits. A request can count for several of these."]);
             line.add_child(pct);
         }

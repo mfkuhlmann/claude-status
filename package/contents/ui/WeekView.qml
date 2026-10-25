@@ -14,6 +14,8 @@ PlasmaComponents3.ScrollView {
     id: view
 
     readonly property var recap: root.weekRecap
+    readonly property string span: root.weekSpan   // the one picked (its answer may still come)
+    readonly property bool weeks: !!recap && recap.span === "all"   // a row per 7 days, with their numbers
     readonly property var days: recap ? recap.days : []
     readonly property var sum: recap ? recap.sum : null
     readonly property var previous: recap && recap.previous && (recap.previous.workedMs || recap.previous.prompts
@@ -30,6 +32,7 @@ PlasmaComponents3.ScrollView {
     readonly property var currency: recap && recap.currency ? recap.currency : ({ code: "USD", rate: 1, date: "", error: "" })
     readonly property bool hasData: !!sum && (sum.workedMs > 0 || sum.prompts > 0 || sum.cost > 0)
     readonly property real maxProject: Math.max(1, ...projects.map(p => p.workedMs))
+    readonly property real weekMax: Math.max(1, ...days.map(d => Math.max(d.youMs, d.workedMs)))   // (Overall's busiest 7 days)
     readonly property real gu: Kirigami.Units.gridUnit
     property string openDay: ""       // the day whose chats are unfolded
     property string openProject: ""   // the project folder whose chats are unfolded: host|path
@@ -44,7 +47,7 @@ PlasmaComponents3.ScrollView {
     readonly property color waitColor: Kirigami.Theme.neutralTextColor
     readonly property color limitColor: Kirigami.Theme.negativeTextColor
 
-    readonly property real dayWidth: gu * 2.6
+    readonly property real dayWidth: gu * (weeks ? 3.4 : 2.6)
     readonly property real numWidth: gu * 2.9
     readonly property real youHeight: Math.round(gu * 0.25)
     readonly property real workHeight: Math.round(gu * 0.5)
@@ -115,11 +118,17 @@ PlasmaComponents3.ScrollView {
     }
 
     function periodText() {
-        if (!recap)
-            return root.weekBack === 0 ? i18n("Last 7 days") : ""
-        const span = i18nc("from day – to day", "%1 – %2", Qt.locale().toString(date(recap.from), "d MMM"),
+        if (!recap || recap.span !== span)
+            return root.weekBack !== 0 ? "" : span === "day" ? i18n("Today") : span === "all" ? i18n("Everything") : i18n("Last 7 days")
+        if (span === "day") {
+            const day = Qt.locale().toString(date(recap.from), "ddd d MMM")
+            return recap.back === 0 ? i18n("Today · %1", day) : recap.back === 1 ? i18n("Yesterday · %1", day) : day
+        }
+        if (span === "all")
+            return recap.first ? i18n("Everything since %1", Qt.locale().toString(date(recap.first), "d MMM yyyy")) : i18n("Everything")
+        const days = i18nc("from day – to day", "%1 – %2", Qt.locale().toString(date(recap.from), "d MMM"),
                            Qt.locale().toString(date(recap.to), "d MMM"))
-        return recap.back === 0 ? i18n("Last 7 days · %1", span) : span
+        return recap.back === 0 ? i18n("Last 7 days · %1", days) : days
     }
 
     // The change against the 7 days before: +4h 44m, −$12
@@ -134,8 +143,10 @@ PlasmaComponents3.ScrollView {
     }
 
     function beforeText(before, kind) {
-        return !previous ? "" : "\n" + i18n("The 7 days before: %1", kind === "time" ? hours(before) : kind === "money" ? money(before)
-                                                                                                : String(before))
+        if (!previous)
+            return ""
+        const value = kind === "time" ? hours(before) : kind === "money" ? money(before) : String(before)
+        return "\n" + (span === "day" ? i18n("The day before: %1", value) : i18n("The 7 days before: %1", value))
     }
 
     // The same number over the 5 weeks up to these days (a week older than
@@ -145,7 +156,8 @@ PlasmaComponents3.ScrollView {
             return ""
         const shown = trend.map(w => !w ? "?" : kind === "time" ? hours(w[key]) : kind === "money" ? money(w[key])
                                                                                                   : String(w[key]))
-        return "\n" + i18n("Week by week, these 7 days last: %1", shown.join(" · "))
+        return "\n" + (span === "day" ? i18n("Day by day, this day last: %1", shown.join(" · "))
+                                      : i18n("Week by week, these 7 days last: %1", shown.join(" · ")))
     }
 
     readonly property var tiles: !sum ? [] : [
@@ -186,6 +198,8 @@ PlasmaComponents3.ScrollView {
 
     // What went on at the moment the mouse points at, on its day's row
     function hoverText() {
+        if (weeks)
+            return i18n("Click a week for its chats.")
         if (!hover || !days[hover.row])
             return i18n("Point at a day to see what went on then; click it for its chats.")
         const d = days[hover.row]
@@ -289,23 +303,42 @@ PlasmaComponents3.ScrollView {
         // (while it reads again: what it said before, dimmed, no jump)
         opacity: root.weekBusy && view.recap ? 0.6 : 1
 
-        // The 7 days shown, a week back or on, and whose chats
+        // A day, 7 days or everything kept
+        RowLayout {
+            Layout.alignment: Qt.AlignHCenter
+            Layout.topMargin: Kirigami.Units.smallSpacing
+            spacing: Kirigami.Units.smallSpacing
+
+            Repeater {
+                model: [["day", i18n("Day")], ["week", i18n("Week")], ["all", i18n("Overall")]]
+                delegate: PlasmaComponents3.ToolButton {
+                    required property var modelData
+                    text: modelData[1]
+                    checkable: true
+                    autoExclusive: true
+                    checked: view.span === modelData[0]
+                    onClicked: root.setWeekSpan(modelData[0])
+                }
+            }
+        }
+
+        // The days shown, one back or on, and whose chats
         RowLayout {
             Layout.fillWidth: true
-            Layout.topMargin: Kirigami.Units.smallSpacing
             spacing: Kirigami.Units.smallSpacing
 
             PlasmaComponents3.ToolButton {
                 icon.name: "go-previous"
                 display: PlasmaComponents3.AbstractButton.IconOnly
-                text: i18n("The week before")
+                text: view.span === "day" ? i18n("The day before") : i18n("The week before")
+                visible: view.span !== "all"
                 enabled: root.weekBack < (view.recap ? view.recap.backMax : 0)
                 onClicked: root.weekBack += 1
 
                 PlasmaCore.ToolTipArea {
                     textFormat: Text.PlainText
                     anchors.fill: parent
-                    mainText: i18n("The week before")
+                    mainText: parent.text
                 }
             }
             PlasmaComponents3.Label {
@@ -319,14 +352,15 @@ PlasmaComponents3.ScrollView {
             PlasmaComponents3.ToolButton {
                 icon.name: "go-next"
                 display: PlasmaComponents3.AbstractButton.IconOnly
-                text: i18n("The week after")
+                text: view.span === "day" ? i18n("The day after") : i18n("The week after")
+                visible: view.span !== "all"
                 enabled: root.weekBack > 0
                 onClicked: root.weekBack -= 1
 
                 PlasmaCore.ToolTipArea {
                     textFormat: Text.PlainText
                     anchors.fill: parent
-                    mainText: i18n("The week after")
+                    mainText: parent.text
                 }
             }
         }
@@ -384,8 +418,10 @@ PlasmaComponents3.ScrollView {
             Layout.fillWidth: true
             visible: !!view.recap && !view.hasData
             iconName: "view-calendar-week"
-            text: i18n("No Claude in these days")
-            explanation: i18n("None of your chats here (or on the SSH hosts shown) has a prompt or a reply in these 7 days.")
+            text: view.span === "day" ? i18n("No Claude on this day") : view.span === "all" ? i18n("No Claude yet") : i18n("No Claude in these days")
+            explanation: view.span === "day" ? i18n("None of your chats here (or on the SSH hosts shown) has a prompt or a reply on this day.")
+                         : view.span === "all" ? i18n("None of your chats here (or on the SSH hosts shown) has a prompt or a reply yet.")
+                         : i18n("None of your chats here (or on the SSH hosts shown) has a prompt or a reply in these 7 days.")
         }
 
         // The numbers of the week, against the week before
@@ -493,16 +529,17 @@ PlasmaComponents3.ScrollView {
             spacing: Math.round(view.gu * 0.2)
 
             SectionTitle {
-                text: i18n("Day by day")
+                text: view.weeks ? i18n("Week by week") : view.recap && view.recap.span === "day" ? i18n("Through the day") : i18n("Day by day")
             }
             Flow {
                 Layout.fillWidth: true
                 spacing: Kirigami.Units.largeSpacing
 
                 Repeater {
-                    model: [[view.youColor, i18n("You")], [view.workColor, i18n("Claude working")],
-                            [view.waitColor, i18n("Waiting for you")]].concat(
-                               view.days.some(d => d.limits && d.limits.length) ? [[view.limitColor, i18n("A usage limit stopped a chat"), true]] : [])
+                    model: view.weeks ? [[view.youColor, i18n("You")], [view.workColor, i18n("Claude worked")]]
+                           : [[view.youColor, i18n("You")], [view.workColor, i18n("Claude working")],
+                              [view.waitColor, i18n("Waiting for you")]].concat(
+                                 view.days.some(d => d.limits && d.limits.length) ? [[view.limitColor, i18n("A usage limit stopped a chat"), true]] : [])
                     delegate: RowLayout {
                         required property var modelData
                         spacing: Math.round(view.gu * 0.25)
@@ -538,7 +575,7 @@ PlasmaComponents3.ScrollView {
                     onWidthChanged: view.timelineWidth = width
 
                     Repeater {
-                        model: [0, 6, 12, 18, 24]
+                        model: view.weeks ? [] : [0, 6, 12, 18, 24]
                         delegate: PlasmaComponents3.Label {
                             required property int modelData
                             textFormat: Text.PlainText
@@ -573,7 +610,7 @@ PlasmaComponents3.ScrollView {
                     id: dayRow
                     required property int index
                     readonly property var day: view.days[index] || view.emptyDay
-                    readonly property bool today: index === view.days.length - 1 && !!view.recap && view.recap.back === 0
+                    readonly property bool today: index === (view.weeks ? 0 : view.days.length - 1) && !!view.recap && view.recap.back === 0
                     readonly property bool open: view.openDay !== "" && view.openDay === day.day
                     Layout.fillWidth: true
                     spacing: 0
@@ -589,7 +626,7 @@ PlasmaComponents3.ScrollView {
                         PlasmaComponents3.Label {
                             textFormat: Text.PlainText
                             Layout.preferredWidth: view.dayWidth
-                            text: dayRow.day.day ? Qt.locale().toString(view.date(dayRow.day.day), "ddd d") : ""
+                            text: !dayRow.day.day ? "" : Qt.locale().toString(view.date(dayRow.day.day), view.weeks ? "d MMM" : "ddd d")
                             elide: Text.ElideRight
                             font.pointSize: Kirigami.Theme.smallFont.pointSize
                             font.bold: dayRow.today || dayRow.open
@@ -601,9 +638,35 @@ PlasmaComponents3.ScrollView {
                                 onClicked: dayRow.toggle()
                             }
                         }
+                        // (Overall: the 7 days' time, yours and Claude's, against the busiest 7 days)
+                        Item {
+                            visible: view.weeks
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: view.youHeight + view.laneGap + view.workHeight + 2
+
+                            Rectangle {
+                                width: Math.max(dayRow.day.youMs > 0 ? 1 : 0, parent.width * dayRow.day.youMs / view.weekMax)
+                                height: view.youHeight
+                                radius: 1
+                                color: view.youColor
+                            }
+                            Rectangle {
+                                y: view.youHeight + view.laneGap
+                                width: Math.max(dayRow.day.workedMs > 0 ? 1 : 0, parent.width * dayRow.day.workedMs / view.weekMax)
+                                height: view.workHeight
+                                radius: 1
+                                color: view.workColor
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: dayRow.day.chats.length ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                onClicked: dayRow.toggle()
+                            }
+                        }
                         Item {
                             id: track
                             readonly property real span: Math.max(1, dayRow.day.end - dayRow.day.start)
+                            visible: !view.weeks
                             Layout.fillWidth: true
                             Layout.preferredHeight: view.youHeight + view.laneGap + view.workHeight + 2
 
@@ -728,7 +791,10 @@ PlasmaComponents3.ScrollView {
                             PlasmaCore.ToolTipArea {
                                 textFormat: Text.PlainText
                                 anchors.fill: parent
-                                mainText: dayRow.day.day ? Qt.locale().toString(view.date(dayRow.day.day), "dddd d MMMM") : ""
+                                mainText: !dayRow.day.day ? "" : view.weeks
+                                          ? i18nc("from day – to day", "%1 – %2", Qt.locale().toString(view.date(dayRow.day.day), "d MMMM"),
+                                                  Qt.locale().toString(view.date(dayRow.day.to), "d MMMM"))
+                                          : Qt.locale().toString(view.date(dayRow.day.day), "dddd d MMMM")
                                 subText: i18n("You: %1 · Claude worked %2 (on the clock %3) · it waited %4 for you",
                                               view.hours(dayRow.day.youMs), view.hours(dayRow.day.workedMs),
                                               view.hours(dayRow.day.busyMs), view.hours(dayRow.day.waitMs))
@@ -1160,7 +1226,7 @@ PlasmaComponents3.ScrollView {
                 visible: view.tips.length === 0
                 wrapMode: Text.Wrap
                 opacity: 0.7
-                text: i18n("Nothing stands out: no habit takes a tenth of this week's usage.")
+                text: i18n("Nothing stands out: no habit takes a tenth of the usage shown.")
             }
             Repeater {
                 model: view.tips.length
@@ -1209,8 +1275,8 @@ PlasmaComponents3.ScrollView {
                         PlasmaCore.ToolTipArea {
                             textFormat: Text.PlainText
                             anchors.fill: parent
-                            mainText: i18n("%1% of this week's usage", tipRow.tip.pct || 0)
-                            subText: i18n("Of the usage of these 7 days, as Claude Code's /usage weighs it toward your plan's limits. A request can count for several of these.")
+                            mainText: i18n("%1% of the usage shown", tipRow.tip.pct || 0)
+                            subText: i18n("Of the usage of these days, as Claude Code's /usage weighs it toward your plan's limits. A request can count for several of these.")
                         }
                     }
                     PlasmaComponents3.ToolButton {

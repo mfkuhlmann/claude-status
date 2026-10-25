@@ -133,12 +133,49 @@ KCM.SimpleKCM {
         }
     }
 
+    // The Recap's history (week.py --history-status, --history on|off,
+    // --forget): one choice for every copy of the widget and the VS Code
+    // extension, kept next to their cache, so it changes at once (not with Apply)
+    property var history: null        // {keep, since, deletedChats, sizeKB}
+    property string historyMessage: ""
+    property bool forgetAsking: false
+
+    P5Support.DataSource {
+        id: historyHelper
+        engine: "executable"
+        connectedSources: []
+        onNewData: (source, data) => {
+            disconnectSource(source)
+            let result = null
+            try {
+                result = JSON.parse(data["stdout"])
+            } catch (e) {
+                page.historyMessage = i18n("Couldn't ask the Recap about its history")
+                return
+            }
+            if (result.keep !== undefined) {
+                page.history = result
+            } else {
+                page.historyMessage = result.message || ""
+                page.runHistory(["--history-status"])
+            }
+        }
+    }
+
+    function runHistory(args) {
+        const q = s => "'" + String(s).replace(/'/g, "'\\''") + "'"
+        historyHelper.connectSource("python3 -I " + q(codeDir + "week.py") + " " + args.map(q).join(" ") + " # " + Date.now())
+    }
+
     function jumpCommand(args) {
         const q = s => "'" + String(s).replace(/'/g, "'\\''") + "'"
         return "python3 -I " + q(codeDir + "jump.py") + " " + args.map(q).join(" ") + " # " + Date.now()
     }
 
-    Component.onCompleted: phoneHelper.connectSource(jumpCommand(["--phone-devices"]))
+    Component.onCompleted: {
+        phoneHelper.connectSource(jumpCommand(["--phone-devices"]))
+        runHistory(["--history-status"])
+    }
 
     function play(sound) {
         const q = s => "'" + String(s).replace(/'/g, "'\\''") + "'"
@@ -479,6 +516,70 @@ KCM.SimpleKCM {
             font: Kirigami.Theme.smallFont
             opacity: 0.7
             text: i18n("Claude's API prices are in US dollars. For another currency, the Recap tab downloads the European Central Bank's reference rates of the day from ecb.europa.eu, at most every 6 hours and only while the tab is open; offline, it uses the last rates it has. Nothing about your chats is sent.")
+        }
+
+        QQC2.CheckBox {
+            id: recapHistory
+            text: i18n("Keep a history beyond Claude's 30 days")
+            enabled: page.history !== null
+            checked: page.history ? page.history.keep : true
+            onToggled: {
+                page.runHistory(["--history", checked ? "on" : "off"])
+                checked = Qt.binding(() => page.history ? page.history.keep : true)   // (it shows what the Recap keeps)
+            }
+        }
+
+        QQC2.Label {
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 20
+            wrapMode: Text.Wrap
+            font: Kirigami.Theme.smallFont
+            opacity: 0.7
+            text: i18n("Claude Code deletes chats after 30 days (its cleanupPeriodDays setting). The Recap's Overall keeps their numbers past that, in ~/.cache/claude-widget: times, tokens, costs, folders and chat names. Off, it keeps only what Claude still has. This changes at once, for the VS Code extension too.")
+                  + (!page.history ? "" : "\n" + (page.history.since
+                         ? i18np("Kept since %2, with %1 chat Claude has deleted · %3 KB", "Kept since %2, with %1 chats Claude has deleted · %3 KB",
+                                 page.history.deletedChats, Qt.locale().toString(new Date(page.history.since + "T00:00"), "d MMM yyyy"),
+                                 page.history.sizeKB)
+                         : i18n("Nothing kept yet.")))
+        }
+
+        RowLayout {
+            spacing: Kirigami.Units.smallSpacing
+
+            QQC2.Button {
+                visible: !page.forgetAsking
+                enabled: page.history !== null && !!page.history.since
+                icon.name: "edit-delete"
+                text: i18n("Delete Saved History…")
+                onClicked: page.forgetAsking = true
+            }
+            QQC2.Label {
+                visible: page.forgetAsking
+                Layout.maximumWidth: Kirigami.Units.gridUnit * 14
+                wrapMode: Text.Wrap
+                text: i18n("Delete the Recap's saved history? It starts again from the chats Claude still has.")
+            }
+            QQC2.Button {
+                visible: page.forgetAsking
+                icon.name: "edit-delete"
+                text: i18n("Delete")
+                onClicked: {
+                    page.forgetAsking = false
+                    page.runHistory(["--forget"])
+                }
+            }
+            QQC2.Button {
+                visible: page.forgetAsking
+                text: i18n("Cancel")
+                onClicked: page.forgetAsking = false
+            }
+        }
+
+        QQC2.Label {
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 20
+            visible: page.historyMessage !== ""
+            wrapMode: Text.Wrap
+            font: Kirigami.Theme.smallFont
+            text: page.historyMessage
         }
 
         QQC2.CheckBox {

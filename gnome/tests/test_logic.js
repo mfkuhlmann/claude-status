@@ -480,6 +480,12 @@ test("the week's days, tiles and facts", () => {
     const r = weekRecap();
     eq(L.weekPeriodText(r), 'Last 7 days · 18 Oct – 24 Oct');
     eq(L.weekPeriodText({...r, back: 1, from: '2026-10-11', to: '2026-10-17'}), '11 Oct – 17 Oct');
+    // a day, everything kept
+    eq(L.weekPeriodText({...r, span: 'day', back: 0, from: '2026-10-24', to: '2026-10-24'}), 'Today · Sat 24 Oct');
+    eq(L.weekPeriodText({...r, span: 'day', back: 1, from: '2026-10-23', to: '2026-10-23'}), 'Yesterday · Fri 23 Oct');
+    eq(L.weekPeriodText({...r, span: 'all', first: '2026-10-14'}), 'Everything since 14 October 2026');
+    eq([L.weekPeriodWaiting('day', 0), L.weekPeriodWaiting('all', 0), L.weekPeriodWaiting('week', 2)], ['Today', 'Everything', '']);
+    eq([L.weekRowDay('2026-10-19'), L.weekRowDay('2026-10-19', true)], ['Mon 19', '19 Oct']);
     const tiles = L.weekTiles(r);
     eq(tiles.map(t => [t.label, t.value, t.delta]), [['You', '18h 0m', '+4h 44m'], ['Claude worked', '32h 6m', '+17h 6m'],
         ['At API prices', '$906', '+$509'], ['Prompts', '219', '+16']]);
@@ -487,7 +493,7 @@ test("the week's days, tiles and facts", () => {
     eq(L.weekFactsText(r.sum), 'longest turn 1h 13m (startup hang) · up to 3 chats at once · busiest day Tuesday · usage limits stopped you 2 times');
     eq(L.weekFootText(r).split('\n')[1], "lab couldn't be read: no answer");
     eq(L.weekArgs(1, 'abc', ['lab', 'gpu'], {lab: {ok: true, result: {}}, gpu: {ok: false, result: null}}, ['--config-dir', '/x']),
-        ['--back', '1', '--account', 'abc', '--host', 'lab', '--config-dir', '/x']);
+        ['--span', 'week', '--back', '1', '--account', 'abc', '--host', 'lab', '--config-dir', '/x']);
 });
 
 test('pointing at a day says what went on then', () => {
@@ -513,8 +519,10 @@ test('amounts in another currency, at the rate week.py sends', () => {
     eq(L.weekFootText(r).split('\n')[1], "Amounts in EUR at the European Central Bank's rate of 23 October 2026: 1 USD = 0.9000 EUR.");
     const failed = weekRecap({currency: {code: 'USD', rate: 1, date: '', error: 'no EUR rate from the European Central Bank yet'}});
     eq(L.weekCurrency(failed).code, 'USD');
-    eq(L.weekArgs(0, '', [], {}, [], 'EUR'), ['--back', '0', '--currency', 'EUR']);
-    eq(L.weekArgs(0, '', [], {}, [], '../x'), ['--back', '0']);
+    eq(L.weekArgs(0, '', [], {}, [], 'EUR'), ['--span', 'week', '--back', '0', '--currency', 'EUR']);
+    eq(L.weekArgs(0, '', [], {}, [], '../x'), ['--span', 'week', '--back', '0']);
+    eq(L.weekArgs(3, '', [], {}, [], 'USD', 'day'), ['--span', 'day', '--back', '3']);
+    eq(L.weekArgs(0, '', [], {}, [], 'USD', '../x'), ['--span', 'week', '--back', '0']);
 });
 
 test('trend lines, what Claude did, where the money went, the prompts you answered', () => {

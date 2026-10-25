@@ -105,9 +105,12 @@ export default class ClaudeStatusPreferences extends ExtensionPreferences {
             'show-pet'));
         look.add(toggle('show-tokens', 'Show token totals', 'from local transcripts'));
         look.add(this._currencyRow(settings));
-        look.add(toggle('recap-rules', 'Suggest rules for the permission prompts you answered',
-            "The Permissions tab offers rules that would have let them go without asking, each with an Allow… button. Off, it only counts the prompts, and there's nothing to allow by mistake. Either way it lists the permissions you gave, to revoke them."));
         page.add(look);
+        page.add(this._historyGroup(window));
+        const perms = new Adw.PreferencesGroup({title: 'Permissions'});
+        perms.add(toggle('recap-rules', 'Suggest rules for the permission prompts you answered',
+            "The Permissions tab offers rules that would have let them go without asking, each with an Allow… button. Off, it only counts the prompts, and there's nothing to allow by mistake. Either way it lists the permissions you gave, to revoke them."));
+        page.add(perms);
 
         window.add(this._accountsPage(window, settings));
     }
@@ -398,6 +401,69 @@ export default class ClaudeStatusPreferences extends ExtensionPreferences {
         });
         row.connect('changed', () => row.remove_css_class('error'));
         return row;
+    }
+
+    // The Recap's history (week.py --history-status, --history on|off,
+    // --forget): one choice for every copy of the widget and the VS Code
+    // extension, kept next to their cache, so it changes at once
+    _historyGroup(window) {
+        const group = new Adw.PreferencesGroup({title: 'Recap history',
+            description: "Claude Code deletes chats after 30 days (its cleanupPeriodDays setting). The Recap's Overall keeps their numbers past that, in ~/.cache/claude-widget: times, tokens, costs, folders and chat names. Off, it keeps only what Claude still has. This changes at once, for the VS Code extension too."});
+        const week = args => new Promise(resolve => {
+            try {
+                const proc = Gio.Subprocess.new(['python3', '-I', GLib.build_filenamev([this.path, 'code', 'week.py']), ...args],
+                    Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE);
+                proc.communicate_utf8_async(null, null, (pr, res) => {
+                    try {
+                        resolve(JSON.parse(pr.communicate_utf8_finish(res)[1]));
+                    } catch (e) {
+                        resolve({ok: false, message: e.message});
+                    }
+                });
+            } catch (e) {
+                resolve({ok: false, message: e.message});
+            }
+        });
+        const keep = new Adw.SwitchRow({title: "Keep a history beyond Claude's 30 days", sensitive: false});
+        const forget = new Gtk.Button({label: 'Delete…', valign: Gtk.Align.CENTER, css_classes: ['destructive-action'], sensitive: false});
+        const saved = new Adw.ActionRow({title: 'Saved history'});
+        saved.add_suffix(forget);
+        let syncing = false;
+        const sync = async () => {
+            const st = await week(['--history-status']);
+            if (st.keep === undefined)
+                return;
+            syncing = true;
+            keep.active = st.keep;
+            keep.sensitive = true;
+            syncing = false;
+            saved.subtitle = st.since ? `Kept since ${st.since}, with ${st.deletedChats} chats Claude has deleted · ${st.sizeKB} KB` : 'Nothing kept yet';
+            forget.sensitive = !!st.since;
+        };
+        const said = result => window.add_toast(new Adw.Toast({title: GLib.markup_escape_text(result.message || '', -1), timeout: 5}));
+        keep.connect('notify::active', async () => {
+            if (syncing)
+                return;
+            said(await week(['--history', keep.active ? 'on' : 'off']));
+            sync();
+        });
+        forget.connect('clicked', () => {
+            const dialog = new Adw.AlertDialog({heading: 'Delete the saved history?',
+                body: 'The Recap starts again from the chats Claude still has.'});
+            dialog.add_response('cancel', 'Cancel');
+            dialog.add_response('delete', 'Delete');
+            dialog.set_response_appearance('delete', Adw.ResponseAppearance.DESTRUCTIVE);
+            dialog.choose(window, null, async (d, res) => {
+                if (d.choose_finish(res) !== 'delete')
+                    return;
+                said(await week(['--forget']));
+                sync();
+            });
+        });
+        group.add(keep);
+        group.add(saved);
+        sync();
+        return group;
     }
 
     // The Recap tab's currency: Claude's API prices are in US dollars; another

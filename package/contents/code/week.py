@@ -7,12 +7,23 @@ All of it comes from the chat transcripts Claude Code keeps on this computer
 (and on the SSH hosts shown): nothing here starts Claude or calls a model,
 and only --currency goes online (for the day's exchange rates). Each run
 reads only what the transcripts added since the last one
-(~/.cache/claude-widget/week-2.json), and the widget runs it only while its
+(~/.cache/claude-widget/week-3.json), and the widget runs it only while its
 Recap tab is open, never in its status checks.
 
-    python3 -I week.py [--back N] [--account ID] [--host HOST]... [--config-dir DIR]... [--currency C] [--pretty]
+The cache keeps what it read for good (the history: Overall goes back to the
+first chat it read), also once Claude Code deletes a chat's transcript
+(after its cleanupPeriodDays, 30 by default), unless the history is turned
+off: then it keeps only what the transcripts still have.
 
-    --back N      the 7 days N weeks before the last 7 (BACK_MAX at most)
+    python3 -I week.py [--span day|week|all] [--back N] [--account ID] [--host HOST]... [--config-dir DIR]... [--currency C] [--pretty]
+
+    --span S      day: one day (back N days); week: 7 days (back N weeks, the
+                  default); all: everything kept, a row per 7 days
+    --back N      the day or 7 days N before today's
+    --history-status | --history on|off | --forget
+                  whether the history is kept (and since when), keep it or
+                  not, or delete it (the cache starts again from the
+                  transcripts Claude still has)
     --account ID  one account's chats (an id of claude_status.py's groups)
     --host HOST   an SSH host's chats too: remote.py runs this file there
                   (python3 -I - with claude_status.py loaded first) with
@@ -55,12 +66,13 @@ if os.path.isfile(globals().get("__file__") or ""):  # (on an SSH host it comes 
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # -I leaves the script dir off sys.path
 import claude_status as cs  # noqa: E402
 
-CACHE_FILE = "week-2.json"  # (a new layout gets a new name: an older copy of this file keeps its own)
-OLD_CACHE_FILES = ("week-1.json",)
+CACHE_FILE = "week-3.json"  # (a new layout gets a new name: an older copy of this file keeps its own)
+OLD_CACHE_FILES = ("week-1.json", "week-2.json")
+HISTORY_FILE = "history.json"  # {"keep": false} once you turn the history off
 CACHE_LOCK = "week.lock"
 LOCK_WAIT_S = 30  # another run reading the transcripts: wait for it this long, then use the cache as it is
-KEEP_DAYS = 35  # what the cache keeps: this week and the four before it
-BACK_MAX = 4  # weeks you can step back
+SPANS = ("day", "week", "all")
+BACK_LIMIT = 3650  # (days or weeks back: further than any history)
 DAY_MS = 86_400_000
 HOUR_MS = 3_600_000
 BUCKET_MS = 300_000  # 5 minutes: how Claude's /usage counts the chats running at once
@@ -263,7 +275,7 @@ def reply_id(mid):
     return mid[-12:]
 
 
-def scan(profiles, cache, now_ms):
+def scan(profiles, cache, now_ms, keep=True):
     """Read what the profiles' transcripts added since the last run into the
     cache (by path: {"ino", "offset", "chat", "sub", "state", "data"}).
 
@@ -271,8 +283,10 @@ def scan(profiles, cache, now_ms):
     of its original, a chat continued in another folder gets the same entries
     in both for a while, a forked subagent starts with a copy of the call that
     started it. Each reply counts once, in the first transcript read that has
-    it (the ids of the counted ones are kept with their hour)."""
-    cutoff = now_ms - KEEP_DAYS * DAY_MS
+    it (the ids of the counted ones are kept with their hour).
+
+    keep: a transcript Claude has deleted keeps its record ("gone"), for
+    the history; else it goes with it."""
     old = cache.get("files") if isinstance(cache.get("files"), dict) else {}
     found = found_transcripts(profiles)
     for key in list(found):  # a file reached through another of its paths now keeps its record
@@ -289,16 +303,21 @@ def scan(profiles, cache, now_ms):
         if (not isinstance(rec, dict) or rec.get("ino") != st.st_ino or rec.get("offset", 0) > st.st_size
                 or "state" not in rec):
             rec = new_record(f["kind"], st)
-            if st.st_mtime * 1000 < cutoff:
-                rec["offset"] = st.st_size  # untouched for longer than the cache keeps
         rec["profiles"] = f["profiles"]
+        rec.pop("gone", None)
         files[key] = rec
+    if keep:
+        for key, rec in old.items():
+            if key not in files and isinstance(rec, dict) and isinstance(rec.get("data"), dict):
+                rec["gone"] = True  # (its transcript was deleted: what was read stays)
+                if isinstance(rec.get("state"), dict):
+                    rec["state"]["turn"] = None  # (no turn goes on in it any more)
+                files[key] = rec
     counted = {i for rec in files.values() for agg in rec["data"]["hours"].values() for i in agg.get("m", [])}
-    for key in sorted(files):
+    for key in sorted(found):
         rec = files[key]
         if rec["offset"] < found[key]["st"].st_size:
             read_transcript(Path(key), rec, counted)
-        prune_record(rec, cutoff)
     cache["files"] = files
     cache["scannedAt"] = now_ms
     return cache
@@ -735,17 +754,6 @@ def take_user(e, ts, rec, line):
     state["turn"] = {"start": ts, "last": ts, "gaps": []}
 
 
-def prune_record(rec, cutoff):
-    data = rec.get("data")
-    if not isinstance(data, dict):
-        return
-    data["turns"] = [t for t in data["turns"] if t[1] >= cutoff]
-    data["prompts"] = [p for p in data["prompts"] if p >= cutoff]
-    data["limits"] = [p for p in data["limits"] if p >= cutoff]
-    first_hour = cutoff // HOUR_MS
-    data["hours"] = {h: a for h, a in data["hours"].items() if int(h) >= first_hour}
-
-
 # ---------------------------------------------------------------- the cache
 
 
@@ -763,34 +771,118 @@ def load_cache(cache_root):
     return data if isinstance(data, dict) and isinstance(data.get("files"), dict) else {"files": {}}
 
 
-def updated_cache(cache_root, profiles, now_ms):
-    """The cache with what the transcripts added since; while another run is
-    reading them (another widget, the VS Code extension), the cache it writes."""
-    import fcntl
-    cs.private_dir(cache_root)
-    fd = os.open(str(cache_root / CACHE_LOCK), os.O_CREAT | os.O_RDWR, 0o600)
-    try:
-        held, waited = False, 0.0
+class cache_lock:
+    """Holds the cache's lock (another run may be reading the transcripts:
+    another widget, the VS Code extension); .held is False when it didn't
+    come within LOCK_WAIT_S."""
+
+    def __init__(self, cache_root):
+        self.cache_root = cache_root
+
+    def __enter__(self):
+        import fcntl
+        cs.private_dir(self.cache_root)
+        self.fd = os.open(str(self.cache_root / CACHE_LOCK), os.O_CREAT | os.O_RDWR, 0o600)
+        self.held, waited = False, 0.0
         while True:
             try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                held = True
-                break
+                fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                self.held = True
+                return self
             except OSError:
                 if waited >= LOCK_WAIT_S:
-                    break
+                    return self
                 time.sleep(0.2)
                 waited += 0.2
+
+    def __exit__(self, *exc):
+        os.close(self.fd)
+
+
+def updated_cache(cache_root, profiles, now_ms):
+    """The cache with what the transcripts added since; while another run is
+    reading them, the cache it writes."""
+    with cache_lock(cache_root) as lock:
         cache = load_cache(cache_root)
-        if held:
-            scan(profiles, cache, now_ms)
+        if lock.held:
+            scan(profiles, cache, now_ms, keep_history(cache_root))
             try:
                 cs.write_json_atomic(cache_path(cache_root), cache)
             except OSError:
                 pass
         return cache
-    finally:
-        os.close(fd)
+
+
+# ---------------------------------------------------------------- the history
+# What the cache read stays after Claude Code deletes a chat's transcript,
+# so Overall keeps growing; off, only what the transcripts still have is
+# kept. One choice for every copy of this file (the widgets, the VS Code
+# extension): it's a file next to the cache.
+
+
+def keep_history(cache_root):
+    data = cs.read_json(cache_root / HISTORY_FILE)
+    return not (isinstance(data, dict) and data.get("keep") is False)
+
+
+def first_activity(cache):
+    """When the first chat the cache has began (ms), or None."""
+    first = None
+    for rec in cache.get("files", {}).values():
+        data = rec.get("data") if isinstance(rec, dict) else None
+        if not isinstance(data, dict):
+            continue
+        times = [t[0] for t in data.get("turns", [])[:1]] + data.get("prompts", [])[:1] + [
+            int(h) * HOUR_MS for h in data.get("hours", {})]
+        if times:
+            first = min(times) if first is None else min(first, min(times))
+    return first
+
+
+def history_status(cache_root):
+    cache = load_cache(cache_root)
+    first = first_activity(cache)
+    gone = {rec.get("chat") for rec in cache["files"].values() if isinstance(rec, dict) and rec.get("gone")}
+    try:
+        size = cache_path(cache_root).stat().st_size
+    except OSError:
+        size = 0
+    return {"ok": True, "keep": keep_history(cache_root),
+            "since": date.fromtimestamp(first / 1000).isoformat() if first else None,
+            "deletedChats": len(gone), "sizeKB": size // 1024}
+
+
+def set_history(cache_root, keep):
+    """(ok, message): keep the history or not; off, what only it had goes now."""
+    with cache_lock(cache_root) as lock:
+        if not lock.held:
+            return False, "The Recap is reading your chats: try again in a moment"
+        cs.write_json_atomic(cache_root / HISTORY_FILE, {"keep": bool(keep)})
+        if keep:
+            return True, "The Recap keeps its history"
+        cache = load_cache(cache_root)
+        files = cache["files"]
+        gone = [k for k, rec in files.items() if isinstance(rec, dict) and rec.get("gone")]
+        for k in gone:
+            del files[k]
+        if gone:
+            cs.write_json_atomic(cache_path(cache_root), cache)
+        return True, "The Recap keeps only what Claude still has" + (
+            " (it forgot %d deleted transcripts)" % len(gone) if gone else "")
+
+
+def forget_history(cache_root):
+    """(ok, message): the cache deleted; it starts again from the transcripts
+    Claude still has."""
+    with cache_lock(cache_root) as lock:
+        if not lock.held:
+            return False, "The Recap is reading your chats: try again in a moment"
+        for name in (CACHE_FILE,) + OLD_CACHE_FILES:
+            try:
+                (cache_root / name).unlink()
+            except OSError:
+                pass
+        return True, "The saved history is deleted: the Recap starts again from the chats Claude still has"
 
 
 # ---------------------------------------------------------------- one machine's chats of some days
@@ -909,9 +1001,40 @@ def midnight(day):
 
 def week_days(back, now_ms):
     """The 7 days ending today, back weeks before: [(day, start ms, end ms)]."""
-    end = date.fromtimestamp(now_ms / 1000) - timedelta(days=7 * back)
-    days = [end - timedelta(days=i) for i in range(6, -1, -1)]
+    return span_days("week", back, now_ms)
+
+
+def span_days(span, back, now_ms, first_ms=None):
+    """The days a span shows: day: the one back days before today; week:
+    the 7 ending today, back weeks before; all: from the first one with a
+    chat (first_ms) to today. [(day, start ms, end ms)]"""
+    today = date.fromtimestamp(now_ms / 1000)
+    if span == "day":
+        days = [today - timedelta(days=back)]
+    elif span == "all":
+        first = date.fromtimestamp(first_ms / 1000) if first_ms else today
+        days = [first + timedelta(days=i) for i in range(max(1, (today - first).days + 1))]
+    else:
+        end = today - timedelta(days=7 * back)
+        days = [end - timedelta(days=i) for i in range(6, -1, -1)]
     return [(d.isoformat(), midnight(d), midnight(d + timedelta(days=1))) for d in days]
+
+
+def span_since(span, back, now_ms, first_ms=None):
+    """Where a span's chats start to matter: its days, the period before (the
+    comparison) and the trend lines' periods."""
+    first_day = date.fromisoformat(span_days(span, back, now_ms, first_ms)[0][0])
+    if span == "all":
+        return 0
+    return midnight(first_day - timedelta(days=(1 if span == "day" else 7) * (TREND_WEEKS - 1)))
+
+
+def back_max(span, now_ms, first_ms):
+    """How far back a span can step: to the day or the 7 days with the first chat."""
+    if span == "all" or not first_ms:
+        return 0
+    days = (date.fromtimestamp(now_ms / 1000) - date.fromtimestamp(first_ms / 1000)).days
+    return max(0, days if span == "day" else days // 7)
 
 
 def merged(intervals, join=0):
@@ -1003,15 +1126,17 @@ def day_of(starts, ms):
     return None
 
 
-def recap(sources, back, account, now_ms, home, usage=None, added=()):
+def recap(sources, back, account, now_ms, home, usage=None, added=(), span="week", first_ms=None):
     """The Recap tab: sources = [{"host", "chats" (chats_between), "accounts"}];
     usage: this computer's plan windows now (plan_windows); added: the rules
-    this tab added (to undo them)."""
-    days = week_days(back, now_ms)
+    this tab added (to undo them); span: day, week or all (span_days), with
+    first_ms when the first chat began (how far back it goes)."""
+    days = span_days(span, back, now_ms, first_ms)
     starts = [d[1] for d in days] + [days[-1][2]]
     w0, w1 = starts[0], min(starts[-1], now_ms)
     first_day = date.fromisoformat(days[0][0])
-    p0 = midnight(first_day - timedelta(days=7))
+    step = 1 if span == "day" else 7  # (days a period has: the one before and the trend's)
+    p0 = midnight(first_day - timedelta(days=step))
     chats, accounts = [], {}
     for src in sources:
         host = src.get("host") or ""
@@ -1079,30 +1204,40 @@ def recap(sources, back, account, now_ms, home, usage=None, added=()):
         return out, {"stretches": stretches, "waits": waits, "yours": yours, "worked": worked}
 
     total, parts = period(w0, w1, True)
-    previous = period(p0, w0, False)
+    previous = period(p0, w0, False) if span != "all" else None   # (everything has nothing before it)
     running = at_once([s[:3] for s in clipped(parts["stretches"], w0, w1)])
     total["peakAtOnce"] = max((n for _, _, n in running), default=0)
 
-    # The weeks before, for the trend lines (oldest first, these days last);
-    # one older than the cache keeps is unknown (null)
-    kept_from = now_ms - KEEP_DAYS * DAY_MS
+    # The days or weeks before, for the trend lines (oldest first, these
+    # last); one before the first chat kept is unknown (null)
     trend = []
-    for k in range(TREND_WEEKS - 1, 0, -1):
-        lo, hi = midnight(first_day - timedelta(days=7 * k)), midnight(first_day - timedelta(days=7 * (k - 1)))
-        trend.append(dict(period(lo, hi, False), start=lo) if lo >= kept_from - DAY_MS else None)
-    trend.append({key: total[key] for key in ("youMs", "workedMs", "busyMs", "waitMs", "prompts", "cost")})
-    trend[-1]["start"] = w0
+    if span != "all":
+        for k in range(TREND_WEEKS - 1, 0, -1):
+            lo, hi = midnight(first_day - timedelta(days=step * k)), midnight(first_day - timedelta(days=step * (k - 1)))
+            trend.append(dict(period(lo, hi, False), start=lo) if first_ms is not None and hi > first_ms else None)
+        trend.append({key: total[key] for key in ("youMs", "workedMs", "busyMs", "waitMs", "prompts", "cost")})
+        trend[-1]["start"] = w0
 
     # The timeline, a day per row, with each day's chats (to unfold) and the
-    # moments a usage limit stopped one
+    # moments a usage limit stopped one; for all, a row per 7 days (newest
+    # first, ending today) with their numbers
     hits = sorted({t for c in chats for t in c["limits"] if w0 <= t < w1})
-    day_rows = []
-    for i, (day, ds, de) in enumerate(days):
+    day_rows, row_days = [], days
+    if span == "all":
+        row_days = []
+        end = date.fromisoformat(days[-1][0])
+        while True:
+            start = end - timedelta(days=6)
+            row_days.append((start.isoformat(), midnight(start), midnight(end + timedelta(days=1))))
+            if midnight(start) <= w0:
+                break
+            end = start - timedelta(days=1)
+    for day, ds, row_end in row_days:
         if ds >= now_ms:
             break
-        de = min(de, now_ms) if i == len(days) - 1 else de
+        de = min(row_end, now_ms)
         work = [[s, e, n] for s, e, n in clipped(running, ds, de)]
-        row = {"day": day, "start": ds, "end": days[i][2],
+        row = {"day": day, "start": ds, "end": row_end,
                "you": [s[:2] for s in merged(clipped(parts["yours"], ds, de), JOIN_MS)],
                "work": join_running(work),
                # (only while no chat worked: then Claude was idle, waiting for you)
@@ -1116,8 +1251,11 @@ def recap(sources, back, account, now_ms, home, usage=None, added=()):
         row["cost"] = round(sum(request_cost(k, t) for c in chats for h, a in c["hours"].items()
                                 if ds <= int(h) * HOUR_MS < de for k, t in a["t"].items()), 4)
         row["chats"] = chats_of(chats, parts["stretches"], ds, de, home)
+        if span == "all":  # (a row's numbers and chats: no 24 hours to draw)
+            row.update(to=(date.fromisoformat(day) + timedelta(days=6)).isoformat(), you=[], work=[], wait=[])
         day_rows.append(row)
-    total["busiestDay"] = max(day_rows, key=lambda r: r["workedMs"])["day"] if any(r["workedMs"] for r in day_rows) else None
+    total["busiestDay"] = (max(day_rows, key=lambda r: r["workedMs"])["day"]
+                           if span == "week" and any(r["workedMs"] for r in day_rows) else None)
 
     # Where it went: folders (with their chats), chats, models
     folders, models, guessed, saved = {}, {}, set(), 0.0
@@ -1163,8 +1301,10 @@ def recap(sources, back, account, now_ms, home, usage=None, added=()):
     return {
         "ok": True,
         "generatedAt": now_ms,
+        "span": span,
         "back": back,
-        "backMax": BACK_MAX,
+        "backMax": back_max(span, now_ms, first_ms),
+        "first": date.fromtimestamp(first_ms / 1000).isoformat() if first_ms else None,
         "account": account or "",
         "accounts": sorted(accounts.values(), key=lambda a: a["name"]),
         "from": days[0][0],
@@ -1935,10 +2075,10 @@ def short_count(n):
 # ---------------------------------------------------------------- SSH hosts
 
 
-def host_chats(host, back):
+def host_chats(host, back, span="week"):
     """A host's chats of the days asked for (this file run there), as a source."""
     import remote
-    answer = remote.host_answer(host, ["--data", "--back", str(back)], name="week.py")
+    answer = remote.host_answer(host, ["--data", "--span", span, "--back", str(back)], name="week.py")
     if not answer.get("ok"):
         return {"host": host, "ok": False, "error": answer.get("message") or answer.get("error") or "no answer",
                 "chats": {}, "accounts": []}
@@ -1955,9 +2095,9 @@ def host_chats(host, back):
 
 def main(argv=None):
     args = sys.argv[1:] if argv is None else list(argv)
-    back, account, hosts, config_dirs, currency = 0, "", [], [], "USD"
-    pretty = remote = data = perms = False
-    allow = undo = revoke = None
+    back, account, hosts, config_dirs, currency, span = 0, "", [], [], "USD", "week"
+    pretty = remote = data = perms = status = forget = False
+    allow = undo = revoke = history = None
     while args:
         arg = args.pop(0)
         if arg == "--allow" and len(args) >= 3:
@@ -1969,7 +2109,15 @@ def main(argv=None):
         elif arg == "--currency" and args:
             currency = args.pop(0)
         elif arg == "--back" and args and args[0].isdigit():
-            back = min(BACK_MAX, int(args.pop(0)))
+            back = min(BACK_LIMIT, int(args.pop(0)))
+        elif arg == "--span" and args and args[0] in SPANS:
+            span = args.pop(0)
+        elif arg == "--history-status":
+            status = True
+        elif arg == "--history" and args and args[0] in ("on", "off"):
+            history = args.pop(0) == "on"
+        elif arg == "--forget":
+            forget = True
         elif arg == "--account" and args:
             account = args.pop(0)
         elif arg == "--host" and args:
@@ -1990,9 +2138,14 @@ def main(argv=None):
     home = Path.home()
     now_ms = int(time.time() * 1000)
     cache_root = cs.cache_dir(home)
-    if allow or undo or revoke:  # (a button of the tab's permission prompts)
+    if status or forget or history is not None or allow or undo or revoke:  # (a setting, or a button of the permissions)
         try:
-            if allow:
+            if status:
+                result = history_status(cache_root)
+            elif forget or history is not None:
+                ok, message = forget_history(cache_root) if forget else set_history(cache_root, history)
+                result = {"ok": ok, "message": message}
+            elif allow:
                 ok, message, rid = allow_rule(home, cache_root, *allow)
                 result = {"ok": ok, "message": message, "id": rid}
             elif undo:
@@ -2012,10 +2165,9 @@ def main(argv=None):
             sys.stdout.write(json.dumps(permissions(cache, profiles, now_ms, home, load_added(cache_root)),
                                         indent=2 if pretty else None) + "\n")
             return
-        days = week_days(back, now_ms)
-        # (the weeks before these too: the trend lines)
-        since = midnight(date.fromisoformat(days[0][0]) - timedelta(days=7 * (TREND_WEEKS - 1)))
-        chats = chats_between(cache, profiles, since, days[-1][2], home)
+        first_ms = first_activity(cache)
+        days = span_days(span, back, now_ms, first_ms)
+        chats = chats_between(cache, profiles, span_since(span, back, now_ms, first_ms), days[-1][2], home)
         _, accounts = account_ids(profiles)
         if data:  # ("now" as it answers: the computer asking sets this one's clock against its own)
             result = {"ok": True, "now": int(time.time() * 1000), "chats": chats, "accounts": accounts,
@@ -2025,8 +2177,13 @@ def main(argv=None):
             if hosts:
                 from concurrent.futures import ThreadPoolExecutor
                 with ThreadPoolExecutor(max_workers=min(8, len(hosts))) as pool:
-                    sources += list(pool.map(lambda h: host_chats(h, back), hosts))
-            result = recap(sources, back, account, now_ms, home, plan_windows(cache_root, profiles), load_added(cache_root))
+                    sources += list(pool.map(lambda h: host_chats(h, back, span), hosts))
+            if span == "all":  # (a host's chats may go back further)
+                starts = [x for src in sources[1:] for c in (src.get("chats") or {}).values()
+                          for x in [t[0] for t in c.get("turns", [])[:1]] + c.get("prompts", [])[:1]]
+                first_ms = min([first_ms] * (first_ms is not None) + starts) if starts else first_ms
+            result = recap(sources, back, account, now_ms, home, plan_windows(cache_root, profiles), load_added(cache_root),
+                           span, first_ms)
             result["currency"] = currency_of(currency, cache_root, now_ms / 1000)
     except Exception as exc:  # the widget must always get parseable output
         result = {"ok": False, "error": "{}: {}".format(type(exc).__name__, exc), "generatedAt": now_ms}
