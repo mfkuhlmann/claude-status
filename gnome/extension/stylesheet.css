@@ -189,6 +189,7 @@
 .claude-stats-name { width: 8em; }
 .claude-stats-meter { height: 5px; }
 .claude-stats-numbers { width: 9em; text-align: right; }
+.claude-week-plan-numbers { width: 11.5em; }  /* ("31% · resets Thu 11:00" whole) */
 .claude-recap { padding-top: 2px; }
 
 /* Tabs: your chats now, or your last 7 days */

@@ -548,6 +548,12 @@ test('trend lines, what Claude did, where the money went, the prompts you answer
     eq(L.weekGrantMeta(grant), 'chats started in app · ~/app/.claude/settings.local.json');
     eq(L.weekRevokeArgs(grant, ['--config-dir', '/x']), ['--revoke', 'f6d8dba1ebf0', '--config-dir', '/x']);
     eq(L.permsArgs(['--config-dir', '/x']), ['--permissions', '--config-dir', '/x']);
+    // an SSH host's: listed with --host (one that answered), changed there with --on
+    eq(L.permsArgs([], ['lab', 'gpu'], {lab: {ok: true, result: {}}, gpu: {ok: false, result: null}}), ['--permissions', '--host', 'lab']);
+    eq(L.weekRevokeArgs(grant, ['--config-dir', '/x'], 'lab'), ['--revoke', 'f6d8dba1ebf0', '--on', 'lab']);
+    eq(L.weekRuleArgs(rule, false, 'lab'), ['--undo', 'a1b2c3d4e5f6', '--on', 'lab']);
+    eq([L.permsKey('', 'a1'), L.permsKey('lab', 'a1')], ['|a1', 'lab|a1']);
+    eq(L.weekGrantedIntro([], 'lab'), 'Nothing lets chats on lab skip a permission prompt: they ask you each time.');
     const many = Array.from({length: 11}, (_, i) => ({...grant, id: String(i)}));
     eq([L.weekGrantedShown(many, false).length, L.weekGrantedShown(many, true).length], [L.WEEK_GRANTED_FEW, 11]);
     eq(L.weekGrantedIntro([]), 'Nothing lets chats on this computer skip a permission prompt: they ask you each time.');

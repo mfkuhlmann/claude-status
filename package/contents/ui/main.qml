@@ -2560,7 +2560,8 @@ PlasmoidItem {
     property string permsError: ""
     readonly property bool permsShown: popupTab === "perms" && dashboardShown && !coveredByWindow
     readonly property bool suggestRules: Plasmoid.configuration.recapRules   // suggest rules for the prompts you answered
-    property string ruleBusy: ""     // the rule being written or taken back: its id
+    property string ruleBusy: ""     // the rule being written or taken back: host|id
+    property string ruleHost: ""     // where the last one was: an SSH host, or "" (this computer)
     property string ruleMessage: ""  // what the last one did
     property bool ruleRevoked: false // (the last one revoked a permission you gave: its message goes there)
 
@@ -2580,7 +2581,11 @@ PlasmoidItem {
         if (popupTab !== "perms" || permsBusy)
             return
         permsBusy = true
-        permsReader.connectSource("python3 -I " + shellQuote(codeDir + "week.py") + " --permissions" + configDirArgs + " # " + Date.now())
+        let cmd = "python3 -I " + shellQuote(codeDir + "week.py") + " --permissions"
+        for (const host of shownHosts)   // (the ones that answered their last check: no waiting on one out of reach)
+            if (remote[host] && remote[host].result && !remote[host].error)
+                cmd += " --host " + shellQuote(host)
+        permsReader.connectSource(cmd + configDirArgs + " # " + Date.now())
     }
 
     P5Support.DataSource {
@@ -2603,11 +2608,14 @@ PlasmoidItem {
     // A rule the Permissions tab offers for prompts you answered: allow
     // (into the chats' folder's .claude/settings.local.json), or take back
     // one it added
-    function changeRule(rule, allow) {
+    function changeRule(rule, allow, host) {
         let cmd = "python3 -I " + shellQuote(codeDir + "week.py")
         cmd += allow ? " --allow " + shellQuote(rule.kind) + " " + shellQuote(rule.value) + " " + shellQuote(rule.project)
                      : " --undo " + shellQuote(rule.id)
-        ruleBusy = rule.id
+        if (host)
+            cmd += " --on " + shellQuote(host)   // (week.py runs there)
+        ruleBusy = (host || "") + "|" + rule.id
+        ruleHost = host || ""
         ruleMessage = ""
         ruleRevoked = false
         ruleWriter.connectSource(cmd + " # " + Date.now())
@@ -2615,12 +2623,13 @@ PlasmoidItem {
 
     // Takes one of the permissions you gave (what lets chats go without
     // asking) out of its file
-    function revokeGrant(grant) {
-        ruleBusy = grant.id
+    function revokeGrant(grant, host) {
+        ruleBusy = (host || "") + "|" + grant.id
+        ruleHost = host || ""
         ruleMessage = ""
         ruleRevoked = true
         ruleWriter.connectSource("python3 -I " + shellQuote(codeDir + "week.py") + " --revoke " + shellQuote(grant.id)
-                                 + configDirArgs + " # " + Date.now())
+                                 + (host ? " --on " + shellQuote(host) : configDirArgs) + " # " + Date.now())
     }
 
     P5Support.DataSource {

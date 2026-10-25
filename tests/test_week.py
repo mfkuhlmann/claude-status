@@ -5,6 +5,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -769,6 +770,53 @@ class GrantedTests(Projects):
         later = self.now + 8 * week.DAY_MS  # (a week on, those prompts are gone)
         self.assertEqual(week.permissions(self.scan(), self.profiles(), later, self.home)["prompts"]["answered"], 0)
 
+    def test_trusted_folders_and_what_claude_json_keeps(self):
+        claude_json = self.home / ".claude-work/.claude.json"
+        data = json.loads(claude_json.read_text())
+        data["bypassPermissionsModeAccepted"] = True
+        data["projects"] = {str(self.app): {"hasTrustDialogAccepted": True, "allowedTools": ["Bash(make *)"],
+                                            "enabledMcpjsonServers": ["db"], "enableAllProjectMcpServers": True},
+                            str(self.lib): {"hasTrustDialogAccepted": False},
+                            "/gone": {"hasTrustDialogAccepted": True}}  # (a folder deleted: nothing to trust)
+        claude_json.write_text(json.dumps(data))
+        kept = [(g["kind"], g["value"], g["folder"], g["place"]) for g in self.granted() if g["where"] == "~/.claude-work/.claude.json"]
+        self.assertEqual(kept, [
+            ("flag", "bypassPermissionsModeAccepted", "", "every chat of work"),
+            ("trust", str(self.app), str(self.app), "for work"),
+            ("allow", "Bash(make *)", str(self.app), "chats started in app, for work"),
+            ("mcp", "db", str(self.app), "chats started in app, for work"),
+            ("flag", "enableAllProjectMcpServers", str(self.app), "chats started in app, for work")])
+        for kind, value in (("trust", str(self.app)), ("allow", "Bash(make *)"), ("mcp", "db"), ("flag", "enableAllProjectMcpServers"),
+                            ("flag", "bypassPermissionsModeAccepted")):
+            rid = next(g["id"] for g in self.granted() if (g["kind"], g["value"]) == (kind, value) and g["where"].endswith(".claude.json"))
+            self.assertTrue(week.revoke_rule(self.home, self.cache_root, self.profiles(), rid)[0], (kind, value))
+        after = json.loads(claude_json.read_text())
+        self.assertEqual(after["projects"][str(self.app)], {"hasTrustDialogAccepted": False, "allowedTools": [],
+                                                            "enabledMcpjsonServers": [], "enableAllProjectMcpServers": False})
+        self.assertIs(after["bypassPermissionsModeAccepted"], False)
+        self.assertEqual(after["oauthAccount"], data["oauthAccount"])  # (the rest stays)
+        self.assertFalse([g for g in self.granted() if g["where"].endswith(".claude.json")])
+
+    def test_settings_that_loosen_a_check_and_the_administrators(self):
+        cs.write_json_atomic(self.user, {"skipDangerousModePermissionPrompt": True, "sandbox": {"autoAllowBashIfSandboxed": True},
+                                         "enabledMcpjsonServers": ["github"], "skipAutoPermissionPrompt": False})
+        managed = Path(self.tmp.name) / "etc-claude-code"
+        managed.mkdir()
+        cs.write_json_atomic(managed / "managed-settings.json", {"permissions": {"allow": ["Bash(ls *)"]}})
+        with mock.patch.object(week, "MANAGED_DIR", managed):
+            granted = self.granted()
+            self.assertEqual([(g["kind"], g["value"], g["shared"]) for g in granted[:4]], [
+                ("allow", "Bash(ls *)", True),  # (the administrator's first, not changed here)
+                ("flag", "skipDangerousModePermissionPrompt", False), ("flag", "sandbox.autoAllowBashIfSandboxed", False),
+                ("mcp", "github", False)])
+            self.assertEqual(granted[0]["place"], "every chat (set by your administrator)")
+            self.assertFalse(week.revoke_rule(self.home, self.cache_root, self.profiles(), granted[0]["id"])[0])
+            for g in granted[1:4]:
+                self.assertTrue(week.revoke_rule(self.home, self.cache_root, self.profiles(), g["id"])[0], g["value"])
+        self.assertEqual(json.loads(self.user.read_text()), {"skipDangerousModePermissionPrompt": False,
+                                                              "sandbox": {"autoAllowBashIfSandboxed": False},
+                                                              "skipAutoPermissionPrompt": False})  # (an emptied list goes)
+
     def test_revoking_a_rule_the_recap_allowed_puts_back_what_was_before(self):
         self.asked()
         week.updated_cache(self.cache_root, self.profiles(), self.now)
@@ -848,6 +896,27 @@ class HostTests(FakeSSH):
         self.assertEqual(list(source["chats"]), ["chat-r"])
         r = week.recap([{"host": "", "chats": {}, "accounts": []}, source], 0, "", now, Path(self.tmp.name))
         self.assertEqual((r["sum"]["workedMs"], r["projects"][0]["host"], r["sources"][1]["ok"]), (60_000, "lab", True))
+
+    def test_an_ssh_hosts_permissions_and_revoking_one_there(self):
+        proj = self.fake_home / "proj"
+        (proj / ".claude").mkdir(parents=True)
+        (proj / ".claude/settings.local.json").write_text(json.dumps({"permissions": {"allow": ["Bash(make *)"]}}))
+        claude_json = self.fake_home / ".claude/.claude.json"
+        data = json.loads(claude_json.read_text())
+        data["projects"] = {str(proj): {"hasTrustDialogAccepted": True}}
+        claude_json.write_text(json.dumps(data))
+        source = week.host_permissions("lab")
+        self.assertTrue(source["ok"], source)
+        self.assertEqual(sorted((g["kind"], g["value"]) for g in source["granted"]), [("allow", "Bash(make *)"), ("trust", str(proj))])
+        import io
+        from contextlib import redirect_stdout
+        rid = next(g["id"] for g in source["granted"] if g["kind"] == "allow")
+        out = io.StringIO()
+        with redirect_stdout(out):
+            week.main(["--revoke", rid, "--on", "lab"])
+        self.assertTrue(json.loads(out.getvalue())["ok"], out.getvalue())
+        self.assertEqual(json.loads((proj / ".claude/settings.local.json").read_text()), {})
+        self.assertEqual([g["kind"] for g in week.host_permissions("lab")["granted"]], ["trust"])
 
     def test_a_host_that_turns_you_away(self):
         self.mode("denied")

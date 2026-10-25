@@ -66,8 +66,9 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         // setting); revoking: the permission you gave whose Revoke asks first;
         // ruleRevoked: the message is a revoke's; allGranted: all those
         // permissions shown, not the first few)
-        this.perms = {data: null, error: '', busy: false, asking: '', ruleBusy: '', ruleMessage: '',
-            rules: this._settings.get_boolean('recap-rules'), revoking: '', ruleRevoked: false, allGranted: false};
+        // (asking, revoking, ruleBusy: host|id; ruleHost: where the last one was; allGranted: by host)
+        this.perms = {data: null, error: '', busy: false, asking: '', ruleBusy: '', ruleMessage: '', ruleHost: '',
+            rules: this._settings.get_boolean('recap-rules'), revoking: '', ruleRevoked: false, allGranted: {}};
         this._weekAsked = 0;
         // Turns that ended while the menu was closed (row key -> "done"), for
         // the hotkey; forgotten when the menu opens
@@ -1080,7 +1081,7 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
             return;
         this.perms.busy = true;
         this._render(true);
-        const out = await this._runner.run('week.py', L.permsArgs(this._configDirArgs), {poll: true});
+        const out = await this._runner.run('week.py', L.permsArgs(this._configDirArgs, this.shownHosts, this.remote), {poll: true});
         if (this._destroyed || out.cancelled)
             return;
         const result = L.helperResult(out.stdout, out.stderr);
@@ -1102,13 +1103,14 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
     // Allows a rule the tab offers for the permission prompts you answered
     // (into the chats' folder's .claude/settings.local.json), or takes one it
     // added back; then reads them again
-    async changeRule(rule, allow) {
+    async changeRule(rule, allow, host = '') {
         this.perms.asking = '';
-        this.perms.ruleBusy = rule.id;
+        this.perms.ruleBusy = L.permsKey(host, rule.id);
+        this.perms.ruleHost = host;
         this.perms.ruleMessage = '';
         this.perms.ruleRevoked = false;
         this._render(true);
-        const result = await this._helper('week.py', L.weekRuleArgs(rule, allow));
+        const result = await this._helper('week.py', L.weekRuleArgs(rule, allow, host));
         if (this._destroyed)
             return;
         this.perms.ruleBusy = '';
@@ -1121,20 +1123,21 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         this._render(true);
     }
 
-    permsShowAllGranted() {
-        this.perms.allGranted = true;
+    permsShowAllGranted(host = '') {
+        this.perms.allGranted = {...this.perms.allGranted, [host]: true};
         this._render(true);
     }
 
     // Takes one of the permissions you gave (what lets chats go without
     // asking) out of its file; then reads them again
-    async revokeGrant(grant) {
+    async revokeGrant(grant, host = '') {
         this.perms.revoking = '';
-        this.perms.ruleBusy = grant.id;
+        this.perms.ruleBusy = L.permsKey(host, grant.id);
+        this.perms.ruleHost = host;
         this.perms.ruleMessage = '';
         this.perms.ruleRevoked = true;
         this._render(true);
-        const result = await this._helper('week.py', L.weekRevokeArgs(grant, this._configDirArgs));
+        const result = await this._helper('week.py', L.weekRevokeArgs(grant, this._configDirArgs, host));
         if (this._destroyed)
             return;
         this.perms.ruleBusy = '';

@@ -38,6 +38,8 @@ off: then it keeps only what the transcripts still have.
                   that would have let them through, and the permissions you
                   gave (every rule and mode that lets chats go without asking)
     --revoke ID   takes one of those permissions out of its file
+    --host HOST   (with --permissions) an SSH host's too; --on HOST: an
+                  --allow, --undo or --revoke there
 
 What it reads, per turn of a chat: your prompt, Claude's own count of its
 work (the turn_duration record Claude Code writes when a turn ends, which
@@ -1689,26 +1691,46 @@ def undo_rule(home, cache_root, rid):
 
 
 # ---------------------------------------------------------------- permissions you gave
-# Everything that lets chats on this computer go without a permission
-# prompt, wherever it is: each account's user settings, and the
-# .claude/settings.local.json and .claude/settings.json of every folder Claude
-# ran in (each account's .claude.json lists them), with the rules Claude
-# saved when you answered "don't ask again". Revoke takes one out of its
-# file; a folder's .claude/settings.json is shared through git, so its rules
-# are listed but changed there.
+# Everything that lets chats on this computer do more without asking you,
+# wherever it is:
+#   - settings files: each account's settings.json, the .claude/settings.json
+#     and settings.local.json of every folder Claude ran in, and the
+#     administrator's /etc/claude-code/managed-settings.json (+ .d/*.json):
+#     permissions.allow rules, permissions.additionalDirectories, a
+#     permissions.defaultMode that skips prompts, approved .mcp.json servers,
+#     and the settings that loosen a check (FLAGS: those Claude Code itself
+#     counts as not restrictive);
+#   - each account's .claude.json: the folders you trusted, and per folder
+#     the tools and .mcp.json servers approved there (what older Claude Code
+#     saved on "don't ask again"), and bypass mode's warning accepted.
+# Revoke takes one out of its file. Not changed here: a folder's
+# .claude/settings.json (shared through git) and the administrator's.
 
 GRANTING_MODES = {
     "acceptEdits": "Accept file edits without asking",
     "auto": "Auto mode: a classifier answers the prompts it finds safe",
     "bypassPermissions": "Skip every permission prompt (bypass permissions)",
 }
+FLAGS = {  # settings that let more go without asking (true): their key path and what they do
+    "skipDangerousModePermissionPrompt": "Bypass permissions mode starts without its warning",
+    "skipAutoPermissionPrompt": "Auto mode starts without its warning",
+    "useAutoModeDuringPlan": "Auto mode acts while you plan",
+    "enableAllProjectMcpServers": "Every MCP server of a folder's .mcp.json runs without asking",
+    "skipWebFetchPreflight": "Web pages are fetched without Claude Code's safety check of their site",
+    "channelsEnabled": "Channels can send messages into chats",
+    "autoUploadSessions": "Chats are uploaded to claude.ai by themselves",
+    "remoteControlAtStartup": "Remote control starts with every chat",
+    "remoteTools.allowUnattendedServing": "Remote tools run while nobody watches",
+    "sandbox.autoAllowBashIfSandboxed": "Commands run without asking inside the sandbox",
+}
+MANAGED_DIR = Path("/etc/claude-code")
 
 
 def rule_folders(home, cache, profiles):
     """The folders Claude ran in here: each account's .claude.json lists
     them, and the Recap's chats started in them."""
     folders = set()
-    for f in [p.path / ".claude.json" for p in profiles] + [home / ".claude.json"]:
+    for f in claude_jsons(home, profiles):
         data = cs.read_json(f)
         projects = data.get("projects") if isinstance(data, dict) else None
         if isinstance(projects, dict):
@@ -1719,11 +1741,36 @@ def rule_folders(home, cache, profiles):
     return sorted({os.path.normpath(f) for f in folders if f.startswith("/") and os.path.isdir(f)})
 
 
+def claude_jsons(home, profiles):
+    """Each account's .claude.json (what Claude Code keeps of its folders),
+    once each: ~/.claude's is ~/.claude.json when it has none of its own."""
+    files = [p.path / ".claude.json" for p in profiles] + [home / ".claude.json"]
+    out, seen = [], set()
+    for f in files:
+        real = os.path.realpath(str(f))
+        if real not in seen and os.path.isfile(real):
+            seen.add(real)
+            out.append(Path(real))
+    return out
+
+
+def flag_on(data, key):
+    for part in key.split("."):
+        data = data.get(part) if isinstance(data, dict) else None
+    return data is True
+
+
 def granted_title(kind, value, home):
     if kind == "mode":
         return GRANTING_MODES[value]
+    if kind == "flag":
+        return FLAGS.get(value) or "You accepted bypass permissions mode's warning"
     if kind == "dir":
         return "Read files in %s" % tilde(os.path.expanduser(value), home)
+    if kind == "trust":
+        return "Trusted folder: %s" % tilde(value, home)
+    if kind == "mcp":
+        return "MCP server “%s” of a folder's .mcp.json runs without asking" % value
     m = re.match(r"^(\w+)\((.+)\)$", value)
     if m and m.group(1) == "Bash":
         return "Run “%s”" % m.group(2)
@@ -1733,13 +1780,23 @@ def granted_title(kind, value, home):
 
 
 def granted_rules(home, folders, profiles, added=()):
-    """Every rule and mode in those settings that lets chats go without
-    asking, your user settings first: [{"id", "kind" ("allow": a
-    permissions.allow rule, "dir": permissions.additionalDirectories,
-    "mode": permissions.defaultMode), "value", "title", "place", "file",
-    "where" (the file, from ~), "shared" (through git: not changed here),
-    "added" (by the Recap's Allow), "change" (what revoking it does)}]."""
+    """Every rule, mode and setting that lets chats go without asking, your
+    user settings first: [{"id", "kind" ("allow": a rule, "dir": a folder to
+    read, "mode": a default mode, "flag": a setting, "mcp": an approved
+    .mcp.json server, "trust": a trusted folder), "value", "folder" (for
+    what .claude.json keeps per folder), "title", "place", "file", "where"
+    (the file, from ~), "shared" (through git or the administrator's: not
+    changed here), "managed" (the administrator's), "added" (by the Recap's Allow), "change" (what revoking
+    it does)}]."""
     out, seen = [], set()
+
+    def add(real, kind, value, place, shared, change, folder=""):
+        where = tilde(real, home)
+        out.append({"id": cs.short_id("%s\0%s\0%s\0%s" % (real, folder, kind, value)), "kind": kind, "value": value,
+                    "folder": folder, "title": granted_title(kind, value, home), "place": place, "file": real,
+                    "where": where, "shared": shared, "managed": real.startswith(str(MANAGED_DIR) + "/"),
+                    "added": added_note(added, real, kind, value) is not None,
+                    "change": change % where})
 
     def take(path, place, shared):
         real = os.path.realpath(str(path))
@@ -1747,31 +1804,75 @@ def granted_rules(home, folders, profiles, added=()):
             return
         seen.add(real)
         data = cs.read_json(real)
-        perms = data.get("permissions") if isinstance(data, dict) else None
-        if not isinstance(perms, dict):
+        if not isinstance(data, dict):
             return
-        found = [("mode", perms["defaultMode"])] if perms.get("defaultMode") in GRANTING_MODES else []
-        for kind, key in (("dir", "additionalDirectories"), ("allow", "allow")):
-            if isinstance(perms.get(key), list):
-                found += [(kind, v) for v in perms[key] if isinstance(v, str) and v.strip()]
-        where = tilde(real, home)
-        for kind, value in found:
-            change = ("takes permissions.defaultMode (%s) out of %s" % (value, where) if kind == "mode"
-                      else "takes %s out of permissions.additionalDirectories in %s" % (tilde(os.path.expanduser(value), home), where)
-                      if kind == "dir" else "takes %s out of permissions.allow in %s" % (value, where))
-            out.append({"id": cs.short_id("%s\0%s\0%s" % (real, kind, value)), "kind": kind, "value": value,
-                        "title": granted_title(kind, value, home), "place": place + (" (shared through git)" if shared else ""),
-                        "file": real, "where": where, "shared": shared, "added": added_note(added, real, kind, value) is not None,
-                        "change": change})
+        perms = data.get("permissions") if isinstance(data.get("permissions"), dict) else {}
+        if perms.get("defaultMode") in GRANTING_MODES:
+            add(real, "mode", perms["defaultMode"], place, shared,
+                "takes permissions.defaultMode (%s) out of %%s" % perms["defaultMode"])
+        for d in perms.get("additionalDirectories") or [] if isinstance(perms.get("additionalDirectories"), list) else []:
+            if isinstance(d, str) and d.strip():
+                add(real, "dir", d, place, shared, "takes %s out of permissions.additionalDirectories in %%s"
+                    % tilde(os.path.expanduser(d), home).replace("%", "%%"))
+        for r in perms.get("allow") or [] if isinstance(perms.get("allow"), list) else []:
+            if isinstance(r, str) and r.strip():
+                add(real, "allow", r, place, shared, "takes %s out of permissions.allow in %%s" % r.replace("%", "%%"))
+        for key in FLAGS:
+            if flag_on(data, key):
+                add(real, "flag", key, place, shared, "sets %s to false in %%s" % key)
+        for name in data.get("enabledMcpjsonServers") or [] if isinstance(data.get("enabledMcpjsonServers"), list) else []:
+            if isinstance(name, str) and name.strip():
+                add(real, "mcp", name, place, shared, "takes %s out of enabledMcpjsonServers in %%s" % name.replace("%", "%%"))
 
     accounts = {}
     for p in profiles:
         accounts.setdefault(os.path.realpath(str(p.real / "settings.json")), []).append(p.label)
+    managed = sorted(MANAGED_DIR.glob("managed-settings.d/*.json")) if MANAGED_DIR.is_dir() else []
+    for path in [MANAGED_DIR / "managed-settings.json"] + managed:
+        take(path, "every chat (set by your administrator)", True)
     for p in profiles:
         take(p.real / "settings.json", "every chat of %s" % ", ".join(accounts[os.path.realpath(str(p.real / "settings.json"))]), False)
     for folder in folders:
         for name, shared in (("settings.local.json", False), ("settings.json", True)):
-            take(Path(folder) / ".claude" / name, "chats started in %s" % project_name(folder, home), shared)
+            take(Path(folder) / ".claude" / name,
+                 "chats started in %s" % project_name(folder, home) + (" (shared through git)" if shared else ""), shared)
+    # what each account's .claude.json keeps: trusted folders, and what was approved in them
+    by_file = {}
+    for p in profiles:
+        f = os.path.realpath(str(p.path / ".claude.json"))
+        if not os.path.isfile(f) and p.is_default:
+            f = os.path.realpath(str(home / ".claude.json"))
+        by_file.setdefault(f, []).append(p.label)
+    for f in claude_jsons(home, profiles):
+        real = str(f)
+        names = ", ".join(by_file.get(real) or ["plain claude"])
+        data = cs.read_json(real)
+        if not isinstance(data, dict):
+            continue
+        if data.get("bypassPermissionsModeAccepted") is True:
+            add(real, "flag", "bypassPermissionsModeAccepted", "every chat of %s" % names, False,
+                "sets bypassPermissionsModeAccepted to false in %s (its warning shows again)")
+        projects = data.get("projects") if isinstance(data.get("projects"), dict) else {}
+        for folder in sorted(projects):
+            proj = projects[folder]
+            if not isinstance(proj, dict) or not isinstance(folder, str) or not os.path.isdir(folder):
+                continue  # (a folder gone: nothing to trust any more)
+            place = "chats started in %s, for %s" % (project_name(folder, home), names)
+            if proj.get("hasTrustDialogAccepted") is True:
+                add(real, "trust", folder, "for %s" % names, False,
+                    "marks %s untrusted in %%s: Claude asks again before it works there" % tilde(folder, home).replace("%", "%%"),
+                    folder)
+            for tool in proj.get("allowedTools") or [] if isinstance(proj.get("allowedTools"), list) else []:
+                if isinstance(tool, str) and tool.strip():
+                    add(real, "allow", tool, place, False, "takes %s out of that folder's allowedTools in %%s" % tool.replace("%", "%%"),
+                        folder)
+            for name in proj.get("enabledMcpjsonServers") or [] if isinstance(proj.get("enabledMcpjsonServers"), list) else []:
+                if isinstance(name, str) and name.strip():
+                    add(real, "mcp", name, place, False,
+                        "takes %s out of that folder's enabledMcpjsonServers in %%s" % name.replace("%", "%%"), folder)
+            if proj.get("enableAllProjectMcpServers") is True:
+                add(real, "flag", "enableAllProjectMcpServers", place, False,
+                    "sets that folder's enableAllProjectMcpServers to false in %s", folder)
     return out
 
 
@@ -1783,6 +1884,15 @@ def added_note(added, real, kind, value):
         if (a.get("kind"), a.get("value")) == (kind, value) or (a.get("kind") == "edits" and (kind, value) == ("mode", "acceptEdits")):
             return a
     return None
+
+
+def host_permissions(host):
+    """An SSH host's Permissions tab (this file run there), as a source."""
+    import remote
+    answer = remote.host_answer(host, ["--permissions"], name="week.py")
+    if not answer.get("ok"):
+        return {"host": host, "ok": False, "error": answer.get("message") or answer.get("error") or "no answer"}
+    return {"host": host, "ok": True, "error": "", "prompts": answer.get("prompts"), "granted": answer.get("granted") or []}
 
 
 def permissions(cache, profiles, now_ms, home, added=()):
@@ -1806,22 +1916,47 @@ def revoke_rule(home, cache_root, profiles, rid):
     if g is None:
         return False, "That rule isn't in your settings any more"
     if g["shared"]:
-        return False, "%s is shared through git: change it there" % g["where"]
+        return False, ("%s is your administrator's: it can't be changed here" if g["where"].startswith(str(MANAGED_DIR))
+                       else "%s is shared through git: change it there") % g["where"]
     real = g["file"]
     note = added_note(added, real, g["kind"], g["value"])
-    if note is not None:
+    if note is not None and not g["folder"]:
         return undo_rule(home, cache_root, note["id"])
     data = cs.read_json(real)
-    perms = data.get("permissions") if isinstance(data, dict) else None
-    if not isinstance(perms, dict):
+    if not isinstance(data, dict):
         return False, "%s isn't JSON the widget can change: leave it as it is" % g["where"]
-    if g["kind"] == "mode":
-        if perms.get("defaultMode") == g["value"]:
-            del perms["defaultMode"]
+    kind, value = g["kind"], g["value"]
+    if g["folder"] or value == "bypassPermissionsModeAccepted":  # (.claude.json: a folder's entry, or its warning)
+        node = data if not g["folder"] else (data.get("projects") or {}).get(g["folder"])
+        if not isinstance(node, dict):
+            return False, "That isn't in %s any more" % g["where"]
+        if kind == "trust":
+            node["hasTrustDialogAccepted"] = False
+        elif kind == "flag":
+            node[value] = False
+        else:
+            take_out(node, "allowedTools" if kind == "allow" else "enabledMcpjsonServers", value)
+            node.setdefault("allowedTools" if kind == "allow" else "enabledMcpjsonServers", [])  # (as Claude Code keeps it)
+    elif kind == "flag":
+        *parents, last = value.split(".")
+        node = data
+        for part in parents:
+            node = node.get(part) if isinstance(node, dict) else None
+        if isinstance(node, dict) and node.get(last) is True:
+            node[last] = False
+    elif kind == "mcp":
+        take_out(data, "enabledMcpjsonServers", value)
     else:
-        take_out(perms, "additionalDirectories" if g["kind"] == "dir" else "allow", g["value"])
-    if not perms:
-        del data["permissions"]
+        perms = data.get("permissions")
+        if not isinstance(perms, dict):
+            return False, "%s isn't JSON the widget can change: leave it as it is" % g["where"]
+        if kind == "mode":
+            if perms.get("defaultMode") == value:
+                del perms["defaultMode"]
+        else:
+            take_out(perms, "additionalDirectories" if kind == "dir" else "allow", value)
+        if not perms:
+            del data["permissions"]
     write_settings(real, data)
     return True, "Revoked: %s (%s)" % (g["title"], g["where"])
 
@@ -2097,7 +2232,7 @@ def main(argv=None):
     args = sys.argv[1:] if argv is None else list(argv)
     back, account, hosts, config_dirs, currency, span = 0, "", [], [], "USD", "week"
     pretty = remote = data = perms = status = forget = False
-    allow = undo = revoke = history = None
+    allow = undo = revoke = history = on = None
     while args:
         arg = args.pop(0)
         if arg == "--allow" and len(args) >= 3:
@@ -2106,6 +2241,8 @@ def main(argv=None):
             undo = args.pop(0)
         elif arg == "--revoke" and args:
             revoke = args.pop(0)
+        elif arg == "--on" and args:
+            on = args.pop(0)
         elif arg == "--currency" and args:
             currency = args.pop(0)
         elif arg == "--back" and args and args[0].isdigit():
@@ -2138,6 +2275,16 @@ def main(argv=None):
     home = Path.home()
     now_ms = int(time.time() * 1000)
     cache_root = cs.cache_dir(home)
+
+    def emit(result):
+        text = json.dumps(result, indent=2 if pretty and not remote else None)
+        sys.stdout.write(("\n" + cs.REMOTE_MARK + " " if remote else "") + text + "\n")
+
+    if on and (allow or undo or revoke):  # (a button of an SSH host's permissions: this file runs there)
+        import remote as remote_hosts
+        args_there = (["--allow"] + allow if allow else ["--undo", undo] if undo else ["--revoke", revoke])
+        answer = remote_hosts.host_answer(on, args_there, name="week.py")
+        return emit({"ok": answer["ok"], "message": answer.get("message") or ""})
     if status or forget or history is not None or allow or undo or revoke:  # (a setting, or a button of the permissions)
         try:
             if status:
@@ -2156,15 +2303,17 @@ def main(argv=None):
                 result = {"ok": ok, "message": message}
         except Exception as exc:
             result = {"ok": False, "message": "{}: {}".format(type(exc).__name__, exc)}
-        sys.stdout.write(json.dumps(result) + "\n")
-        return
+        return emit(result)
     try:
         profiles = cs.discover_profiles(home, config_dirs)
         cache = updated_cache(cache_root, profiles, now_ms)
         if perms:
-            sys.stdout.write(json.dumps(permissions(cache, profiles, now_ms, home, load_added(cache_root)),
-                                        indent=2 if pretty else None) + "\n")
-            return
+            result = permissions(cache, profiles, now_ms, home, load_added(cache_root))
+            if hosts:
+                from concurrent.futures import ThreadPoolExecutor
+                with ThreadPoolExecutor(max_workers=min(8, len(hosts))) as pool:
+                    result["hosts"] = list(pool.map(host_permissions, hosts))
+            return emit(result)
         first_ms = first_activity(cache)
         days = span_days(span, back, now_ms, first_ms)
         chats = chats_between(cache, profiles, span_since(span, back, now_ms, first_ms), days[-1][2], home)
@@ -2187,10 +2336,7 @@ def main(argv=None):
             result["currency"] = currency_of(currency, cache_root, now_ms / 1000)
     except Exception as exc:  # the widget must always get parseable output
         result = {"ok": False, "error": "{}: {}".format(type(exc).__name__, exc), "generatedAt": now_ms}
-    text = json.dumps(result, indent=2 if pretty and not remote else None)
-    if remote:
-        sys.stdout.write("\n" + cs.REMOTE_MARK + " ")
-    sys.stdout.write(text + "\n")
+    emit(result)
 
 
 if __name__ == "__main__":

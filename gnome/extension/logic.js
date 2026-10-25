@@ -1409,8 +1409,9 @@ export function weekArgs(back, account, shownHosts, remote, configDirArgs, curre
 }
 
 // week.py's arguments to allow a rule the tab offers, or take one it added back
-export function weekRuleArgs(rule, allow) {
-    return allow ? ['--allow', rule.kind, rule.value, rule.project] : ['--undo', rule.id];
+// (on an SSH host: week.py runs there)
+export function weekRuleArgs(rule, allow, host = '') {
+    return [...(allow ? ['--allow', rule.kind, rule.value, rule.project] : ['--undo', rule.id]), ...(host ? ['--on', host] : [])];
 }
 
 // The permissions you gave (week.py's granted list): the first few, until
@@ -1421,11 +1422,20 @@ export function weekGrantedShown(granted, all) {
     return all ? granted : granted.slice(0, WEEK_GRANTED_FEW);
 }
 
-export function weekGrantedIntro(granted) {
-    return granted.length
-        ? 'What lets chats on this computer go without asking you: your settings, and the .claude settings of the folders ' +
-          "Claude ran in, with the rules it saved when you answered “don't ask again”. Revoke takes one out of its file."
-        : 'Nothing lets chats on this computer skip a permission prompt: they ask you each time.';
+export function weekGrantedIntro(granted, host = '') {
+    if (!granted.length)
+        return `Nothing lets chats on ${host || 'this computer'} skip a permission prompt: they ask you each time.`;
+    return host
+        ? `What lets chats on ${host} go without asking you, as listed there: its settings, its trusted folders, and the .claude ` +
+          `settings of the folders Claude ran in. Revoke takes one out of its file on ${host}.`
+        : "What lets chats on this computer go without asking you: your settings and your administrator's, the folders you " +
+          'trusted, the .claude settings of the folders Claude ran in, and what you approved in them. Revoke takes one out of its file.';
+}
+
+// What asks first or is busy in the Permissions tab: host|id (a host's
+// rule and this computer's may share an id)
+export function permsKey(host, id) {
+    return `${host || ''}|${id}`;
 }
 
 export function weekGrantMeta(g) {
@@ -1434,12 +1444,13 @@ export function weekGrantMeta(g) {
 
 // week.py's arguments for the Permissions tab (with the extra Claude
 // folders, as the others)
-export function permsArgs(configDirArgs) {
-    return ['--permissions', ...configDirArgs];
+export function permsArgs(configDirArgs, shownHosts = [], remote = {}) {
+    const hosts = shownHosts.filter(h => remote[h] && remote[h].ok && remote[h].result);   // (one out of reach would hold it up)
+    return ['--permissions', ...hosts.flatMap(h => ['--host', h]), ...configDirArgs];
 }
 
 // week.py's arguments to take one of them out of its file (with the extra
 // Claude folders, so it finds the same list)
-export function weekRevokeArgs(grant, configDirArgs) {
-    return ['--revoke', grant.id, ...configDirArgs];
+export function weekRevokeArgs(grant, configDirArgs, host = '') {
+    return ['--revoke', grant.id, ...(host ? ['--on', host] : configDirArgs)];
 }
