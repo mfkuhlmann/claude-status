@@ -1507,6 +1507,7 @@ body.vscode-high-contrast .top.scrolled {
 }
 
 .tab-btn {
+  white-space: nowrap;
   border: none;
   border-bottom: 2px solid transparent;
   border-radius: 0;
@@ -1665,6 +1666,10 @@ body.vscode-high-contrast .top.scrolled {
   align-items: center;
   flex-wrap: wrap;
   gap: 4px;
+}
+
+.week-legend > span {
+  white-space: nowrap;
 }
 
 .swatch {
@@ -1915,4 +1920,173 @@ body.vscode-high-contrast .top.scrolled {
 
 .week-foot {
   white-space: pre-line;
+}
+
+/* the last 5 weeks under a tile, these 7 days last */
+.week-trend {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 12px;
+  margin-top: 3px;
+}
+
+.week-trend span {
+  width: 7px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--cs-fg) 45%, transparent);
+}
+
+.week-trend span.now {
+  background: var(--cs-working);
+}
+
+.week-trend span.gone {
+  height: 4px;
+  border-radius: 2px;
+  opacity: 0.3;
+}
+
+.swatch.limit,
+.week-limit {
+  background: var(--cs-failed);
+}
+
+.swatch.limit {
+  width: 2px;
+  height: 12px;
+}
+
+.week-limit {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  pointer-events: none;
+}
+
+/* a day or a project: click for its chats */
+.week-row.opens,
+.week-bars li.opens {
+  cursor: pointer;
+}
+
+.week-row.open .week-day,
+.week-bars li.open .week-bar-name {
+  font-weight: 600;
+}
+
+.week-bar-name .icon {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 2px;
+  vertical-align: -2px;
+  opacity: 0.6;
+}
+
+.week-bar-name .icon.turn {
+  transform: rotate(90deg);
+}
+
+.week-bars li.week-sub {
+  display: block;
+}
+
+.week-chat.sub {
+  padding-left: calc(3.4em + 10px);
+  font-size: 0.92em;
+}
+
+.week-sub .week-chat.sub {
+  padding-left: 18px;
+}
+
+.week-more {
+  display: block;
+  padding-left: 22px;
+}
+
+/* a plan window filling up, from its start to its reset */
+.week-fill {
+  width: 100%;
+  height: 18px;
+  border-radius: 2px;
+  background: var(--cs-track);
+}
+
+.week-fill .line {
+  fill: none;
+  stroke: var(--cs-usage-low);
+  stroke-width: 1.5px;
+}
+
+.week-fill .area {
+  fill: color-mix(in srgb, var(--cs-usage-low) 30%, transparent);
+}
+
+.week-fill.mid .line {
+  stroke: var(--cs-usage-medium);
+}
+
+.week-fill.mid .area {
+  fill: color-mix(in srgb, var(--cs-usage-medium) 30%, transparent);
+}
+
+.week-fill.high .line {
+  stroke: var(--cs-usage-high);
+}
+
+.week-fill.high .area {
+  fill: color-mix(in srgb, var(--cs-usage-high) 30%, transparent);
+}
+
+.week-bar-value.over {
+  color: var(--cs-usage-high);
+}
+
+/* rules for the permission prompts you answered */
+.week-rules {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.week-rule {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.week-rule-text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.week-rule > .chip,
+.week-rule > span:last-child {
+  flex: none;
+}
+
+.week-rule-ask {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.week-rule-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.week-section .error {
+  color: var(--cs-failed);
 }

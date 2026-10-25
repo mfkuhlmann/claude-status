@@ -444,6 +444,7 @@ export interface ViewSettings {
   showTokens: boolean;
   recentChats: number;
   reopenIn: ReopenIn; // where recent chats reopen (the switch above them)
+  recapCurrency?: string; // the Recap tab's amounts: "USD", "EUR", …
 }
 
 export type ReopenIn = "terminal" | "claudeCode";
@@ -492,12 +493,14 @@ export interface WeekDay {
   you: [number, number][]; // when you were at it
   work: [number, number, number][]; // when Claude worked: [from, to, chats at once]
   wait: [number, number][]; // when it waited for your answer (and no chat worked)
+  limits: number[]; // when a usage limit stopped a chat
   youMs: number;
   workedMs: number;
   busyMs: number;
   waitMs: number;
   prompts: number;
   cost: number;
+  chats: WeekChat[]; // the day's chats, what Claude worked on most first
 }
 
 export interface WeekNumbers {
@@ -526,7 +529,8 @@ export interface WeekProject {
   workedMs: number;
   cost: number;
   prompts: number;
-  chats: number;
+  chats: WeekChat[]; // its chats Claude worked on most
+  chatCount: number; // all of them
 }
 
 export interface WeekChat {
@@ -539,6 +543,9 @@ export interface WeekChat {
   workedMs: number;
   cost: number;
   prompts: number;
+  startedAt?: number; // (a turn: when it started and ended)
+  endedAt?: number;
+  resumes?: number; // (a chat come back to after its cache expired: how often)
 }
 
 export interface WeekModel {
@@ -559,6 +566,32 @@ export interface WeekTip {
   command: string; // e.g. "/compact", or ""
 }
 
+// A plan window now, and how it filled up (the widget's usage history)
+export interface WeekPlanWindow {
+  key: string; // "five_hour", "seven_day", …
+  label: string; // "5h", "7d", …
+  resetsAt: number | null;
+  pct: number;
+  points: [number, number][]; // [ms, percent used]
+}
+
+// A rule that would have let permission prompts you answered go without
+// asking: kind "dir" (permissions.additionalDirectories), "edits"
+// (defaultMode acceptEdits), "allow" (a permissions.allow rule); it goes
+// into project/.claude/settings.local.json
+export interface WeekRule {
+  kind: "dir" | "edits" | "allow";
+  value: string;
+  project: string;
+  count: number;
+  waitMs: number;
+  example: string;
+  id: string;
+  state: "new" | "allowed" | "added"; // added: by the Recap tab, it can take it back
+  title: string;
+  change: string; // what allowing it changes, in words
+}
+
 export interface WeekRecap {
   ok: true;
   generatedAt: number;
@@ -571,12 +604,34 @@ export interface WeekRecap {
   days: WeekDay[];
   sum: WeekSum;
   previous: WeekNumbers; // the 7 days before
+  trend: ((WeekNumbers & { start: number }) | null)[]; // the 5 weeks up to these days (null: older than what's kept)
   projects: WeekProject[];
   chats: WeekChat[];
   models: WeekModel[];
   cacheSaved: number;
+  spend: {
+    turns: WeekChat[]; // the turns that cost most
+    chats: WeekChat[]; // the chats that cost most
+    cold: { count: number; cost: number; chats: WeekChat[] }; // coming back after a chat's cache expired
+  };
+  work: {
+    toolCalls: number;
+    tools: [string, number][];
+    commands: number;
+    edits: number;
+    files: number;
+    linesAdded: number;
+    linesRemoved: number;
+    subagents: number;
+    compactions: number;
+    webSearches: number;
+    webFetches: number;
+  };
+  plan: { account: string; name: string; windows: WeekPlanWindow[] }[]; // (this computer's accounts, these 7 days only)
+  prompts: { answered: number; refused: number; waitMs: number; byTool: [string, number][]; rules: WeekRule[] };
   tips: WeekTip[];
   prices: { asOf: string; guessed: string[] };
+  currency?: { code: string; rate: number; date: string; error: string }; // rate: per US dollar
   sources: { host: string; ok: boolean; error: string }[];
 }
 
@@ -638,6 +693,7 @@ export type WebviewMessage =
   | { type: "openUsagePage" }
   | { type: "week"; back: number; account: string } // the Recap tab wants these days' recap
   | { type: "openWeekChat"; chatId: string; profileDir: string; name: string; cwd?: string } // one of the week's chats here
+  | { type: "weekRule"; allow: boolean; kind: string; value: string; project: string; id: string } // allow a rule the tab offers, or take one back
   | { type: "copy"; text: string }; // a tip's command, to the clipboard
 
 // extension -> webview
@@ -645,4 +701,5 @@ export type HostMessage =
   | { type: "state"; state: ViewState }
   | { type: "petEvent"; kind: PetEventKind; text: string; key: string }
   | { type: "visible"; visible: boolean }
-  | { type: "week"; back: number; account: string; recap: WeekRecap | null; error: string };
+  | { type: "week"; back: number; account: string; recap: WeekRecap | null; error: string }
+  | { type: "weekRule"; id: string; ok: boolean; message: string };

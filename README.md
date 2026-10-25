@@ -108,13 +108,22 @@ As an editor tab (**Claude Status: Open in Editor Tab**):
   Claude worked, against the week before; a row per day on a timeline, with
   when you were at it, when Claude worked (darker where several chats worked
   at once) and when it waited for your answer (point at a day to see what
-  went on then); the projects and chats it worked on most (click one to bring
-  it up); what the same work would cost at Claude's API prices, by model,
-  with what the cache saved; and what would use less of your plan: the tips
-  of Claude Code's own `/usage` (*Start fresh when you switch tasks*, *Save
-  max effort for hard tasks*, …), each with the share of the week's usage it
-  touches and a command to copy. For all your accounts or one, with the SSH
-  hosts shown. It's read from the chats' transcripts, so it uses no tokens,
+  went on then), with a red mark where a usage limit stopped a chat (click a
+  day for its chats); how full your plan's windows are now and how they
+  filled up; a trend line of the last five weeks under each number; the
+  projects (click one for its chats) and chats it worked on most (click one
+  to bring it up); what Claude did (tool calls, commands, edits with their
+  files and lines, subagents, web searches, compactions); what the same work
+  would cost at Claude's API prices, by model, with what the cache saved, the
+  turns that cost most and what coming back to chats after their cache had
+  expired cost; the permission prompts you answered, with the rules that
+  would have let the most of them through (**Allow…** writes one into the
+  `.claude/settings.local.json` of the folder its chats started in, **Undo**
+  takes it back); and what would use less of your plan: the tips of Claude
+  Code's own `/usage` (*Start fresh when you switch tasks*, *Save max effort
+  for hard tasks*, …), each with the share of the week's usage it touches
+  and a command to copy. For all your accounts or one, with the SSH hosts
+  shown, in US dollars or your currency (`claudeStatus.recapCurrency`). It's read from the chats' transcripts, so it uses no tokens,
   and only while the tab is open: the first time takes a few seconds, after
   that only what's new is read.
 - **A chat's recap**: the unfolded peek ends with the chat's numbers: your
@@ -299,12 +308,18 @@ code --install-extension claude-status-*.vsix
 | `claudeStatus.notifySound`, `soundVolume`, `soundWaiting`, `soundDone`, `soundFailed` | | Sounds (sound-theme names or files) |
 | `claudeStatus.showPet` / `chatPets` | `true` / `5` | Talpa, and pets per account |
 | `claudeStatus.showTokens`, `showUsageInStatusBar`, `recentChats`, `keepDoneHours` | | What the view shows |
+| `claudeStatus.recapCurrency` | `USD` | The Recap tab's amounts: US dollars (Claude's API prices), or another currency at the European Central Bank's rate of the day |
 | `claudeStatus.pythonPath` | `python3` | Python on this computer |
 
 ## Privacy
 
 Nothing leaves your computer except the `ssh` connections to the hosts you
 pick. There is no telemetry, and the view loads nothing from the internet.
+The one download: with `claudeStatus.recapCurrency` set to a currency other
+than US dollars, the **Recap** tab fetches the European Central Bank's public
+exchange rates (`https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml`)
+at most every 6 hours while it's open; that request carries nothing about
+you or your chats.
 
 What it reads, all of it written by Claude Code itself: the session registry
 (`<config>/sessions`), background jobs (`<config>/jobs`), transcripts (for
@@ -316,8 +331,11 @@ the plans chats wrote (`<config>/plans`), Claude's memories
 (`<config>/projects/<folder>/memory`) and each account's `CLAUDE.md`,
 the account name and plan from `.claude.json`, and the status-line copies in
 `~/.cache/claude-widget/statusline`. The **Recap** tab reads the transcripts
-too, and keeps what it read in `~/.cache/claude-widget/week-1.json`; it calls
-no model. It writes only to
+too, and keeps what it read in `~/.cache/claude-widget/week-2.json`; it calls
+no model. A rule you **Allow…** there is one entry in the
+`.claude/settings.local.json` of the folder its chats started in (only
+there, never your user settings), and `~/.cache/claude-widget/rules.json`
+remembers it so **Undo** can take it back. It writes only to
 `~/.cache/claude-widget` (caches, the list of chats you removed, the tasks
 you queue until they start, copies of the files a comparison shows, kept for
 a day) and, if you

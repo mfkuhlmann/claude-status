@@ -16,6 +16,21 @@
   week at a time (up to four), and look at all accounts or one. SSH hosts
   shown count too. It reads the chats' transcripts, so it uses no tokens, and
   only while the tab is open; the status checks don't change.
+- **More in the Recap tab:** the permission prompts you answered, with the
+  rules that would have let the most of them through (another project's
+  folder to read, edits in the chat's own folder, a read-only command, a
+  site's pages): **Allow…** says what changes where, then writes the rule
+  into the `.claude/settings.local.json` of the folder the chats started in,
+  and **Undo** takes it back. Red marks on the timeline where a usage limit
+  stopped a chat, and how full your plan's windows are now, with how they
+  filled up. The turns that cost most, the costliest chats, and what coming
+  back to chats after their cache had expired cost. A trend line of the last
+  five weeks under each number. What Claude did: tool calls, commands, edits
+  (files and lines), subagents, web searches, compactions. Click a day or a
+  project for its chats. And `claudeStatus.recapCurrency` shows the amounts
+  in euros or another currency, at the European Central Bank's rate of the
+  day (downloaded at most every 6 hours, only while the tab is open).
+- **The Recap tab's name** no longer breaks over two lines in a narrow view.
 - **Keep going until it's done:** a chat at work on this computer can keep
   going while you're away (the ↻ button on its row): when a usage limit
   stops it, it goes on by itself in the background a minute after the limit

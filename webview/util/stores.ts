@@ -15,3 +15,6 @@ export const petColorsVersion = createStore(0);
 
 // The Recap tab's last answer (the extension runs week.py when the tab asks)
 export const weekAnswer = createStore<Extract<HostMessage, { type: "week" }> | null>(null);
+
+// What allowing (or taking back) a rule of the Recap tab's did
+export const weekRuleAnswer = createStore<Extract<HostMessage, { type: "weekRule" }> | null>(null);

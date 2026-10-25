@@ -1,33 +1,44 @@
 import { useEffect, useState } from "preact/hooks";
-import type { WeekDay, WeekRecap } from "../../src/shared/types";
+import type { WeekChat, WeekDay, WeekPlanWindow, WeekRecap, WeekRule } from "../../src/shared/types";
 import {
   cacheText,
+  coldText,
+  costliestText,
+  currencyOf,
   dayTip,
   factsText,
+  fillPaths,
   footText,
   hoursText,
   hoverText,
   moneyText,
   periodText,
+  promptsText,
+  resetText,
   rowDay,
+  ruleMeta,
   shareText,
+  toolsText,
   weekTiles,
+  whenText,
+  workText,
+  type Currency,
 } from "../../src/shared/week";
 import { post } from "../env";
 import { Icon } from "../util/icons";
 import { useViewVisible } from "../util/petStage";
 import { useStore } from "../util/store";
-import { weekAnswer } from "../util/stores";
+import { weekAnswer, weekRuleAnswer } from "../util/stores";
 
 const REFRESH_MS = 10 * 60000; // while the tab is in sight
 
 // The Recap tab: your last 7 days with Claude. How long you were at it and
 // how long Claude worked, a day per row on a timeline, what the same work
-// would cost at API prices, where it went, and what would use less of your
-// plan (the rules of Claude Code's own /usage). The extension runs the
-// widget's week.py for it (only while this tab is open): read from the
-// chats' transcripts, no tokens used, nothing sent anywhere.
-export function WeekView({ hosts }: { hosts: string[] }) {
+// would cost at API prices, where it went, the permission prompts you
+// answered, and what would use less of your plan (the rules of Claude Code's
+// own /usage). The extension runs the widget's week.py for it (only while
+// this tab is open): read from the chats' transcripts, no tokens used.
+export function WeekView({ hosts, currency }: { hosts: string[]; currency: string }) {
   const visible = useViewVisible();
   const answer = useStore(weekAnswer);
   const [back, setBack] = useState(answer?.back ?? 0);
@@ -47,7 +58,7 @@ export function WeekView({ hosts }: { hosts: string[] }) {
     ask();
     const timer = setInterval(ask, REFRESH_MS);
     return () => clearInterval(timer);
-  }, [visible, back, account, hostsKey]);
+  }, [visible, back, account, hostsKey, currency]);
 
   const mine = answer && answer.back === back && answer.account === account ? answer : null;
   useEffect(() => {
@@ -111,14 +122,19 @@ export function WeekView({ hosts }: { hosts: string[] }) {
                 <span class="week-tile-label muted">{t.label}</span>
                 <span class="week-tile-value">{t.value}</span>
                 {t.delta ? <span class="week-tile-delta muted">{t.delta}</span> : null}
+                <Trend values={t.trend} />
               </div>
             ))}
           </div>
           {factsText(s) ? <div class="week-facts small muted">{factsText(s)}</div> : null}
           <Timeline recap={recap} />
+          <Plan recap={recap} />
           <Projects recap={recap} />
           <Chats recap={recap} />
+          <Work recap={recap} />
           <Models recap={recap} />
+          <Spend recap={recap} />
+          <Prompts recap={recap} reload={ask} />
           <Tips recap={recap} copied={copied} onCopy={copy} />
           <div class="week-foot small muted">{footText(recap)}</div>
         </>
@@ -127,20 +143,57 @@ export function WeekView({ hosts }: { hosts: string[] }) {
   );
 }
 
+// The same number over the 5 weeks up to these days, these last (a week
+// the widget no longer has: a dot)
+function Trend({ values }: { values: (number | null)[] }) {
+  if (values.length < 2) return null;
+  const top = Math.max(1e-9, ...values.filter((v): v is number => v !== null));
+  return (
+    <span class="week-trend" aria-hidden="true">
+      {values.map((v, i) => (
+        <span key={i} class={(v === null ? "gone" : "") + (i === values.length - 1 ? " now" : "")}
+          style={v === null ? undefined : { height: `max(1px, ${(100 * v) / top}%)` }} />
+      ))}
+    </span>
+  );
+}
+
+// A chat in the tab's lists: click one of this computer's to bring it up
+function ChatLine({ c, cur, where, sub }: { c: WeekChat; cur: Currency; where?: string; sub?: boolean }) {
+  return (
+    <li>
+      <button type="button" class={"week-chat" + (sub ? " sub" : "")} disabled={!!c.host || !c.chatId}
+        title={c.host ? `${c.name} on ${c.host}: its row under ${c.host} opens it` : `Open “${c.name}”`}
+        onClick={() => post({ type: "openWeekChat", chatId: c.chatId, profileDir: c.profileDir, name: c.name, cwd: c.cwd })}>
+        <span class="week-chat-name">{c.name}</span>
+        <span class="week-chat-folder small muted">{where ?? (c.host ? c.host + ": " : "") + c.folder}</span>
+        <span class="week-chat-value small muted">{hoursText(c.workedMs)} · {moneyText(c.cost, cur)}</span>
+      </button>
+    </li>
+  );
+}
+
 // A day per row: when you were at it, when Claude worked (darker where
-// several chats worked at once), when it waited for your answer
+// several chats worked at once), when it waited for your answer, where a
+// usage limit stopped a chat. Click a day for its chats.
 function Timeline({ recap }: { recap: WeekRecap }) {
   const [hover, setHover] = useState<{ row: number; x: number; ms: number; px: number } | null>(null);
+  const [open, setOpen] = useState("");
+  const cur = currencyOf(recap);
   const last = recap.days.length - 1;
   const pct = (d: WeekDay, ms: number) => `${Math.max(0, Math.min(100, (100 * (ms - d.start)) / Math.max(1, d.end - d.start)))}%`;
   const width = (d: WeekDay, a: number, b: number) =>
     `max(1px, ${Math.max(0, (100 * (Math.min(b, d.end) - Math.max(a, d.start))) / Math.max(1, d.end - d.start))}%)`;
+  const limits = recap.days.some((d) => d.limits?.length);
   return (
     <section class="week-section">
       <div class="week-heading">
         <h2>Day by day</h2>
         <span class="week-legend small muted">
-          <span class="swatch you" /> You <span class="swatch work" /> Claude working <span class="swatch wait" /> Waiting for you
+          <span><span class="swatch you" /> You</span>
+          <span><span class="swatch work" /> Claude working</span>
+          <span><span class="swatch wait" /> Waiting for you</span>
+          {limits ? <span><span class="swatch limit" /> A usage limit stopped a chat</span> : null}
         </span>
       </div>
       <div class="week-row week-axis small muted" aria-hidden="true">
@@ -153,79 +206,152 @@ function Timeline({ recap }: { recap: WeekRecap }) {
         <span class="week-num">You</span>
         <span class="week-num">Claude</span>
       </div>
-      {recap.days.map((d, i) => (
-        <div key={d.day} class={"week-row" + (i === last && recap.back === 0 ? " today" : "")} title={dayTip(d)}>
-          <span class="week-day small">{rowDay(d.day)}</span>
-          <span
-            class="week-track"
-            onMouseMove={(e) => {
-              const box = (e.currentTarget as HTMLElement).getBoundingClientRect();
-              const x = Math.max(0, Math.min(box.width, e.clientX - box.left));
-              const span = d.end - d.start;
-              setHover({ row: i, x, ms: d.start + (x / Math.max(1, box.width)) * span, px: span / Math.max(1, box.width) });
-            }}
-            onMouseLeave={() => setHover((h) => (h && h.row === i ? null : h))}
-          >
-            {d.you.map(([a, b]) => <span key={"y" + a} class="week-you" style={{ left: pct(d, a), width: width(d, a, b) }} />)}
-            {d.wait.map(([a, b]) => <span key={"w" + a} class="week-wait" style={{ left: pct(d, a), width: width(d, a, b) }} />)}
-            {d.work.map(([a, b, n]) => (
-              <span key={"c" + a} class={"week-work" + (n >= 3 ? " many" : n === 2 ? " two" : "")} style={{ left: pct(d, a), width: width(d, a, b) }} />
-            ))}
-            {i === last && recap.back === 0 ? <span class="week-now" style={{ left: pct(d, recap.generatedAt) }} /> : null}
-            {hover && hover.row === i ? <span class="week-cross" style={{ left: `${hover.x}px` }} /> : null}
-          </span>
-          <span class="week-num small muted">{d.youMs >= 60000 ? hoursText(d.youMs) : "–"}</span>
-          <span class="week-num small">{d.workedMs >= 60000 ? hoursText(d.workedMs) : "–"}</span>
-        </div>
-      ))}
+      {recap.days.map((d, i) => {
+        const shown = open === d.day && !!d.chats?.length;
+        return (
+          <div key={d.day}>
+            <div class={"week-row" + (i === last && recap.back === 0 ? " today" : "") + (d.chats?.length ? " opens" : "") + (shown ? " open" : "")}
+              title={dayTip(d, cur)} onClick={() => setOpen(shown || !d.chats?.length ? "" : d.day)}>
+              <span class="week-day small">{rowDay(d.day)}</span>
+              <span
+                class="week-track"
+                onMouseMove={(e) => {
+                  const box = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                  const x = Math.max(0, Math.min(box.width, e.clientX - box.left));
+                  const span = d.end - d.start;
+                  setHover({ row: i, x, ms: d.start + (x / Math.max(1, box.width)) * span, px: span / Math.max(1, box.width) });
+                }}
+                onMouseLeave={() => setHover((h) => (h && h.row === i ? null : h))}
+              >
+                {d.you.map(([a, b]) => <span key={"y" + a} class="week-you" style={{ left: pct(d, a), width: width(d, a, b) }} />)}
+                {d.wait.map(([a, b]) => <span key={"w" + a} class="week-wait" style={{ left: pct(d, a), width: width(d, a, b) }} />)}
+                {d.work.map(([a, b, n]) => (
+                  <span key={"c" + a} class={"week-work" + (n >= 3 ? " many" : n === 2 ? " two" : "")} style={{ left: pct(d, a), width: width(d, a, b) }} />
+                ))}
+                {(d.limits ?? []).map((t) => <span key={"l" + t} class="week-limit" style={{ left: pct(d, t) }} />)}
+                {i === last && recap.back === 0 ? <span class="week-now" style={{ left: pct(d, recap.generatedAt) }} /> : null}
+                {hover && hover.row === i ? <span class="week-cross" style={{ left: `${hover.x}px` }} /> : null}
+              </span>
+              <span class="week-num small muted">{d.youMs >= 60000 ? hoursText(d.youMs) : "–"}</span>
+              <span class="week-num small">{d.workedMs >= 60000 ? hoursText(d.workedMs) : "–"}</span>
+            </div>
+            {shown ? (
+              <ul class="week-chats week-day-chats">
+                {d.chats.map((c) => <ChatLine key={c.host + c.chatId} c={c} cur={cur} sub />)}
+              </ul>
+            ) : null}
+          </div>
+        );
+      })}
       <div class={"week-readout small" + (hover ? "" : " muted")}>
-        {hover ? hoverText(recap.days[hover.row], hover.ms, recap.generatedAt, hover.px) : "Point at a day to see what went on then."}
+        {hover ? hoverText(recap.days[hover.row], hover.ms, recap.generatedAt, hover.px) : "Point at a day to see what went on then; click it for its chats."}
       </div>
     </section>
   );
 }
 
-// The project folders Claude worked in most (a chat started in a subfolder
-// of a repository counts for the repository)
-function Projects({ recap }: { recap: WeekRecap }) {
-  if (!recap.projects.length) return null;
-  const most = Math.max(1, ...recap.projects.map((p) => p.workedMs));
+// How full your plan's windows are now, and how they filled up (this
+// computer's accounts, from the widget's usage history)
+function Plan({ recap }: { recap: WeekRecap }) {
+  const plans = recap.plan ?? [];
+  if (!plans.length) return null;
   return (
     <section class="week-section">
-      <h2>Where Claude worked</h2>
-      <ul class="week-bars">
-        {recap.projects.map((p) => (
-          <li key={p.host + p.path}
-            title={`${p.host ? p.host + ": " : ""}${p.path}\nClaude worked ${hoursText(p.workedMs)} · ${moneyText(p.cost)} at API prices\n${p.prompts} prompts · ${p.chats} chats`}>
-            <span class="week-bar-name">{(p.host ? p.host + ": " : "") + p.name}</span>
-            <span class="week-bar-meter work"><span style={{ width: `${(100 * p.workedMs) / most}%` }} /></span>
-            <span class="week-bar-value small muted">{hoursText(p.workedMs)} · {moneyText(p.cost)}</span>
-          </li>
-        ))}
+      <h2>Your plan's limits now</h2>
+      <ul class="week-bars week-plan">
+        {plans.flatMap((p) =>
+          p.windows.map((w) => (
+            <li key={p.account + w.key} title={`${w.label}: ${Math.round(w.pct)}% used\nHow this window of your plan filled up, from its start (on the left) to when it resets (on the right), as the extension saw it.`}>
+              <span class="week-bar-name">{(plans.length > 1 ? p.name + " · " : "") + w.label}</span>
+              <FillChart w={w} now={recap.generatedAt} />
+              <span class={"week-bar-value small" + (w.pct >= 90 ? " over" : " muted")}>
+                {Math.round(w.pct)}%{w.resetsAt ? ` · ${resetText(w.resetsAt, recap.generatedAt)}` : ""}
+              </span>
+            </li>
+          )),
+        )}
       </ul>
     </section>
   );
 }
 
-// The chats Claude worked on most: click one of this computer's to bring it up
+function FillChart({ w, now }: { w: WeekPlanWindow; now: number }) {
+  const { line, area } = fillPaths(w, now, 100, 20);
+  const level = w.pct >= 90 ? " high" : w.pct >= 70 ? " mid" : "";
+  return (
+    <svg class={"week-fill" + level} viewBox="0 0 100 20" preserveAspectRatio="none" aria-hidden="true">
+      {area ? <path class="area" d={area} /> : null}
+      {line ? <path class="line" d={line} vector-effect="non-scaling-stroke" /> : null}
+    </svg>
+  );
+}
+
+// The project folders Claude worked in most (a chat started in a subfolder
+// of a repository counts for the repository): click one for its chats
+function Projects({ recap }: { recap: WeekRecap }) {
+  const [open, setOpen] = useState("");
+  if (!recap.projects.length) return null;
+  const cur = currencyOf(recap);
+  const most = Math.max(1, ...recap.projects.map((p) => p.workedMs));
+  return (
+    <section class="week-section">
+      <h2>Where Claude worked</h2>
+      <ul class="week-bars">
+        {recap.projects.map((p) => {
+          const key = p.host + "|" + p.path;
+          const shown = open === key;
+          const chats = Array.isArray(p.chats) ? p.chats : [];
+          return [
+            <li key={key} class={"opens" + (shown ? " open" : "")} onClick={() => setOpen(shown ? "" : key)}
+              title={`${p.host ? p.host + ": " : ""}${p.path}\nClaude worked ${hoursText(p.workedMs)} · ${moneyText(p.cost, cur)} at API prices\n` +
+                `${p.prompts} prompts · ${p.chatCount ?? chats.length} chats\nClick for its chats`}>
+              <span class="week-bar-name">
+                <Icon name="chevron" class={shown ? "turn" : ""} />
+                {(p.host ? p.host + ": " : "") + p.name}
+              </span>
+              <span class="week-bar-meter work"><span style={{ width: `${(100 * p.workedMs) / most}%` }} /></span>
+              <span class="week-bar-value small muted">{hoursText(p.workedMs)} · {moneyText(p.cost, cur)}</span>
+            </li>,
+            shown ? (
+              <li key={key + "/chats"} class="week-sub">
+                <ul class="week-chats">
+                  {chats.map((c) => <ChatLine key={c.host + c.chatId} c={c} cur={cur} where="" sub />)}
+                </ul>
+                {(p.chatCount ?? 0) > chats.length ? (
+                  <span class="small muted week-more">and {(p.chatCount ?? 0) - chats.length} more {(p.chatCount ?? 0) - chats.length === 1 ? "chat" : "chats"}</span>
+                ) : null}
+              </li>
+            ) : null,
+          ];
+        })}
+      </ul>
+    </section>
+  );
+}
+
+// The chats Claude worked on most
 function Chats({ recap }: { recap: WeekRecap }) {
   if (!recap.chats.length) return null;
+  const cur = currencyOf(recap);
   return (
     <section class="week-section">
       <h2>Chats it worked on most</h2>
       <ul class="week-chats">
-        {recap.chats.map((c) => (
-          <li key={c.host + c.chatId}>
-            <button type="button" class="week-chat" disabled={!!c.host}
-              title={c.host ? `${c.name} on ${c.host}: its row under ${c.host} opens it` : `Open “${c.name}”`}
-              onClick={() => post({ type: "openWeekChat", chatId: c.chatId, profileDir: c.profileDir, name: c.name, cwd: c.cwd })}>
-              <span class="week-chat-name">{c.name}</span>
-              <span class="week-chat-folder small muted">{(c.host ? c.host + ": " : "") + c.folder}</span>
-              <span class="week-chat-value small muted">{hoursText(c.workedMs)} · {moneyText(c.cost)}</span>
-            </button>
-          </li>
-        ))}
+        {recap.chats.map((c) => <ChatLine key={c.host + c.chatId} c={c} cur={cur} />)}
       </ul>
+    </section>
+  );
+}
+
+// What Claude did: its tool calls, commands, edits, subagents
+function Work({ recap }: { recap: WeekRecap }) {
+  const text = workText(recap.work);
+  if (!text) return null;
+  return (
+    <section class="week-section">
+      <h2>What Claude did</h2>
+      <div>{text}</div>
+      {toolsText(recap.work) ? <div class="small muted">{toolsText(recap.work)}</div> : null}
     </section>
   );
 }
@@ -233,19 +359,109 @@ function Chats({ recap }: { recap: WeekRecap }) {
 // What it'd cost on the API, by model, and what the cache saved
 function Models({ recap }: { recap: WeekRecap }) {
   if (!recap.models.length) return null;
+  const cur = currencyOf(recap);
   return (
     <section class="week-section">
       <h2>At API prices</h2>
       <ul class="week-bars">
         {recap.models.map((m) => (
-          <li key={m.model} title={`${m.model}: ${moneyText(m.cost)} · ${m.requests} requests`}>
+          <li key={m.model} title={`${m.model}: ${moneyText(m.cost, cur)} · ${m.requests} requests`}>
             <span class="week-bar-name">{m.model}</span>
             <span class="week-bar-meter"><span style={{ width: `${100 * m.share}%` }} /></span>
-            <span class="week-bar-value small muted">{moneyText(m.cost)} · {shareText(m.share)}</span>
+            <span class="week-bar-value small muted">{moneyText(m.cost, cur)} · {shareText(m.share)}</span>
           </li>
         ))}
       </ul>
       {cacheText(recap) ? <div class="small muted">{cacheText(recap)}</div> : null}
+    </section>
+  );
+}
+
+// Where the money went: the turns that cost most, the chats, and coming
+// back to chats whose cache had expired
+function Spend({ recap }: { recap: WeekRecap }) {
+  const spend = recap.spend;
+  if (!spend || (!spend.turns.length && !spend.cold.count)) return null;
+  const cur = currencyOf(recap);
+  return (
+    <section class="week-section">
+      {spend.turns.length ? (
+        <>
+          <h2>Turns that cost the most</h2>
+          <ul class="week-chats">
+            {spend.turns.map((t) => <ChatLine key={t.host + t.chatId + t.startedAt} c={t} cur={cur} where={t.startedAt ? whenText(t.startedAt) : ""} />)}
+          </ul>
+        </>
+      ) : null}
+      {costliestText(recap) ? <div class="small muted">{costliestText(recap)}</div> : null}
+      {coldText(recap) ? <div class="small muted">{coldText(recap)}</div> : null}
+    </section>
+  );
+}
+
+// The permission prompts you answered, and the rules that would have let
+// the most of them through (written only when you allow one)
+function Prompts({ recap, reload }: { recap: WeekRecap; reload: () => void }) {
+  const p = recap.prompts;
+  const ruleAnswer = useStore(weekRuleAnswer);
+  const [asking, setAsking] = useState("");
+  const [busy, setBusy] = useState("");
+  useEffect(() => {
+    if (!ruleAnswer) return;
+    setBusy("");
+    reload();
+  }, [ruleAnswer]);
+  if (!p || !p.answered) return null;
+
+  function change(rule: WeekRule, allow: boolean) {
+    setAsking("");
+    setBusy(rule.id);
+    post(allow
+      ? { type: "weekRule", allow: true, kind: rule.kind, value: rule.value, project: rule.project, id: "" }
+      : { type: "weekRule", allow: false, kind: "", value: "", project: "", id: rule.id });
+  }
+
+  return (
+    <section class="week-section">
+      <h2>Permission prompts</h2>
+      <div>{promptsText(p)}</div>
+      {p.byTool.length ? <div class="small muted">For: {p.byTool.map(([tool, n]) => `${tool} ${n}`).join(" · ")}</div> : null}
+      {p.rules.length ? (
+        <div class="small muted">
+          These rules would have let the most of them through. One you allow goes into the .claude/settings.local.json of the
+          folder the chats started in (not shared through git), and only chats started there follow it.
+        </div>
+      ) : null}
+      <ul class="week-rules">
+        {p.rules.map((r) => (
+          <li key={r.id} class="week-rule">
+            <span class="week-rule-text">
+              <span>{r.title}</span>
+              <span class="small muted">{ruleMeta(r)}</span>
+              {asking === r.id ? (
+                <span class="week-rule-ask">
+                  <span class="small">This {r.change}.</span>
+                  <span class="week-rule-buttons">
+                    <button type="button" class="chip on" onClick={() => change(r, true)}>Allow</button>
+                    <button type="button" class="chip" onClick={() => setAsking("")}>Cancel</button>
+                  </span>
+                </span>
+              ) : null}
+            </span>
+            {busy === r.id ? <span class="small muted">…</span>
+              : r.state === "allowed" ? <span class="small muted">Allowed now</span>
+              : r.state === "added" ? (
+                <button type="button" class="chip" disabled={!!busy} onClick={() => change(r, false)}
+                  title="You allowed it here: Undo removes it from the file it went into, as it was before.">Undo</button>
+              ) : asking !== r.id ? (
+                <button type="button" class="chip" disabled={!!busy} onClick={() => setAsking(r.id)}>Allow…</button>
+              ) : null}
+          </li>
+        ))}
+      </ul>
+      {ruleAnswer?.message ? (
+        <div class={"small" + (ruleAnswer.ok ? "" : " error")} role="status">{ruleAnswer.ok ? ruleAnswer.message : `Nothing changed: ${ruleAnswer.message}`}</div>
+      ) : null}
     </section>
   );
 }

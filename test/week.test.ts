@@ -6,7 +6,10 @@ import { test } from "node:test";
 import * as vscode from "vscode";
 import { demoState, demoWeek } from "../src/shared/demo";
 import type { WeekDay } from "../src/shared/types";
-import { deltaText, factsText, hoursText, hoverText, moneyText, periodText, weekAsked, weekTiles } from "../src/shared/week";
+import {
+  coldText, currencyOf, deltaText, factsText, fillPaths, footText, hoursText, hoverText, moneyText, periodText, promptsText, ruleMeta,
+  weekAsked, weekRuleAsked, weekTiles, windowSpan, workText,
+} from "../src/shared/week";
 import { ViewHost } from "../src/view";
 
 const MIN = 60000;
@@ -43,13 +46,67 @@ test("pointing at a day says what went on then", () => {
   const at = (h: number) => start + h * HOUR;
   const day: WeekDay = {
     day: "2026-10-24", start, end: start + 24 * HOUR, you: [[at(9), at(10)]], work: [[at(9.5), at(11), 2]], wait: [[at(1), at(9)]],
-    youMs: HOUR, workedMs: 3 * HOUR, busyMs: 1.5 * HOUR, waitMs: 8 * HOUR, prompts: 3, cost: 4,
+    youMs: HOUR, workedMs: 3 * HOUR, busyMs: 1.5 * HOUR, waitMs: 8 * HOUR, prompts: 3, cost: 4, limits: [at(10.5)], chats: [],
   };
   const px = (24 * HOUR) / 400;
+  assert.match(hoverText(day, at(10.5), NOW, px), /: a usage limit stopped a chat at .* · Claude worked /);
   assert.match(hoverText(day, at(3), NOW, px), /^Sat 24 Oct, .*: Claude waited for your answer .*–.*$/);
   assert.match(hoverText(day, at(9.75), NOW, px), /Claude worked .*, 2 chats at once · you were at it /);
   assert.match(hoverText(day, at(14), NOW, px), /nothing went on$/);
   assert.match(hoverText(day, at(20), NOW, px), /still to come$/);
+});
+
+test("amounts in another currency, at the rate week.py sends", () => {
+  const eur = { code: "EUR", rate: 0.8934 };
+  assert.equal(moneyText(941, eur), "€841");
+  assert.equal(moneyText(23.8, eur), "€21.26");
+  assert.equal(moneyText(0.004, eur), "<€0.01");
+  assert.equal(moneyText(12, { code: "JPY", rate: 152.3 }), "¥1,828");
+  assert.equal(moneyText(12, { code: "CHF", rate: 0.8 }), "9.60 CHF");
+  assert.equal(deltaText(397, 906, "money", eur), "−€455");
+  const recap = { ...demoWeek(NOW), currency: { code: "EUR", rate: 0.9, date: "2026-10-23", error: "" } };
+  assert.deepEqual(currencyOf(recap), recap.currency);
+  assert.match(weekTiles(recap)[2].value, /^€/);
+  assert.match(footText(recap), /Amounts in EUR at the European Central Bank's rate of 23 October 2026: 1 USD = 0\.9000 EUR\./);
+  const failed = { ...recap, currency: { code: "USD", rate: 1, date: "", error: "no EUR rate from the European Central Bank yet" } };
+  assert.equal(currencyOf(failed).code, "USD");
+  assert.match(footText(failed), /Amounts in US dollars: no EUR rate/);
+});
+
+test("trend lines, what Claude did, where the money went, the prompts you answered", () => {
+  const recap = demoWeek(NOW);
+  const tiles = weekTiles(recap);
+  assert.equal(tiles[1].trend.length, 5);
+  assert.equal(tiles[1].trend[4], recap.sum.workedMs);
+  assert.match(tiles[1].tip, /\nWeek by week, these 7 days last: .* · .* · .* · .* · /);
+  assert.deepEqual(weekTiles(demoWeek(NOW, 3))[0].trend.slice(0, 2), [null, null]);
+  assert.match(weekTiles(demoWeek(NOW, 3))[0].tip, /these 7 days last: \? · \? · /);
+  assert.equal(workText(recap.work), "3,184 tool calls · 1,410 commands run · 699 edits in 143 files (+9,412 −2,210) · 21 subagents started · 6 web searches · 9 pages fetched · 3 compactions");
+  assert.equal(workText({ ...recap.work, toolCalls: 1, commands: 1, edits: 1, files: 1, subagents: 0, webSearches: 0, webFetches: 0, compactions: 0 }),
+    "1 tool call · 1 command run · 1 edit in 1 file (+9,412 −2,210)");
+  assert.match(coldText(recap), /^You came back to chats after their cache had expired \(an hour without a reply\) 5 times: .*\$11\.40 more .* Most in: Release notes for 2\.0 \(3×, \$7\.10\)\.$/);
+  assert.equal(promptsText(recap.prompts), "You answered 148 permission prompts and refused 2 of them. They waited for your answer 3h 18m in all.");
+  assert.equal(ruleMeta(recap.prompts.rules[0]), "24 prompts · waited 2h 6m for you · e.g. ~/projects/shared-ui/src/button.tsx");
+});
+
+test("a plan window's fill, from its start to its reset", () => {
+  const w = { key: "five_hour", label: "5h", resetsAt: NOW + 2 * HOUR, pct: 60, points: [[NOW - 4 * HOUR, 0], [NOW - 3 * HOUR, 30], [NOW - HOUR, 60]] as [number, number][] };
+  assert.deepEqual(windowSpan(w), [NOW - 3 * HOUR, NOW + 2 * HOUR]);
+  const { line, area } = fillPaths(w, NOW, 100, 20);
+  assert.equal(line, "M0.0,13.8 L40.0,8.1 L60.0,8.1"); // (the point before the window's start left out; level up to now)
+  assert.equal(area, "M0.0,20 L0.0,13.8 L40.0,8.1 L60.0,8.1 L60.0,20 Z");
+  assert.deepEqual(fillPaths({ ...w, points: [] }, NOW, 100, 20), { line: "", area: "" });
+});
+
+test("a rule message is taken only in the shapes the tab sends", () => {
+  assert.deepEqual(weekRuleAsked({ allow: true, kind: "dir", value: "/w/lib", project: "/w/app" }),
+    { allow: true, kind: "dir", value: "/w/lib", project: "/w/app" });
+  assert.deepEqual(weekRuleAsked({ allow: false, id: "a1b2c3d4e5f6" }), { allow: false, id: "a1b2c3d4e5f6" });
+  assert.equal(weekRuleAsked({ allow: true, kind: "shell", value: "x", project: "/a" }), null);
+  assert.equal(weekRuleAsked({ allow: true, kind: "allow", value: "Bash(ls *)", project: "relative" }), null);
+  assert.equal(weekRuleAsked({ allow: true, kind: "allow", value: "Bash(ls *)\nrm", project: "/a" }), null);
+  assert.equal(weekRuleAsked({ allow: "yes", kind: "allow", value: "Bash(ls *)", project: "/a" }), null);
+  assert.equal(weekRuleAsked({ allow: false, id: "../x" }), null);
 });
 
 function setup() {
@@ -57,7 +114,7 @@ function setup() {
   const posted: unknown[] = [];
   const record = (name: string) => (...args: unknown[]) => {
     calls.push({ name, args });
-    return Promise.resolve({ recap: demoWeek(NOW) });
+    return Promise.resolve(name === "weekRule" ? { ok: true, message: "done" } : { recap: demoWeek(NOW) });
   };
   const state = demoState(NOW);
   const actions = new Proxy({}, { get: (_target, name: string) => record(name) });
@@ -67,6 +124,7 @@ function setup() {
     state: () => state,
     setVisible() {},
     week: record("week"),
+    weekRule: record("weekRule"),
   };
   const host = new ViewHost(vscode.Uri.file("/ext") as never, dash as never, actions as never);
   const priv = host as unknown as { receive(webview: unknown, m: unknown): void };
@@ -87,6 +145,22 @@ test("the page asks for days within what's kept, for an account id or all", asyn
   assert.equal(answer.back, 1);
   assert.equal(answer.account, "ba9876543210");
   assert.ok(answer.recap);
+});
+
+test("Allow and Undo reach the backend only as rules; the answer goes back to the page", async () => {
+  const { calls, posted, receive } = setup();
+  receive({ type: "weekRule", allow: true, kind: "allow", value: "Bash(git log *)", project: "/w/app", id: "" });
+  receive({ type: "weekRule", allow: true, kind: "allow", value: "Bash(git log *)", project: "../app", id: "" });
+  receive({ type: "weekRule", allow: false, kind: "", value: "", project: "", id: "a1b2c3d4e5f6" });
+  assert.deepEqual(calls, [
+    { name: "weekRule", args: [{ allow: true, kind: "allow", value: "Bash(git log *)", project: "/w/app" }] },
+    { name: "weekRule", args: [{ allow: false, id: "a1b2c3d4e5f6" }] },
+  ]);
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual(posted, [
+    { type: "weekRule", id: "", ok: true, message: "done" },
+    { type: "weekRule", id: "a1b2c3d4e5f6", ok: true, message: "done" },
+  ]);
 });
 
 test("a week's chat opens only with an id and account folder that are ones; a tip's command is all that's copied", () => {

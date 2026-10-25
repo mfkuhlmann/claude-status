@@ -8,7 +8,7 @@ import type { Actions } from "./actions";
 import { setReopenIn } from "./config";
 import type { Dashboard } from "./dashboard";
 import { findChatRef, findMemory, findPlan, goOnAt, machineStatus, shareAccounts } from "./shared/model";
-import { weekAsked } from "./shared/week";
+import { weekAsked, weekRuleAsked } from "./shared/week";
 import type { ChatRef, Group, HostMessage, PlanItem, WebviewMessage } from "./shared/types";
 
 const AGENT_ID = /^[A-Za-z0-9_-]{1,100}$/;
@@ -289,6 +289,15 @@ export class ViewHost implements vscode.WebviewViewProvider, vscode.Disposable {
         const asked = weekAsked(m.back, m.account);
         void this.dash.week(asked.back, asked.account).then(({ recap, error }) =>
           webview.postMessage({ type: "week", ...asked, recap: recap ?? null, error: error ?? "" } satisfies HostMessage),
+        );
+        break;
+      }
+      case "weekRule": {
+        const ask = weekRuleAsked(m);
+        if (!ask) break;
+        const id = ask.allow ? "" : ask.id;
+        void this.dash.weekRule(ask).then(({ ok, message }) =>
+          webview.postMessage({ type: "weekRule", id, ok, message } satisfies HostMessage),
         );
         break;
       }

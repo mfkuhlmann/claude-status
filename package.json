@@ -499,6 +499,14 @@
           "markdownDescription": "The reasoning effort new chats in a terminal or in the background start with (`claude --effort`; **New Chat…** changes it).",
           "order": 33
         },
+        "claudeStatus.recapCurrency": {
+          "type": "string",
+          "enum": ["USD", "EUR", "GBP", "CHF", "JPY", "CNY", "INR", "CAD", "AUD", "NZD", "SEK", "NOK", "DKK", "PLN", "CZK", "HUF", "RON", "ISK", "TRY", "BRL", "MXN", "ZAR", "KRW", "SGD", "HKD", "ILS", "IDR", "MYR", "PHP", "THB"],
+          "enumItemLabels": ["US dollars (USD)", "Euros (EUR)", "Pounds sterling (GBP)", "Swiss francs (CHF)", "Japanese yen (JPY)", "Chinese yuan (CNY)", "Indian rupees (INR)", "Canadian dollars (CAD)", "Australian dollars (AUD)", "New Zealand dollars (NZD)", "Swedish kronor (SEK)", "Norwegian kroner (NOK)", "Danish kroner (DKK)", "Polish złoty (PLN)", "Czech koruny (CZK)", "Hungarian forints (HUF)", "Romanian lei (RON)", "Icelandic krónur (ISK)", "Turkish lira (TRY)", "Brazilian reais (BRL)", "Mexican pesos (MXN)", "South African rand (ZAR)", "South Korean won (KRW)", "Singapore dollars (SGD)", "Hong Kong dollars (HKD)", "Israeli shekels (ILS)", "Indonesian rupiah (IDR)", "Malaysian ringgit (MYR)", "Philippine pesos (PHP)", "Thai baht (THB)"],
+          "default": "USD",
+          "markdownDescription": "The currency of the Recap tab's amounts. Claude's API prices are in US dollars; for another currency the Recap tab downloads the European Central Bank's reference rates of the day from ecb.europa.eu, at most every 6 hours and only while the tab is open (offline it uses the last rates it has). Nothing about your chats is sent.",
+          "order": 34
+        },
         "claudeStatus.pythonPath": {
           "scope": "machine",
           "type": "string",

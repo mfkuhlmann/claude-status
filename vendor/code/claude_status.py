@@ -6067,6 +6067,9 @@ def add_vscode(result, home, extra_dirs=(), remote=False, cache_root=None):
     which is listed first."""
     installed, profile, plain, default = default_profile(home, discover_profiles(home, extra_dirs), remote, cache_root)
     result["vscode"] = {"installed": installed, "on": profile.label if profile else None}
+    # (whether accounts.py --default can point anything elsewhere: VS Code's
+    # Claude, or plain claude through a ~/.claude link)
+    result["canDefault"] = bool(installed) or (home / ".claude").is_symlink()
     for g in result.get("groups", []):
         keys = g.get("profileKeys", [])
         g["vscodeHere"] = profile is not None and profile.key in keys
