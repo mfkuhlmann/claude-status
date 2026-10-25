@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.15.0 (2026-10-25)
 
 - **A chat's whole name:** its tags (*background*, *agents 0/1*, *auto mode*, *±4*, …) shared its line, so a long name was cut down to a few letters. Now the tags go under the name when they don't all fit beside it, as in the VS Code extension; a name is only cut short when it's too long for the line by itself. On GNOME too.
 - **The big Talpa goes anywhere:** it was kept to the right half of its stage, clear of the headline. Now it wanders, follows your mouse and can be dragged all the way to the left too, and walks in front of the words when it passes them (its burrow still stays on the stage). On GNOME too.
