@@ -36,12 +36,14 @@
   choice with the widget), and **Claude Status: Delete the Recap's Saved
   History…** starts it again from the chats Claude still has.
 - **A Permissions tab:** the view's new **Permissions** tab, next to
-  **Recap**, lists the permissions you gave: every rule and mode that lets
-  chats on this computer go without asking, in your user settings and the
-  `.claude` settings of every folder Claude ran in, the rules Claude saved
-  when you answered *don't ask again* included; **Revoke…** says what it
-  takes out of which file, then does (a folder's `.claude/settings.json` is
-  shared through git: listed, not changed). Under it, the permission prompts
+  **Recap**, lists the permissions you gave, here and on the SSH hosts
+  shown: the rules and modes in your settings, your administrator's and
+  every folder's `.claude` settings (the rules Claude saved when you
+  answered *don't ask again* included), approved `.mcp.json` servers, the
+  settings that loosen a check, and the folders you trusted; **Revoke…**
+  says what it changes in which file, then does, on the host for a host's
+  (a folder's `.claude/settings.json`, shared through git, and your
+  administrator's are listed, not changed). Under it, the permission prompts
   you answered in the last 7 days, with the rules that would have let the
   most of them through (another project's folder to read, edits in the
   chat's own folder, a read-only command, a site's pages): **Allow…** says

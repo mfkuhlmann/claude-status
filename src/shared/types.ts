@@ -605,12 +605,14 @@ export interface WeekRule {
 // that skips prompts), in your user settings or a folder's .claude settings
 export interface WeekGrant {
   id: string;
-  kind: "allow" | "dir" | "mode";
+  kind: "allow" | "dir" | "mode" | "flag" | "mcp" | "trust";
+  folder?: string; // (what .claude.json keeps per folder: its trust, the tools and servers approved there)
   value: string;
   title: string;
   place: string; // whose chats it lets through
   where: string; // the file, from ~
-  shared: boolean; // a folder's settings.json, shared through git: changed there, not here
+  shared: boolean; // a folder's settings.json (shared through git) or the administrator's: not changed here
+  managed?: boolean; // the administrator's (/etc/claude-code)
   added: boolean; // the Recap tab's Allow put it there
   change: string; // what revoking it does, in words
 }
@@ -625,6 +627,7 @@ export interface PermsData {
   to: string;
   prompts: WeekRecap["prompts"];
   granted: WeekGrant[];
+  hosts?: { host: string; ok: boolean; error: string; prompts?: WeekRecap["prompts"]; granted?: WeekGrant[] }[]; // the SSH hosts shown, as listed there
 }
 
 // What the Recap tab shows: a day, the last 7 days (or 7 before), or everything kept
@@ -734,8 +737,8 @@ export type WebviewMessage =
   | { type: "openUsagePage" }
   | { type: "week"; back: number; account: string; span?: WeekSpan } // the Recap tab wants these days' recap
   | { type: "openWeekChat"; chatId: string; profileDir: string; name: string; cwd?: string } // one of the week's chats here
-  | { type: "weekRule"; allow: boolean; kind: string; value: string; project: string; id: string } // allow a rule the tab offers, or take one back
-  | { type: "weekRevoke"; id: string } // take a permission you gave out of its file
+  | { type: "weekRule"; allow: boolean; kind: string; value: string; project: string; id: string; host?: string } // allow a rule the tab offers, or take one back (on an SSH host shown, if host)
+  | { type: "weekRevoke"; id: string; host?: string } // take a permission you gave out of its file
   | { type: "perms" } // the Permissions tab wants what it shows
   | { type: "copy"; text: string }; // a tip's command, to the clipboard
 
@@ -745,6 +748,6 @@ export type HostMessage =
   | { type: "petEvent"; kind: PetEventKind; text: string; key: string }
   | { type: "visible"; visible: boolean }
   | { type: "week"; back: number; account: string; span: WeekSpan; recap: WeekRecap | null; error: string }
-  | { type: "weekRule"; id: string; ok: boolean; message: string }
-  | { type: "weekRevoke"; id: string; ok: boolean; message: string }
+  | { type: "weekRule"; id: string; host: string; ok: boolean; message: string }
+  | { type: "weekRevoke"; id: string; host: string; ok: boolean; message: string }
   | { type: "perms"; data: PermsData | null; error: string };

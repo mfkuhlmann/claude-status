@@ -295,11 +295,13 @@ export function promptsText(p: WeekRecap["prompts"] | undefined): string {
 // The permissions you gave: the first few, until you ask for all
 export const GRANTED_FEW = 8;
 
-export function grantedIntro(granted: WeekGrant[]): string {
-  return granted.length
-    ? "What lets chats on this computer go without asking you: your settings, and the .claude settings of the folders " +
-      "Claude ran in, with the rules it saved when you answered “don't ask again”. Revoke takes one out of its file."
-    : "Nothing lets chats on this computer skip a permission prompt: they ask you each time.";
+export function grantedIntro(granted: WeekGrant[], host = ""): string {
+  if (!granted.length) return `Nothing lets chats on ${host || "this computer"} skip a permission prompt: they ask you each time.`;
+  return host
+    ? `What lets chats on ${host} go without asking you, as listed there: its settings, its trusted folders, and the .claude ` +
+      `settings of the folders Claude ran in. Revoke takes one out of its file on ${host}.`
+    : "What lets chats on this computer go without asking you: your settings and your administrator's, the folders you " +
+      "trusted, the .claude settings of the folders Claude ran in, and what you approved in them. Revoke takes one out of its file.";
 }
 
 export function grantMeta(g: WeekGrant): string {
@@ -310,6 +312,13 @@ export function grantMeta(g: WeekGrant): string {
 // week.py's list (which checks again that it's one of it)
 export function weekRevokeAsked(id: unknown): string | null {
   return typeof id === "string" && /^[0-9a-f]{12}$/.test(id) ? id : null;
+}
+
+// The SSH host a permission message is for: a plain name or "" (this
+// computer); the extension acts on it only if it's one of the hosts shown
+export function permsHost(host: unknown): string | null {
+  if (host === undefined || host === "") return "";
+  return typeof host === "string" && /^[A-Za-z0-9_.@-]{1,255}$/.test(host) && !host.startsWith("-") ? host : null;
 }
 
 export function ruleMeta(r: WeekRule): string {

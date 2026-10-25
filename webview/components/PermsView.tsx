@@ -43,9 +43,19 @@ export function PermsView({ rules }: { rules: boolean }) {
       {answer?.error ? <div class="error">Couldn't read your permissions: {answer.error}</div> : null}
       {data ? (
         <>
-          <Granted data={data} reload={ask} />
-          <Prompts data={data} rules={rules} reload={ask} />
-          <div class="week-foot small muted">Read from your settings and the chats on this computer, without using any tokens.</div>
+          {/* this computer's, then each SSH host's shown (as listed there) */}
+          {[{ host: "", ok: true, error: "", prompts: data.prompts, granted: data.granted }, ...(data.hosts ?? [])].map((src) =>
+            src.ok ? (
+              <div key={src.host} class="week">
+                <Granted granted={src.granted ?? []} host={src.host} reload={ask} />
+                <Prompts prompts={src.prompts ?? null} host={src.host} rules={rules} reload={ask} />
+              </div>
+            ) : (
+              <div key={src.host} class="msg error" role="alert">Couldn't read the permissions on {src.host}: {src.error || "no answer"}</div>
+            ))}
+          <div class="week-foot small muted">
+            Read from your settings and the chats on this computer{data.hosts?.length ? " and on the SSH hosts shown" : ""}, without using any tokens.
+          </div>
         </>
       ) : null}
     </div>
@@ -55,8 +65,9 @@ export function PermsView({ rules }: { rules: boolean }) {
 // The permission prompts you answered, and the rules that would have let
 // the most of them through (written only when you allow one; the settings
 // can leave them out)
-function Prompts({ data, rules: suggest, reload }: { data: PermsData; rules: boolean; reload: () => void }) {
-  const p = data.prompts;
+function Prompts({ prompts: p, host, rules: suggest, reload }: {
+  prompts: PermsData["prompts"] | null; host: string; rules: boolean; reload: () => void;
+}) {
   const ruleAnswer = useStore(weekRuleAnswer);
   const [asking, setAsking] = useState("");
   const [busy, setBusy] = useState("");
@@ -72,14 +83,14 @@ function Prompts({ data, rules: suggest, reload }: { data: PermsData; rules: boo
     setAsking("");
     setBusy(rule.id);
     post(allow
-      ? { type: "weekRule", allow: true, kind: rule.kind, value: rule.value, project: rule.project, id: "" }
-      : { type: "weekRule", allow: false, kind: "", value: "", project: "", id: rule.id });
+      ? { type: "weekRule", allow: true, kind: rule.kind, value: rule.value, project: rule.project, id: "", host }
+      : { type: "weekRule", allow: false, kind: "", value: "", project: "", id: rule.id, host });
   }
 
   return (
     <section class="week-section">
-      <h2>Permission prompts, last 7 days</h2>
-      <div>{p.answered ? promptsText(p) : "You answered no permission prompts on this computer in the last 7 days."}</div>
+      <h2>{host ? `Permission prompts on ${host}, last 7 days` : "Permission prompts, last 7 days"}</h2>
+      <div>{p.answered ? promptsText(p) : `You answered no permission prompts on ${host || "this computer"} in the last 7 days.`}</div>
       {p.byTool.length ? <div class="small muted">For: {p.byTool.map(([tool, n]) => `${tool} ${n}`).join(" · ")}</div> : null}
       {rules.length ? (
         <div class="small muted">
@@ -114,7 +125,7 @@ function Prompts({ data, rules: suggest, reload }: { data: PermsData; rules: boo
           </li>
         ))}
       </ul>
-      {ruleAnswer?.message ? (
+      {ruleAnswer?.message && ruleAnswer.host === host ? (
         <div class={"small" + (ruleAnswer.ok ? "" : " error")} role="status">{ruleAnswer.ok ? ruleAnswer.message : `Nothing changed: ${ruleAnswer.message}`}</div>
       ) : null}
     </section>
@@ -123,7 +134,7 @@ function Prompts({ data, rules: suggest, reload }: { data: PermsData; rules: boo
 
 // The permissions you gave: every rule and mode that lets chats on this
 // computer go without asking, each to revoke (it asks first)
-function Granted({ data, reload }: { data: PermsData; reload: () => void }) {
+function Granted({ granted, host, reload }: { granted: WeekGrant[]; host: string; reload: () => void }) {
   const answer = useStore(weekRevokeAnswer);
   const [asking, setAsking] = useState("");
   const [busy, setBusy] = useState("");
@@ -133,19 +144,18 @@ function Granted({ data, reload }: { data: PermsData; reload: () => void }) {
     setBusy("");
     reload();
   }, [answer]);
-  const granted = data.granted;
 
   function revoke(g: WeekGrant) {
     setAsking("");
     setBusy(g.id);
-    post({ type: "weekRevoke", id: g.id });
+    post({ type: "weekRevoke", id: g.id, host });
   }
 
   const shown = all ? granted : granted.slice(0, GRANTED_FEW);
   return (
     <section class="week-section">
-      <h2>Permissions you gave</h2>
-      <div class="small muted">{grantedIntro(granted)}</div>
+      <h2>{host ? `Permissions you gave on ${host}` : "Permissions you gave"}</h2>
+      <div class="small muted">{grantedIntro(granted, host)}</div>
       <ul class="week-rules">
         {shown.map((g) => (
           <li key={g.id} class="week-rule">
@@ -164,7 +174,8 @@ function Granted({ data, reload }: { data: PermsData; reload: () => void }) {
             </span>
             {busy === g.id ? <span class="small muted">…</span>
               : g.shared ? (
-                <span class="small muted" title="This folder's .claude/settings.json is shared with whoever uses its repository: change it there.">In git</span>
+                g.managed ? <span class="small muted" title="Set by your administrator (/etc/claude-code): it can't be changed here.">Administrator's</span>
+                : <span class="small muted" title="This folder's .claude/settings.json is shared with whoever uses its repository: change it there.">In git</span>
               ) : asking !== g.id ? (
                 <button type="button" class="chip" disabled={!!busy} onClick={() => setAsking(g.id)}>Revoke…</button>
               ) : null}
@@ -174,7 +185,7 @@ function Granted({ data, reload }: { data: PermsData; reload: () => void }) {
       {!all && granted.length > GRANTED_FEW ? (
         <button type="button" class="chip" onClick={() => setAll(true)}>Show {granted.length - GRANTED_FEW} more</button>
       ) : null}
-      {answer?.message ? (
+      {answer?.message && answer.host === host ? (
         <div class={"small" + (answer.ok ? "" : " error")} role="status">{answer.ok ? answer.message : `Nothing changed: ${answer.message}`}</div>
       ) : null}
     </section>

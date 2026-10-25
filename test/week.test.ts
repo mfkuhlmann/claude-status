@@ -181,14 +181,18 @@ test("Allow and Undo reach the backend only as rules; the answer goes back to th
   receive({ type: "weekRule", allow: true, kind: "allow", value: "Bash(git log *)", project: "/w/app", id: "" });
   receive({ type: "weekRule", allow: true, kind: "allow", value: "Bash(git log *)", project: "../app", id: "" });
   receive({ type: "weekRule", allow: false, kind: "", value: "", project: "", id: "a1b2c3d4e5f6" });
+  receive({ type: "weekRule", allow: false, kind: "", value: "", project: "", id: "a1b2c3d4e5f6", host: "lab" });
+  receive({ type: "weekRule", allow: false, kind: "", value: "", project: "", id: "a1b2c3d4e5f6", host: "-oProxyCommand=x" });
   assert.deepEqual(calls, [
-    { name: "weekRule", args: [{ allow: true, kind: "allow", value: "Bash(git log *)", project: "/w/app" }] },
-    { name: "weekRule", args: [{ allow: false, id: "a1b2c3d4e5f6" }] },
+    { name: "weekRule", args: [{ allow: true, kind: "allow", value: "Bash(git log *)", project: "/w/app" }, ""] },
+    { name: "weekRule", args: [{ allow: false, id: "a1b2c3d4e5f6" }, ""] },
+    { name: "weekRule", args: [{ allow: false, id: "a1b2c3d4e5f6" }, "lab"] }, // (the dashboard acts only on a host shown)
   ]);
   await new Promise((r) => setTimeout(r, 0));
   assert.deepEqual(posted, [
-    { type: "weekRule", id: "", ok: true, message: "done" },
-    { type: "weekRule", id: "a1b2c3d4e5f6", ok: true, message: "done" },
+    { type: "weekRule", id: "", host: "", ok: true, message: "done" },
+    { type: "weekRule", id: "a1b2c3d4e5f6", host: "", ok: true, message: "done" },
+    { type: "weekRule", id: "a1b2c3d4e5f6", host: "lab", ok: true, message: "done" },
   ]);
 });
 
@@ -197,9 +201,10 @@ test("the Permissions tab asks for what it shows; the answer goes back to the pa
   receive({ type: "perms" });
   assert.deepEqual(calls, [{ name: "perms", args: [] }]);
   await new Promise((r) => setTimeout(r, 0));
-  const answer = posted[0] as { type: string; data: { prompts: unknown; granted: unknown[] } | null; error: string };
+  const answer = posted[0] as { type: string; data: { prompts: unknown; granted: unknown[]; hosts: { host: string }[] } | null; error: string };
   assert.equal(answer.type, "perms");
-  assert.equal(answer.data?.granted.length, 4);
+  assert.equal(answer.data?.granted.length, 5);
+  assert.deepEqual(answer.data?.hosts.map((h) => h.host), ["build-server"]);
   assert.equal(answer.error, "");
 });
 
@@ -207,9 +212,12 @@ test("Revoke reaches the backend only as an id; the answer goes back to the page
   const { calls, posted, receive } = setup();
   receive({ type: "weekRevoke", id: "../../.ssh" });
   receive({ type: "weekRevoke", id: "a1b2c3d4e5f6" });
-  assert.deepEqual(calls, [{ name: "weekRevoke", args: ["a1b2c3d4e5f6"] }]);
+  receive({ type: "weekRevoke", id: "a1b2c3d4e5f6", host: "lab" });
+  receive({ type: "weekRevoke", id: "a1b2c3d4e5f6", host: "a b" });
+  assert.deepEqual(calls, [{ name: "weekRevoke", args: ["a1b2c3d4e5f6", ""] }, { name: "weekRevoke", args: ["a1b2c3d4e5f6", "lab"] }]);
   await new Promise((r) => setTimeout(r, 0));
-  assert.deepEqual(posted, [{ type: "weekRevoke", id: "a1b2c3d4e5f6", ok: true, message: "done" }]);
+  assert.deepEqual(posted, [{ type: "weekRevoke", id: "a1b2c3d4e5f6", host: "", ok: true, message: "done" },
+    { type: "weekRevoke", id: "a1b2c3d4e5f6", host: "lab", ok: true, message: "done" }]);
 });
 
 test("a week's chat opens only with an id and account folder that are ones; a tip's command is all that's copied", () => {

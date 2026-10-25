@@ -543,6 +543,15 @@ export function demoPerms(now: number): PermsData {
       { id: "a9b8c7d6e5f4", kind: "allow", value: "WebSearch", title: "WebSearch", place: "chats started in webapp (shared through git)",
         where: "~/projects/webapp/.claude/settings.json", shared: true, added: false,
         change: "takes WebSearch out of permissions.allow in ~/projects/webapp/.claude/settings.json" },
+      { id: "7a6b5c4d3e2f", kind: "trust", value: "/home/alice/projects/webapp", folder: "/home/alice/projects/webapp",
+        title: "Trusted folder: ~/projects/webapp", place: "for personal", where: "~/.claude-personal/.claude.json", shared: false,
+        added: false, change: "marks ~/projects/webapp untrusted in ~/.claude-personal/.claude.json: Claude asks again before it works there" },
+    ],
+    hosts: [
+      { host: "build-server", ok: true, error: "", prompts: { answered: 0, refused: 0, waitMs: 0, byTool: [], rules: [] },
+        granted: [{ id: "1b2c3d4e5f6a", kind: "flag", value: "skipDangerousModePermissionPrompt", folder: "",
+          title: "Bypass permissions mode starts without its warning", place: "every chat of team", where: "~/.claude/settings.json",
+          shared: false, added: false, change: "sets skipDangerousModePermissionPrompt to false in ~/.claude/settings.json" }] },
     ],
   };
 }

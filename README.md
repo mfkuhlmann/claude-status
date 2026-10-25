@@ -133,9 +133,12 @@ As an editor tab (**Claude Status: Open in Editor Tab**):
   and only while the tab is open: the first time takes a few seconds, after
   that only what's new is read.
 - **The permissions you gave, in one place**: the view's **Permissions** tab
-  lists every rule and mode that lets chats on this computer go without
-  asking you, wherever it is (your settings, the `.claude` settings of every
-  folder Claude ran in), and **Revoke…** takes one out of its file. Under it,
+  lists everything that lets chats go without asking you, here and on the
+  SSH hosts shown: the rules and modes in your settings, your administrator's
+  and every folder's `.claude` settings, approved `.mcp.json` servers, the
+  settings that loosen a check, and the folders you trusted. **Revoke…**
+  changes that one entry in its file (on the host for a host's; a trusted
+  folder is marked untrusted). Under it,
   the permission prompts you answered in the last 7 days, with the rules
   that would have let the most of them through (**Allow…** writes one,
   **Undo** takes it back; `claudeStatus.recapRules` leaves them out).
