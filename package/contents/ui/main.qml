@@ -667,6 +667,19 @@ PlasmoidItem {
         expandedPeek = next
     }
 
+    // The right-click menu's default account choices: one is checked
+    PlasmaCore.ActionGroup {
+        id: defaultAccountGroup
+    }
+
+    // A click checks its choice at once (and unchecks the others): until the
+    // switch lands, or if it's refused, they show what the status says
+    function pickDefault(group) {
+        makeDefault(group)
+        for (const a of [defaultChoice0, defaultChoice1, defaultChoice2, defaultChoice3])
+            a.checked = Qt.binding(() => a.account !== null && a.account.defaultHere === true)
+    }
+
     Plasmoid.contextualActions: [
         PlasmaCore.Action {
             text: i18n("Refresh")
@@ -690,54 +703,52 @@ PlasmoidItem {
             icon.name: "internet-web-browser"
             onTriggered: Qt.openUrlExternally("https://claude.ai/settings/usage")
         },
-        // The default account, as the settings' Accounts page makes it (up to four here)
+        // The default account, as the settings' Accounts page makes it (up to four
+        // here): radio buttons under a heading, as there is only one
         PlasmaCore.Action {
             isSeparator: true
+            text: i18n("Default Account")
             visible: root.defaultChoices.length > 1
         },
         PlasmaCore.Action {
+            id: defaultChoice0
             readonly property var account: root.defaultChoices[0] || null
-            visible: account !== null
-            text: account ? i18n("Default Account: %1", account.title) : ""
+            visible: root.defaultChoices.length > 1
+            text: account ? account.title : ""
             checkable: true
+            actionGroup: defaultAccountGroup
             checked: account !== null && account.defaultHere === true
-            onTriggered: {
-                root.makeDefault(account)
-                checked = Qt.binding(() => account !== null && account.defaultHere === true)   // (it follows the status)
-            }
+            onTriggered: root.pickDefault(account)
         },
         PlasmaCore.Action {
+            id: defaultChoice1
             readonly property var account: root.defaultChoices[1] || null
             visible: account !== null
-            text: account ? i18n("Default Account: %1", account.title) : ""
+            text: account ? account.title : ""
             checkable: true
+            actionGroup: defaultAccountGroup
             checked: account !== null && account.defaultHere === true
-            onTriggered: {
-                root.makeDefault(account)
-                checked = Qt.binding(() => account !== null && account.defaultHere === true)   // (it follows the status)
-            }
+            onTriggered: root.pickDefault(account)
         },
         PlasmaCore.Action {
+            id: defaultChoice2
             readonly property var account: root.defaultChoices[2] || null
             visible: account !== null
-            text: account ? i18n("Default Account: %1", account.title) : ""
+            text: account ? account.title : ""
             checkable: true
+            actionGroup: defaultAccountGroup
             checked: account !== null && account.defaultHere === true
-            onTriggered: {
-                root.makeDefault(account)
-                checked = Qt.binding(() => account !== null && account.defaultHere === true)   // (it follows the status)
-            }
+            onTriggered: root.pickDefault(account)
         },
         PlasmaCore.Action {
+            id: defaultChoice3
             readonly property var account: root.defaultChoices[3] || null
             visible: account !== null
-            text: account ? i18n("Default Account: %1", account.title) : ""
+            text: account ? account.title : ""
             checkable: true
+            actionGroup: defaultAccountGroup
             checked: account !== null && account.defaultHere === true
-            onTriggered: {
-                root.makeDefault(account)
-                checked = Qt.binding(() => account !== null && account.defaultHere === true)   // (it follows the status)
-            }
+            onTriggered: root.pickDefault(account)
         }
     ]
 

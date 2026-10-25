@@ -603,6 +603,22 @@ class SshUsageTests(unittest.TestCase):
         self.assertIn("visible: !section.group.limitsHidden", section)
 
 
+class DefaultAccountMenuTests(unittest.TestCase):
+    def test_the_right_click_menus_accounts_are_one_choice(self):
+        # Radio buttons in one exclusive group (checkboxes said you could
+        # pick two); a click re-reads every choice from the status, as the
+        # group unchecks the old default before the switch has happened
+        main = (ROOT / "ui/main.qml").read_text()
+        choices = re.findall(r"id: (defaultChoice\d)\n\s*readonly property var account: root\.defaultChoices\[\d\] \|\| null\n"
+                             r"((?:\s+.*\n)*?)\s+onTriggered: root\.pickDefault\(account\)", main)
+        self.assertEqual(len(choices), 4)
+        for name, body in choices:
+            self.assertIn("actionGroup: defaultAccountGroup", body, name)
+        pick = main[main.index("function pickDefault("):]
+        pick = pick[:pick.index("\n    }\n")]
+        self.assertIn("[" + ", ".join(name for name, _ in choices) + "]", pick)
+
+
 class SearchAndNewChatBoxTests(unittest.TestCase):
     def test_a_box_made_while_its_list_is_open_shows_the_task(self):
         # A plan's new-chat box is made again when the plans are folded and
