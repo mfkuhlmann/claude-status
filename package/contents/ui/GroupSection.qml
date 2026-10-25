@@ -473,8 +473,16 @@ ColumnLayout {
                         anchors.fill: parent
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: section.remoteHost ? root.remoteOpen(section.remoteHost, sharedLine.chat.openCommand)
-                                                      : root.jumpTo(sharedLine.chat.sessionId, sharedLine.chat.profileDir)
+                        // as a click on the chat's own name (its row, under the account it's used on)
+                        onClicked: {
+                            const row = root.listedRow(sharedLine.chat.sessionId, sharedLine.chat.profileDir, section.remoteHost)
+                            if (row)
+                                root.clickChat(row, section.remoteHost)
+                            else if (section.remoteHost)
+                                root.remoteOpen(section.remoteHost, sharedLine.chat.openCommand)
+                            else
+                                root.jumpTo(sharedLine.chat.sessionId, sharedLine.chat.profileDir)
+                        }
                     }
                 }
             }
