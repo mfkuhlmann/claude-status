@@ -120,6 +120,7 @@ export function buildWeekView(ctx) {
     view.add_child(models);
     view.add_child(buildSpend(ctx, recap, cur));
     view.add_child(buildPrompts(ctx, recap));
+    view.add_child(buildGranted(ctx, recap));
     view.add_child(buildTips(ctx, recap));
     view.add_child(paragraph(L.weekFootText(recap), 'claude-small claude-dim claude-week-foot'));
     return view;
@@ -427,11 +428,12 @@ function buildPrompts(ctx, recap) {
     section.add_child(paragraph(L.weekPromptsText(p), ''));
     if (p.byTool.length)
         section.add_child(paragraph(`For: ${p.byTool.map(([tool, n]) => `${tool} ${n}`).join(' · ')}`, 'claude-small claude-dim'));
-    if (p.rules.length)
+    const rules = week.rules ? p.rules : [];   // (the settings can leave them out)
+    if (rules.length)
         section.add_child(paragraph('These rules would have let the most of them through. One you allow goes into the ' +
             '.claude/settings.local.json of the folder the chats started in (not shared through git), and only chats started there follow it.',
         'claude-small claude-dim'));
-    for (const r of p.rules) {
+    for (const r of rules) {
         const line = box('claude-week-tip', {x_expand: true});
         const text = column('', {x_expand: true});
         text.add_child(paragraph(r.title, ''));
@@ -462,7 +464,51 @@ function buildPrompts(ctx, recap) {
         }
         section.add_child(line);
     }
-    if (week.ruleMessage)
+    if (week.ruleMessage && !week.ruleRevoked)
+        section.add_child(paragraph(week.ruleMessage, 'claude-small'));
+    return section;
+}
+
+// The permissions you gave: every rule and mode that lets chats on this
+// computer go without asking, each to revoke (it asks first)
+function buildGranted(ctx, recap) {
+    const section = column('claude-week-section', {x_expand: true});
+    if (!recap.granted)
+        return section;
+    const week = ctx.week;
+    section.add_child(heading('Permissions you gave'));
+    section.add_child(paragraph(L.weekGrantedIntro(recap.granted), 'claude-small claude-dim'));
+    for (const g of L.weekGrantedShown(recap.granted, week.allGranted)) {
+        const line = box('claude-week-tip', {x_expand: true});
+        const text = column('', {x_expand: true});
+        text.add_child(paragraph(g.title, ''));
+        text.add_child(paragraph(L.weekGrantMeta(g), 'claude-small claude-dim'));
+        if (week.revoking === g.id) {
+            text.add_child(paragraph(`This ${g.change}.`, 'claude-small'));
+            const buttons = box('claude-week-accounts');
+            buttons.add_child(textButton('Revoke', () => ctx.revokeWeekGrant(g), 'claude-chip claude-chip-on'));
+            buttons.add_child(textButton('Cancel', () => ctx.weekRevokeAsk(''), 'claude-chip'));
+            text.add_child(buttons);
+        }
+        line.add_child(text);
+        if (week.ruleBusy === g.id) {
+            line.add_child(label('…', 'claude-small claude-dim', {y_align: Clutter.ActorAlign.START}));
+        } else if (g.shared) {
+            const git = label('In git', 'claude-small claude-dim', {y_align: Clutter.ActorAlign.START});
+            ctx.tips.add(git, ['Shared through git', "This folder's .claude/settings.json is shared with whoever uses its repository: change it there."]);
+            line.add_child(git);
+        } else if (week.revoking !== g.id) {
+            const revoke = textButton('Revoke…', () => ctx.weekRevokeAsk(g.id), 'claude-chip');
+            revoke.y_align = Clutter.ActorAlign.START;
+            revoke.reactive = !week.ruleBusy;
+            line.add_child(revoke);
+        }
+        section.add_child(line);
+    }
+    const more = recap.granted.length - L.WEEK_GRANTED_FEW;
+    if (!week.allGranted && more > 0)
+        section.add_child(textButton(`Show ${more} more`, () => ctx.weekShowAllGranted(), 'claude-chip'));
+    if (week.ruleMessage && week.ruleRevoked)
         section.add_child(paragraph(week.ruleMessage, 'claude-small'));
     return section;
 }

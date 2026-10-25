@@ -1397,3 +1397,28 @@ export function weekArgs(back, account, shownHosts, remote, configDirArgs, curre
 export function weekRuleArgs(rule, allow) {
     return allow ? ['--allow', rule.kind, rule.value, rule.project] : ['--undo', rule.id];
 }
+
+// The permissions you gave (week.py's granted list): the first few, until
+// you ask for all
+export const WEEK_GRANTED_FEW = 8;
+
+export function weekGrantedShown(granted, all) {
+    return all ? granted : granted.slice(0, WEEK_GRANTED_FEW);
+}
+
+export function weekGrantedIntro(granted) {
+    return granted.length
+        ? 'What lets chats on this computer go without asking you: your settings, and the .claude settings of the folders ' +
+          "Claude ran in, with the rules it saved when you answered “don't ask again”. Revoke takes one out of its file."
+        : 'Nothing lets chats on this computer skip a permission prompt: they ask you each time.';
+}
+
+export function weekGrantMeta(g) {
+    return `${g.place} · ${g.where}`;
+}
+
+// week.py's arguments to take one of them out of its file (with the extra
+// Claude folders, so it finds the same list)
+export function weekRevokeArgs(grant, configDirArgs) {
+    return ['--revoke', grant.id, ...configDirArgs];
+}

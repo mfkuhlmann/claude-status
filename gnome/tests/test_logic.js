@@ -535,6 +535,13 @@ test('trend lines, what Claude did, where the money went, the prompts you answer
     eq(L.weekRuleMeta(rule), '3 prompts · e.g. ~/lib/x');
     eq(L.weekRuleArgs(rule, true), ['--allow', 'dir', '/h/lib', '/h/app']);
     eq(L.weekRuleArgs(rule, false), ['--undo', 'a1b2c3d4e5f6']);
+    // the permissions you gave: the first few, each to revoke with the same Claude folders
+    const grant = {id: 'f6d8dba1ebf0', place: 'chats started in app', where: '~/app/.claude/settings.local.json'};
+    eq(L.weekGrantMeta(grant), 'chats started in app · ~/app/.claude/settings.local.json');
+    eq(L.weekRevokeArgs(grant, ['--config-dir', '/x']), ['--revoke', 'f6d8dba1ebf0', '--config-dir', '/x']);
+    const many = Array.from({length: 11}, (_, i) => ({...grant, id: String(i)}));
+    eq([L.weekGrantedShown(many, false).length, L.weekGrantedShown(many, true).length], [L.WEEK_GRANTED_FEW, 11]);
+    eq(L.weekGrantedIntro([]), 'Nothing lets chats on this computer skip a permission prompt: they ask you each time.');
     const w = {key: 'five_hour', resetsAt: 10 * HOUR, points: [[HOUR, 5]]};
     eq(L.weekWindowSpan(w), [5 * HOUR, 10 * HOUR]);
     eq(L.weekResetText(10 * HOUR, 9 * HOUR), `resets ${new Date(10 * HOUR).getHours().toString().padStart(2, '0')}:00`);

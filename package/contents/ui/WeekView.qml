@@ -28,6 +28,7 @@ PlasmaComponents3.ScrollView {
     readonly property var spend: recap && recap.spend ? recap.spend : null
     readonly property var work: recap && recap.work ? recap.work : null
     readonly property var prompts: recap && recap.prompts ? recap.prompts : null
+    readonly property var granted: recap && recap.granted ? recap.granted : []
     readonly property var currency: recap && recap.currency ? recap.currency : ({ code: "USD", rate: 1, date: "", error: "" })
     readonly property bool hasData: !!sum && (sum.workedMs > 0 || sum.prompts > 0 || sum.cost > 0)
     readonly property real maxProject: Math.max(1, ...projects.map(p => p.workedMs))
@@ -35,6 +36,9 @@ PlasmaComponents3.ScrollView {
     property string openDay: ""       // the day whose chats are unfolded
     property string openProject: ""   // the project folder whose chats are unfolded: host|path
     property string confirmRule: ""   // the rule whose Allow asks first: its id
+    property string confirmGrant: ""  // the permission whose Revoke asks first: its id
+    property bool allGranted: false   // all the permissions you gave shown, not the first few
+    readonly property int grantedFew: 8
 
     // One hue for Claude's work (darker where several chats ran at once), the
     // text color for you, orange (as for a chat that needs you) for Claude
@@ -60,6 +64,8 @@ PlasmaComponents3.ScrollView {
                                            chatCount: 0 })
     readonly property var emptyRule: ({ kind: "", value: "", project: "", count: 0, waitMs: 0, example: "", id: "",
                                         state: "", title: "", change: "" })
+    readonly property var emptyGrant: ({ id: "", kind: "", value: "", title: "", place: "", where: "", shared: false,
+                                         added: false, change: "" })
     readonly property var emptyWindow: ({ key: "", label: "", resetsAt: 0, pct: 0, points: [] })
     readonly property var emptyModel: ({ model: "", cost: 0, tokens: 0, requests: 0, share: 0 })
     readonly property var emptyChat: ({ name: "", chatId: "", host: "", profileDir: "", folder: "", workedMs: 0, cost: 0,
@@ -73,6 +79,17 @@ PlasmaComponents3.ScrollView {
     contentWidth: availableWidth
     contentHeight: sheet.implicitHeight
     PlasmaComponents3.ScrollBar.horizontal.policy: PlasmaComponents3.ScrollBar.AlwaysOff
+
+    // A permission you gave: a folder, a mode, a command, the web
+    function grantIcon(g) {
+        if (g.kind === "dir")
+            return "folder-open"
+        if (g.kind === "mode")
+            return g.value === "acceptEdits" ? "document-edit" : "security-low"
+        if (g.value.indexOf("WebFetch") === 0 || g.value === "WebSearch")
+            return "globe"
+        return g.value.indexOf("Bash") === 0 ? "utilities-terminal" : "checkmark"
+    }
 
     // 3h 05m, 45m: a week of work reads better in hours than in days
     function hours(ms) {
@@ -1183,14 +1200,14 @@ PlasmaComponents3.ScrollView {
             PlasmaComponents3.Label {
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
-                visible: !!view.prompts && view.prompts.rules.length > 0
+                visible: root.weekRules && !!view.prompts && view.prompts.rules.length > 0
                 wrapMode: Text.Wrap
                 font: Kirigami.Theme.smallFont
                 opacity: 0.7
                 text: i18n("These rules would have let the most of them through. One you allow goes into the .claude/settings.local.json of the folder the chats started in (not shared through git), and only chats started there follow it.")
             }
             Repeater {
-                model: view.prompts ? view.prompts.rules.length : 0
+                model: root.weekRules && view.prompts ? view.prompts.rules.length : 0   // (the settings can leave them out)
                 delegate: ColumnLayout {
                     id: ruleRow
                     required property int index
@@ -1309,7 +1326,147 @@ PlasmaComponents3.ScrollView {
             PlasmaComponents3.Label {
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
-                visible: root.weekRuleMessage !== ""
+                visible: root.weekRuleMessage !== "" && !root.weekRuleRevoked
+                wrapMode: Text.Wrap
+                font: Kirigami.Theme.smallFont
+                text: root.weekRuleMessage
+            }
+        }
+
+        // The permissions you gave: every rule and mode that lets chats on
+        // this computer go without asking, each to revoke (it asks first)
+        ColumnLayout {
+            Layout.fillWidth: true
+            visible: view.hasData && !!view.recap && !!view.recap.granted
+            spacing: Math.round(view.gu * 0.2)
+
+            Kirigami.Heading {
+                textFormat: Text.PlainText
+                level: 4
+                text: i18n("Permissions you gave")
+            }
+            PlasmaComponents3.Label {
+                textFormat: Text.PlainText
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                font: Kirigami.Theme.smallFont
+                opacity: 0.7
+                text: view.granted.length
+                      ? i18n("What lets chats on this computer go without asking you: your settings, and the .claude settings of the folders Claude ran in, with the rules it saved when you answered “don't ask again”. Revoke takes one out of its file.")
+                      : i18n("Nothing lets chats on this computer skip a permission prompt: they ask you each time.")
+            }
+            Repeater {
+                model: view.allGranted ? view.granted.length : Math.min(view.granted.length, view.grantedFew)
+                delegate: ColumnLayout {
+                    id: grantRow
+                    required property int index
+                    readonly property var grant: view.granted[index] || view.emptyGrant
+                    readonly property bool asking: view.confirmGrant !== "" && view.confirmGrant === grant.id
+                    Layout.fillWidth: true
+                    spacing: Math.round(view.gu * 0.2)
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: Kirigami.Units.smallSpacing
+
+                        Kirigami.Icon {
+                            Layout.alignment: Qt.AlignTop
+                            Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                            Layout.preferredHeight: Kirigami.Units.iconSizes.small
+                            source: view.grantIcon(grantRow.grant)
+                            opacity: 0.8
+                        }
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 0
+
+                            PlasmaComponents3.Label {
+                                textFormat: Text.PlainText
+                                Layout.fillWidth: true
+                                wrapMode: Text.Wrap
+                                text: grantRow.grant.title
+                            }
+                            PlasmaComponents3.Label {
+                                textFormat: Text.PlainText
+                                Layout.fillWidth: true
+                                wrapMode: Text.Wrap
+                                text: grantRow.grant.place + " · " + grantRow.grant.where
+                                font: Kirigami.Theme.smallFont
+                                opacity: 0.7
+                            }
+                        }
+                        PlasmaComponents3.Label {
+                            textFormat: Text.PlainText
+                            Layout.alignment: Qt.AlignTop
+                            visible: grantRow.grant.shared
+                            text: i18n("In git")
+                            font: Kirigami.Theme.smallFont
+                            opacity: 0.7
+
+                            PlasmaCore.ToolTipArea {
+                                textFormat: Text.PlainText
+                                anchors.fill: parent
+                                mainText: i18n("Shared through git")
+                                subText: i18n("This folder's .claude/settings.json is shared with whoever uses its repository: change it there.")
+                            }
+                        }
+                        PlasmaComponents3.Button {
+                            Layout.alignment: Qt.AlignTop
+                            visible: !grantRow.grant.shared && !grantRow.asking && root.weekRuleBusy !== grantRow.grant.id
+                            enabled: root.weekRuleBusy === ""
+                            text: i18n("Revoke…")
+                            onClicked: view.confirmGrant = grantRow.grant.id
+                        }
+                        PlasmaComponents3.BusyIndicator {
+                            Layout.alignment: Qt.AlignTop
+                            Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                            Layout.preferredHeight: Kirigami.Units.iconSizes.small
+                            visible: root.weekRuleBusy !== "" && root.weekRuleBusy === grantRow.grant.id
+                            running: visible
+                        }
+                    }
+                    // Revoke asks first, saying what changes where
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Layout.leftMargin: Kirigami.Units.iconSizes.small + Kirigami.Units.smallSpacing
+                        visible: grantRow.asking
+                        spacing: Kirigami.Units.smallSpacing
+
+                        PlasmaComponents3.Label {
+                            textFormat: Text.PlainText
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            font: Kirigami.Theme.smallFont
+                            text: i18n("This %1.", grantRow.grant.change)
+                        }
+                        RowLayout {
+                            spacing: Kirigami.Units.smallSpacing
+
+                            PlasmaComponents3.Button {
+                                icon.name: "edit-delete-remove"
+                                text: i18n("Revoke")
+                                onClicked: {
+                                    view.confirmGrant = ""
+                                    root.revokeWeekGrant(grantRow.grant)
+                                }
+                            }
+                            PlasmaComponents3.Button {
+                                text: i18n("Cancel")
+                                onClicked: view.confirmGrant = ""
+                            }
+                        }
+                    }
+                }
+            }
+            PlasmaComponents3.ToolButton {
+                visible: !view.allGranted && view.granted.length > view.grantedFew
+                text: i18np("Show %1 more", "Show %1 more", view.granted.length - view.grantedFew)
+                onClicked: view.allGranted = true
+            }
+            PlasmaComponents3.Label {
+                textFormat: Text.PlainText
+                Layout.fillWidth: true
+                visible: root.weekRuleMessage !== "" && root.weekRuleRevoked
                 wrapMode: Text.Wrap
                 font: Kirigami.Theme.smallFont
                 text: root.weekRuleMessage

@@ -49,6 +49,7 @@ KCM.SimpleKCM {
     property string cfg_sshUsage
     property string cfg_markdownApp
     property string cfg_recapCurrency
+    property alias cfg_recapRules: recapRules.checked
     property alias cfg_notifySound: notifySound.checked
     property alias cfg_soundVolume: soundVolume.value
     property alias cfg_soundWaiting: soundWaiting.value
@@ -86,6 +87,7 @@ KCM.SimpleKCM {
     property string cfg_sshUsageDefault
     property string cfg_markdownAppDefault
     property string cfg_recapCurrencyDefault
+    property bool cfg_recapRulesDefault
     property bool cfg_notifySoundDefault
     property int cfg_soundVolumeDefault
     property string cfg_soundWaitingDefault
@@ -477,6 +479,19 @@ KCM.SimpleKCM {
             font: Kirigami.Theme.smallFont
             opacity: 0.7
             text: i18n("Claude's API prices are in US dollars. For another currency, the Recap tab downloads the European Central Bank's reference rates of the day from ecb.europa.eu, at most every 6 hours and only while the tab is open; offline, it uses the last rates it has. Nothing about your chats is sent.")
+        }
+
+        QQC2.CheckBox {
+            id: recapRules
+            text: i18n("Suggest rules for the permission prompts you answered")
+        }
+
+        QQC2.Label {
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 20
+            wrapMode: Text.Wrap
+            font: Kirigami.Theme.smallFont
+            opacity: 0.7
+            text: i18n("The Recap tab offers rules that would have let those prompts go without asking, each with an Allow… button. Off, it only counts the prompts, and there's nothing to allow by mistake. Either way it lists the permissions you gave, to revoke them.")
         }
 
         QQC2.ComboBox {

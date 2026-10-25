@@ -147,6 +147,10 @@
       <label>The reasoning effort new chats start with, picked in the new-chat box (low, medium, high, xhigh, max; empty: Claude's default)</label>
       <default>xhigh</default>
     </entry>
+    <entry name="recapRules" type="Bool">
+      <label>The Recap tab suggests rules for the permission prompts you answered, each with an Allow button</label>
+      <default>true</default>
+    </entry>
     <entry name="recapCurrency" type="String">
       <label>The currency of the Recap tab's amounts (USD, or another at the European Central Bank's rate of the day)</label>
       <default>USD</default>

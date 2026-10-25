@@ -522,8 +522,8 @@ class PlanTests(Home):
         self.assertEqual(self.recap(back=1, usage=plans)["plan"], [])
 
 
-class PromptTests(Home):
-    """The permission prompts you answered, and rules that let them through."""
+class Projects(Home):
+    """Two of your projects, ~/repos/app (where the chats start) and ~/repos/lib."""
 
     def setUp(self):
         super().setUp()
@@ -552,6 +552,10 @@ class PromptTests(Home):
             tr.result(s + 60_000, "T%d" % i, **dict({"source": "user_temporary"}, **kw))
         tr.duration(t0 + 1200_000, 600_000)
         self.write(tr)
+
+
+class PromptTests(Projects):
+    """The permission prompts you answered, and rules that let them through."""
 
     def test_rules_for_the_prompts_you_answered(self):
         self.asked()
@@ -625,6 +629,83 @@ class PromptTests(Home):
         cs.write_json_atomic(self.settings, ["not", "settings"])
         self.assertFalse(week.allow_rule(self.home, self.cache_root, "allow", "Bash(ls *)", app)[0])
         self.assertEqual(json.loads(self.settings.read_text()), ["not", "settings"])
+
+
+class GrantedTests(Projects):
+    """The permissions you gave: every rule and mode that lets chats go
+    without asking, and revoking them."""
+
+    def setUp(self):
+        super().setUp()
+        # one user settings file for both accounts (a link from each), and
+        # the folders Claude ran in, as each account's .claude.json lists them
+        self.user = self.home / ".claude-shared/settings.json"
+        self.user.parent.mkdir()
+        cs.write_json_atomic(self.user, {"model": "opus", "permissions": {"allow": ["Bash(npm test *)"], "defaultMode": "default"}})
+        for name in ("work", "personal"):
+            (self.home / (".claude-" + name) / "settings.json").symlink_to(self.user)
+        data = json.loads((self.home / ".claude-work/.claude.json").read_text())
+        data["projects"] = {str(self.app): {}, str(self.lib): {}, "/gone": {}}
+        (self.home / ".claude-work/.claude.json").write_text(json.dumps(data))
+        cs.write_json_atomic(self.settings, {"permissions": {"allow": ["Bash(git log *)", "WebFetch(domain:docs.example.org)"],
+                                                             "additionalDirectories": [str(self.lib)], "defaultMode": "acceptEdits"}})
+        self.settings.chmod(0o644)
+        cs.write_json_atomic(self.app / ".claude/settings.json", {"permissions": {"allow": ["WebSearch"], "deny": ["Bash(rm *)"]}})
+
+    def granted(self):
+        profiles = self.profiles()
+        return week.granted_rules(self.home, week.rule_folders(self.home, {"files": {}}, profiles), profiles,
+                                  week.load_added(self.cache_root))
+
+    def revoke(self, kind, value):
+        rid = next(g["id"] for g in self.granted() if (g["kind"], g["value"]) == (kind, value))
+        return week.revoke_rule(self.home, self.cache_root, self.profiles(), rid)
+
+    def test_every_rule_that_lets_chats_go_without_asking(self):
+        self.assertEqual([(g["kind"], g["value"], g["title"], g["place"], g["where"]) for g in self.granted()], [
+            ("allow", "Bash(npm test *)", "Run “npm test *”", "every chat of personal, work", "~/.claude-shared/settings.json"),
+            ("mode", "acceptEdits", "Accept file edits without asking", "chats started in app", "~/repos/app/.claude/settings.local.json"),
+            ("dir", str(self.lib), "Read files in ~/repos/lib", "chats started in app", "~/repos/app/.claude/settings.local.json"),
+            ("allow", "Bash(git log *)", "Run “git log *”", "chats started in app", "~/repos/app/.claude/settings.local.json"),
+            ("allow", "WebFetch(domain:docs.example.org)", "Open pages from docs.example.org", "chats started in app",
+             "~/repos/app/.claude/settings.local.json"),
+            ("allow", "WebSearch", "WebSearch", "chats started in app (shared through git)", "~/repos/app/.claude/settings.json")])
+        self.assertEqual([g["shared"] for g in self.granted()], [False] * 5 + [True])
+        self.assertEqual(self.granted()[3]["change"],
+                         "takes Bash(git log *) out of permissions.allow in ~/repos/app/.claude/settings.local.json")
+
+    def test_revoke_takes_it_out_of_its_file(self):
+        self.addCleanup(os.umask, os.umask(0o077))  # (as week.py runs)
+        self.assertTrue(self.revoke("allow", "Bash(git log *)")[0])
+        self.assertTrue(self.revoke("dir", str(self.lib))[0])
+        self.assertEqual(self.revoke("mode", "acceptEdits"), (True, "Revoked: Accept file edits without asking "
+                                                                    "(~/repos/app/.claude/settings.local.json)"))
+        self.assertEqual(json.loads(self.settings.read_text()), {"permissions": {"allow": ["WebFetch(domain:docs.example.org)"]}})
+        self.assertEqual(self.settings.stat().st_mode & 0o777, 0o644)  # (who may read it stays as it was)
+        # your user settings: the rest of the file stays, the links stay links
+        self.assertTrue(self.revoke("allow", "Bash(npm test *)")[0])
+        self.assertEqual(json.loads(self.user.read_text()), {"model": "opus", "permissions": {"defaultMode": "default"}})
+        self.assertTrue((self.home / ".claude-work/settings.json").is_symlink())
+
+    def test_what_it_never_revokes(self):
+        shared = self.app / ".claude/settings.json"
+        before = shared.read_text()
+        self.assertEqual(self.revoke("allow", "WebSearch"),
+                         (False, "~/repos/app/.claude/settings.json is shared through git: change it there"))
+        self.assertEqual(shared.read_text(), before)
+        self.assertEqual(week.revoke_rule(self.home, self.cache_root, self.profiles(), "0123456789ab"),
+                         (False, "That rule isn't in your settings any more"))
+
+    def test_revoking_a_rule_the_recap_allowed_puts_back_what_was_before(self):
+        self.asked()
+        week.updated_cache(self.cache_root, self.profiles(), self.now)
+        cs.write_json_atomic(self.settings, {"permissions": {"defaultMode": "plan"}})
+        self.assertTrue(week.allow_rule(self.home, self.cache_root, "edits", str(self.app), str(self.app))[0])
+        mode = next(g for g in self.granted() if g["kind"] == "mode")
+        self.assertTrue(mode["added"])
+        self.assertTrue(self.revoke("mode", "acceptEdits")[0])
+        self.assertEqual(json.loads(self.settings.read_text()), {"permissions": {"defaultMode": "plan"}})
+        self.assertEqual(week.load_added(self.cache_root), [])
 
 
 RATES = """<?xml version="1.0" encoding="UTF-8"?>

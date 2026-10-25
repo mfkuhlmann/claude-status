@@ -105,6 +105,8 @@ export default class ClaudeStatusPreferences extends ExtensionPreferences {
             'show-pet'));
         look.add(toggle('show-tokens', 'Show token totals', 'from local transcripts'));
         look.add(this._currencyRow(settings));
+        look.add(toggle('recap-rules', 'Suggest rules for the permission prompts you answered',
+            "The Recap tab offers rules that would have let them go without asking, each with an Allow… button. Off, it only counts the prompts, and there's nothing to allow by mistake. Either way it lists the permissions you gave, to revoke them."));
         page.add(look);
 
         window.add(this._accountsPage(window, settings));

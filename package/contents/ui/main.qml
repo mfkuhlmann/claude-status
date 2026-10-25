@@ -354,7 +354,7 @@ PlasmoidItem {
         "notifyDoneMinSeconds", "notifySound", "soundVolume", "soundWaiting", "soundDone", "soundFailed", "recentChats",
         "sshHosts", "remotePollSeconds", "sshUsage", "keepDoneHours", "showUsageInPanel", "showPet", "chatPets", "showTokens",
         "newChatInVscode", "iconBlink", "awayDigest", "awayMinutes", "phoneWhileAway", "phoneFinished", "phoneDevice",
-        "markdownApp", "newChatModel", "newChatEffort", "newChatMode", "usageCap"]
+        "markdownApp", "newChatModel", "newChatEffort", "newChatMode", "usageCap", "recapRules"]
     property real settingsSeenAt: 0     // the newest shared settings this copy has seen
     property string settingsSeen: ""    // its own settings as of the last check (to see changes)
 
@@ -2489,8 +2489,10 @@ PlasmoidItem {
     property string weekAsked: ""     // the command whose answer is awaited
     readonly property bool weekShown: popupTab === "week" && dashboardShown && !coveredByWindow
     readonly property string weekCurrency: Plasmoid.configuration.recapCurrency || "USD"
+    readonly property bool weekRules: Plasmoid.configuration.recapRules   // suggest rules for the prompts you answered
     property string weekRuleBusy: ""     // the rule being written or taken back: its id
     property string weekRuleMessage: ""  // what the last one did
+    property bool weekRuleRevoked: false // (the last one revoked a permission you gave: its message goes there)
 
     onWeekShownChanged: {
         if (weekShown)
@@ -2551,7 +2553,18 @@ PlasmoidItem {
                      : " --undo " + shellQuote(rule.id)
         weekRuleBusy = rule.id
         weekRuleMessage = ""
+        weekRuleRevoked = false
         ruleWriter.connectSource(cmd + " # " + Date.now())
+    }
+
+    // Takes one of the permissions you gave (the Recap's list of what lets
+    // chats go without asking) out of its file
+    function revokeWeekGrant(grant) {
+        weekRuleBusy = grant.id
+        weekRuleMessage = ""
+        weekRuleRevoked = true
+        ruleWriter.connectSource("python3 -I " + shellQuote(codeDir + "week.py") + " --revoke " + shellQuote(grant.id)
+                                 + configDirArgs + " # " + Date.now())
     }
 
     P5Support.DataSource {
