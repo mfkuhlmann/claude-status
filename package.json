@@ -133,6 +133,11 @@
         "icon": "$(account)"
       },
       {
+        "command": "claudeStatus.forgetRecapHistory",
+        "title": "Delete the Recap's Saved History…",
+        "category": "Claude Status"
+      },
+      {
         "command": "claudeStatus.accounts",
         "title": "Claude Accounts…",
         "category": "Claude Status",
@@ -507,11 +512,17 @@
           "markdownDescription": "The currency of the Recap tab's amounts. Claude's API prices are in US dollars; for another currency the Recap tab downloads the European Central Bank's reference rates of the day from ecb.europa.eu, at most every 6 hours and only while the tab is open (offline it uses the last rates it has). Nothing about your chats is sent.",
           "order": 35
         },
+        "claudeStatus.recapHistory": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Claude Code deletes chats after 30 days (its `cleanupPeriodDays` setting). The Recap tab's **Overall** keeps their numbers past that, in `~/.cache/claude-widget`: times, tokens, costs, folders and chat names. Off, it keeps only what Claude still has. One choice for the widget and this extension. **Claude Status: Delete the Recap's Saved History…** deletes it.",
+          "order": 36
+        },
         "claudeStatus.recapRules": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "The Recap tab suggests rules that would have let the permission prompts you answered go without asking, each with an **Allow…** button. Off, it only counts the prompts, and there's nothing to allow by mistake. Either way it lists the permissions you gave, to revoke them.",
-          "order": 36
+          "order": 37
         },
         "claudeStatus.newChatMode": {
           "type": "string",

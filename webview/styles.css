@@ -1565,6 +1565,13 @@ body.vscode-high-contrast .top.scrolled {
   opacity: 0.6; /* what it said before, while it reads again */
 }
 
+/* a day, 7 days or everything kept */
+.week-spans {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+}
+
 .week-period {
   display: flex;
   align-items: center;

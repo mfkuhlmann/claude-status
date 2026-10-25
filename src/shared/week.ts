@@ -2,7 +2,7 @@
 // the recap of the widget's week.py; here, so the tests can read them.
 
 import { clockText, dayLabel, plural } from "./model";
-import type { WeekDay, WeekGrant, WeekNumbers, WeekPlanWindow, WeekRecap, WeekRule, WeekSum } from "./types";
+import type { WeekDay, WeekGrant, WeekNumbers, WeekPlanWindow, WeekRecap, WeekRule, WeekSpan, WeekSum } from "./types";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const WEEKDAYS_LONG = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -69,9 +69,9 @@ export function dateText(day: string): string {
   return `${d.getDate()} ${MONTHS_LONG[d.getMonth()]} ${d.getFullYear()}`;
 }
 
-// "Sat 24": a timeline row's day
-export function rowDay(day: string): string {
-  return dayLabel(day).split(" ").slice(0, 2).join(" ");
+// "Sat 24": a timeline row's day ("19 Oct": Overall's 7 days)
+export function rowDay(day: string, weeks = false): string {
+  return weeks ? shortDay(day) : dayLabel(day).split(" ").slice(0, 2).join(" ");
 }
 
 // "Wed 14:05": when a turn started
@@ -80,8 +80,18 @@ export function whenText(ms: number): string {
 }
 
 export function periodText(recap: WeekRecap): string {
+  if (recap.span === "day") {
+    const day = rowDay(recap.from) + " " + shortDay(recap.from).split(" ")[1];
+    return recap.back === 0 ? `Today · ${day}` : recap.back === 1 ? `Yesterday · ${day}` : day;
+  }
+  if (recap.span === "all") return recap.first ? `Everything since ${dateText(recap.first)}` : "Everything";
   const span = `${shortDay(recap.from)} – ${shortDay(recap.to)}`;
   return recap.back === 0 ? `Last 7 days · ${span}` : span;
+}
+
+// What the period line says before the answer for a span comes
+export function periodWaiting(span: WeekSpan, back: number): string {
+  return back !== 0 ? "" : span === "day" ? "Today" : span === "all" ? "Everything" : "Last 7 days";
 }
 
 // The 7 days before, when there was anything in them
@@ -120,10 +130,13 @@ export function weekTiles(recap: WeekRecap): WeekTile[] {
   const p = previousOf(recap);
   const cur = currencyOf(recap);
   const shown = (v: number, kind: Kind) => (kind === "time" ? hoursText(v) : kind === "money" ? moneyText(v, cur) : String(v));
-  const before = (v: number, kind: Kind) => (p ? `\nThe 7 days before: ${shown(v, kind)}` : "");
+  const day = recap.span === "day";
+  const before = (v: number, kind: Kind) => (p ? `\n${day ? "The day before" : "The 7 days before"}: ${shown(v, kind)}` : "");
   const weeks = (key: NumberKey, kind: Kind) => {
     const values = trendOf(recap, key);
-    return values.length > 1 ? `\nWeek by week, these 7 days last: ${values.map((v) => (v === null ? "?" : shown(v, kind))).join(" · ")}` : "";
+    return values.length > 1
+      ? `\n${day ? "Day by day, this day last" : "Week by week, these 7 days last"}: ${values.map((v) => (v === null ? "?" : shown(v, kind))).join(" · ")}`
+      : "";
   };
   return [
     {
@@ -197,7 +210,7 @@ export function hoverText(d: WeekDay, ms: number, now: number, px: number): stri
 
 export function dayTip(d: WeekDay, cur: Currency = USD): string {
   return (
-    `${longDay(d.day)}\nYou: ${hoursText(d.youMs)} · Claude worked ${hoursText(d.workedMs)} (on the clock ${hoursText(d.busyMs)}) · ` +
+    `${d.to ? `${shortDay(d.day)} – ${shortDay(d.to)}` : longDay(d.day)}\nYou: ${hoursText(d.youMs)} · Claude worked ${hoursText(d.workedMs)} (on the clock ${hoursText(d.busyMs)}) · ` +
     `it waited ${hoursText(d.waitMs)} for you\n${plural(d.prompts, "%1 prompt", "%1 prompts")} · ${moneyText(d.cost, cur)} at API prices` +
     (d.chats?.length ? "\nClick for its chats" : "")
   );
@@ -337,12 +350,13 @@ export function footText(recap: WeekRecap): string {
   return lines.join("\n");
 }
 
-// Week messages from the page, as the extension takes them: weeks back
-// within what's kept, an account id or all
-export function weekAsked(back: unknown, account: unknown): { back: number; account: string } {
-  const b = typeof back === "number" && Number.isInteger(back) ? Math.min(4, Math.max(0, back)) : 0;
+// Week messages from the page, as the extension takes them: a span, days or
+// weeks back (any: week.py stops at the first chat kept), an account id or all
+export function weekAsked(back: unknown, account: unknown, span: unknown = "week"): { back: number; account: string; span: WeekSpan } {
+  const b = typeof back === "number" && Number.isInteger(back) ? Math.min(3650, Math.max(0, back)) : 0;
   const a = typeof account === "string" && /^[0-9a-f]{12}$/.test(account) ? account : "";
-  return { back: b, account: a };
+  const sp: WeekSpan = span === "day" || span === "all" ? span : "week";
+  return { back: b, account: a, span: sp };
 }
 
 export type WeekRuleAsk = { allow: true; kind: string; value: string; project: string } | { allow: false; id: string };

@@ -110,8 +110,10 @@ As an editor tab (**Claude Status: Open in Editor Tab**):
   tokens per day as bars (hover one for its chats and prompts), the totals,
   the busiest folders and the models used. The prompts come from Claude
   Code's prompt history, the tokens from the transcripts.
-- **Your week with Claude**: the view's **Recap** tab shows your last 7 days
-  (and the weeks before, a click back): how long you were at it and how long
+- **Your days with Claude**: the view's **Recap** tab shows a day, your last
+  7 days or everything since your first chat (**Day | Week | Overall**; Claude
+  Code deletes chats after 30 days, but the Recap keeps their numbers unless
+  `claudeStatus.recapHistory` is off). For the 7 days: how long you were at it and how long
   Claude worked, against the week before; a row per day on a timeline, with
   when you were at it, when Claude worked (darker where several chats worked
   at once) and when it waited for your answer (point at a day to see what
@@ -321,6 +323,7 @@ code --install-extension claude-status-*.vsix
 | `claudeStatus.showPet` / `chatPets` | `true` / `5` | Talpa, and pets per account |
 | `claudeStatus.showTokens`, `showUsageInStatusBar`, `recentChats`, `keepDoneHours` | | What the view shows |
 | `claudeStatus.recapCurrency` | `USD` | The Recap tab's amounts: US dollars (Claude's API prices), or another currency at the European Central Bank's rate of the day |
+| `claudeStatus.recapHistory` | `true` | The Recap keeps the numbers of chats Claude Code has deleted (after 30 days), so **Overall** keeps growing; **Delete the Recap's Saved History…** starts it again |
 | `claudeStatus.recapRules` | `true` | The Permissions tab suggests rules for the permission prompts you answered, each with **Allow…**; off, it only counts the prompts |
 | `claudeStatus.pythonPath` | `python3` | Python on this computer |
 

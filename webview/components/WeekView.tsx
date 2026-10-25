@@ -1,5 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
-import type { WeekChat, WeekDay, WeekPlanWindow, WeekRecap } from "../../src/shared/types";
+import type { WeekChat, WeekDay, WeekPlanWindow, WeekRecap, WeekSpan } from "../../src/shared/types";
 import {
   cacheText,
   coldText,
@@ -13,6 +13,7 @@ import {
   hoverText,
   moneyText,
   periodText,
+  periodWaiting,
   resetText,
   rowDay,
   shareText,
@@ -39,6 +40,7 @@ const REFRESH_MS = 10 * 60000; // while the tab is in sight
 export function WeekView({ hosts, currency }: { hosts: string[]; currency: string }) {
   const visible = useViewVisible();
   const answer = useStore(weekAnswer);
+  const [span, setSpan] = useState<WeekSpan>(answer?.span ?? "week");
   const [back, setBack] = useState(answer?.back ?? 0);
   const [account, setAccount] = useState(answer?.account ?? "");
   const [busy, setBusy] = useState(true); // asked, and its answer hasn't come
@@ -47,7 +49,7 @@ export function WeekView({ hosts, currency }: { hosts: string[]; currency: strin
 
   function ask() {
     setBusy(true);
-    post({ type: "week", back, account });
+    post({ type: "week", back, account, span });
   }
 
   // Ask for these days when the tab is in sight, again every 10 minutes
@@ -56,9 +58,9 @@ export function WeekView({ hosts, currency }: { hosts: string[]; currency: strin
     ask();
     const timer = setInterval(ask, REFRESH_MS);
     return () => clearInterval(timer);
-  }, [visible, back, account, hostsKey, currency]);
+  }, [visible, span, back, account, hostsKey, currency]);
 
-  const mine = answer && answer.back === back && answer.account === account ? answer : null;
+  const mine = answer && answer.span === span && answer.back === back && answer.account === account ? answer : null;
   useEffect(() => {
     if (mine) setBusy(false);
   }, [mine]);
@@ -75,16 +77,34 @@ export function WeekView({ hosts, currency }: { hosts: string[]; currency: strin
 
   return (
     <div class={"week" + (busy && recap ? " busy" : "")}>
+      {/* A day, 7 days or everything kept */}
+      <div class="week-spans" role="radiogroup" aria-label="What to show">
+        {([["day", "Day"], ["week", "Week"], ["all", "Overall"]] as const).map(([sp, text]) => (
+          <button key={sp} type="button" role="radio" aria-checked={span === sp} class={"chip" + (span === sp ? " on" : "")}
+            onClick={() => {
+              setSpan(sp);
+              setBack(0);
+            }}>
+            {text}
+          </button>
+        ))}
+      </div>
       <div class="week-period">
-        <button type="button" class="icon-btn flip" title="The week before" aria-label="The week before"
-          disabled={back >= (recap?.backMax ?? 0)} onClick={() => setBack(back + 1)}>
-          <Icon name="chevron" />
-        </button>
-        <span class="week-span">{recap ? periodText({ ...recap, back }) : back === 0 ? "Last 7 days" : ""}</span>
-        <button type="button" class="icon-btn" title="The week after" aria-label="The week after" disabled={back <= 0}
-          onClick={() => setBack(back - 1)}>
-          <Icon name="chevron" />
-        </button>
+        {span !== "all" ? (
+          <button type="button" class="icon-btn flip" title={span === "day" ? "The day before" : "The week before"}
+            aria-label={span === "day" ? "The day before" : "The week before"}
+            disabled={!mine || back >= (recap?.backMax ?? 0)} onClick={() => setBack(back + 1)}>
+            <Icon name="chevron" />
+          </button>
+        ) : null}
+        <span class="week-span">{mine && recap ? periodText({ ...recap, back }) : periodWaiting(span, back)}</span>
+        {span !== "all" ? (
+          <button type="button" class="icon-btn" title={span === "day" ? "The day after" : "The week after"}
+            aria-label={span === "day" ? "The day after" : "The week after"} disabled={back <= 0}
+            onClick={() => setBack(back - 1)}>
+            <Icon name="chevron" />
+          </button>
+        ) : null}
         <button type="button" class="icon-btn" title="Read again" aria-label="Read again" onClick={ask}>
           <Icon name="refresh" />
         </button>
@@ -109,7 +129,11 @@ export function WeekView({ hosts, currency }: { hosts: string[]; currency: strin
       ) : null}
       {error ? <div class="msg error" role="alert">Couldn't read your week: {error}</div> : null}
       {recap && !hasData ? (
-        <div class="empty muted">No Claude in these days: none of your chats here (or on the SSH hosts shown) has a prompt or a reply in them.</div>
+        <div class="empty muted">
+          {recap.span === "day" ? "No Claude on this day: none of your chats here (or on the SSH hosts shown) has a prompt or a reply on it."
+            : recap.span === "all" ? "No Claude yet: none of your chats here (or on the SSH hosts shown) has a prompt or a reply."
+              : "No Claude in these days: none of your chats here (or on the SSH hosts shown) has a prompt or a reply in them."}
+        </div>
       ) : null}
 
       {recap && s && hasData ? (
@@ -177,7 +201,9 @@ function Timeline({ recap }: { recap: WeekRecap }) {
   const [hover, setHover] = useState<{ row: number; x: number; ms: number; px: number } | null>(null);
   const [open, setOpen] = useState("");
   const cur = currencyOf(recap);
-  const last = recap.days.length - 1;
+  const weeks = recap.span === "all"; // (a row per 7 days, with their numbers)
+  const last = weeks ? 0 : recap.days.length - 1;
+  const most = Math.max(1, ...recap.days.map((d) => Math.max(d.youMs, d.workedMs)));
   const pct = (d: WeekDay, ms: number) => `${Math.max(0, Math.min(100, (100 * (ms - d.start)) / Math.max(1, d.end - d.start)))}%`;
   const width = (d: WeekDay, a: number, b: number) =>
     `max(1px, ${Math.max(0, (100 * (Math.min(b, d.end) - Math.max(a, d.start))) / Math.max(1, d.end - d.start))}%)`;
@@ -185,18 +211,18 @@ function Timeline({ recap }: { recap: WeekRecap }) {
   return (
     <section class="week-section">
       <div class="week-heading">
-        <h2>Day by day</h2>
+        <h2>{weeks ? "Week by week" : recap.span === "day" ? "Through the day" : "Day by day"}</h2>
         <span class="week-legend small muted">
           <span><span class="swatch you" /> You</span>
-          <span><span class="swatch work" /> Claude working</span>
-          <span><span class="swatch wait" /> Waiting for you</span>
-          {limits ? <span><span class="swatch limit" /> A usage limit stopped a chat</span> : null}
+          <span><span class="swatch work" /> {weeks ? "Claude worked" : "Claude working"}</span>
+          {weeks ? null : <span><span class="swatch wait" /> Waiting for you</span>}
+          {limits && !weeks ? <span><span class="swatch limit" /> A usage limit stopped a chat</span> : null}
         </span>
       </div>
       <div class="week-row week-axis small muted" aria-hidden="true">
         <span class="week-day" />
         <span class="week-hours">
-          {[0, 6, 12, 18, 24].map((h) => (
+          {(weeks ? [] : [0, 6, 12, 18, 24]).map((h) => (
             <span key={h} style={{ left: `${(100 * h) / 24}%` }}>{h}</span>
           ))}
         </span>
@@ -209,7 +235,13 @@ function Timeline({ recap }: { recap: WeekRecap }) {
           <div key={d.day}>
             <div class={"week-row" + (i === last && recap.back === 0 ? " today" : "") + (d.chats?.length ? " opens" : "") + (shown ? " open" : "")}
               title={dayTip(d, cur)} onClick={() => setOpen(shown || !d.chats?.length ? "" : d.day)}>
-              <span class="week-day small">{rowDay(d.day)}</span>
+              <span class="week-day small">{rowDay(d.day, weeks)}</span>
+              {weeks ? (
+                <span class="week-track">
+                  {d.youMs > 0 ? <span class="week-you" style={{ left: 0, width: `max(1px, ${(100 * d.youMs) / most}%)` }} /> : null}
+                  {d.workedMs > 0 ? <span class="week-work many" style={{ left: 0, width: `max(1px, ${(100 * d.workedMs) / most}%)` }} /> : null}
+                </span>
+              ) : (
               <span
                 class="week-track"
                 onMouseMove={(e) => {
@@ -229,6 +261,7 @@ function Timeline({ recap }: { recap: WeekRecap }) {
                 {i === last && recap.back === 0 ? <span class="week-now" style={{ left: pct(d, recap.generatedAt) }} /> : null}
                 {hover && hover.row === i ? <span class="week-cross" style={{ left: `${hover.x}px` }} /> : null}
               </span>
+              )}
               <span class="week-num small muted">{d.youMs >= 60000 ? hoursText(d.youMs) : "–"}</span>
               <span class="week-num small">{d.workedMs >= 60000 ? hoursText(d.workedMs) : "–"}</span>
             </div>
@@ -241,7 +274,8 @@ function Timeline({ recap }: { recap: WeekRecap }) {
         );
       })}
       <div class={"week-readout small" + (hover ? "" : " muted")}>
-        {hover ? hoverText(recap.days[hover.row], hover.ms, recap.generatedAt, hover.px) : "Point at a day to see what went on then; click it for its chats."}
+        {weeks ? "Click a week for its chats."
+          : hover ? hoverText(recap.days[hover.row], hover.ms, recap.generatedAt, hover.px) : "Point at a day to see what went on then; click it for its chats."}
       </div>
     </section>
   );
@@ -401,7 +435,7 @@ function Tips({ recap, copied, onCopy }: { recap: WeekRecap; copied: string; onC
   return (
     <section class="week-section">
       <h2>What could use less of your plan</h2>
-      {!recap.tips.length ? <div class="muted">Nothing stands out: no habit takes a tenth of this week's usage.</div> : null}
+      {!recap.tips.length ? <div class="muted">Nothing stands out: no habit takes a tenth of the usage shown.</div> : null}
       <ul class="week-tips">
         {recap.tips.map((t) => (
           <li key={t.key} class="week-tip">
@@ -411,7 +445,7 @@ function Tips({ recap, copied, onCopy }: { recap: WeekRecap; copied: string; onC
             </span>
             {t.pct !== null ? (
               <span class="week-tip-pct small"
-                title={`${t.pct}% of this week's usage: of the usage of these 7 days, as Claude Code's /usage weighs it toward your plan's limits. A request can count for several of these.`}>
+                title={`${t.pct}% of the usage shown: of the usage of these days, as Claude Code's /usage weighs it toward your plan's limits. A request can count for several of these.`}>
                 {t.pct}%
               </span>
             ) : null}

@@ -36,6 +36,7 @@ export const settings = {
     return typeof v === "string" && /^[A-Z]{3}$/.test(v) ? v : "USD";
   },
   recapRules: () => cfg().get<boolean>("recapRules", true) !== false,
+  recapHistory: () => cfg().get<boolean>("recapHistory", true) !== false,
   notifyWaiting: () => cfg().get<boolean>("notifyWaiting", true),
   notifyDone: () => cfg().get<boolean>("notifyDone", true),
   notifyDoneMinSeconds: () => num("notifyDoneMinSeconds", 30, 0, 3600),

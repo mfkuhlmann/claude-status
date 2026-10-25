@@ -9,6 +9,7 @@ import type { WeekDay } from "../src/shared/types";
 import {
   coldText, currencyOf, deltaText, factsText, fillPaths, footText, hoursText, hoverText, moneyText, periodText, promptsText, ruleMeta,
   weekAsked, weekRevokeAsked, weekRuleAsked, weekTiles, windowSpan, workText, grantMeta, grantedIntro,
+  dateText, periodWaiting, rowDay, shortDay,
 } from "../src/shared/week";
 import { ViewHost } from "../src/view";
 
@@ -109,6 +110,21 @@ test("a rule message is taken only in the shapes the tab sends", () => {
   assert.equal(weekRuleAsked({ allow: false, id: "../x" }), null);
 });
 
+test("a day and everything: what the period line says, Overall's rows", () => {
+  const day = demoWeek(NOW, 0, "", "day");
+  assert.equal(day.days.length, 1);
+  assert.match(periodText(day), /^Today · \w{3} \d+ \w{3}$/);
+  assert.match(periodText({ ...day, back: 1 }), /^Yesterday · /);
+  const all = demoWeek(NOW, 0, "", "all");
+  assert.equal(all.previous, null);
+  assert.equal(all.days.length, 2);
+  assert.equal(all.sum.workedMs, all.days[0].workedMs + all.days[1].workedMs);
+  assert.equal(periodText(all), `Everything since ${dateText(all.first!)}`);
+  assert.deepEqual([periodWaiting("day", 0), periodWaiting("all", 0), periodWaiting("week", 1)], ["Today", "Everything", ""]);
+  assert.equal(rowDay(all.days[0].day, true), shortDay(all.days[0].day));
+  assert.equal(weekTiles(all)[0].delta, "");
+});
+
 test("a permission you gave is revoked only by an id of week.py's list", () => {
   assert.equal(weekRevokeAsked("a1b2c3d4e5f6"), "a1b2c3d4e5f6");
   for (const bad of ["../x", "A1B2C3D4E5F6", "a1b2c3d4e5f", 12, null]) assert.equal(weekRevokeAsked(bad), null);
@@ -143,13 +159,15 @@ function setup() {
   return { calls, posted, receive: (m: unknown) => priv.receive(webview, m) };
 }
 
-test("the page asks for days within what's kept, for an account id or all", async () => {
-  assert.deepEqual(weekAsked(2, "0123456789ab"), { back: 2, account: "0123456789ab" });
-  assert.deepEqual(weekAsked(99, "../../etc"), { back: 4, account: "" });
-  assert.deepEqual(weekAsked("1", null), { back: 0, account: "" });
+test("the page asks for a span, days or weeks back, for an account id or all", async () => {
+  assert.deepEqual(weekAsked(2, "0123456789ab"), { back: 2, account: "0123456789ab", span: "week" });
+  assert.deepEqual(weekAsked(99, "../../etc", "day"), { back: 99, account: "", span: "day" });
+  assert.deepEqual(weekAsked(-3, null, "all"), { back: 0, account: "", span: "all" });
+  assert.deepEqual(weekAsked("1", null, "../x"), { back: 0, account: "", span: "week" });
+  assert.deepEqual(weekAsked(1e9, ""), { back: 3650, account: "", span: "week" });
   const { calls, posted, receive } = setup();
   receive({ type: "week", back: 1, account: "ba9876543210" });
-  assert.deepEqual(calls, [{ name: "week", args: [1, "ba9876543210"] }]);
+  assert.deepEqual(calls, [{ name: "week", args: [1, "ba9876543210", "week"] }]);
   await new Promise((r) => setTimeout(r, 0));
   const answer = posted[0] as { type: string; back: number; account: string; recap: unknown };
   assert.equal(answer.type, "week");

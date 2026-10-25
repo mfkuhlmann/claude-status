@@ -27,6 +27,14 @@
   is done, popping up when a chat starts, ducking down and peeking out, with
   what flies off landing first. While it types or bounces it looks straight
   at you.
+- **A day, a week or everything:** the Recap tab switches between **Day**
+  (one day across its 24 hours, against the day before; step back a day at
+  a time), **Week** (the last 7 days, as before) and **Overall** (everything
+  since your first chat, a row per 7 days), and steps back as far as your
+  history goes. Claude Code deletes chats after 30 days; the Recap keeps
+  their numbers past that (`claudeStatus.recapHistory`, on by default; one
+  choice with the widget), and **Claude Status: Delete the Recap's Saved
+  History…** starts it again from the chats Claude still has.
 - **A Permissions tab:** the view's new **Permissions** tab, next to
   **Recap**, lists the permissions you gave: every rule and mode that lets
   chats on this computer go without asking, in your user settings and the

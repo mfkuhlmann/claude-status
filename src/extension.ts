@@ -104,6 +104,7 @@ export function activate(context: vscode.ExtensionContext): void {
       },
     }),
     vscode.commands.registerCommand("claudeStatus.refresh", () => dash.refreshAll()),
+    vscode.commands.registerCommand("claudeStatus.forgetRecapHistory", () => dash.forgetRecapHistory()),
     vscode.commands.registerCommand("claudeStatus.pickHosts", () => a.pickHosts()),
     vscode.commands.registerCommand("claudeStatus.openInEditor", () => view.openInEditor()),
     vscode.commands.registerCommand("claudeStatus.newChat", () => a.newChat()),

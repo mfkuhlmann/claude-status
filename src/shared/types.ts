@@ -493,6 +493,7 @@ export type PetEventKind = "waiting" | "done" | "failed" | "stopped" | "limit" |
 // The Recap tab: your last 7 days with Claude (the widget's week.py, read
 // from the chats' transcripts when the tab asks, never in the status checks)
 export interface WeekDay {
+  to?: string; // (Overall's rows: 7 days, from day to this one)
   day: string; // "2026-10-24"
   start: number; // its local midnight
   end: number; // the next one
@@ -626,10 +627,15 @@ export interface PermsData {
   granted: WeekGrant[];
 }
 
+// What the Recap tab shows: a day, the last 7 days (or 7 before), or everything kept
+export type WeekSpan = "day" | "week" | "all";
+
 export interface WeekRecap {
   ok: true;
   generatedAt: number;
-  back: number; // weeks before the last 7 days
+  span?: WeekSpan; // (a widget older than the spans sends none: week)
+  first?: string | null; // the first day with a chat kept
+  back: number; // days (span day) or weeks before today's
   backMax: number;
   account: string; // an account's id, or "" for all
   accounts: { id: string; name: string; plan: string | null; hosts: string[] }[];
@@ -637,7 +643,7 @@ export interface WeekRecap {
   to: string;
   days: WeekDay[];
   sum: WeekSum;
-  previous: WeekNumbers; // the 7 days before
+  previous: WeekNumbers | null; // the day or 7 days before (none for everything)
   trend: ((WeekNumbers & { start: number }) | null)[]; // the 5 weeks up to these days (null: older than what's kept)
   projects: WeekProject[];
   chats: WeekChat[];
@@ -726,7 +732,7 @@ export type WebviewMessage =
   | { type: "pickHosts" }
   | { type: "setupUsageBars" }
   | { type: "openUsagePage" }
-  | { type: "week"; back: number; account: string } // the Recap tab wants these days' recap
+  | { type: "week"; back: number; account: string; span?: WeekSpan } // the Recap tab wants these days' recap
   | { type: "openWeekChat"; chatId: string; profileDir: string; name: string; cwd?: string } // one of the week's chats here
   | { type: "weekRule"; allow: boolean; kind: string; value: string; project: string; id: string } // allow a rule the tab offers, or take one back
   | { type: "weekRevoke"; id: string } // take a permission you gave out of its file
@@ -738,7 +744,7 @@ export type HostMessage =
   | { type: "state"; state: ViewState }
   | { type: "petEvent"; kind: PetEventKind; text: string; key: string }
   | { type: "visible"; visible: boolean }
-  | { type: "week"; back: number; account: string; recap: WeekRecap | null; error: string }
+  | { type: "week"; back: number; account: string; span: WeekSpan; recap: WeekRecap | null; error: string }
   | { type: "weekRule"; id: string; ok: boolean; message: string }
   | { type: "weekRevoke"; id: string; ok: boolean; message: string }
   | { type: "perms"; data: PermsData | null; error: string };

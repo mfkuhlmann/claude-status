@@ -293,8 +293,8 @@ export class ViewHost implements vscode.WebviewViewProvider, vscode.Disposable {
         void vscode.commands.executeCommand("claudeStatus.setupUsageBars");
         break;
       case "week": {
-        const asked = weekAsked(m.back, m.account);
-        void this.dash.week(asked.back, asked.account).then(({ recap, error }) =>
+        const asked = weekAsked(m.back, m.account, m.span);
+        void this.dash.week(asked.back, asked.account, asked.span).then(({ recap, error }) =>
           webview.postMessage({ type: "week", ...asked, recap: recap ?? null, error: error ?? "" } satisfies HostMessage),
         );
         break;

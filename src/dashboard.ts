@@ -13,7 +13,7 @@ import { currentRemoteHost } from "./remoteHost";
 import { demoPerms, demoState, demoWeek } from "./shared/demo";
 import { allGroups, chatsNeedingYou, keptChat, limitReset, queuedWhat, shareUsage, toLocalClock, trackKey, type ChatSpot } from "./shared/model";
 import { chatRef } from "./notify";
-import type { ClaudeCodeInfo, DigestCard, HostState, PermsData, PetEventKind, QueuedTask, Status, ViewState, WeekRecap } from "./shared/types";
+import type { ClaudeCodeInfo, DigestCard, HostState, PermsData, PetEventKind, QueuedTask, Status, ViewState, WeekRecap, WeekSpan } from "./shared/types";
 import type { WeekRuleAsk } from "./shared/week";
 import { mergeChanges, TransitionTracker, type Changes, type PetEvent } from "./transitions";
 
@@ -70,6 +70,7 @@ export class Dashboard implements vscode.Disposable {
       this.onPetEventEmitter,
       vscode.workspace.onDidChangeConfiguration((e) => {
         if (!e.affectsConfiguration("claudeStatus")) return;
+        if (e.affectsConfiguration("claudeStatus.recapHistory")) void this.setRecapHistory(settings.recapHistory());
         this.syncHosts();
         this.scheduleLocal(0);
         this.scheduleHosts(0);
@@ -474,14 +475,15 @@ export class Dashboard implements vscode.Disposable {
 
   // The Recap tab's recap of these days, with the SSH hosts shown whose last
   // check answered (one out of reach would hold it up)
-  async week(back: number, account: string): Promise<{ recap?: WeekRecap; error?: string }> {
-    if (this.demoPhase !== null) return { recap: demoWeek(Date.now(), back, account) };
+  async week(back: number, account: string, span: WeekSpan = "week"): Promise<{ recap?: WeekRecap; error?: string }> {
+    if (this.demoPhase !== null) return { recap: demoWeek(Date.now(), back, account, span) };
     const hosts = this.shownHosts().filter((name) => {
       const h = this.hosts.get(name);
       return !!h && h.ok && !!h.result;
     });
     const currency = settings.recapCurrency();
     return this.backend.week([
+      "--span", span,
       "--back", String(back),
       ...(account ? ["--account", account] : []),
       ...(currency !== "USD" ? ["--currency", currency] : []),
@@ -495,6 +497,27 @@ export class Dashboard implements vscode.Disposable {
   async weekRule(ask: WeekRuleAsk): Promise<{ ok: boolean; message: string }> {
     if (this.demoPhase !== null) return { ok: false, message: "Not in the demo: nothing was changed" };
     return this.backend.action("week.py", ask.allow ? ["--allow", ask.kind, ask.value, ask.project] : ["--undo", ask.id]);
+  }
+
+  // The Recap's history: kept past Claude's own cleanup or not (one choice
+  // for every copy of the widget's week.py: a file next to their cache), or
+  // deleted (it starts again from the transcripts Claude still has)
+  async setRecapHistory(keep: boolean): Promise<void> {
+    if (this.demoPhase !== null) return;
+    const { ok, message } = await this.backend.action("week.py", ["--history", keep ? "on" : "off"]);
+    if (ok) void vscode.window.showInformationMessage(`Claude Status: ${message}.`);
+    else void vscode.window.showWarningMessage(`Claude Status: the Recap's history didn't change: ${message}`);
+  }
+
+  async forgetRecapHistory(): Promise<void> {
+    const pick = await vscode.window.showWarningMessage("Delete the Recap's saved history?", {
+      modal: true,
+      detail: "It starts again from the chats Claude still has (Claude Code keeps them 30 days by default).",
+    }, "Delete");
+    if (pick !== "Delete" || this.demoPhase !== null) return;
+    const { ok, message } = await this.backend.action("week.py", ["--forget"]);
+    if (ok) void vscode.window.showInformationMessage(`Claude Status: ${message}.`);
+    else void vscode.window.showWarningMessage(`Claude Status: nothing was deleted: ${message}`);
   }
 
   // The Permissions tab: the permissions you gave and the prompts of the

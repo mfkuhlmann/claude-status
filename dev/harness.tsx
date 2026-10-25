@@ -91,7 +91,9 @@ setTimeout(() => {
   sendState();
   send({ type: "visible", visible: true });
   // ?week=1: the Week tab, its days there from the start (a screenshot doesn't wait)
-  if (params.get("week") === "1") send({ type: "week", back: 0, account: "", recap: demoWeek(Date.now()), error: "" });
+  // (?span=day or all: the Recap tab starts on it)
+  const span = params.get("span") === "day" || params.get("span") === "all" ? (params.get("span") as "day" | "all") : "week";
+  if (params.get("week") === "1") send({ type: "week", back: 0, account: "", span, recap: demoWeek(Date.now(), 0, "", span), error: "" });
   if (params.get("perms") === "1") send({ type: "perms", data: demoPerms(Date.now()), error: "" });
   // ?scroll=N: to see the top stay put over the list
   const scroll = Number(params.get("scroll"));
@@ -107,10 +109,11 @@ setTimeout(() => send({ type: "petEvent", kind: "done", text: "Fix the date pars
 
 // The Recap tab asks for its days, the Permissions tab for what it shows: the made-up ones
 window.addEventListener("harness-post", (event) => {
-  const m = (event as CustomEvent).detail as { type: string; back?: number; account?: string };
+  const m = (event as CustomEvent).detail as { type: string; back?: number; account?: string; span?: "day" | "week" | "all" };
   if (m.type === "perms") send({ type: "perms", data: demoPerms(Date.now()), error: "" });
   if (m.type !== "week") return;
   const back = m.back ?? 0;
   const account = m.account ?? "";
-  send({ type: "week", back, account, recap: demoWeek(Date.now(), back, account), error: "" });
+  const span = m.span ?? "week";
+  send({ type: "week", back, account, span, recap: demoWeek(Date.now(), back, account, span), error: "" });
 });

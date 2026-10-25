@@ -2,7 +2,7 @@
 // Claude Code) and for the webview's dev harness. Nothing here is real: the
 // accounts, folders, hosts and chats are invented, times are relative to now.
 
-import type { Agent, ChatStats, Group, HostState, PermsData, Session, Status, UsageStats, ViewState, WeekChat, WeekDay, WeekRecap } from "./types";
+import type { Agent, ChatStats, Group, HostState, PermsData, Session, Status, UsageStats, ViewState, WeekChat, WeekDay, WeekRecap, WeekSpan } from "./types";
 
 const MIN = 60000;
 const HOUR = 60 * MIN;
@@ -390,7 +390,26 @@ const DEMO_CHATS: WeekChat[] = [
 // The Recap tab's recap of made-up days: mornings and afternoons of work, a
 // second chat at once now and then, one long wait for your answer, two
 // usage limits, the rules the permission prompts you answered ask for
-export function demoWeek(now: number, back = 0, account = ""): WeekRecap {
+export function demoWeek(now: number, back = 0, account = "", span: WeekSpan = "week"): WeekRecap {
+  if (span !== "week") {
+    // a day: today's (or the one back days before) out of the made-up week;
+    // everything: that week and the one before, a row each
+    const week = demoWeek(now, span === "day" ? Math.floor(back / 7) : 0, account);
+    if (span === "day") {
+      const d = week.days[Math.max(0, week.days.length - 1 - (back % 7))];
+      return { ...week, span, back, backMax: 13, first: week.days[0].day, from: d.day, to: d.day, days: [d], trend: week.trend.slice(-5) };
+    }
+    const before = demoWeek(now, 1, account);
+    const row = (w: WeekRecap): WeekDay => ({
+      ...w.days[0], to: w.to, you: [], work: [], wait: [], limits: [], end: w.days[w.days.length - 1].end,
+      youMs: w.sum.youMs, workedMs: w.sum.workedMs, busyMs: w.sum.busyMs, waitMs: w.sum.waitMs, prompts: w.sum.prompts, cost: w.sum.cost,
+      chats: w.chats.slice(0, 3),
+    });
+    const sum = { ...week.sum, youMs: week.sum.youMs + before.sum.youMs, workedMs: week.sum.workedMs + before.sum.workedMs,
+      prompts: week.sum.prompts + before.sum.prompts, cost: week.sum.cost + before.sum.cost };
+    return { ...week, span, back: 0, backMax: 0, first: before.from, from: before.from, previous: null, trend: [],
+      days: [row(week), row(before)], sum };
+  }
   const today = new Date(now);
   const midnight = (offset: number) =>
     new Date(today.getFullYear(), today.getMonth(), today.getDate() - 7 * back - offset).getTime();
