@@ -37,10 +37,11 @@ const REFRESH_MS = 10 * 60000; // while the tab is in sight
 
 // The Recap tab: your last 7 days with Claude. How long you were at it and
 // how long Claude worked, a day per row on a timeline, what the same work
-// would cost at API prices, where it went, the permission prompts you
-// answered, and what would use less of your plan (the rules of Claude Code's
-// own /usage). The extension runs the widget's week.py for it (only while
-// this tab is open): read from the chats' transcripts, no tokens used.
+// would cost at API prices, where it went, what would use less of your plan
+// (the rules of Claude Code's own /usage), and at the end the permission
+// prompts you answered and the permissions you gave. The extension runs the
+// widget's week.py for it (only while this tab is open): read from the chats'
+// transcripts, no tokens used.
 export function WeekView({ hosts, currency, rules }: { hosts: string[]; currency: string; rules: boolean }) {
   const visible = useViewVisible();
   const answer = useStore(weekAnswer);
@@ -137,9 +138,9 @@ export function WeekView({ hosts, currency, rules }: { hosts: string[]; currency
           <Work recap={recap} />
           <Models recap={recap} />
           <Spend recap={recap} />
+          <Tips recap={recap} copied={copied} onCopy={copy} />
           <Prompts recap={recap} rules={rules} reload={ask} />
           <Granted recap={recap} reload={ask} />
-          <Tips recap={recap} copied={copied} onCopy={copy} />
           <div class="week-foot small muted">{footText(recap)}</div>
         </>
       ) : null}

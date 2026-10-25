@@ -1661,15 +1661,20 @@ body.vscode-high-contrast .top.scrolled {
   white-space: nowrap;
 }
 
+/* each section set off from the one before by a line, its title big and bold */
 .week-section {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--cs-border);
 }
 
 .week-section h2 {
-  font-size: 1em;
-  font-weight: 600;
+  margin: 0 0 2px;
+  font-size: 1.25em;
+  font-weight: 700;
 }
 
 .week-heading {
