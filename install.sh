@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Install or upgrade Claude Status (the Plasma widget, or the GNOME Shell
 # extension) and hook the Claude status line.
-#   ./install.sh              install/upgrade; add the status-line snippet (asks first)
+#   ./install.sh              install/upgrade; add the status-line snippet and
+#                             (Plasma) the permission hook (asks first)
 #   ./install.sh --yes        same, without asking
-#   ./install.sh --uninstall  remove it and the snippet
+#   ./install.sh --uninstall  remove it, the snippet and the hook
 #   --plasma / --gnome        which one (default: the desktop you're on)
 # The snippet goes into every script a Claude profile's settings.json runs as
 # its status line (~/.claude, ~/.claude-*; a script shared by several profiles
@@ -217,6 +218,16 @@ uninstall_gnome() {
 
 mapfile -t statuslines < <(find_statuslines)
 
+# The permission hook (pane.py --relay status|on|off): with it, the widget's
+# rows, chat pane and notifications can answer Claude's permission prompts.
+# Prints what happened; "status" prints True or False.
+relay() {
+  python3 -I "$here/package/contents/code/pane.py" --relay "$1" 2>/dev/null \
+    | python3 -I -c 'import json, sys
+a = json.load(sys.stdin)
+print(a["on"] if "on" in a else a.get("message") or "")' 2>/dev/null || true
+}
+
 if [ "$uninstall" = 1 ]; then
   if [ "$target" = gnome ]; then
     uninstall_gnome
@@ -234,6 +245,8 @@ if [ "$uninstall" = 1 ]; then
     for statusline in "${statuslines[@]}"; do
       [ -f "$statusline" ] && grep -qF "$marker_start" "$statusline" && apply_statusline remove
     done
+    # (the permission hook too: nothing would answer what it hands on)
+    relay off
   fi
   echo "Uninstalled. Cached data is in ${XDG_CACHE_HOME:-$HOME/.cache}/claude-widget (safe to delete)."
   exit 0
@@ -264,6 +277,18 @@ for statusline in "${statuslines[@]}"; do
     echo "Status-line script not found: $statusline"
   fi
 done
+
+# 3. Permission hook (opt-in; the Plasma widget answers what it hands on)
+if [ "$target" = plasma ]; then
+  if [ "$(relay status)" = True ]; then
+    relay on >/dev/null  # (its copy brought up to date)
+    echo "Permission prompts can be answered from the widget (the hook is up to date)."
+  elif confirm "Answer Claude's permission prompts from the widget too? (adds a hook to each Claude profile's settings.json; the widget's settings turn it off)"; then
+    relay on
+  else
+    echo "Skipped the permission hook: the widget's settings can turn it on (Answer permission prompts from the widget)."
+  fi
+fi
 
 echo
 if [ "$target" = gnome ]; then

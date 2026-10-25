@@ -738,10 +738,14 @@ def hook_command(path):
 
 
 def settings_files(home, extra_dirs):
-    """Each Claude profile's settings.json, once per real file."""
+    """Each Claude profile's settings.json, once per real file (also of a
+    ~/.claude that Claude has had no chat in yet)."""
     seen, out = set(), []
-    for p in cs.discover_profiles(home, extra_dirs):
-        path = p.path / "settings.json"
+    folders = [p.path for p in cs.discover_profiles(home, extra_dirs)]
+    if (home / ".claude").is_dir():
+        folders.append(home / ".claude")
+    for folder in folders:
+        path = folder / "settings.json"
         real = os.path.realpath(path)
         if real not in seen:
             seen.add(real)

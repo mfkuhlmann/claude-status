@@ -82,6 +82,18 @@ class InstallTests(unittest.TestCase):
         self.assertIn("Kept the status-line snippet: the VS Code extension still uses it.", out.stdout)
         self.assertIn("claude-widget", script.read_text())
 
+    def test_the_permission_hook_with_plasma(self):
+        self.statusline("~/.claude/statusline.sh", "#!/bin/sh\ninput=$(cat)\n")
+        out = self.install()
+        self.assertIn("Permission prompts can be answered from the widget", out.stdout)
+        settings = (self.home / ".claude/settings.json").read_text()
+        self.assertIn(".local/share/claude-widget/permission-hook.py", settings)
+        self.assertTrue((self.home / ".local/share/claude-widget/permission-hook.py").is_file())
+        self.assertIn("the hook is up to date", self.install().stdout)  # (an upgrade keeps it, brought up to date)
+        out = self.install("--uninstall")
+        self.assertNotIn("permission-hook", (self.home / ".claude/settings.json").read_text())
+        self.assertFalse((self.home / ".local/share/claude-widget/permission-hook.py").exists())
+
     def test_gnome_45_to_48_refused(self):
         self.stub("gnome-shell", "#!/bin/sh\necho 'GNOME Shell 46.0'\n")
         out = self.install("--gnome")
