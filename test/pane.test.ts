@@ -150,6 +150,16 @@ test("the tests badge, a queued reply and how a reply goes", () => {
   assert.match(routeHint("tmux", true, "interactive", "gpu"), /tmux pane\. \(on gpu\)/);
 });
 
+test("every file a page loads from dist/ is packaged (.vscodeignore names each one)", async () => {
+  const fs = await import("node:fs");
+  const shipped = fs.readFileSync(".vscodeignore", "utf8").split("\n").filter((l) => l.startsWith("!dist/")).map((l) => l.slice(6).trim());
+  const loaded = new Set<string>();
+  for (const f of fs.readdirSync("src").filter((n) => n.endsWith(".ts")))
+    for (const m of fs.readFileSync(`src/${f}`, "utf8").matchAll(/asset\("dist", "([^"]+)"\)/g)) loaded.add(m[1]);
+  assert.ok(loaded.has("chat.js") && loaded.has("webview.js"), [...loaded].join(", "));
+  for (const name of loaded) assert.ok(shipped.includes(name), `${name} isn't in .vscodeignore`);
+});
+
 test("Claude's Markdown: links only to the web or mail; the rest stays text", () => {
   const out = inline("see **[the docs](https://example.org/x)** and [this](javascript:alert(1)) and `rm -rf /`");
   const flat = (nodes: unknown[]): { type: unknown; href?: string }[] =>
