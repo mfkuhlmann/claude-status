@@ -844,7 +844,9 @@ def first_activity(cache):
 def history_status(cache_root):
     cache = load_cache(cache_root)
     first = first_activity(cache)
-    gone = {rec.get("chat") for rec in cache["files"].values() if isinstance(rec, dict) and rec.get("gone")}
+    recs = [rec for rec in cache["files"].values() if isinstance(rec, dict)]
+    # (a chat Claude moved to another folder isn't deleted: its transcript is there)
+    gone = {r.get("chat") for r in recs if r.get("gone")} - {r.get("chat") for r in recs if not r.get("gone")}
     try:
         size = cache_path(cache_root).stat().st_size
     except OSError:
@@ -988,9 +990,23 @@ def chats_between(cache, profiles, since, until, home):
     for c in chats.values():
         c["accounts"] = sorted({by_profile[p] for p in c["profiles"] if p in by_profile})
         c["project"] = project_of(c["folder"], home, roots) if c["folder"] else ""
-        c["turns"].sort()
-        c["prompts"].sort()
+        c["turns"] = one_of_each(c["turns"])
+        c["prompts"] = sorted(set(c["prompts"]))
+        c["limits"] = sorted(set(c["limits"]))
     return {k: c for k, c in chats.items() if c["turns"] or c["prompts"] or c["hours"]}
+
+
+def one_of_each(turns):
+    """A chat's turns in time order, each once: a chat Claude moved to another
+    folder (its transcript went with it) has its old file's record kept as
+    history, with the same turns as the new one; the copy that counted the
+    tokens is kept (a reply counts once, in the first transcript read)."""
+    best = {}
+    for t in turns:
+        k = (t[0], t[1], t[2])
+        if k not in best or (len(t) > 4 and t[4] and not (len(best[k]) > 4 and best[k][4])):
+            best[k] = t
+    return sorted(best.values(), key=lambda t: (t[0], t[1], t[2]))
 
 
 # ---------------------------------------------------------------- the recap

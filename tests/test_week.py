@@ -458,6 +458,18 @@ class HistoryTests(Home):
         self.assertEqual(week.history_status(self.cache_root)["deletedChats"], 1)
         self.assertEqual(self.worked(), [("chat-a", 60_000), ("chat-b", 30_000)])  # (and on the next read)
 
+    def test_a_chat_claude_moved_to_another_folder_counts_once(self):
+        # (Claude moves a chat's transcript when it goes into a worktree: the
+        # old path's record stays as history, the new file has the same turns)
+        moved = self.kept.parent.parent / "-w--claude-worktrees-x" / self.kept.name
+        moved.parent.mkdir()
+        self.kept.rename(moved)
+        self.assertEqual(self.worked(), [("chat-a", 60_000), ("chat-b", 30_000)])
+        self.assertEqual(week.history_status(self.cache_root)["deletedChats"], 0)
+        self.assertEqual(week.recap([{"host": "", "chats": week.chats_between(
+            week.updated_cache(self.cache_root, self.profiles(), self.now), self.profiles(), 0, self.now + week.DAY_MS,
+            self.home), "accounts": week.account_ids(self.profiles())[1]}], 0, "", self.now, self.home)["ok"], True)
+
     def test_off_it_keeps_only_what_claude_has(self):
         self.deleted.unlink()
         self.worked()
