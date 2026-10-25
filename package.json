@@ -505,6 +505,30 @@
           "enumItemLabels": ["US dollars (USD)", "Euros (EUR)", "Pounds sterling (GBP)", "Swiss francs (CHF)", "Japanese yen (JPY)", "Chinese yuan (CNY)", "Indian rupees (INR)", "Canadian dollars (CAD)", "Australian dollars (AUD)", "New Zealand dollars (NZD)", "Swedish kronor (SEK)", "Norwegian kroner (NOK)", "Danish kroner (DKK)", "Polish złoty (PLN)", "Czech koruny (CZK)", "Hungarian forints (HUF)", "Romanian lei (RON)", "Icelandic krónur (ISK)", "Turkish lira (TRY)", "Brazilian reais (BRL)", "Mexican pesos (MXN)", "South African rand (ZAR)", "South Korean won (KRW)", "Singapore dollars (SGD)", "Hong Kong dollars (HKD)", "Israeli shekels (ILS)", "Indonesian rupiah (IDR)", "Malaysian ringgit (MYR)", "Philippine pesos (PHP)", "Thai baht (THB)"],
           "default": "USD",
           "markdownDescription": "The currency of the Recap tab's amounts. Claude's API prices are in US dollars; for another currency the Recap tab downloads the European Central Bank's reference rates of the day from ecb.europa.eu, at most every 6 hours and only while the tab is open (offline it uses the last rates it has). Nothing about your chats is sent.",
+          "order": 35
+        },
+        "claudeStatus.newChatMode": {
+          "type": "string",
+          "enum": [
+            "default",
+            "acceptEdits",
+            "plan",
+            "auto",
+            "dontAsk",
+            "bypassPermissions",
+            ""
+          ],
+          "enumItemLabels": [
+            "Manual",
+            "Accept edits",
+            "Plan mode",
+            "Auto mode",
+            "Don't ask",
+            "Bypass permissions",
+            "Claude's default"
+          ],
+          "default": "",
+          "markdownDescription": "The permission mode new chats in a terminal or in the background start in (`claude --permission-mode`; **New Chat…** changes it, Shift+Tab in the chat too). A background chat can start in auto mode or bypass permissions only once you turned that on in a terminal.",
           "order": 34
         },
         "claudeStatus.pythonPath": {

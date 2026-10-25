@@ -53,18 +53,21 @@ export const settings = {
   usageCap: () => num("usageCap", 0, 0, 100),
   newChatModel: () => (cfg().get<string>("newChatModel", "opus") ?? "").trim(),
   newChatEffort: () => (cfg().get<string>("newChatEffort", "xhigh") ?? "").trim(),
+  newChatMode: () => (cfg().get<string>("newChatMode", "") ?? "").trim(),
 };
 
-// claude's options for the model and effort new chats start with (New Chat… picks them)
+// claude's options for the model, effort and permission mode new chats start with (New Chat… picks them)
 export function chatOptionArgs(): string[] {
   const model = settings.newChatModel();
   const effort = settings.newChatEffort();
-  return [...(model ? ["--model", model] : []), ...(effort ? ["--effort", effort] : [])];
+  const mode = settings.newChatMode();
+  return [...(model ? ["--model", model] : []), ...(effort ? ["--effort", effort] : []), ...(mode ? ["--permission-mode", mode] : [])];
 }
 
-export async function setChatOptions(model: string, effort: string): Promise<void> {
+export async function setChatOptions(model: string, effort: string, mode: string): Promise<void> {
   await cfg().update("newChatModel", model, vscode.ConfigurationTarget.Global);
   await cfg().update("newChatEffort", effort, vscode.ConfigurationTarget.Global);
+  await cfg().update("newChatMode", mode, vscode.ConfigurationTarget.Global);
 }
 
 export function viewSettings(): ViewSettings {

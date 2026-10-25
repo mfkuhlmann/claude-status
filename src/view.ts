@@ -244,6 +244,13 @@ export class ViewHost implements vscode.WebviewViewProvider, vscode.Disposable {
       case "unqueue":
         if (this.dash.state().status?.queue?.some((q) => q.id === m.id)) void this.actions.unqueue(m.id);
         break;
+      case "star": {
+        // (its id from the extension's own state: a chat, or one of an account's plans)
+        const found = chat ? null : this.planOf(m);
+        if (chat) void this.actions.star("chats", chat.chatId || chat.sessionId, chat.host, m.on === true);
+        else if (found) void this.actions.star("plans", found.plan.slug, found.group.host, m.on === true);
+        break;
+      }
       case "keepGoing":
         if (chat && !chat.host) void this.actions.keepGoing(chat, m.on === true); // (this computer's chats)
         break;
@@ -252,10 +259,10 @@ export class ViewHost implements vscode.WebviewViewProvider, vscode.Disposable {
         const state = this.dash.state();
         const where = chat?.host ? state.hosts.find((h) => h.name === chat.host)?.result : state.status;
         for (const g of where?.groups ?? []) {
-          const item = [...(g.sessions ?? []), ...(g.recent ?? [])].find((x) => x.key === chat?.key);
+          const item = [...(g.sessions ?? []), ...(g.recent ?? []), ...(g.starred ?? [])].find((x) => x.key === chat?.key);
           if (!item) continue;
           const at = goOnAt(item);
-          if (chat && at) void this.actions.queueContinue(chat, at, g.title);
+          if (chat && at) void this.actions.queueContinue(chat, at, g.title, m.keep === true);
           break;
         }
         break;

@@ -4,6 +4,7 @@
 import "../webview/main";
 import { demoState, demoWeek } from "../src/shared/demo";
 import type { HostMessage } from "../src/shared/types";
+import { toggleStarred, uiState } from "../webview/util/ui";
 
 const params = new URLSearchParams(location.search);
 let phase = Number(params.get("phase")) || 0;
@@ -30,6 +31,44 @@ function sendState(): void {
   if (params.get("default") === "1" && groups.length)
     groups.splice(1, 0, { ...groups[0], id: "demo-second", name: "work", title: "work · Team", plan: "Team", defaultHere: false, sessions: [] }),
       (groups[0] = { ...groups[0], defaultHere: true });
+  // ?stopped=1: two chats here a usage limit stopped, one queued to go on that keeps going
+  const hostStopped = state.hosts.flatMap((h) => h.result?.groups ?? []).flatMap((g) => g.sessions).find((s) => s.stopped);
+  if (params.get("stopped") === "1" && hostStopped && groups.length && state.status) {
+    const copy = (id: string, name: string) => ({ ...hostStopped, key: id, sessionId: id, chatId: id, name, overlaps: [] });
+    const later = copy("demo-stopped-2", "Port the importer");
+    groups[0].sessions.push(copy("demo-stopped-1", "Migrate the schema"), later);
+    state.status.keep = [{ chat: later.chatId, profile: ".claude", name: later.name, since: Date.now(), wentOnAt: null, tries: 0, note: "", error: "" }];
+    state.status.queue = [...(state.status.queue ?? []), {
+      id: "q-later", host: "", profile: ".claude", account: groups[0].title, folder: later.cwd, folderShort: later.cwdShort, prompt: "",
+      plan: null, planProfile: null, planTitle: "", startAt: (later.stopped?.resetsAt ?? Date.now()) + 60000, createdAt: Date.now(),
+      error: "", due: false, chat: later.chatId, name: later.name, scheduled: false,
+    }];
+  }
+  // ?stars=1: a chat at work, a recent chat and a plan starred, and an old chat and plan under Starred
+  const first = groups[0];
+  if (params.get("stars") === "1" && first) {
+    const DAY = 86400_000;
+    if (first.sessions[0]) first.sessions[0].starred = true;
+    const recent = first.recent?.[0];
+    if (recent) {
+      recent.starred = true;
+      first.starred = [
+        { ...recent, key: recent.key + "|starred" },
+        { ...recent, key: "demo-old|starred", sessionId: "demo-old", name: "Rate limiter design", lastActive: Date.now() - 9 * DAY, stopped: null, recap: null },
+      ];
+    }
+    const plan = first.plans?.[0];
+    if (plan) {
+      plan.starred = true;
+      first.starredPlans = [
+        { ...plan, key: plan.key + "|starred" },
+        { ...plan, key: "demo-old-plan|starred", slug: "old-plan", title: "Cache the API answers", updatedAt: Date.now() - 9 * DAY, chatId: null },
+      ];
+    }
+  }
+  // (?stars=1&open=1: the starred lists unfolded too)
+  if (params.get("stars") === "1" && params.get("open") === "1" && first)
+    for (const fold of ["|chats", "|plans"]) if (!uiState.get().starred[first.id + fold]) toggleStarred(first.id + fold);
   // ?banner=0: without the "Demo data" line, for the README's screenshots
   if (params.get("banner") === "0") state.demo = false;
   // ?keep=1: the first chat at work keeps going (after each usage limit), and one gave up

@@ -14,6 +14,7 @@ interface UiState {
   peek: Record<string, true>;
   recent: Record<string, true>;
   plans: Record<string, true>;
+  starred: Record<string, true>; // an account's starred chats or plans unfolded: its key + "|chats" or "|plans"
   memories: Record<string, true>;
   stats: Record<string, true>;
 }
@@ -32,6 +33,7 @@ function load(): UiState {
     peek: { ...(saved?.peek ?? {}) },
     recent: { ...(saved?.recent ?? {}) },
     plans: { ...(saved?.plans ?? {}) },
+    starred: { ...(saved?.starred ?? {}) },
     memories: { ...(saved?.memories ?? {}) },
     stats: { ...(saved?.stats ?? {}) },
   };
@@ -81,6 +83,11 @@ export function toggleRecent(groupKey: string): void {
 export function togglePlans(groupKey: string): void {
   const s = uiState.get();
   persist({ ...s, plans: toggled(s.plans, groupKey) });
+}
+
+export function toggleStarred(key: string): void {
+  const s = uiState.get();
+  persist({ ...s, starred: toggled(s.starred, key) });
 }
 
 export function toggleMemories(groupKey: string): void {

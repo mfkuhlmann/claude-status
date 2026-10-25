@@ -1385,6 +1385,28 @@ button:focus-visible {
   top: 0;
 }
 
+/* A chat or plan you starred: its star, always shown (click: unstarred) */
+.star-mark {
+  flex: none;
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  color: var(--vscode-charts-yellow, #cca700);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* The starred ones, unfolded: a step further in */
+.starred-toggle {
+  display: flex;
+  margin-left: 12px;
+}
+
+.recent-list.starred-list {
+  margin-left: 12px;
+}
+
 /* ---------------------------------------------------------------------------
    An SSH host */
 

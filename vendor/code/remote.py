@@ -16,7 +16,7 @@
     python3 -I remote.py --unshare HOST CHAT_ID PROFILE    keep a shared chat only on PROFILE there
     python3 -I remote.py --find HOST QUERY          the chats there with every word of QUERY
     python3 -I remote.py --task HOST PROFILE FOLDER [--prompt TEXT] [--plan SLUG PLAN_PROFILE] [--model M] [--effort E]
-                         [--bg | --print-command]
+                         [--permission-mode MODE] [--bg | --print-command]
                                                     a new chat there with a task: in the background there,
                                                     or in a terminal here (or print its command)
     python3 -I remote.py --plan HOST SLUG [PROFILE] [--no-open]   a plan there, as a Markdown file here
@@ -274,6 +274,10 @@ def status(host, done_hours=None, recent=None, tokens=True):
         args += ["--recent", str(recent)]
     if not tokens:
         args.append("--no-tokens")
+    stars = cs.starred_of(cs.load_stars(cs.cache_dir(Path.home())), host)  # (the stars are kept here)
+    for kind in cs.STAR_KINDS:
+        if stars[kind]:
+            args += [f"--starred-{kind}", ",".join(sorted(stars[kind]))]
     started = time.time()
     try:
         r = ssh(host, "python3 -I - " + " ".join(shlex.quote(a) for a in args), host_script(), STATUS_TIMEOUT)
@@ -468,9 +472,9 @@ def plan_sharing(host, slug, profile, share_it, to=None):
 
 
 def task(host, profile, folder, text="", plan=None, plan_profile=None, background=False, open_it=True,
-         model=None, effort=None):
+         model=None, effort=None, mode=None):
     """A new chat on host's profile in folder there, with a task (and that
-    model and effort): in the background there, or in a terminal here (ssh
+    model, effort and permission mode): in the background there, or in a terminal here (ssh
     -t), or (without open_it) the command that starts it there. {"ok",
     "message", "id" | "command"}."""
     args = ["--start-task" if background else "--task-command", folder or "~", "--profile", profile]
@@ -482,6 +486,8 @@ def task(host, profile, folder, text="", plan=None, plan_profile=None, backgroun
         args += ["--model", model]
     if effort:
         args += ["--effort", effort]
+    if mode:
+        args += ["--permission-mode", mode]
     answer = host_answer(host, args)
     if background or not answer["ok"]:
         return answer
@@ -708,6 +714,8 @@ def main(argv=None):
                     kw["plan"], kw["plan_profile"] = rest.pop(0), rest.pop(0)
                 elif arg in ("--model", "--effort") and rest:
                     kw[arg[2:]] = rest.pop(0) or None
+                elif arg == "--permission-mode" and rest:
+                    kw["mode"] = rest.pop(0) or None
                 elif arg == "--bg":
                     kw["background"] = True
                 elif arg == "--print-command":

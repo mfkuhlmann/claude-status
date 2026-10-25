@@ -12,7 +12,7 @@ import { chatOptionArgs } from "../src/config";
 import { Dashboard } from "../src/dashboard";
 import type { Notifier } from "../src/notify";
 import { demoState } from "../src/shared/demo";
-import { clockText, keptChat, keptTitle, limitReset, resetAtText } from "../src/shared/model";
+import { clockText, findChatRef, findPlan, keptChat, keptTitle, limitReset, resetAtText, toLocalClock } from "../src/shared/model";
 import type { Group, KeptChat } from "../src/shared/types";
 
 const NOW = new Date(2026, 9, 24, 10, 0).getTime();
@@ -44,18 +44,35 @@ test("the chats that keep going: found by their id, and what their tag says", ()
   assert.match(keptTitle({ ...k, note: "Its account's login has expired" }), /login has expired/);
 });
 
-test("new chats start with the model and effort picked: Opus and extra high to begin with", async () => {
+test("new chats start with the model, effort and permission mode picked: Opus, extra high and Claude's own mode to begin with", async () => {
   const { overrides } = await import("./vscode-stub");
   try {
     assert.deepEqual(chatOptionArgs(), ["--model", "opus", "--effort", "xhigh"]);
     overrides.set("newChatModel", "sonnet");
     overrides.set("newChatEffort", "");
     assert.deepEqual(chatOptionArgs(), ["--model", "sonnet"], "Claude's own default effort");
-    assert.equal(chatOptionsText("sonnet", ""), "Sonnet · Claude's default effort");
-    assert.equal(chatOptionsText("opus", "xhigh"), "Opus · Extra high effort");
+    overrides.set("newChatMode", "plan");
+    assert.deepEqual(chatOptionArgs(), ["--model", "sonnet", "--permission-mode", "plan"]);
+    assert.equal(chatOptionsText("sonnet", ""), "Sonnet · Claude's default effort · Claude's default mode");
+    assert.equal(chatOptionsText("opus", "xhigh", "auto"), "Opus · Extra high effort · Auto mode");
   } finally {
     overrides.clear();
   }
+});
+
+test("a starred chat or plan under Starred is one the extension knows, and an SSH host's is on this computer's clock", () => {
+  const status = demoState(NOW).status!;
+  const g = status.groups[0];
+  const recent = g.recent[0];
+  const plan = g.plans![0];
+  g.starred = [{ ...recent, key: "old|starred", sessionId: "old", lastActive: NOW - 86400_000, starred: true }];
+  g.starredPlans = [{ ...plan, key: "old-plan|starred", slug: "old-plan", updatedAt: NOW - 86400_000, starred: true }];
+  assert.equal(findChatRef(status, [], undefined, "old|starred")?.sessionId, "old");
+  assert.equal(findPlan(status, [], undefined, g.id, "old-plan|starred")?.plan.slug, "old-plan");
+  assert.equal(findChatRef(status, [], undefined, "nope|starred"), null);
+  const shifted = toLocalClock(status, 60_000);
+  assert.equal(shifted.groups[0].starred![0].lastActive, NOW - 86400_000 + 60_000);
+  assert.equal(shifted.groups[0].starredPlans![0].updatedAt, NOW - 86400_000 + 60_000);
 });
 
 test("this computer's check has the usage cap, and the window that notifies looks after the chats that keep going", async () => {

@@ -62,8 +62,14 @@ As an editor tab (**Claude Status: Open in Editor Tab**):
   chats can go on. Meanwhile **Continue on …** under the chat moves it to
   another account with room left (shared with it, then reopened there), or
   **⏱ Go on at 10:41** has it go on by itself in the background once the
-  limit resets (an idle Claude that still has it open quits first). In
-  **Recent chats**, click a chat's **limit** tag for the same.
+  limit resets, in the permission mode it had (an idle Claude that still has
+  it open quits first). **↻ Keep going** beside it does that after every
+  later limit too, until the chat is done; a chat at work gets the same from
+  its ↻ button. In **Recent chats**, click a chat's **limit** tag (once) or
+  **↻** (keep going) for the same.
+- **Star chats and plans** (the star button next to them): each account
+  lists its starred ones under **Recent chats → ★ Starred** and **Plans → ★
+  Starred**, however old they are. ★ unstars one.
 - **Find a Chat…** (the search button in the view's title bar): every chat
   with all the words you type in its name, folder or prompts, here and on
   the SSH hosts shown. Pick one to go to it, or to reopen it. It finds

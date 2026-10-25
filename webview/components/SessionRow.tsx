@@ -87,7 +87,7 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
   const canKeep = !host && !kept && s.state === "working" && s.entrypoint !== "claude-vscode";
   const ending =
     (s.pid === null ? "" : s.kind === "bg" ? " This background session is stopped first (claude stop)." : " Claude here quits first (its terminal stays open).") +
-    (host ? "" : " It goes on by itself after later limits too, until it's done.");
+    " It goes on in the permission mode it had.";
   const resetsAt = s.stopped?.kind === "limit" && !s.stopped.over && s.stopped.resetsAt ? s.stopped.resetsAt : 0;
   const stopped = s.stopped && !s.stopped.over ? " stopped" : s.stopped ? " freed" : "";
 
@@ -101,6 +101,16 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
           <button type="button" class="link session-name" title={openHint(s, host)} onClick={() => post({ type: "open", chat })}>
             {s.name}
           </button>
+          {s.starred ? (
+            <button
+              type="button"
+              class="star-mark"
+              title="Starred: once it isn't listed here any more, it stays under Recent chats → Starred. Click to unstar it."
+              onClick={() => post({ type: "star", chat, on: false })}
+            >
+              ★
+            </button>
+          ) : null}
           {showProfile && s.profile ? <Tag text={s.profile} title="The Claude profile (config folder) this chat runs in" /> : null}
           {tag ? (
             <Tag
@@ -250,7 +260,7 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
               <button
                 type="button"
                 class="link"
-                title={`Goes on by itself at ${clockText(goingOn.startAt)}, in the background, telling Claude that the limit has reset.${ending} If it went on before then, nothing happens.\n\nClick to cancel it.`}
+                title={`Goes on by itself at ${clockText(goingOn.startAt)}, in the background, telling Claude that the limit has reset.${ending} If it went on before then, nothing happens.\n\nClick to cancel it${kept ? ": then it doesn't keep going either" : ""}.`}
                 onClick={() => post({ type: "unqueue", id: goingOn.id })}
               >
                 ✓ Goes on at {clockText(goingOn.startAt)}
@@ -259,13 +269,23 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
               <button
                 type="button"
                 class="link"
-                title={`At ${clockText(goOn)}, a minute after the limit resets, the chat goes on in the background, telling Claude that the limit has reset.${ending} If it went on before then, nothing happens.`}
+                title={`At ${clockText(goOn)}, a minute after the limit resets, the chat goes on in the background, telling Claude that the limit has reset.${ending} If it went on before then, nothing happens.\n\nThis happens once${host ? "" : ": to have it go on after later limits too, choose Keep going"}.`}
                 onClick={() => post({ type: "queueContinue", chat })}
               >
                 ⏱ Go on at {clockText(goOn)}
               </button>
             ) : null}
-            {kept && !goingOn ? (
+            {goOn && !goingOn && !kept && !host ? (
+              <button
+                type="button"
+                class="link"
+                title={`Keep going until it's done: at ${clockText(goOn)}, a minute after the limit resets, the chat goes on in the background, and again after each later limit that stops it, until a turn of it ends by itself.${ending}`}
+                onClick={() => post({ type: "queueContinue", chat, keep: true })}
+              >
+                ↻ Keep going
+              </button>
+            ) : null}
+            {kept ? (
               <button type="button" class="link" title={keptTitle(kept)} onClick={() => post({ type: "keepGoing", chat, on: false })}>
                 ↻ Keeps going{kept.error ? " (gave up)" : kept.note ? " (can't go on now)" : ""}
               </button>
@@ -278,13 +298,21 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
         {showAgents && agents ? <AgentTree tree={agents.tree} now={now} rowKey={rowKey} chat={chat} host={host} /> : null}
       </div>
 
-      {share || remove || stop || canKeep ? (
+      {share || remove || stop || canKeep || !s.starred ? (
         <div class="row-actions">
+          {s.starred ? null : (
+            <IconButton
+              icon="star"
+              label="Star"
+              title="Star this chat: once it isn't listed here any more, it stays under Recent chats → Starred, however old it is."
+              onClick={() => post({ type: "star", chat, on: true })}
+            />
+          )}
           {canKeep ? (
             <IconButton
               icon="repeat"
               label="Keep going after usage limits"
-              title="Keep going until it's done: when a usage limit stops this chat, it goes on by itself in the background a minute after the limit resets, and again after each later one, until a turn of it ends by itself. Claude here quits first then (its terminal stays open)."
+              title="Keep going until it's done: when a usage limit stops this chat, it goes on by itself in the background a minute after the limit resets, in the permission mode it had, and again after each later one, until a turn of it ends by itself. Claude here quits first then (its terminal stays open)."
               onClick={() => post({ type: "keepGoing", chat, on: true })}
             />
           ) : null}
