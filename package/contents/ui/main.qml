@@ -842,7 +842,9 @@ PlasmoidItem {
         }
     }
 
-    // A chat that waits for a permission the widget can answer: its buttons
+    // A chat that waits for a permission the widget can answer: its buttons,
+    // in Claude's own order (Yes, Yes and don't ask again, No). The note
+    // goes in the pane: Plasma puts a reply button before all the others.
     Component {
         id: askNotificationComponent
         Notification {
@@ -868,6 +870,10 @@ PlasmoidItem {
                 label: i18n("Deny")
                 onActivated: root.answerPermission(ask.row, ask.host, "deny", "")
             }
+            property QtObject noteAction: NotificationAction {
+                label: i18n("Deny with a note…")
+                onActivated: root.denyWithNote(ask.row, ask.host)
+            }
             componentName: "plasma_workspace"
             eventId: "notification"
             hints: ({ "x-kde-display-appname": "Claude Code" })
@@ -875,14 +881,7 @@ PlasmoidItem {
                 label: i18n("Open")
                 onActivated: root.openFromNotification(ask, true)
             }
-            actions: withAlways ? [allowAction, alwaysAction, denyAction] : [allowAction, denyAction]
-            replyAction {
-                label: i18n("Deny with a note")
-                placeholderText: i18n("What should Claude do instead?")
-                submitButtonText: i18n("Deny")
-                submitButtonIconName: "dialog-cancel"
-                onReplied: text => root.answerPermission(ask.row, ask.host, "deny", text)
-            }
+            actions: withAlways ? [allowAction, alwaysAction, denyAction, noteAction] : [allowAction, denyAction, noteAction]
             onClosed: {
                 root.forgetNotification(ask)
                 ask.destroy()
@@ -2521,6 +2520,15 @@ PlasmoidItem {
                                   + (note ? " --note " + shellQuote(note) : "") + (host ? " --host " + shellQuote(host) : "")
                                   + configDirArgs + " # " + Date.now())
     }
+
+    // Deny with a note, from a notification: the chat's pane, its note field ready
+    function denyWithNote(s, host) {
+        if (!s)
+            return
+        openPane(s, host, "chat")
+        paneDenying = true
+    }
+    property bool paneDenying: false   // (the pane opens its ask's note field)
 
     // A reply from a notification: sent as the chat takes one; one in a
     // terminal that takes no text opens the pane with it
