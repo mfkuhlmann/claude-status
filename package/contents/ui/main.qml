@@ -667,17 +667,13 @@ PlasmoidItem {
         expandedPeek = next
     }
 
-    // The right-click menu's default account choices: one is checked
-    PlasmaCore.ActionGroup {
-        id: defaultAccountGroup
-    }
+    // The right-click menu's default account choices show a radio button as
+    // their icon, so it sits under the other entries' icons (a checkable
+    // entry's own mark is drawn in a column of its own, left of them)
+    readonly property string iconDir: decodeURIComponent(Qt.resolvedUrl("../icons/").toString().replace(/^file:\/\//, ""))
 
-    // A click checks its choice at once (and unchecks the others): until the
-    // switch lands, or if it's refused, they show what the status says
-    function pickDefault(group) {
-        makeDefault(group)
-        for (const a of [defaultChoice0, defaultChoice1, defaultChoice2, defaultChoice3])
-            a.checked = Qt.binding(() => a.account !== null && a.account.defaultHere === true)
+    function defaultIcon(account) {
+        return iconDir + (account !== null && account.defaultHere === true ? "radio-on.svg" : "radio-off.svg")
     }
 
     Plasmoid.contextualActions: [
@@ -704,51 +700,40 @@ PlasmoidItem {
             onTriggered: Qt.openUrlExternally("https://claude.ai/settings/usage")
         },
         // The default account, as the settings' Accounts page makes it (up to four
-        // here): radio buttons under a heading, as there is only one
+        // here): radio buttons under a heading, as there is only one (they show
+        // what the status says, so a refused switch leaves them as they were)
         PlasmaCore.Action {
             isSeparator: true
             text: i18n("Default Account")
             visible: root.defaultChoices.length > 1
         },
         PlasmaCore.Action {
-            id: defaultChoice0
             readonly property var account: root.defaultChoices[0] || null
             visible: root.defaultChoices.length > 1
             text: account ? account.title : ""
-            checkable: true
-            actionGroup: defaultAccountGroup
-            checked: account !== null && account.defaultHere === true
-            onTriggered: root.pickDefault(account)
+            icon.name: root.defaultIcon(account)
+            onTriggered: root.makeDefault(account)
         },
         PlasmaCore.Action {
-            id: defaultChoice1
             readonly property var account: root.defaultChoices[1] || null
             visible: account !== null
             text: account ? account.title : ""
-            checkable: true
-            actionGroup: defaultAccountGroup
-            checked: account !== null && account.defaultHere === true
-            onTriggered: root.pickDefault(account)
+            icon.name: root.defaultIcon(account)
+            onTriggered: root.makeDefault(account)
         },
         PlasmaCore.Action {
-            id: defaultChoice2
             readonly property var account: root.defaultChoices[2] || null
             visible: account !== null
             text: account ? account.title : ""
-            checkable: true
-            actionGroup: defaultAccountGroup
-            checked: account !== null && account.defaultHere === true
-            onTriggered: root.pickDefault(account)
+            icon.name: root.defaultIcon(account)
+            onTriggered: root.makeDefault(account)
         },
         PlasmaCore.Action {
-            id: defaultChoice3
             readonly property var account: root.defaultChoices[3] || null
             visible: account !== null
             text: account ? account.title : ""
-            checkable: true
-            actionGroup: defaultAccountGroup
-            checked: account !== null && account.defaultHere === true
-            onTriggered: root.pickDefault(account)
+            icon.name: root.defaultIcon(account)
+            onTriggered: root.makeDefault(account)
         }
     ]
 

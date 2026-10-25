@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <!-- a radio button not picked: a grey ring, seen on light and dark menus -->
+  <circle cx="8" cy="8" r="6.5" fill="none" stroke="#8b9095"/>
+</svg>

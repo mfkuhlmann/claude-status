@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <!-- a picked radio button (the right-click menu's default account): Breeze's accent blue, on light and dark menus -->
+  <circle cx="8" cy="8" r="6.5" fill="#3daee9" fill-opacity="0.18" stroke="#3daee9"/>
+  <circle cx="8" cy="8" r="3" fill="#3daee9"/>
+</svg>

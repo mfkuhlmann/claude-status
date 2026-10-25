@@ -604,19 +604,22 @@ class SshUsageTests(unittest.TestCase):
 
 
 class DefaultAccountMenuTests(unittest.TestCase):
-    def test_the_right_click_menus_accounts_are_one_choice(self):
-        # Radio buttons in one exclusive group (checkboxes said you could
-        # pick two); a click re-reads every choice from the status, as the
-        # group unchecks the old default before the switch has happened
+    def test_the_right_click_menus_accounts_are_radio_buttons_under_its_icons(self):
+        # One choice (checkboxes said you could pick two), its mark in the
+        # icon column as the other entries' icons: a checkable entry's mark
+        # is drawn left of that column, so the entries are plain ones with
+        # a radio button for an icon, following the status
         main = (ROOT / "ui/main.qml").read_text()
-        choices = re.findall(r"id: (defaultChoice\d)\n\s*readonly property var account: root\.defaultChoices\[\d\] \|\| null\n"
-                             r"((?:\s+.*\n)*?)\s+onTriggered: root\.pickDefault\(account\)", main)
+        choices = re.findall(r"readonly property var account: root\.defaultChoices\[\d\] \|\| null\n((?:\s+.*\n)*?)\s+\}", main)
         self.assertEqual(len(choices), 4)
-        for name, body in choices:
-            self.assertIn("actionGroup: defaultAccountGroup", body, name)
-        pick = main[main.index("function pickDefault("):]
-        pick = pick[:pick.index("\n    }\n")]
-        self.assertIn("[" + ", ".join(name for name, _ in choices) + "]", pick)
+        for body in choices:
+            self.assertIn("icon.name: root.defaultIcon(account)", body)
+            self.assertIn("onTriggered: root.makeDefault(account)", body)
+            self.assertNotIn("checkable", body)
+        icon = main[main.index("function defaultIcon("):]
+        self.assertIn('account.defaultHere === true ? "radio-on.svg" : "radio-off.svg"', icon[:icon.index("\n    }\n")])
+        for name in ("radio-on.svg", "radio-off.svg"):
+            self.assertTrue((ROOT / "icons" / name).is_file(), name)
 
 
 class SearchAndNewChatBoxTests(unittest.TestCase):
