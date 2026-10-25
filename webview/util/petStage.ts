@@ -8,9 +8,12 @@ import type { AccountInput, HeroInput, PetStage, StageCallbacks } from "../pets/
 import { useStore } from "./store";
 import { hostVisible, pageVisible } from "./stores";
 
+// A pet (its name tag, the hero's headline) goes to the chat's own window, its
+// terminal or Claude Code tab; only a click on the chat's name opens its tab
+// here (as on Plasma)
 export const stageCallbacks: StageCallbacks = {
   open(chat: ChatRef) {
-    post({ type: "open", chat });
+    post({ type: "openWindow", chat });
   },
 };
 

@@ -13,8 +13,9 @@
   Code takes no text from outside, so you choose there: it goes on in the
   background, or the message goes to the clipboard and its terminal comes
   up. Also for SSH hosts' chats; a notification takes a reply (**Reply…**).
-  The window button beside a chat still opens the chat itself, and
-  `claudeStatus.clickOpensPane` makes a click do that again.
+  The window button beside a chat and a click on its pet still open the
+  chat itself, and `claudeStatus.clickOpensPane` makes a click on its name
+  do that again.
 - **Answer permission prompts from the view:** a chat waiting for a
   permission shows the command, or the file and its change, with **Allow
   once**, **Always allow** and **Deny** (a note for Claude optional), in its

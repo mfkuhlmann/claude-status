@@ -20,7 +20,7 @@ function bundle(): string {
     const { buildSync } = createRequire(__filename)("esbuild") as Any; // (not bundled into this test)
     bundled = buildSync({
       stdin: {
-        contents: 'export { Stage } from "./webview/pets/stage";\nexport { petFields } from "./webview/util/petStage";\n' +
+        contents: 'export { Stage } from "./webview/pets/stage";\nexport { petFields, stageCallbacks } from "./webview/util/petStage";\n' +
           'export { ACTIONS, MOODS } from "./vendor/talpa/actions.mjs";\n',
         resolveDir: repo,
         loader: "ts",
@@ -108,6 +108,7 @@ function load() {
   const resize: ((entries: unknown[]) => void)[] = [];
   const intersect: ((entries: unknown[]) => void)[] = [];
   const frames = { asked: 0 };
+  const posted: Any[] = [];
   const sandbox: Record<string, unknown> = {
     document: {
       createElement: (tag: string) => new FakeEl(tag),
@@ -116,7 +117,7 @@ function load() {
       body: new FakeEl("body"),
     },
     window: { CLAUDE_STATUS: { editorTab: false }, addEventListener() {} },
-    acquireVsCodeApi: () => ({ postMessage() {}, getState: () => undefined, setState() {} }),
+    acquireVsCodeApi: () => ({ postMessage: (m: unknown) => void posted.push(m), getState: () => undefined, setState() {} }),
     ResizeObserver: class {
       constructor(cb: (entries: unknown[]) => void) {
         resize.push(cb);
@@ -149,7 +150,7 @@ function load() {
   const exports = (sandbox.module as { exports: Any }).exports;
   return {
     Stage: exports.Stage as Any, petFields: exports.petFields as Any, ACTIONS: exports.ACTIONS as Any,
-    MOODS: exports.MOODS as Any, resize, intersect, frames,
+    MOODS: exports.MOODS as Any, stageCallbacks: exports.stageCallbacks as Any, resize, intersect, frames, posted,
   };
 }
 
@@ -205,6 +206,17 @@ test("the pets are told when a usage limit has reset", () => {
     JSON.stringify({ chats: [chat("p/1", "idle", { stopped: { kind: "limit", over, resetsAt: 5 } })] }, petFields);
   assert.notEqual(rows(false), rows(true));
   assert.notEqual(rows(false), JSON.stringify({ chats: [chat("p/1", "idle")] }, petFields));
+});
+
+test("a click on a pet goes to its chat's window; only the chat's name opens its tab", () => {
+  // (as on Plasma: the pets jump to the terminal or Claude Code tab, whatever
+  // claudeStatus.clickOpensPane says about the name)
+  const { stageCallbacks, posted } = load();
+  const ref = { key: "p/1", sessionId: "s-1", profileDir: "p", name: "chat 1" };
+  stageCallbacks.open(ref);
+  assert.equal(posted.length, 1);
+  assert.equal(posted[0].type, "openWindow");
+  assert.equal(posted[0].chat, ref);
 });
 
 test("every mood and action a pet asks Talpa for is one it knows", () => {

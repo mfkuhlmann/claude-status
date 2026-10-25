@@ -245,11 +245,12 @@ name and Claude's recap, that you edit first. Finished chats that changed
 files say **to review** until you **Mark reviewed** (or until they change
 files again), with whether tests ran and passed after their last edit.
 
-The window button beside a chat opens the chat itself, on the machine it's
-on (with `claudeStatus.clickOpensPane` off, so does a click): in VS Code's
-terminal here, on the window's host, or through `ssh -t` for another host. A
-chat already running in one of this window's terminals is brought to the
-front; a chat of the Claude Code extension is revealed in it.
+The window button beside a chat and a click on its pet open the chat
+itself, on the machine it's on (with `claudeStatus.clickOpensPane` off, so
+does a click on its name): in VS Code's terminal here, on the window's host,
+or through `ssh -t` for another host. A chat already running in one of this
+window's terminals is brought to the front; a chat of the Claude Code
+extension is revealed in it.
 
 **New chat** (＋) asks where: in a terminal, in one of the account's recent
 folders or any other, or as a Claude Code chat tab in this window. **Start
