@@ -275,7 +275,7 @@ Item {
     function event(kind, text) {
         if (held || leaving)
             return   // (a reaction now would stop it digging away)
-        const action = { done: "finished", failed: "failed", stopped: "shrug", oops: "confused", reset: "charged" }[kind]
+        const action = { done: "finished", failed: "failed", stopped: "shrug", limit: "battery", oops: "confused", reset: "charged" }[kind]
         react(action || "alert")
         say(text)
     }

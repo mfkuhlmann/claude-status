@@ -269,7 +269,9 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
     _noteUnseen(source, out) {
         const min = this._settings.get_int('notify-done-min-seconds') * 1000;
         for (const f of out.finished) {
-            if (!this.menu.isOpen && f.took >= min)
+            if (f.stop)
+                delete this._unseen[f.key];   // (a limit stopped it: nothing to look at)
+            else if (!this.menu.isOpen && f.took >= min)
                 this._unseen[f.key] = 'done';
         }
         for (const key of Object.keys(this._unseen)) {

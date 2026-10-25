@@ -13,6 +13,12 @@ function plural(n, one, many) {
     return fmt(n === 1 ? one : many, n);
 }
 
+// What stopped a chat's turn before it was through, while that holds:
+// "limit" (a usage limit, until it resets) or "login" (it expired), else ""
+export function stopOf(s) {
+    return (s.state === 'idle' || s.state === 'done') && s.stopped && !s.stopped.over ? s.stopped.kind : '';
+}
+
 export function counts(groups) {
     const c = {waiting: 0, working: 0, idle: 0, done: 0};
     for (const g of groups) {
@@ -355,6 +361,7 @@ export class Tracker {
     constructor() {
         this.lastStates = {};
         this.turnStarts = {};
+        this.lastEnded = {};   // the turns that ended at the last poll, told as finished: {key: how long it took}
         this.primed = {};
         this.lastWaitingAlert = {};
         this.lastWindows = {};
@@ -362,12 +369,14 @@ export class Tracker {
 
     // settings: {notifyWaiting, notifyDone, notifyDoneMinSeconds}
     // Returns {notify: [...], close: [...], pets: [...], sound: "" | "waiting" | "done" | "failed",
-    // present: Set, states: {key: state}, finished: [{key, took}] (every turn that ended)}
+    // present: Set, states: {key: state}, finished: [{key, took, stop}] (every turn that ended;
+    // stop: what broke it off, see stopOf)}
     track(source, groupList, nowMs, host, settings) {
         const out = {notify: [], close: [], pets: [], sound: '', present: new Set(), states: {}, finished: []};
-        const next = {}, starts = {};
+        const next = {}, starts = {}, ends = {};
         const before = this.lastStates[source] || {};
         const startedAt = this.turnStarts[source] || {};
+        const ended = this.lastEnded[source] || {};
         const primed = !!this.primed[source];
         const where = host ? ` · ${host}` : '';
         const sound = kind => {
@@ -389,7 +398,17 @@ export class Tracker {
                     starts[sid] = sid in startedAt ? startedAt[sid] : s.since || nowMs;
                 if (prev === 'waiting' && s.state !== 'waiting')
                     out.close.push({key: sid, kind: 'waiting'});   // answered: drop the stale prompt
-                if (!primed || prev === s.state)
+                if (!primed)
+                    continue;
+                const stop = stopOf(s);
+                if (stop && sid in ended) {
+                    // Claude writes its transcript a moment after the turn ends, so
+                    // the usage limit that ended it can show a poll later: it
+                    // didn't finish after all
+                    this._turnEnded(out, sid, s, host, ended[sid], settings, sound);
+                    continue;
+                }
+                if (prev === s.state)
                     continue;
                 if (s.state === 'waiting') {
                     // At most one "needs input" alert per session per minute
@@ -406,27 +425,12 @@ export class Tracker {
                             sound('waiting');
                         }
                     }
-                } else if (prev === 'working' && (s.state === 'idle' || s.state === 'done')) {
-                    const pk = petKeyOf(s, host);
-                    if (s.reason === 'failed')
-                        out.pets.push({kind: 'failed', text: fmt('%1 failed…', s.name), key: pk});
-                    else if (s.reason === 'stopped')
-                        out.pets.push({kind: 'stopped', text: fmt('%1 was stopped.', s.name), key: pk});
-                    else
-                        out.pets.push({kind: 'done', text: fmt('%1 is done!', s.name), key: pk});
+                } else if ((prev === 'working' || (stop && prev === 'waiting')) && (s.state === 'idle' || s.state === 'done')) {
+                    // (a background session a limit stops can say it waits for a moment first)
                     const took = (s.since || nowMs) - (sid in startedAt ? startedAt[sid] : nowMs);
-                    out.finished.push({key: sid, took});
-                    if (settings.notifyDone && took >= settings.notifyDoneMinSeconds * 1000) {
-                        const title = s.reason === 'failed' ? fmt('%1 failed', s.name)
-                            : s.reason === 'stopped' ? fmt('%1 was stopped', s.name)
-                                : fmt('%1 finished', s.name);
-                        out.notify.push({
-                            key: sid, session: s, kind: 'done', host, title,
-                            body: `${s.detail ? `${s.detail}\n` : ''}${fmt('Took %1 · %2', duration(took), s.cwdShort)}${where}`,
-                            icon: 'emblem-ok-symbolic',
-                        });
-                        sound(s.reason === 'failed' ? 'failed' : 'done');
-                    }
+                    this._turnEnded(out, sid, s, host, took, settings, sound);
+                    if (!stop)
+                        ends[sid] = took;
                 }
             }
         }
@@ -436,14 +440,58 @@ export class Tracker {
         }
         this.lastStates[source] = next;
         this.turnStarts[source] = starts;
+        this.lastEnded[source] = ends;
         this.primed[source] = true;
         return out;
+    }
+
+    // A chat's turn ended (it was working, it's idle or done now) after took ms:
+    // its pet reacts and a notification says how. A turn a usage limit or an
+    // expired login broke off didn't finish (its notification replaces a
+    // "finished" one sent a poll before).
+    _turnEnded(out, sid, s, host, took, settings, sound) {
+        const where = host ? ` · ${host}` : '';
+        const stop = stopOf(s);
+        const pk = petKeyOf(s, host);
+        if (stop === 'limit')
+            out.pets.push({kind: 'limit', text: fmt('%1 hit the usage limit.', s.name), key: pk});
+        else if (stop === 'login')
+            out.pets.push({kind: 'stopped', text: fmt('%1: the login expired.', s.name), key: pk});
+        else if (s.reason === 'failed')
+            out.pets.push({kind: 'failed', text: fmt('%1 failed…', s.name), key: pk});
+        else if (s.reason === 'stopped')
+            out.pets.push({kind: 'stopped', text: fmt('%1 was stopped.', s.name), key: pk});
+        else
+            out.pets.push({kind: 'done', text: fmt('%1 is done!', s.name), key: pk});
+        out.finished.push({key: sid, took, stop});
+        if (!settings.notifyDone || took < settings.notifyDoneMinSeconds * 1000)
+            return;
+        if (stop) {
+            out.notify.push({
+                key: sid, session: s, kind: stop, host,
+                title: stop === 'limit' ? fmt('%1 hit the usage limit', s.name) : fmt('%1 stopped: the login expired', s.name),
+                body: `${s.stopped.text}\n${fmt('Took %1 · %2', duration(took), s.cwdShort)}${where}`,
+                icon: stop === 'limit' ? 'appointment-soon-symbolic' : 'dialog-error-symbolic',
+            });
+            sound('failed');
+        } else {
+            const title = s.reason === 'failed' ? fmt('%1 failed', s.name)
+                : s.reason === 'stopped' ? fmt('%1 was stopped', s.name)
+                    : fmt('%1 finished', s.name);
+            out.notify.push({
+                key: sid, session: s, kind: 'done', host, title,
+                body: `${s.detail ? `${s.detail}\n` : ''}${fmt('Took %1 · %2', duration(took), s.cwdShort)}${where}`,
+                icon: 'emblem-ok-symbolic',
+            });
+            sound(s.reason === 'failed' ? 'failed' : 'done');
+        }
     }
 
     // A source you stopped showing (an unticked host): picked again later, it starts afresh
     forget(source) {
         delete this.lastStates[source];
         delete this.turnStarts[source];
+        delete this.lastEnded[source];
         delete this.primed[source];
         for (const key of Object.keys(this.lastWaitingAlert)) {
             if (keyOfSource(key, source))
@@ -918,16 +966,18 @@ export function awayDigest(away, groups, now, minMinutes) {
         return null;
     const before = away.snapshot.sessions;
     const named = (s, host) => (host ? fmt('%1 (%2)', s.name, host) : s.name);
-    const finished = [], failed = [], resets = [];
+    const finished = [], failed = [], limited = [], loggedOut = [], resets = [];
     for (const g of groups) {
         for (const s of g.sessions) {
             const prev = before[sessionKey(s, g.host)];
             const ended = s.state === 'idle' || s.state === 'done';
             const ran = prev ? prev.state === 'working' || prev.state === 'waiting'
                 : (s.since || 0) >= away.lockedAt;   // a chat that came and finished meanwhile
-            if (!ended || !ran || s.reason === 'stopped')
+            const stop = stopOf(s);
+            if (!ended || !ran || (s.reason === 'stopped' && !stop))
                 continue;
-            (s.reason === 'failed' ? failed : finished).push(named(s, g.host));
+            (stop === 'limit' ? limited : stop === 'login' ? loggedOut : s.reason === 'failed' ? failed : finished)
+                .push(named(s, g.host));
         }
         for (const w of g.limits ? g.limits.windows : []) {
             const prev = away.snapshot.windows[`${g.host || ''}|${g.id}/${w.key}`];
@@ -936,7 +986,7 @@ export function awayDigest(away, groups, now, minMinutes) {
         }
     }
     const waiting = chatsNeedingYou(groups);
-    if (!waiting.length && !finished.length && !failed.length)
+    if (!waiting.length && !finished.length && !failed.length && !limited.length && !loggedOut.length)
         return null;
     const lines = waiting.slice(0, 3).map(c => fmt('Needs you: %1 (waiting %2)', named(c.session, c.host),
         duration(now - (c.session.since || now))));
@@ -946,6 +996,10 @@ export function awayDigest(away, groups, now, minMinutes) {
         lines.push(fmt('Finished: %1', nameList(finished)));
     if (failed.length)
         lines.push(fmt('Failed: %1', nameList(failed)));
+    if (limited.length)
+        lines.push(fmt('Hit the usage limit: %1', nameList(limited)));
+    if (loggedOut.length)
+        lines.push(fmt('Login expired: %1', nameList(loggedOut)));
     lines.push(...resets);
     return {title: fmt('While you were away (%1)', duration(awayMs)), body: lines.join('\n'), first: waiting[0] || null};
 }

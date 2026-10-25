@@ -150,6 +150,7 @@ const NOTIFY = {
     oncall: { depth: 'high', prop: 'sign', arms: 'sign', eyes: 'wide', mouth: 'open', plume: 'up', lamp: 'needs' },
     trophy: { depth: 'high', arms: 'up', eyes: 'happy', mouth: 'grin', lamp: 'done' },
     sad: { depth: 'half', eyes: 'sad', mouth: 'frown', plume: 'droop', lamp: 'failed' },
+    limit: { depth: 'half', eyes: 'tired', mouth: 'flat', plume: 'droop', prop: 'battery', lamp: 'limit' },
     error: { depth: 'half', eyes: 'squint', mouth: 'wavy', plume: 'droop', lamp: 'error' }
 };
 

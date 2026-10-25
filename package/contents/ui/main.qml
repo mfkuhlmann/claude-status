@@ -20,6 +20,7 @@ PlasmoidItem {
     // "needs input" one can be closed.
     property var lastStates: ({})
     property var turnStarts: ({})
+    property var lastEnded: ({})   // the turns that ended at the last check, told as finished: {chat key: how long it took}
     property var notifications: ({})
     property var primedSources: ({})
     property string actionError: ""
@@ -132,7 +133,13 @@ PlasmoidItem {
     }
 
     function atLimit(s) {
-        return (s.state === "idle" || s.state === "done") && !!s.stopped && s.stopped.kind === "limit" && !s.stopped.over
+        return stopOf(s) === "limit"
+    }
+
+    // What stopped a chat's turn before it was through, while that holds:
+    // "limit" (a usage limit, until it resets) or "login" (it expired), else ""
+    function stopOf(s) {
+        return (s.state === "idle" || s.state === "done") && s.stopped && !s.stopped.over ? s.stopped.kind : ""
     }
     // What happened since you last opened the popup, for the icon: chats that
     // started needing you, and chats that finished a turn (as long as the
@@ -479,7 +486,7 @@ PlasmoidItem {
     // notification sums up what happened since you left (awayDigest).
     property bool away: false
     property real awaySince: 0
-    property var awayEvents: []         // [{kind: done|failed|stopped|reset, name}]
+    property var awayEvents: []         // [{kind: done|failed|stopped|limit|login|reset, name, key}]
     property var awayDigest: null       // the last summary, at the top of the popup until you've seen it
 
     function awayLongEnough() {
@@ -507,9 +514,9 @@ PlasmoidItem {
         onNewData: (source, data) => disconnectSource(source)   // a phone out of reach just misses it
     }
 
-    function noteAway(kind, name) {
+    function noteAway(kind, name, key) {
         if (away)
-            awayEvents = awayEvents.concat([{ kind: kind, name: name }])
+            awayEvents = awayEvents.concat([{ kind: kind, name: name, key: key || "" }])
     }
 
     function setAway(locked) {
@@ -545,13 +552,18 @@ PlasmoidItem {
                             duration(Date.now() - (c.session.since || Date.now()))))
         if (waiting.length > 3)
             lines.push(i18np("+%1 more needs you", "+%1 more need you", waiting.length - 3))
-        const done = names("done"), failed = names("failed"), stopped = names("stopped"), resets = names("reset")
+        const done = names("done"), failed = names("failed"), stopped = names("stopped"), limited = names("limit")
+        const loggedOut = names("login"), resets = names("reset")
         if (done.length)
             lines.push(i18n("Finished: %1", list(done)))
         if (failed.length)
             lines.push(i18n("Failed: %1", list(failed)))
         if (stopped.length)
             lines.push(i18n("Stopped: %1", list(stopped)))
+        if (limited.length)
+            lines.push(i18n("Hit the usage limit: %1", list(limited)))
+        if (loggedOut.length)
+            lines.push(i18n("Login expired: %1", list(loggedOut)))
         for (const r of resets)
             lines.push(i18n("%1 limit reset", r))
         return lines
@@ -568,7 +580,7 @@ PlasmoidItem {
             return
         const first = waiting.length ? waiting[0] : null
         notify("away-digest", first ? first.session : null, "digest", title, lines.join("\n"), "user-away", first ? first.host : "")
-        queueSound(waiting.length ? "waiting" : awayEvents.some(e => e.kind === "failed") ? "failed" : "done")
+        queueSound(waiting.length ? "waiting" : awayEvents.some(e => ["failed", "limit", "login"].indexOf(e.kind) >= 0) ? "failed" : "done")
         playQueuedSound()
     }
 
@@ -955,9 +967,10 @@ PlasmoidItem {
     // "" for this computer, "ssh:<host>" for an SSH host; each source keeps its
     // own memory, so one poll can't close another's notifications.
     function trackTransitions(source, groupList, nowMs, host) {
-        const next = {}, starts = {}
+        const next = {}, starts = {}, ends = {}
         const before = lastStates[source] || {}
         const startedAt = turnStarts[source] || {}
+        const ended = lastEnded[source] || {}
         const primed = !!primedSources[source]
         const where = host ? " · " + host : ""
         for (const g of groupList) {
@@ -977,7 +990,17 @@ PlasmoidItem {
                 }
                 if (s.state === "working")
                     forgetUnseen(sid, "done")  // it's at it again
-                if (!primed || prev === s.state)
+                if (!primed)
+                    continue
+                const stop = stopOf(s)
+                if (stop && sid in ended) {
+                    // Claude writes its transcript a moment after the turn ends, so
+                    // the usage limit that ended it can show a check later: it
+                    // didn't finish after all
+                    turnEnded(sid, s, host, ended[sid], true)
+                    continue
+                }
+                if (prev === s.state)
                     continue
                 if (s.state === "waiting") {
                     markUnseen(sid, "waiting")
@@ -994,32 +1017,12 @@ PlasmoidItem {
                             queueSound("waiting")
                         }
                     }
-                } else if (prev === "working" && (s.state === "idle" || s.state === "done")) {
-                    const pk = petKeyOf(s, host)
-                    if (s.reason === "failed")
-                        petEvent("failed", i18n("%1 failed…", s.name), pk)
-                    else if (s.reason === "stopped")
-                        petEvent("stopped", i18n("%1 was stopped.", s.name), pk)
-                    else
-                        petEvent("done", i18n("%1 is done!", s.name), pk)
+                } else if ((prev === "working" || (stop && prev === "waiting")) && (s.state === "idle" || s.state === "done")) {
+                    // (a background session a limit stops can say it waits for a moment first)
                     const took = (s.since || nowMs) - (sid in startedAt ? startedAt[sid] : nowMs)
-                    if (took >= Plasmoid.configuration.notifyDoneMinSeconds * 1000)
-                        markUnseen(sid, "done")
-                    noteAway(s.reason === "failed" || s.reason === "stopped" ? s.reason : "done", s.name + where)
-                    if (Plasmoid.configuration.phoneFinished && took >= Plasmoid.configuration.notifyDoneMinSeconds * 1000)
-                        toPhone((s.reason === "failed" ? i18n("Claude: %1 failed", s.name + where)
-                                 : s.reason === "stopped" ? i18n("Claude: %1 was stopped", s.name + where)
-                                 : i18n("Claude: %1 finished", s.name + where))
-                                + (s.detail ? " (" + s.detail + ")" : "") + " · " + i18n("took %1", duration(took)))
-                    if (Plasmoid.configuration.notifyDone && root.notifier && !holdingBack()
-                            && took >= Plasmoid.configuration.notifyDoneMinSeconds * 1000) {
-                        notify(sid, s, "done", s.reason === "failed" ? i18n("%1 failed", s.name)
-                                            : s.reason === "stopped" ? i18n("%1 was stopped", s.name)
-                                            : i18n("%1 finished", s.name),
-                               (s.detail ? s.detail + "\n" : "") + i18n("Took %1 · %2", duration(took), s.cwdShort) + where,
-                               "dialog-ok", host)
-                        queueSound(s.reason === "failed" ? "failed" : "done")
-                    }
+                    turnEnded(sid, s, host, took, false)
+                    if (!stop)
+                        ends[sid] = took
                 }
             }
         }
@@ -1042,8 +1045,63 @@ PlasmoidItem {
         }
         lastStates = Object.assign({}, lastStates, { [source]: next })
         turnStarts = Object.assign({}, turnStarts, { [source]: starts })
+        lastEnded = Object.assign({}, lastEnded, { [source]: ends })
         primedSources = Object.assign({}, primedSources, { [source]: true })
         playQueuedSound()
+    }
+
+    // A chat's turn ended (it was working, it's idle or done now) after took ms:
+    // its pet reacts and a notification says how. A turn a usage limit or an
+    // expired login broke off didn't finish. late: that shows only now, after
+    // it was told as finished (which this takes back).
+    function turnEnded(sid, s, host, took, late) {
+        const where = host ? " · " + host : ""
+        const stop = stopOf(s)
+        const long = took >= Plasmoid.configuration.notifyDoneMinSeconds * 1000
+        const pk = petKeyOf(s, host)
+        if (stop === "limit")
+            petEvent("limit", i18n("%1 hit the usage limit.", s.name), pk)
+        else if (stop === "login")
+            petEvent("stopped", i18n("%1: the login expired.", s.name), pk)
+        else if (s.reason === "failed")
+            petEvent("failed", i18n("%1 failed…", s.name), pk)
+        else if (s.reason === "stopped")
+            petEvent("stopped", i18n("%1 was stopped.", s.name), pk)
+        else
+            petEvent("done", i18n("%1 is done!", s.name), pk)
+        if (late) {
+            forgetUnseen(sid, "done")
+            const i = awayEvents.map(e => e.key === sid && e.kind === "done").lastIndexOf(true)
+            if (i >= 0)
+                awayEvents = awayEvents.slice(0, i).concat(awayEvents.slice(i + 1))
+        } else if (!stop && long) {
+            markUnseen(sid, "done")
+        }
+        noteAway(stop || (s.reason === "failed" || s.reason === "stopped" ? s.reason : "done"), s.name + where, sid)
+        if (Plasmoid.configuration.phoneFinished && long)
+            toPhone((stop === "limit" ? i18n("Claude: %1 hit the usage limit", s.name + where)
+                     : stop ? i18n("Claude: %1 stopped, the login expired", s.name + where)
+                     : s.reason === "failed" ? i18n("Claude: %1 failed", s.name + where)
+                     : s.reason === "stopped" ? i18n("Claude: %1 was stopped", s.name + where)
+                     : i18n("Claude: %1 finished", s.name + where))
+                    + (stop ? " (" + s.stopped.text + ")" : s.detail ? " (" + s.detail + ")" : "") + " · " + i18n("took %1", duration(took)))
+        if (!Plasmoid.configuration.notifyDone || !root.notifier || holdingBack() || !long)
+            return
+        if (stop) {
+            const kept = stop === "limit" && !host && keptChat(s.chatId || s.sessionId)
+            notify(sid, s, stop, stop === "limit" ? i18n("%1 hit the usage limit", s.name) : i18n("%1 stopped: the login expired", s.name),
+                   s.stopped.text + (kept ? "\n" + i18n("It goes on by itself after the reset.") : "") + "\n"
+                   + i18n("Took %1 · %2", duration(took), s.cwdShort) + where,
+                   stop === "limit" ? "chronometer-pause" : "dialog-error", host)
+            queueSound("failed")
+        } else {
+            notify(sid, s, "done", s.reason === "failed" ? i18n("%1 failed", s.name)
+                                : s.reason === "stopped" ? i18n("%1 was stopped", s.name)
+                                : i18n("%1 finished", s.name),
+                   (s.detail ? s.detail + "\n" : "") + i18n("Took %1 · %2", duration(took), s.cwdShort) + where,
+                   "dialog-ok", host)
+            queueSound(s.reason === "failed" ? "failed" : "done")
+        }
     }
 
     function notify(key, session, kind, title, body, icon, host) {
@@ -1053,7 +1111,8 @@ PlasmoidItem {
         const summary = kind === "digest"   // while you were away: someone waits for you, or all went well
         const pose = kind === "done" && session && session.reason === "failed" ? "sad"
                    : summary ? (session ? "oncall" : "trophy")
-                   : { waiting: "oncall", overlap: "oncall", done: "trophy", reset: "trophy", started: "trophy", error: "error" }[kind]
+                   : { waiting: "oncall", overlap: "oncall", done: "trophy", reset: "trophy", started: "trophy", error: "error",
+                       limit: "limit", login: "error" }[kind]
         const n = notificationComponent.createObject(root, {
             sessionId: session ? session.sessionId : "", profileDir: session ? session.profileDir || "" : "",
             host: host || "", openCommand: session && session.openCommand ? session.openCommand : "",
@@ -1447,6 +1506,7 @@ PlasmoidItem {
         const drop = map => { const out = Object.assign({}, map); delete out[source]; return out }
         lastStates = drop(lastStates)
         turnStarts = drop(turnStarts)
+        lastEnded = drop(lastEnded)
         primedSources = drop(primedSources)
         // (else a limit that reset, or files two chats changed, while it was hidden is news once it's back)
         lastStops = drop(lastStops)

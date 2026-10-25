@@ -276,8 +276,43 @@ test('hotkey: unseen finished turns come from the tracker', () => {
     const tracker = new L.Tracker();
     tracker.track('', [group([session('a', 'working', {since: T - 120000})])], T, '', settings);
     const out = tracker.track('', [group([session('a', 'idle', {since: T})])], T + 2000, '', settings);
-    eq(out.finished, [{key: '/a', took: 120000}]);
+    eq(out.finished, [{key: '/a', took: 120000, stop: ''}]);
     eq(out.states, {'/a': 'idle'});
+});
+
+test("a turn a usage limit or the login broke off isn't finished", () => {
+    const limit = {kind: 'limit', window: 'five_hour', text: "You've hit your session limit · resets 4am (Europe/Berlin)"};
+    const login = {kind: 'login', window: null, text: 'Login expired · Please run /login'};
+    const t = new L.Tracker();
+    const at = (since, rows) => [group(rows.map(([k, state, extra]) => session(k, state, {since, ...extra})))];
+    t.track('', at(T, [['a', 'working'], ['b', 'working'], ['c', 'working'], ['d', 'working'], ['e', 'working']]),
+        T, '', settings);
+    // a: its limit shows at once; b: the transcript isn't written yet; c (in the
+    // background) says it waits; d: finished; e: the login expired
+    let out = t.track('', at(T + 60000, [['a', 'idle', {stopped: limit}], ['b', 'idle'], ['c', 'waiting'], ['d', 'idle'],
+        ['e', 'idle', {stopped: login}]]), T + 60000, '', settings);
+    eq(out.notify.map(n => [n.key, n.kind, n.title]), [['/a', 'limit', 'chat a hit the usage limit'],
+        ['/b', 'done', 'chat b finished'], ['/c', 'waiting', 'chat c needs your input'], ['/d', 'done', 'chat d finished'],
+        ['/e', 'login', 'chat e stopped: the login expired']]);
+    eq(out.notify[0].body.split('\n')[0], limit.text);
+    eq(out.pets.map(p => p.kind), ['limit', 'done', 'waiting', 'done', 'stopped']);
+    eq(out.finished.map(f => [f.key, f.stop]), [['/a', 'limit'], ['/b', ''], ['/d', ''], ['/e', 'login']]);
+    // a poll later b's and c's limits show: their notifications say so instead
+    out = t.track('', at(T + 60000, [['a', 'idle', {stopped: limit}], ['b', 'idle', {stopped: limit}],
+        ['c', 'idle', {stopped: limit}], ['d', 'idle'], ['e', 'idle', {stopped: login}]]), T + 62000, '', settings);
+    eq(out.notify.map(n => [n.key, n.kind]), [['/b', 'limit'], ['/c', 'limit']]);
+    eq(out.close, [{key: '/c', kind: 'waiting'}]);
+    eq(out.finished.map(f => [f.key, f.stop]), [['/b', 'limit'], ['/c', 'limit']]);
+    eq(out.sound, 'failed');
+    // only one poll later: a limit that shows up after that is another turn's
+    out = t.track('', at(T + 60000, [['a', 'idle', {stopped: limit}], ['b', 'idle', {stopped: limit}],
+        ['c', 'idle', {stopped: limit}], ['d', 'idle', {stopped: limit}], ['e', 'idle', {stopped: login}]]),
+    T + 64000, '', settings);
+    eq(out.notify, []);
+    // a limit that has reset doesn't hold the turn back
+    t.track('', at(T, [['f', 'working']]), T + 66000, '', settings);
+    out = t.track('', at(T + 60000, [['f', 'idle', {stopped: {...limit, over: true}}]]), T + 68000, '', settings);
+    eq(out.notify.map(n => n.kind), ['done']);
 });
 
 test('while you were away', () => {
@@ -303,6 +338,12 @@ test('while you were away', () => {
     const many = group(['w1', 'w2', 'w3', 'w4', 'w5'].map((k, i) => session(k, 'waiting', {since: now - (10 - i) * M})));
     eq(L.awayDigest(away, [many], now, 5).body.split('\n'), ['Needs you: chat w1 (waiting 10m)',
         'Needs you: chat w2 (waiting 9m)', 'Needs you: chat w3 (waiting 8m)', '+2 more need you']);
+    const stopped = group([session('a', 'idle', {stopped: {kind: 'limit', text: '…'}}),
+        session('f', 'done', {reason: 'failed', stopped: {kind: 'limit', text: '…'}}),
+        session('s', 'done', {reason: 'stopped', stopped: {kind: 'login', text: '…'}}),
+        session('b', 'idle', {stopped: {kind: 'limit', text: '…', over: true}})]);
+    eq(L.awayDigest(away, [stopped], now, 5).body.split('\n'), ['Finished: chat b', 'Hit the usage limit: chat a, chat f',
+        'Login expired: chat s']);
 });
 
 test('account stats', () => {
