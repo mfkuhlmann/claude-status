@@ -1,15 +1,18 @@
 import QtQuick
 import org.kde.kirigami as Kirigami
 import "talpa/talpa.mjs" as T
+import "talpa/pictures.mjs" as P
 
 // Talpa on a canvas: talpa/talpa.mjs is the creature (looks, moods, actions);
 // this ticks its clock with the widget's (main.qml: petFrame) while it can be
 // seen, and paints it. Each picture costs, so:
 // - live (the big Talpa, or a pet you hold): as often as that shows something
 //   new (talpa.frameMs: 25 times a second for quick moves, down to 5 at rest);
-// - stills (a chat's pet): only when what it shows changes (talpa.stillKey),
-//   on the sheet behind, which then fades in as the shown one fades out for
-//   a new pose, or just takes its place for a blink, a glance or a beat.
+// - stills (a chat's pet): pictures (talpa/pictures.mjs), each drawn once on
+//   one of a few sheets and shown while it's what Talpa looks like. A quick
+//   move goes round its pictures, a pose fades into the next (the two mixed
+//   on a sheet of their own), and only a big move (a jump, popping out of its
+//   burrow) is drawn live.
 // The canvas has room around the creature's box for what it throws and holds up.
 Item {
     id: view
@@ -19,24 +22,18 @@ Item {
     property bool travels: false           // may dig over to another spot by itself
     property color tint: "transparent"     // a chat's color (calmed down); none: Talpa's own lilac
     property bool facingLeft: false
-    property bool stills: false            // pictures only (see above)
+    property int sheets: 1                 // canvases: more than one to show it as pictures
+    property bool stills: false            // pictures (see above)
     readonly property real boxX: box * 0.3
     readonly property real boxY: box * 0.45
     readonly property real floorY: boxY + box * T.FLOOR / T.BOX   // the floor, from the canvas top
     property var talpa: null
+    property var pictures: null
     signal travel(int ms)                  // it dug in: move it to its new spot within ms
     signal ready()                         // talpa exists
 
     width: box * 1.6
     height: box * 1.5
-
-    // The sheet shown, and the one behind it for the next picture
-    property Item front: sheetA
-    property Item back: sheetB
-    property real lastPaint: 0
-    property real paintedAt: -1            // the back sheet got its picture (shown at the next tick)
-    property real fadeAt: -1               // the back sheet fades in since then
-    readonly property int fadeMs: 200
 
     function cssColor(c, alpha) {
         return "rgba(" + Math.round(c.r * 255) + "," + Math.round(c.g * 255) + "," + Math.round(c.b * 255) + "," + (alpha === undefined ? c.a : alpha) + ")"
@@ -46,12 +43,6 @@ Item {
     }
     function theme() {
         return { fx: cssColor(Kirigami.Theme.textColor, 0.5), text: cssColor(Kirigami.Theme.textColor, 1) }
-    }
-    // (new colors: the pictures are drawn again)
-    function redraw() {
-        front.key = "~"
-        back.key = ""
-        lastPaint = 0
     }
 
     Component.onCompleted: {
@@ -67,10 +58,12 @@ Item {
         talpa.facingLeft = facingLeft
         talpa.onTravel = ms => view.travel(ms)
         talpa.tick(Date.now())
+        pictures = new P.Pictures(talpa, sheets)
         ready()
         frame(Date.now())
     }
-    onTintChanged: if (talpa) { talpa.setColors(colors()); redraw() }
+    // (new colors: the pictures are drawn again)
+    onTintChanged: if (talpa) { talpa.setColors(colors()); pictures.reset() }
     onFacingLeftChanged: if (talpa) talpa.facingLeft = facingLeft
     onTravelsChanged: if (talpa) talpa.travels = travels
 
@@ -79,7 +72,7 @@ Item {
         function onTextColorChanged() {
             if (view.talpa) {
                 view.talpa.setTheme(view.theme())
-                view.redraw()
+                view.pictures.reset()
             }
         }
     }
@@ -94,86 +87,87 @@ Item {
 
     function frame(now) {
         talpa.tick(now)
-        if (!stills) {
-            if (front.key !== "" || back.opacity > 0) {
-                front.key = ""   // (back from pictures: drawn live on the shown sheet)
-                front.opacity = 1
-                back.opacity = 0
-                back.key = ""
-                fadeAt = paintedAt = -1
+        pictures.pictures = stills
+        pictures.tick(now)
+        for (const s of pictures.sheets) {
+            if (s.paint && sheetItems.itemAt(s.index)) {
+                s.paint = false
+                sheetItems.itemAt(s.index).requestPaint()
             }
-            if (now - lastPaint >= talpa.frameMs - 5) {   // (ticks come every 40 ms, give or take)
-                lastPaint = now
-                front.requestPaint()
-            }
-            return
         }
-        if (fadeAt >= 0) {
-            const p = (now - fadeAt) / fadeMs
-            if (p < 1) {
-                back.opacity = p   // (one fades in as the other fades out)
-                front.opacity = 1 - p
-                return
-            }
-            swap()
-        }
-        if (paintedAt >= 0) {
-            paintedAt = -1
-            showBack(now)
-            return
-        }
-        const key = talpa.stillKey()
-        if (key === front.key)
-            return
-        if (key === back.key) {
-            showBack(now)   // the picture it needs is behind already (a beat, a blink)
-            return
-        }
-        back.key = key
-        back.requestPaint()
-        paintedAt = now
+        // the sheet in front shows, or the blend once it has the two mixed
+        if (pictures.coming)
+            blend.requestPaint()
+        else
+            blend.drawn = false
+        const mixed = pictures.coming !== null && blend.drawn
+        blend.opacity = mixed ? 1 : 0
+        for (let i = 0; i < sheetItems.count; i++)
+            sheetItems.itemAt(i).opacity = !mixed && i === pictures.front.index ? 1 : 0
     }
 
-    // A new pose fades in; a new detail (a blink, a glance, a beat) just shows
-    function showBack(now) {
-        const pose = k => k.split("#")[0]
-        if (front.key !== "" && front.key !== "~" && pose(back.key) === pose(front.key)) {
-            swap()
-        } else {
-            fadeAt = now
-            back.opacity = 0.01
-        }
-    }
-
-    function swap() {
-        const shown = back
-        back = front
-        front = shown
-        front.opacity = 1
-        back.opacity = 0
-        fadeAt = -1
-    }
-
-    function paint(sheet) {
+    function paint(sheet, index) {
         const ctx = sheet.getContext("2d")
         ctx.reset()
-        if (!talpa)
+        if (!pictures)
             return
         ctx.translate(boxX, boxY)
         ctx.scale(box / T.BOX, box / T.BOX)
-        if (sheet.key === "")
-            talpa.draw(ctx)
-        else
-            talpa.drawStill(ctx)
+        pictures.paint(pictures.sheets[index], ctx)
     }
 
-    component Sheet: Canvas {
-        property string key: ""   // the picture on it, "": drawn live
+    Repeater {
+        id: sheetItems
+        model: view.sheets
+        delegate: Canvas {
+            required property int index
+            anchors.fill: parent
+            renderStrategy: Canvas.Cooperative
+            opacity: index === 0 ? 1 : 0
+            onPaint: view.paint(this, index)
+        }
+    }
+
+    // A pose fading into the next: (1 - mix) × the one in front + mix × the
+    // next, added up ("lighter"), so where both cover nothing shows through.
+    // Qt adds up right only at full strength (with less it adds, caps, then
+    // mixes with what was there: the background showed through again), so
+    // the next one is first made mix × itself on a sheet of its own.
+    Canvas {
+        id: fader
         anchors.fill: parent
         renderStrategy: Canvas.Cooperative
-        z: view.back === this ? 1 : 0   // (the next picture fades in on top)
-        onPaint: view.paint(this)
+        visible: false
     }
-    Sheet { id: sheetA }
-    Sheet { id: sheetB; opacity: 0 }
+    Canvas {
+        id: blend
+        property bool drawn: false   // has the two of the fade under way
+        anchors.fill: parent
+        renderStrategy: Canvas.Cooperative
+        opacity: 0
+        z: 1
+        onPaint: {
+            const ctx = getContext("2d")
+            ctx.reset()
+            const p = view.pictures
+            const from = p && p.coming ? sheetItems.itemAt(p.front.index) : null
+            const to = p && p.coming ? sheetItems.itemAt(p.coming.index) : null
+            if (!from || !to) {
+                drawn = false
+                return
+            }
+            // (pixel for pixel: the sheets are a whole number of pixels, the
+            // view maybe not, and squeezing one into it shifted the edges)
+            const next = fader.getContext("2d")
+            next.reset()
+            next.globalAlpha = p.mix
+            next.drawImage(to, 0, 0)
+            ctx.globalAlpha = 1 - p.mix
+            ctx.drawImage(from, 0, 0)
+            ctx.globalAlpha = 1
+            ctx.globalCompositeOperation = "lighter"
+            ctx.drawImage(fader, 0, 0)
+            drawn = true
+        }
+    }
 }

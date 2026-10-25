@@ -368,6 +368,7 @@ Item {
         tint: pet.lone ? "transparent" : pet.tint
         // a chat's pet: pictures (only the big Talpa moves all the time), but
         // drawn live while you hold it and until it has landed
+        sheets: pet.lone ? 1 : 5
         stills: !pet.lone && !pet.landing
         onReady: pet.start()
         onTravel: ms => {
