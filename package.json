@@ -499,6 +499,30 @@
           "markdownDescription": "The reasoning effort new chats in a terminal or in the background start with (`claude --effort`; **New Chat…** changes it).",
           "order": 33
         },
+        "claudeStatus.newChatMode": {
+          "type": "string",
+          "enum": [
+            "default",
+            "acceptEdits",
+            "plan",
+            "auto",
+            "dontAsk",
+            "bypassPermissions",
+            ""
+          ],
+          "enumItemLabels": [
+            "Manual",
+            "Accept edits",
+            "Plan mode",
+            "Auto mode",
+            "Don't ask",
+            "Bypass permissions",
+            "Claude's default"
+          ],
+          "default": "",
+          "markdownDescription": "The permission mode new chats in a terminal or in the background start in (`claude --permission-mode`; **New Chat…** changes it, Shift+Tab in the chat too). A background chat can start in auto mode or bypass permissions only once you turned that on in a terminal.",
+          "order": 34
+        },
         "claudeStatus.pythonPath": {
           "scope": "machine",
           "type": "string",

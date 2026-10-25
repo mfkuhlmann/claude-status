@@ -255,7 +255,7 @@ export class ViewHost implements vscode.WebviewViewProvider, vscode.Disposable {
           const item = [...(g.sessions ?? []), ...(g.recent ?? [])].find((x) => x.key === chat?.key);
           if (!item) continue;
           const at = goOnAt(item);
-          if (chat && at) void this.actions.queueContinue(chat, at, g.title);
+          if (chat && at) void this.actions.queueContinue(chat, at, g.title, m.keep === true);
           break;
         }
         break;

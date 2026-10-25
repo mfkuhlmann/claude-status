@@ -2968,14 +2968,15 @@ def change_queue(cache_root, add=None, take=None, put_back=None, once=False):
 
 
 def queue_entry(profile, folder, prompt, start_at, host="", account="", plan=None, plan_profile=None,
-                plan_title="", now_ms=None, chat=None, name="", scheduled=False, why="", model=None, effort=None):
+                plan_title="", now_ms=None, chat=None, name="", scheduled=False, why="", model=None, effort=None,
+                mode=None):
     """A task to queue (checked), or ValueError. With chat (its id), it goes
     on with that chat (one a usage limit stopped: continue_chat), named name;
     why: "retry" (its turn broke off) or "cap" (stopped at the usage cap) goes
     on whatever its newest turn is (keep_going). scheduled: it starts at a
-    time you picked, not when a limit resets. model, effort: a new chat's
-    (chat_options)."""
-    chat_options(model, effort)  # (checked)
+    time you picked, not when a limit resets. model, effort, mode: a new
+    chat's (chat_options)."""
+    chat_options(model, effort, mode)  # (checked)
     if not isinstance(profile, str) or not profile or not isinstance(folder, str):
         raise ValueError("A queued task needs an account and a folder")
     if chat is not None and not valid_id(chat):
@@ -2996,6 +2997,7 @@ def queue_entry(profile, folder, prompt, start_at, host="", account="", plan=Non
         "chat": chat, "name": clean_text(name, 80) if chat else "", "scheduled": bool(scheduled) and chat is None,
         "why": why if chat and why in ("retry", "cap") else "",
         "model": (model or None) if chat is None else None, "effort": (effort or None) if chat is None else None,
+        "mode": (mode or None) if chat is None else None,
     }
 
 
@@ -4170,11 +4172,15 @@ def resume_command(profile, session_id, home=None, folder=None, claude="claude")
 
 MODEL_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9._\[\]-]{0,79}$")  # an alias (opus, sonnet, fable) or a model's full name
 EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
+# claude --permission-mode's ("manual" is newer Claude's name for "default",
+# which older ones on SSH hosts know only by that)
+PERMISSION_MODES = ("default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions")
 
 
-def chat_options(model=None, effort=None):
-    """claude's options for a new chat's model and reasoning effort (none
-    for Claude's own defaults); ValueError for one that isn't."""
+def chat_options(model=None, effort=None, mode=None):
+    """claude's options for a new chat's model, reasoning effort and
+    permission mode (none for Claude's own defaults); ValueError for one
+    that isn't."""
     words = []
     if model:
         if not MODEL_NAME.match(model):
@@ -4184,6 +4190,11 @@ def chat_options(model=None, effort=None):
         if effort not in EFFORT_LEVELS:
             raise ValueError(f"Not an effort level: {effort} (it's low, medium, high, xhigh or max)")
         words += ["--effort", effort]
+    if mode:
+        mode = "default" if mode == "manual" else mode
+        if mode not in PERMISSION_MODES:
+            raise ValueError(f"Not a permission mode: {mode} (it's {', '.join(PERMISSION_MODES)})")
+        words += ["--permission-mode", mode]
     return words
 
 
@@ -4300,9 +4311,9 @@ def start_background(profile, folder, prompt, home=None, claude="claude", wait=B
     e.g. systemd-run's, so a background service it starts lives on its own
     (not in the widget's group of processes, which a restart of the desktop
     shell ends: jump.scope_prefix). resume: the id of a chat it goes on
-    with (claude --bg --resume: the same chat, if nothing has it open; with
-    options too, Claude would start a copy of it). options: a new one's, e.g.
-    chat_options'."""
+    with (claude --bg --resume: the same chat, if nothing has it open).
+    options: claude's, e.g. chat_options' (going on with a chat: only
+    go_on_options', else Claude would start a copy of it)."""
     import subprocess
     home = home or Path.home()
     if not prompt.strip():
@@ -4322,7 +4333,7 @@ def start_background(profile, folder, prompt, home=None, claude="claude", wait=B
     folder_bin = os.path.dirname(claude)
     if folder_bin and os.path.isfile(os.path.join(folder_bin, "node")):
         env["PATH"] = folder_bin + os.pathsep + env.get("PATH", "")
-    argv = [*prefix, claude, "--bg", *(["--resume", resume] if resume else options), prompt_arg(prompt)]
+    argv = [*prefix, claude, "--bg", *(["--resume", resume] if resume else []), *options, prompt_arg(prompt)]
     try:
         r = subprocess.run(argv, cwd=folder, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                            stderr=subprocess.PIPE, timeout=wait)
@@ -4341,16 +4352,17 @@ def start_background(profile, folder, prompt, home=None, claude="claude", wait=B
 
 
 def run_task(home, extra_dirs, background, folder, profile_key, text, plan_slug=None, plan_profile=None,
-             claude=None, model=None, effort=None):
+             claude=None, model=None, effort=None, mode=None):
     """A task on the profile profile_key in folder (here or on an SSH host,
-    --start-task / --task-command), with that model and effort: started in
+    --start-task / --task-command), with that model, effort and permission
+    mode: started in
     the background, or the shell command that starts it in a terminal.
     {"ok", "message", "id" | "command"}."""
     profiles = discover_profiles(home, extra_dirs)
     profile = next((p for p in profiles if matches_profile(p, profile_key)), None)
     if profile is None:
         return {"ok": False, "message": f"No Claude profile called {profile_key}"}
-    options = chat_options(model, effort)
+    options = chat_options(model, effort, mode)
     plan = None
     if plan_slug:
         plan = find_plan(profiles, plan_slug, plan_profile)
@@ -4368,6 +4380,24 @@ def run_task(home, extra_dirs, background, folder, profile_key, text, plan_slug=
 
 
 CONTINUE_PROMPT = "The usage limit has reset: go on where you stopped."
+# The permission modes a chat goes on in, as it was. Not bypassPermissions:
+# Claude refuses to start a background session in it unless you accepted it
+# in a way it counts (and a go-on that doesn't start is worse than one that
+# asks before it acts).
+GO_ON_MODES = ("default", "manual", "acceptEdits", "plan", "auto", "dontAsk")
+
+
+def go_on_options(profile, chat_id, mode):
+    """claude's options for going on with a chat in the background (claude
+    --bg --resume), whose permission mode is mode: that mode, so the
+    background session it becomes saves it and goes on in it each time it's
+    woken (with none, the first go-on keeps the chat's mode but the session
+    saves none, and the next wakes up in Claude's default one). None when a
+    background session of it is there already: Claude wakes that one with
+    the options it saved, and with any given here it would start a copy."""
+    if mode not in GO_ON_MODES or (profile.path / "jobs" / chat_id[:8]).exists():
+        return []
+    return ["--permission-mode", mode]
 
 
 def continue_chat(home, extra_dirs, profile_key, chat_id, folder=None, text="", claude=None, prefix=(),
@@ -4375,9 +4405,10 @@ def continue_chat(home, extra_dirs, profile_key, chat_id, folder=None, text="", 
     """Go on with a chat a usage limit stopped, now that the limit has reset
     (a queued one: jump.py --start-queued; here or on an SSH host,
     --continue-chat): in the background on its account, with text (else
-    CONTINUE_PROMPT) as your next message. A session that has it open idle
-    ends first (end_for_handover), then claude --bg --resume goes on with the
-    same chat. {"ok", "message", "id"}; ok with no message when it went on
+    CONTINUE_PROMPT) as your next message, in its permission mode
+    (go_on_options). A session that has it open idle ends first
+    (end_for_handover), then claude --bg --resume goes on with the same
+    chat. {"ok", "message", "id"}; ok with no message when it went on
     already (its newest turn isn't the limit's any more): nothing to do.
     force: go on whatever its newest turn (a chat that keeps going whose turn
     broke off, or that the usage cap stopped)."""
@@ -4388,7 +4419,8 @@ def continue_chat(home, extra_dirs, profile_key, chat_id, folder=None, text="", 
     path = transcript_path(profile, chat_id)
     if path is None:
         return {"ok": False, "message": "That chat isn't on this account any more"}
-    if not force and ((chat_peek(path) or {}).get("stopped") or {}).get("kind") != "limit":
+    peek = chat_peek(path) or {}
+    if not force and (peek.get("stopped") or {}).get("kind") != "limit":
         return {"ok": True, "message": ""}
     if not (isinstance(folder, str) and os.path.isdir(folder)):
         folder = chat_folder(path) or str(home)
@@ -4401,7 +4433,8 @@ def continue_chat(home, extra_dirs, profile_key, chat_id, folder=None, text="", 
     while any(e.get("sessionId") == chat_id for e, _, _ in live_entries_all(profiles)) and time.time() < deadline:
         time.sleep(0.2)
     ok, message, job = start_background(profile, folder, (text or "").strip() or CONTINUE_PROMPT, home, claude,
-                                        prefix=prefix, resume=chat_id)
+                                        prefix=prefix, resume=chat_id,
+                                        options=go_on_options(profile, chat_id, peek.get("mode")))
     if ok:
         message = f"Went on in the background on {profile.label}" + (f" ({job})" if job else "")
     return {"ok": ok, "message": message, "id": job}
@@ -6067,6 +6100,9 @@ def add_vscode(result, home, extra_dirs=(), remote=False, cache_root=None):
     which is listed first."""
     installed, profile, plain, default = default_profile(home, discover_profiles(home, extra_dirs), remote, cache_root)
     result["vscode"] = {"installed": installed, "on": profile.label if profile else None}
+    # (whether accounts.py --default can point anything elsewhere: VS Code's
+    # Claude, or plain claude through a ~/.claude link)
+    result["canDefault"] = bool(installed) or (home / ".claude").is_symlink()
     for g in result.get("groups", []):
         keys = g.get("profileKeys", [])
         g["vscodeHere"] = profile is not None and profile.key in keys
@@ -6229,7 +6265,8 @@ USAGE = """usage: claude_status.py [--config-dir DIR]... [--done-hours H] [--rec
        claude_status.py --vscode-account CONFIG_DIR|- [--vscode-server FOLDER]
        claude_status.py --find QUERY [--limit N] [--remote]
        claude_status.py --start-task|--task-command FOLDER --profile PROFILE [--prompt TEXT]
-                        [--plan SLUG [--plan-profile PROFILE]] [--model MODEL] [--effort LEVEL] [--remote]
+                        [--plan SLUG [--plan-profile PROFILE]] [--model MODEL] [--effort LEVEL]
+                        [--permission-mode MODE] [--remote]
        claude_status.py --plan-text SLUG [--profile PROFILE] [--remote]
        claude_status.py --continue-chat CHAT_ID --profile PROFILE [--folder F] [--prompt TEXT] [--remote]
   --config-dir DIR  extra Claude config dir (repeatable)
@@ -6272,7 +6309,7 @@ def main(argv=None):
     task_folder, task_action, prompt, plan_slug, plan_profile, plan_text = None, None, "", None, None, None
     continue_id, continue_folder = None, None
     vscode_account, vscode_server = None, VSCODE_SERVERS["Code"]
-    keep_going, usage_cap, model, effort = False, 0, None, None
+    keep_going, usage_cap, model, effort, mode = False, 0, None, None, None
     while args:
         arg = args.pop(0)
         if arg == "--config-dir" and args:
@@ -6299,6 +6336,8 @@ def main(argv=None):
             model = args.pop(0)
         elif arg == "--effort" and args:
             effort = args.pop(0)
+        elif arg == "--permission-mode" and args:
+            mode = args.pop(0)
         elif arg == "--plan" and args:
             plan_slug = args.pop(0)
         elif arg == "--plan-profile" and args:
@@ -6383,7 +6422,7 @@ def main(argv=None):
     elif task_action is not None:
         try:
             result = run_task(home, config_dirs, task_action == "--start-task", task_folder, profile_key, prompt,
-                              plan_slug, plan_profile, model=model, effort=effort)
+                              plan_slug, plan_profile, model=model, effort=effort, mode=mode)
         except Exception as exc:
             result = {"ok": False, "message": f"{type(exc).__name__}: {exc}"}
     elif agent_run_id is not None:

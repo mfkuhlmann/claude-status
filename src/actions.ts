@@ -43,16 +43,26 @@ import type { PlanReview } from "./planReview";
 
 const CHAT_LINK = "vscode://anthropic.claude-code/open?session=";
 
-// The models and reasoning efforts a new chat can start with (claude --model,
-// --effort; "": Claude's own default)
+// The models, reasoning efforts and permission modes a new chat can start
+// with (claude --model, --effort, --permission-mode; "": Claude's own default)
 const MODELS: [string, string][] = [["opus", "Opus"], ["sonnet", "Sonnet"], ["fable", "Fable"], ["haiku", "Haiku"], ["", "Claude's default model"]];
 const EFFORTS: [string, string][] = [["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"], ["max", "Max"], ["", "Claude's default effort"]];
+const MODES: [string, string, string][] = [
+  ["default", "Manual", "asks you before it edits files or runs commands"],
+  ["acceptEdits", "Accept edits", "edits files without asking; other actions still ask you"],
+  ["plan", "Plan mode", "looks around and writes a plan, changes nothing until you approve it"],
+  ["auto", "Auto mode", "goes ahead with what it judges safe, asks you about the rest"],
+  ["dontAsk", "Don't ask", "what isn't allowed already is refused, without asking you"],
+  ["bypassPermissions", "Bypass permissions", "runs everything without asking"],
+  ["", "Claude's default mode", "the one your Claude settings start chats in"],
+];
 
-// "Opus · Extra high effort": what new chats start with
-export function chatOptionsText(model: string, effort: string): string {
+// "Opus · Extra high effort · Auto mode": what new chats start with
+export function chatOptionsText(model: string, effort: string, mode = ""): string {
   const m = MODELS.find(([v]) => v === model)?.[1] ?? model;
   const e = EFFORTS.find(([v]) => v === effort)?.[1] ?? effort;
-  return `${m} · ${effort ? `${e} effort` : e}`;
+  const p = MODES.find(([v]) => v === mode)?.[1] ?? mode;
+  return `${m} · ${effort ? `${e} effort` : e} · ${p}`;
 }
 
 // The plain chat command inside "cd FOLDER 2>/dev/null; COMMAND" (how the
@@ -826,8 +836,8 @@ export class Actions {
       items.push({ label: "$(sparkle) Start with a task…", description: "say what Claude should do: it starts right away, also in the background", start: "task" });
     if (cli)
       items.push({
-        label: `$(settings-gear) ${chatOptionsText(settings.newChatModel(), settings.newChatEffort())}`,
-        description: "the model and effort it starts with (not in a Claude Code tab): change…",
+        label: `$(settings-gear) ${chatOptionsText(settings.newChatModel(), settings.newChatEffort(), settings.newChatMode())}`,
+        description: "the model, effort and permissions it starts with (not in a Claude Code tab): change…",
         start: "options",
       });
     if (cli) {
@@ -974,7 +984,7 @@ export class Actions {
     if (command) await this.terminals.run(`new|${Date.now()}`, plan ? plan.title : "new chat", command, this.place(host));
   }
 
-  // The model and effort new chats start with: picked, and kept for the next ones
+  // The model, effort and permission mode new chats start with: picked, and kept for the next ones
   private async pickChatOptions(): Promise<void> {
     const model = await vscode.window.showQuickPick(
       MODELS.map(([value, label]) => ({ label, value, description: value === settings.newChatModel() ? "now" : "" })),
@@ -986,12 +996,20 @@ export class Actions {
       { title: `…${model.label}, with the reasoning effort…`, placeHolder: "how hard it thinks (claude --effort; /effort changes it in the chat)" },
     );
     if (!effort) return;
-    await setChatOptions(model.value, effort.value);
+    const mode = await vscode.window.showQuickPick(
+      MODES.map(([value, label, detail]) => ({ label, value, detail, description: value === settings.newChatMode() ? "now" : "" })),
+      {
+        title: `…${model.label} and ${effort.label.toLowerCase()}${effort.value ? " effort" : ""}, in the permission mode…`,
+        placeHolder: "how freely it may act (claude --permission-mode; Shift+Tab changes it in the chat)",
+      },
+    );
+    if (!mode) return;
+    await setChatOptions(model.value, effort.value, mode.value);
   }
 
   // A chat of this computer keeps going until it's done (after each usage
-  // limit, on by itself when that resets), or not any more (its queued go-on
-  // is cancelled too)
+  // limit, on by itself when that resets), or not any more (a go-on of it
+  // that's queued already stays: that one is cancelled on its own)
   async keepGoing(chat: ChatRef, on: boolean): Promise<void> {
     if (this.demoOnly()) return;
     const id = chat.chatId || chat.sessionId;
@@ -1007,13 +1025,14 @@ export class Actions {
 
   // A chat a usage limit stopped goes on by itself at `at` (a minute after
   // the limit resets): queued, then started like a queued task (jump.py
-  // --queue-continue; an SSH host's goes on there, over ssh)
-  async queueContinue(chat: ChatRef, at: number, account: string): Promise<void> {
+  // --queue-continue; an SSH host's goes on there, over ssh). keep: one of
+  // this computer goes on after later limits too, until it's done
+  async queueContinue(chat: ChatRef, at: number, account: string, keep = false): Promise<void> {
     if (this.demoOnly()) return;
     const answer = await this.backend.action("jump.py", [
       "--queue-continue", chat.chatId || chat.sessionId, "--profile", chat.profileDir, "--at", String(Math.round(at)),
       ...(chat.cwd ? ["--cwd", chat.cwd] : []), "--name", chat.name, ...(chat.host ? ["--host", chat.host] : []),
-      "--account", account, ...configDirArgs(),
+      ...(keep && !chat.host ? ["--keep"] : []), "--account", account, ...configDirArgs(),
     ]);
     if (this.report(answer, "Couldn't queue it")) this.dash.setActionInfo(answer.message);
     this.refresh();

@@ -30,6 +30,19 @@ function sendState(): void {
   if (params.get("default") === "1" && groups.length)
     groups.splice(1, 0, { ...groups[0], id: "demo-second", name: "work", title: "work · Team", plan: "Team", defaultHere: false, sessions: [] }),
       (groups[0] = { ...groups[0], defaultHere: true });
+  // ?stopped=1: two chats here a usage limit stopped, one queued to go on that keeps going
+  const hostStopped = state.hosts.flatMap((h) => h.result?.groups ?? []).flatMap((g) => g.sessions).find((s) => s.stopped);
+  if (params.get("stopped") === "1" && hostStopped && groups.length && state.status) {
+    const copy = (id: string, name: string) => ({ ...hostStopped, key: id, sessionId: id, chatId: id, name, overlaps: [] });
+    const later = copy("demo-stopped-2", "Port the importer");
+    groups[0].sessions.push(copy("demo-stopped-1", "Migrate the schema"), later);
+    state.status.keep = [{ chat: later.chatId, profile: ".claude", name: later.name, since: Date.now(), wentOnAt: null, tries: 0, note: "", error: "" }];
+    state.status.queue = [...(state.status.queue ?? []), {
+      id: "q-later", host: "", profile: ".claude", account: groups[0].title, folder: later.cwd, folderShort: later.cwdShort, prompt: "",
+      plan: null, planProfile: null, planTitle: "", startAt: (later.stopped?.resetsAt ?? Date.now()) + 60000, createdAt: Date.now(),
+      error: "", due: false, chat: later.chatId, name: later.name, scheduled: false,
+    }];
+  }
   // ?banner=0: without the "Demo data" line, for the README's screenshots
   if (params.get("banner") === "0") state.demo = false;
   // ?keep=1: the first chat at work keeps going (after each usage limit), and one gave up

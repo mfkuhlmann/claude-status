@@ -625,7 +625,7 @@ export type WebviewMessage =
   | { type: "startQueued"; id: string }
   | { type: "openOverlap"; chat: ChatRef } // the first other chat changing the same files
   | { type: "unqueue"; id: string }
-  | { type: "queueContinue"; chat: ChatRef } // go on by itself once the limit resets
+  | { type: "queueContinue"; chat: ChatRef; keep?: boolean } // go on by itself once the limit resets (keep: and after later limits)
   | { type: "keepGoing"; chat: ChatRef; on: boolean } // keep going after each usage limit (or not any more)
   | { type: "loginHost"; host: string }
   | { type: "disconnectHost"; host: string }

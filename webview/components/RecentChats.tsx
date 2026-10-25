@@ -86,7 +86,8 @@ export function RecentChats({ group }: { group: Group }) {
               const goOn = goOnAt(c);
               const goingOn = queuedChat(view.status, c.sessionId, group.host);
               const kept = group.host ? null : keptChat(view.status, c.sessionId);
-              const later = group.host ? "" : " It goes on by itself after later limits too, until it's done.";
+              const later = group.host ? "" : " Once: ↻ beside it goes on after later limits too, until it's done.";
+              const canKeep = !group.host && !kept && !goingOn && goOn > 0;
               return (
                 <li key={c.key} class={"recent-item" + (canOpen ? "" : " unavailable")}>
                   <button
@@ -113,7 +114,7 @@ export function RecentChats({ group }: { group: Group }) {
                     <Tag
                       text={`⏱ ${clockText(goingOn.startAt)}`}
                       active
-                      title={`Goes on by itself at ${clockText(goingOn.startAt)}, in the background, telling Claude that the limit has reset (if it didn't go on before then).${later}\n\nClick to cancel it.`}
+                      title={`Goes on by itself at ${clockText(goingOn.startAt)}, in the background, in the permission mode it had, telling Claude that the limit has reset (if it didn't go on before then).\n\nClick to cancel it.`}
                       onClick={() => post({ type: "unqueue", id: goingOn.id })}
                     />
                   ) : c.stopped?.kind === "limit" && !c.stopped.over ? (
@@ -124,13 +125,19 @@ export function RecentChats({ group }: { group: Group }) {
                       onClick={goOn ? () => post({ type: "queueContinue", chat }) : undefined}
                     />
                   ) : null}
-                  {kept && !goingOn ? (
+                  {kept ? (
                     <Tag
                       text="↻"
                       active={!kept.error}
                       warning={!!kept.error || !!kept.note}
                       title={keptTitle(kept)}
                       onClick={() => post({ type: "keepGoing", chat, on: false })}
+                    />
+                  ) : canKeep ? (
+                    <Tag
+                      text="↻"
+                      title={`Keep going until it's done\nClick to have it go on by itself in the background at ${clockText(goOn)}, a minute after the limit resets, in the permission mode it had, and again after each later limit that stops it, until a turn of it ends by itself.`}
+                      onClick={() => post({ type: "queueContinue", chat, keep: true })}
                     />
                   ) : null}
                   <Elided text={c.cwdShort || "~"} class="recent-folder small muted" title={c.cwd} />

@@ -44,15 +44,17 @@ test("the chats that keep going: found by their id, and what their tag says", ()
   assert.match(keptTitle({ ...k, note: "Its account's login has expired" }), /login has expired/);
 });
 
-test("new chats start with the model and effort picked: Opus and extra high to begin with", async () => {
+test("new chats start with the model, effort and permission mode picked: Opus, extra high and Claude's own mode to begin with", async () => {
   const { overrides } = await import("./vscode-stub");
   try {
     assert.deepEqual(chatOptionArgs(), ["--model", "opus", "--effort", "xhigh"]);
     overrides.set("newChatModel", "sonnet");
     overrides.set("newChatEffort", "");
     assert.deepEqual(chatOptionArgs(), ["--model", "sonnet"], "Claude's own default effort");
-    assert.equal(chatOptionsText("sonnet", ""), "Sonnet · Claude's default effort");
-    assert.equal(chatOptionsText("opus", "xhigh"), "Opus · Extra high effort");
+    overrides.set("newChatMode", "plan");
+    assert.deepEqual(chatOptionArgs(), ["--model", "sonnet", "--permission-mode", "plan"]);
+    assert.equal(chatOptionsText("sonnet", ""), "Sonnet · Claude's default effort · Claude's default mode");
+    assert.equal(chatOptionsText("opus", "xhigh", "auto"), "Opus · Extra high effort · Auto mode");
   } finally {
     overrides.clear();
   }

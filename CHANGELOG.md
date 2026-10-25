@@ -21,8 +21,16 @@
   stops it, it goes on by itself in the background a minute after the limit
   resets, and again after each later limit, however many that takes, until
   a turn of it ends by itself. Its row says **↻ Keeps going**; click that to
-  stop it. **Go on at …** does the same now: it used to go on once, and a
-  chat that hit the next limit too just stayed stopped.
+  stop it. A chat a limit has stopped already offers both: **Go on at …**
+  goes on once when the limit resets, **↻ Keep going** goes on then and after
+  every later limit too (in Recent chats: **limit** and **↻** beside it). A
+  queued go-on and *↻ Keeps going* show side by side, so you see what will
+  happen.
+- **A chat goes on in its permission mode:** a chat in auto mode (or plan
+  mode, accept edits, …) that went on by itself after a limit went on in
+  auto mode the first time, but in the default mode, asking before
+  everything, from the second time on. It keeps its mode every time now.
+  (Not bypass permissions: a chat in that mode goes on asking first.)
 - **Going on is checked:** when a go-on didn't take (nothing new in the chat
   five minutes after it went on) or its turn broke off on an API error that
   isn't a limit (the connection lost, say), it goes on again after a pause,
@@ -34,12 +42,14 @@
   this computer are stopped once one of its plan windows reaches the
   percentage you set, once in that window. Queued tasks wait until it
   resets, and chats that keep going go on then.
-- **Model and effort for new chats:** **New Chat…** has the model (Opus,
-  Sonnet, Fable, Haiku or Claude's default) and the reasoning effort (low to
-  max) a chat in a terminal or in the background starts with, Opus and extra
-  high to begin with (`claudeStatus.newChatModel`, `claudeStatus.newChatEffort`).
-  Also for queued tasks and SSH hosts; a Claude Code tab has its own model
-  setting.
+- **Model, effort and permissions for new chats:** **New Chat…** has the
+  model (Opus, Sonnet, Fable, Haiku or Claude's default), the reasoning
+  effort (low to max) and the permission mode (manual, accept edits, plan,
+  auto, don't ask, bypass permissions or Claude's default) a chat in a
+  terminal or in the background starts with, Opus, extra high and Claude's
+  default mode to begin with (`claudeStatus.newChatModel`,
+  `claudeStatus.newChatEffort`, `claudeStatus.newChatMode`). Also for queued
+  tasks and SSH hosts; a Claude Code tab has its own settings for them.
 - **When a limit resets:** hovering over *resets in 2h 5m* (a plan window's,
   or a chat's *Limit · resets in …*) shows the time it resets, with the day
   when that isn't today.
