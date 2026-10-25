@@ -227,6 +227,20 @@ test("a chat the page names is looked up: its commands are the extension's own",
   assert.equal(findChatRef(state.status, state.hosts, undefined, local.key)?.sessionId, local.sessionId);
 });
 
+test("a shared chat's pointer is the chat's own row (its tab, its window), else the pointer", () => {
+  const state = demoState(NOW);
+  const groups = state.status!.groups;
+  const row = groups[0].sessions[0];
+  row.chatId = "the-transcript"; // (continued with --resume: not its session id)
+  const pointer = { key: `${row.key}/shared`, sessionId: row.sessionId, name: row.name, profileDir: row.profileDir, openCommand: "x" };
+  groups[groups.length - 1].sharedHere = [pointer as never];
+  const ref = findChatRef(state.status, state.hosts, undefined, pointer.key);
+  assert.equal(ref?.key, row.key);
+  assert.equal(ref?.chatId, "the-transcript");
+  groups[0].sessions = groups[0].sessions.slice(1); // (gone from the list: the pointer still opens)
+  assert.equal(findChatRef(state.status, state.hosts, undefined, pointer.key)?.key, pointer.key);
+});
+
 test("a host that didn't answer this time doesn't count; its clock is put right", () => {
   const state = demoState(NOW);
   const counted = allGroups(state.status, state.hosts).length;

@@ -71,7 +71,9 @@ export function sharedRef(p: SharedPointer, host?: string): ChatRef {
 
 // The chat a click from the webview means, as the extension knows it now:
 // found by host and row key, so the commands it runs are its own (from the
-// status), never ones the page sent. null when it's gone (or never was).
+// status), never ones the page sent. null when it's gone (or never was). A
+// shared chat's pointer (`<row key>/shared`) is the chat's own row, listed
+// under the account it's used on: a click on it does what one on its name does.
 export function findChatRef(status: Status | null, hosts: HostState[], host: unknown, key: unknown): ChatRef | null {
   if (typeof key !== "string" || !key || (host !== undefined && host !== null && typeof host !== "string")) return null;
   const where = host ? hosts.find((h) => h.name === host)?.result : status;
@@ -79,7 +81,9 @@ export function findChatRef(status: Status | null, hosts: HostState[], host: unk
     const h = host ? (host as string) : undefined;
     for (const s of g.sessions ?? []) if (s.key === key) return chatRefOf(s, h);
     for (const c of [...(g.recent ?? []), ...(g.starred ?? [])]) if (c.key === key) return recentRef(c, h);
-    for (const p of g.sharedHere ?? []) if (p.key === key) return sharedRef(p, h);
+    for (const p of g.sharedHere ?? [])
+      if (p.key === key)
+        return (key.endsWith("/shared") ? findChatRef(status, hosts, host, key.slice(0, -"/shared".length)) : null) ?? sharedRef(p, h);
   }
   return null;
 }

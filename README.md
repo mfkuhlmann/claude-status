@@ -169,8 +169,8 @@ As an editor tab (**Claude Status: Open in Editor Tab**):
   they started; its bar in the pet's color), each acting out its chat.
   Talpa lives in a burrow: it digs over to another spot instead of walking,
   a new chat's pet digs up out of the ground, and one whose chat leaves the
-  list waves and digs away. Click a pet to open its chat, drag one out of
-  its burrow, double-click the big one.
+  list waves and digs away. Click a pet to go to its chat (its terminal or
+  Claude Code tab), drag one out of its burrow, double-click the big one.
 - **Shared chats**: with two or more Claude accounts on this computer (or
   on an SSH host), a finished chat's share button continues it on another
   account (say, when one hits its limit), shares it with all of them, or
