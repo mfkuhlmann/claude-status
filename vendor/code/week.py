@@ -22,6 +22,8 @@ Recap tab is open, never in its status checks.
                   of the day (fetched at most every few hours, only then)
     --allow KIND VALUE FOLDER   a rule its permission prompts offer, into
                   FOLDER/.claude/settings.local.json; --undo ID takes it back
+    --revoke ID   takes a rule of the recap's "granted" list (the rules and
+                  modes that let chats go without asking) out of its file
 
 What it reads, per turn of a chat: your prompt, Claude's own count of its
 work (the turn_duration record Claude Code writes when a turn ends, which
@@ -1455,9 +1457,19 @@ def write_settings(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(".%s.%d.tmp" % (path.name, os.getpid()))
     with open(str(tmp), "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
+        json.dump(data, f, indent=2, ensure_ascii=False)
         f.write("\n")
+    if path.exists():
+        os.chmod(str(tmp), path.stat().st_mode & 0o7777)  # (who may read it stays as it was)
     os.replace(str(tmp), str(path))
+
+
+def take_out(perms, key, value):
+    """value out of the list perms[key]; the key goes once that's empty."""
+    if isinstance(perms.get(key), list):
+        perms[key] = [v for v in perms[key] if v != value]
+        if not perms[key]:
+            del perms[key]
 
 
 def allow_rule(home, cache_root, kind, value, project):
@@ -1514,19 +1526,15 @@ def undo_rule(home, cache_root, rid):
     data = cs.read_json(path)
     perms = data.get("permissions") if isinstance(data, dict) and isinstance(data.get("permissions"), dict) else None
     if perms is not None:
-        if note["kind"] == "dir" and isinstance(perms.get("additionalDirectories"), list):
-            perms["additionalDirectories"] = [d for d in perms["additionalDirectories"] if d != note["value"]]
-            if not perms["additionalDirectories"]:
-                del perms["additionalDirectories"]
+        if note["kind"] == "dir":
+            take_out(perms, "additionalDirectories", note["value"])
         elif note["kind"] == "edits" and perms.get("defaultMode") == "acceptEdits":
             if note.get("before"):
                 perms["defaultMode"] = note["before"]
             else:
                 del perms["defaultMode"]
-        elif note["kind"] == "allow" and isinstance(perms.get("allow"), list):
-            perms["allow"] = [r for r in perms["allow"] if r != note["value"]]
-            if not perms["allow"]:
-                del perms["allow"]
+        elif note["kind"] == "allow":
+            take_out(perms, "allow", note["value"])
         if not perms:
             del data["permissions"]
         if not data and note.get("created"):
@@ -1535,6 +1543,132 @@ def undo_rule(home, cache_root, rid):
             write_settings(path, data)
     cs.write_json_atomic(cache_root / RULES_FILE, {"added": [a for a in added if a.get("id") != rid]})
     return True, "Taken back: %s" % rule_title(note["kind"], note["value"], note["project"], home)
+
+
+# ---------------------------------------------------------------- permissions you gave
+# Everything that lets chats on this computer go without a permission
+# prompt, wherever it is: each account's user settings, and the
+# .claude/settings.local.json and .claude/settings.json of every folder Claude
+# ran in (each account's .claude.json lists them), with the rules Claude
+# saved when you answered "don't ask again". Revoke takes one out of its
+# file; a folder's .claude/settings.json is shared through git, so its rules
+# are listed but changed there.
+
+GRANTING_MODES = {
+    "acceptEdits": "Accept file edits without asking",
+    "auto": "Auto mode: a classifier answers the prompts it finds safe",
+    "bypassPermissions": "Skip every permission prompt (bypass permissions)",
+}
+
+
+def rule_folders(home, cache, profiles):
+    """The folders Claude ran in here: each account's .claude.json lists
+    them, and the Recap's chats started in them."""
+    folders = set()
+    for f in [p.path / ".claude.json" for p in profiles] + [home / ".claude.json"]:
+        data = cs.read_json(f)
+        projects = data.get("projects") if isinstance(data, dict) else None
+        if isinstance(projects, dict):
+            folders.update(k for k in projects if isinstance(k, str))
+    for r in cache.get("files", {}).values():
+        if isinstance(r, dict) and isinstance(r.get("data"), dict) and isinstance(r["data"].get("folder"), str):
+            folders.add(r["data"]["folder"])
+    return sorted({os.path.normpath(f) for f in folders if f.startswith("/") and os.path.isdir(f)})
+
+
+def granted_title(kind, value, home):
+    if kind == "mode":
+        return GRANTING_MODES[value]
+    if kind == "dir":
+        return "Read files in %s" % tilde(os.path.expanduser(value), home)
+    m = re.match(r"^(\w+)\((.+)\)$", value)
+    if m and m.group(1) == "Bash":
+        return "Run “%s”" % m.group(2)
+    if m and m.group(1) == "WebFetch" and m.group(2).startswith("domain:"):
+        return "Open pages from %s" % m.group(2)[len("domain:"):]
+    return value
+
+
+def granted_rules(home, folders, profiles, added=()):
+    """Every rule and mode in those settings that lets chats go without
+    asking, your user settings first: [{"id", "kind" ("allow": a
+    permissions.allow rule, "dir": permissions.additionalDirectories,
+    "mode": permissions.defaultMode), "value", "title", "place", "file",
+    "where" (the file, from ~), "shared" (through git: not changed here),
+    "added" (by the Recap's Allow), "change" (what revoking it does)}]."""
+    out, seen = [], set()
+
+    def take(path, place, shared):
+        real = os.path.realpath(str(path))
+        if real in seen or not os.path.isfile(real):
+            return
+        seen.add(real)
+        data = cs.read_json(real)
+        perms = data.get("permissions") if isinstance(data, dict) else None
+        if not isinstance(perms, dict):
+            return
+        found = [("mode", perms["defaultMode"])] if perms.get("defaultMode") in GRANTING_MODES else []
+        for kind, key in (("dir", "additionalDirectories"), ("allow", "allow")):
+            if isinstance(perms.get(key), list):
+                found += [(kind, v) for v in perms[key] if isinstance(v, str) and v.strip()]
+        where = tilde(real, home)
+        for kind, value in found:
+            change = ("takes permissions.defaultMode (%s) out of %s" % (value, where) if kind == "mode"
+                      else "takes %s out of permissions.additionalDirectories in %s" % (tilde(os.path.expanduser(value), home), where)
+                      if kind == "dir" else "takes %s out of permissions.allow in %s" % (value, where))
+            out.append({"id": cs.short_id("%s\0%s\0%s" % (real, kind, value)), "kind": kind, "value": value,
+                        "title": granted_title(kind, value, home), "place": place + (" (shared through git)" if shared else ""),
+                        "file": real, "where": where, "shared": shared, "added": added_note(added, real, kind, value) is not None,
+                        "change": change})
+
+    accounts = {}
+    for p in profiles:
+        accounts.setdefault(os.path.realpath(str(p.real / "settings.json")), []).append(p.label)
+    for p in profiles:
+        take(p.real / "settings.json", "every chat of %s" % ", ".join(accounts[os.path.realpath(str(p.real / "settings.json"))]), False)
+    for folder in folders:
+        for name, shared in (("settings.local.json", False), ("settings.json", True)):
+            take(Path(folder) / ".claude" / name, "chats started in %s" % project_name(folder, home), shared)
+    return out
+
+
+def added_note(added, real, kind, value):
+    """The note of the Recap's Allow that put this rule there, if it did."""
+    for a in added:
+        if os.path.realpath(str(a.get("file") or "")) != real:
+            continue
+        if (a.get("kind"), a.get("value")) == (kind, value) or (a.get("kind") == "edits" and (kind, value) == ("mode", "acceptEdits")):
+            return a
+    return None
+
+
+def revoke_rule(home, cache_root, profiles, rid):
+    """(ok, message): takes a rule or mode of granted_rules out of its file
+    (one the Recap's Allow put there as Undo does: as it was before)."""
+    added = load_added(cache_root)
+    rules = granted_rules(home, rule_folders(home, load_cache(cache_root), profiles), profiles, added)
+    g = next((g for g in rules if g["id"] == rid), None)
+    if g is None:
+        return False, "That rule isn't in your settings any more"
+    if g["shared"]:
+        return False, "%s is shared through git: change it there" % g["where"]
+    real = g["file"]
+    note = added_note(added, real, g["kind"], g["value"])
+    if note is not None:
+        return undo_rule(home, cache_root, note["id"])
+    data = cs.read_json(real)
+    perms = data.get("permissions") if isinstance(data, dict) else None
+    if not isinstance(perms, dict):
+        return False, "%s isn't JSON the widget can change: leave it as it is" % g["where"]
+    if g["kind"] == "mode":
+        if perms.get("defaultMode") == g["value"]:
+            del perms["defaultMode"]
+    else:
+        take_out(perms, "additionalDirectories" if g["kind"] == "dir" else "allow", g["value"])
+    if not perms:
+        del data["permissions"]
+    write_settings(real, data)
+    return True, "Revoked: %s (%s)" % (g["title"], g["where"])
 
 
 # ---------------------------------------------------------------- plan limits
@@ -1808,13 +1942,15 @@ def main(argv=None):
     args = sys.argv[1:] if argv is None else list(argv)
     back, account, hosts, config_dirs, currency = 0, "", [], [], "USD"
     pretty = remote = data = False
-    allow = undo = None
+    allow = undo = revoke = None
     while args:
         arg = args.pop(0)
         if arg == "--allow" and len(args) >= 3:
             allow = [args.pop(0), args.pop(0), args.pop(0)]
         elif arg == "--undo" and args:
             undo = args.pop(0)
+        elif arg == "--revoke" and args:
+            revoke = args.pop(0)
         elif arg == "--currency" and args:
             currency = args.pop(0)
         elif arg == "--back" and args and args[0].isdigit():
@@ -1837,13 +1973,16 @@ def main(argv=None):
     home = Path.home()
     now_ms = int(time.time() * 1000)
     cache_root = cs.cache_dir(home)
-    if allow or undo:  # (a button of the tab's permission prompts)
+    if allow or undo or revoke:  # (a button of the tab's permission prompts)
         try:
             if allow:
                 ok, message, rid = allow_rule(home, cache_root, *allow)
                 result = {"ok": ok, "message": message, "id": rid}
-            else:
+            elif undo:
                 ok, message = undo_rule(home, cache_root, undo)
+                result = {"ok": ok, "message": message}
+            else:
+                ok, message = revoke_rule(home, cache_root, cs.discover_profiles(home, config_dirs), revoke)
                 result = {"ok": ok, "message": message}
         except Exception as exc:
             result = {"ok": False, "message": "{}: {}".format(type(exc).__name__, exc)}
@@ -1866,8 +2005,10 @@ def main(argv=None):
                 from concurrent.futures import ThreadPoolExecutor
                 with ThreadPoolExecutor(max_workers=min(8, len(hosts))) as pool:
                     sources += list(pool.map(lambda h: host_chats(h, back), hosts))
-            result = recap(sources, back, account, now_ms, home, plan_windows(cache_root, profiles), load_added(cache_root))
+            added = load_added(cache_root)
+            result = recap(sources, back, account, now_ms, home, plan_windows(cache_root, profiles), added)
             result["currency"] = currency_of(currency, cache_root, now_ms / 1000)
+            result["granted"] = granted_rules(home, rule_folders(home, cache, profiles), profiles, added)
     except Exception as exc:  # the widget must always get parseable output
         result = {"ok": False, "error": "{}: {}".format(type(exc).__name__, exc), "generatedAt": now_ms}
     text = json.dumps(result, indent=2 if pretty and not remote else None)

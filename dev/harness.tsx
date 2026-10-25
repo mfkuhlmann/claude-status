@@ -23,6 +23,8 @@ function sendState(): void {
       at: Date.now(),
       first: { key: "demo-2", sessionId: "demo-2", profileDir: ".claude", name: "Release notes for 2.0" },
     };
+  // ?rules=0: the Recap tab's rule suggestions left out (the recapRules setting)
+  if (params.get("rules") === "0") state.settings.recapRules = false;
   // ?loggedOut=1: the last account isn't logged in (Log in…)
   const groups = state.status?.groups ?? [];
   if (params.get("loggedOut") === "1" && groups.length)

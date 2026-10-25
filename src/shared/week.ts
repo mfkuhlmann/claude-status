@@ -2,7 +2,7 @@
 // the recap of the widget's week.py; here, so the tests can read them.
 
 import { clockText, dayLabel, plural } from "./model";
-import type { WeekDay, WeekNumbers, WeekPlanWindow, WeekRecap, WeekRule, WeekSum } from "./types";
+import type { WeekDay, WeekGrant, WeekNumbers, WeekPlanWindow, WeekRecap, WeekRule, WeekSum } from "./types";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const WEEKDAYS_LONG = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -277,6 +277,26 @@ export function promptsText(p: WeekRecap["prompts"] | undefined): string {
   const answered = plural(p.answered, "%1 permission prompt", "%1 permission prompts");
   return (p.refused ? `You answered ${answered} and refused ${p.refused} of them.` : `You answered ${answered}.`) +
     (p.waitMs >= 60000 ? ` They waited for your answer ${hoursText(p.waitMs)} in all.` : "");
+}
+
+// The permissions you gave: the first few, until you ask for all
+export const GRANTED_FEW = 8;
+
+export function grantedIntro(granted: WeekGrant[]): string {
+  return granted.length
+    ? "What lets chats on this computer go without asking you: your settings, and the .claude settings of the folders " +
+      "Claude ran in, with the rules it saved when you answered “don't ask again”. Revoke takes one out of its file."
+    : "Nothing lets chats on this computer skip a permission prompt: they ask you each time.";
+}
+
+export function grantMeta(g: WeekGrant): string {
+  return `${g.place} · ${g.where}`;
+}
+
+// A revoke message from the page, as the extension takes it: an id of
+// week.py's list (which checks again that it's one of it)
+export function weekRevokeAsked(id: unknown): string | null {
+  return typeof id === "string" && /^[0-9a-f]{12}$/.test(id) ? id : null;
 }
 
 export function ruleMeta(r: WeekRule): string {

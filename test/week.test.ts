@@ -8,7 +8,7 @@ import { demoState, demoWeek } from "../src/shared/demo";
 import type { WeekDay } from "../src/shared/types";
 import {
   coldText, currencyOf, deltaText, factsText, fillPaths, footText, hoursText, hoverText, moneyText, periodText, promptsText, ruleMeta,
-  weekAsked, weekRuleAsked, weekTiles, windowSpan, workText,
+  weekAsked, weekRevokeAsked, weekRuleAsked, weekTiles, windowSpan, workText, grantMeta, grantedIntro,
 } from "../src/shared/week";
 import { ViewHost } from "../src/view";
 
@@ -109,12 +109,20 @@ test("a rule message is taken only in the shapes the tab sends", () => {
   assert.equal(weekRuleAsked({ allow: false, id: "../x" }), null);
 });
 
+test("a permission you gave is revoked only by an id of week.py's list", () => {
+  assert.equal(weekRevokeAsked("a1b2c3d4e5f6"), "a1b2c3d4e5f6");
+  for (const bad of ["../x", "A1B2C3D4E5F6", "a1b2c3d4e5f", 12, null]) assert.equal(weekRevokeAsked(bad), null);
+  const g = demoWeek(NOW).granted![1];
+  assert.equal(grantMeta(g), "chats started in date-parser · ~/projects/date-parser/.claude/settings.local.json");
+  assert.equal(grantedIntro([]), "Nothing lets chats on this computer skip a permission prompt: they ask you each time.");
+});
+
 function setup() {
   const calls: { name: string; args: unknown[] }[] = [];
   const posted: unknown[] = [];
   const record = (name: string) => (...args: unknown[]) => {
     calls.push({ name, args });
-    return Promise.resolve(name === "weekRule" ? { ok: true, message: "done" } : { recap: demoWeek(NOW) });
+    return Promise.resolve(name === "weekRule" || name === "weekRevoke" ? { ok: true, message: "done" } : { recap: demoWeek(NOW) });
   };
   const state = demoState(NOW);
   const actions = new Proxy({}, { get: (_target, name: string) => record(name) });
@@ -125,6 +133,7 @@ function setup() {
     setVisible() {},
     week: record("week"),
     weekRule: record("weekRule"),
+    weekRevoke: record("weekRevoke"),
   };
   const host = new ViewHost(vscode.Uri.file("/ext") as never, dash as never, actions as never);
   const priv = host as unknown as { receive(webview: unknown, m: unknown): void };
@@ -161,6 +170,15 @@ test("Allow and Undo reach the backend only as rules; the answer goes back to th
     { type: "weekRule", id: "", ok: true, message: "done" },
     { type: "weekRule", id: "a1b2c3d4e5f6", ok: true, message: "done" },
   ]);
+});
+
+test("Revoke reaches the backend only as an id; the answer goes back to the page", async () => {
+  const { calls, posted, receive } = setup();
+  receive({ type: "weekRevoke", id: "../../.ssh" });
+  receive({ type: "weekRevoke", id: "a1b2c3d4e5f6" });
+  assert.deepEqual(calls, [{ name: "weekRevoke", args: ["a1b2c3d4e5f6"] }]);
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual(posted, [{ type: "weekRevoke", id: "a1b2c3d4e5f6", ok: true, message: "done" }]);
 });
 
 test("a week's chat opens only with an id and account folder that are ones; a tip's command is all that's copied", () => {

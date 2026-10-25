@@ -1,5 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
-import type { WeekChat, WeekDay, WeekPlanWindow, WeekRecap, WeekRule } from "../../src/shared/types";
+import type { WeekChat, WeekDay, WeekGrant, WeekPlanWindow, WeekRecap, WeekRule } from "../../src/shared/types";
 import {
   cacheText,
   coldText,
@@ -9,6 +9,9 @@ import {
   factsText,
   fillPaths,
   footText,
+  GRANTED_FEW,
+  grantedIntro,
+  grantMeta,
   hoursText,
   hoverText,
   moneyText,
@@ -28,7 +31,7 @@ import { post } from "../env";
 import { Icon } from "../util/icons";
 import { useViewVisible } from "../util/petStage";
 import { useStore } from "../util/store";
-import { weekAnswer, weekRuleAnswer } from "../util/stores";
+import { weekAnswer, weekRevokeAnswer, weekRuleAnswer } from "../util/stores";
 
 const REFRESH_MS = 10 * 60000; // while the tab is in sight
 
@@ -38,7 +41,7 @@ const REFRESH_MS = 10 * 60000; // while the tab is in sight
 // answered, and what would use less of your plan (the rules of Claude Code's
 // own /usage). The extension runs the widget's week.py for it (only while
 // this tab is open): read from the chats' transcripts, no tokens used.
-export function WeekView({ hosts, currency }: { hosts: string[]; currency: string }) {
+export function WeekView({ hosts, currency, rules }: { hosts: string[]; currency: string; rules: boolean }) {
   const visible = useViewVisible();
   const answer = useStore(weekAnswer);
   const [back, setBack] = useState(answer?.back ?? 0);
@@ -134,7 +137,8 @@ export function WeekView({ hosts, currency }: { hosts: string[]; currency: strin
           <Work recap={recap} />
           <Models recap={recap} />
           <Spend recap={recap} />
-          <Prompts recap={recap} reload={ask} />
+          <Prompts recap={recap} rules={rules} reload={ask} />
+          <Granted recap={recap} reload={ask} />
           <Tips recap={recap} copied={copied} onCopy={copy} />
           <div class="week-foot small muted">{footText(recap)}</div>
         </>
@@ -400,8 +404,9 @@ function Spend({ recap }: { recap: WeekRecap }) {
 }
 
 // The permission prompts you answered, and the rules that would have let
-// the most of them through (written only when you allow one)
-function Prompts({ recap, reload }: { recap: WeekRecap; reload: () => void }) {
+// the most of them through (written only when you allow one; the settings
+// can leave them out)
+function Prompts({ recap, rules: suggest, reload }: { recap: WeekRecap; rules: boolean; reload: () => void }) {
   const p = recap.prompts;
   const ruleAnswer = useStore(weekRuleAnswer);
   const [asking, setAsking] = useState("");
@@ -412,6 +417,7 @@ function Prompts({ recap, reload }: { recap: WeekRecap; reload: () => void }) {
     reload();
   }, [ruleAnswer]);
   if (!p || !p.answered) return null;
+  const rules = suggest ? p.rules : [];
 
   function change(rule: WeekRule, allow: boolean) {
     setAsking("");
@@ -426,14 +432,14 @@ function Prompts({ recap, reload }: { recap: WeekRecap; reload: () => void }) {
       <h2>Permission prompts</h2>
       <div>{promptsText(p)}</div>
       {p.byTool.length ? <div class="small muted">For: {p.byTool.map(([tool, n]) => `${tool} ${n}`).join(" · ")}</div> : null}
-      {p.rules.length ? (
+      {rules.length ? (
         <div class="small muted">
           These rules would have let the most of them through. One you allow goes into the .claude/settings.local.json of the
           folder the chats started in (not shared through git), and only chats started there follow it.
         </div>
       ) : null}
       <ul class="week-rules">
-        {p.rules.map((r) => (
+        {rules.map((r) => (
           <li key={r.id} class="week-rule">
             <span class="week-rule-text">
               <span>{r.title}</span>
@@ -461,6 +467,67 @@ function Prompts({ recap, reload }: { recap: WeekRecap; reload: () => void }) {
       </ul>
       {ruleAnswer?.message ? (
         <div class={"small" + (ruleAnswer.ok ? "" : " error")} role="status">{ruleAnswer.ok ? ruleAnswer.message : `Nothing changed: ${ruleAnswer.message}`}</div>
+      ) : null}
+    </section>
+  );
+}
+
+// The permissions you gave: every rule and mode that lets chats on this
+// computer go without asking, each to revoke (it asks first)
+function Granted({ recap, reload }: { recap: WeekRecap; reload: () => void }) {
+  const answer = useStore(weekRevokeAnswer);
+  const [asking, setAsking] = useState("");
+  const [busy, setBusy] = useState("");
+  const [all, setAll] = useState(false);
+  useEffect(() => {
+    if (!answer) return;
+    setBusy("");
+    reload();
+  }, [answer]);
+  const granted = recap.granted;
+  if (!granted) return null;
+
+  function revoke(g: WeekGrant) {
+    setAsking("");
+    setBusy(g.id);
+    post({ type: "weekRevoke", id: g.id });
+  }
+
+  const shown = all ? granted : granted.slice(0, GRANTED_FEW);
+  return (
+    <section class="week-section">
+      <h2>Permissions you gave</h2>
+      <div class="small muted">{grantedIntro(granted)}</div>
+      <ul class="week-rules">
+        {shown.map((g) => (
+          <li key={g.id} class="week-rule">
+            <span class="week-rule-text">
+              <span>{g.title}</span>
+              <span class="small muted">{grantMeta(g)}</span>
+              {asking === g.id ? (
+                <span class="week-rule-ask">
+                  <span class="small">This {g.change}.</span>
+                  <span class="week-rule-buttons">
+                    <button type="button" class="chip on" onClick={() => revoke(g)}>Revoke</button>
+                    <button type="button" class="chip" onClick={() => setAsking("")}>Cancel</button>
+                  </span>
+                </span>
+              ) : null}
+            </span>
+            {busy === g.id ? <span class="small muted">…</span>
+              : g.shared ? (
+                <span class="small muted" title="This folder's .claude/settings.json is shared with whoever uses its repository: change it there.">In git</span>
+              ) : asking !== g.id ? (
+                <button type="button" class="chip" disabled={!!busy} onClick={() => setAsking(g.id)}>Revoke…</button>
+              ) : null}
+          </li>
+        ))}
+      </ul>
+      {!all && granted.length > GRANTED_FEW ? (
+        <button type="button" class="chip" onClick={() => setAll(true)}>Show {granted.length - GRANTED_FEW} more</button>
+      ) : null}
+      {answer?.message ? (
+        <div class={"small" + (answer.ok ? "" : " error")} role="status">{answer.ok ? answer.message : `Nothing changed: ${answer.message}`}</div>
       ) : null}
     </section>
   );

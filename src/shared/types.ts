@@ -450,6 +450,7 @@ export interface ViewSettings {
   recentChats: number;
   reopenIn: ReopenIn; // where recent chats reopen (the switch above them)
   recapCurrency?: string; // the Recap tab's amounts: "USD", "EUR", …
+  recapRules?: boolean; // the Recap tab suggests rules for the permission prompts you answered
 }
 
 export type ReopenIn = "terminal" | "claudeCode";
@@ -597,6 +598,22 @@ export interface WeekRule {
   change: string; // what allowing it changes, in words
 }
 
+// A permission you gave: a rule or mode that lets chats on this computer go
+// without asking (week.py's granted list): kind "allow" (a permissions.allow
+// rule), "dir" (permissions.additionalDirectories), "mode" (a defaultMode
+// that skips prompts), in your user settings or a folder's .claude settings
+export interface WeekGrant {
+  id: string;
+  kind: "allow" | "dir" | "mode";
+  value: string;
+  title: string;
+  place: string; // whose chats it lets through
+  where: string; // the file, from ~
+  shared: boolean; // a folder's settings.json, shared through git: changed there, not here
+  added: boolean; // the Recap tab's Allow put it there
+  change: string; // what revoking it does, in words
+}
+
 export interface WeekRecap {
   ok: true;
   generatedAt: number;
@@ -634,6 +651,7 @@ export interface WeekRecap {
   };
   plan: { account: string; name: string; windows: WeekPlanWindow[] }[]; // (this computer's accounts, these 7 days only)
   prompts: { answered: number; refused: number; waitMs: number; byTool: [string, number][]; rules: WeekRule[] };
+  granted?: WeekGrant[]; // (this computer's; a widget older than the list sends none)
   tips: WeekTip[];
   prices: { asOf: string; guessed: string[] };
   currency?: { code: string; rate: number; date: string; error: string }; // rate: per US dollar
@@ -700,6 +718,7 @@ export type WebviewMessage =
   | { type: "week"; back: number; account: string } // the Recap tab wants these days' recap
   | { type: "openWeekChat"; chatId: string; profileDir: string; name: string; cwd?: string } // one of the week's chats here
   | { type: "weekRule"; allow: boolean; kind: string; value: string; project: string; id: string } // allow a rule the tab offers, or take one back
+  | { type: "weekRevoke"; id: string } // take a permission you gave out of its file
   | { type: "copy"; text: string }; // a tip's command, to the clipboard
 
 // extension -> webview
@@ -708,4 +727,5 @@ export type HostMessage =
   | { type: "petEvent"; kind: PetEventKind; text: string; key: string }
   | { type: "visible"; visible: boolean }
   | { type: "week"; back: number; account: string; recap: WeekRecap | null; error: string }
-  | { type: "weekRule"; id: string; ok: boolean; message: string };
+  | { type: "weekRule"; id: string; ok: boolean; message: string }
+  | { type: "weekRevoke"; id: string; ok: boolean; message: string };

@@ -32,7 +32,14 @@
   folder to read, edits in the chat's own folder, a read-only command, a
   site's pages): **Allow…** says what changes where, then writes the rule
   into the `.claude/settings.local.json` of the folder the chats started in,
-  and **Undo** takes it back. Red marks on the timeline where a usage limit
+  and **Undo** takes it back (`claudeStatus.recapRules` leaves the rules out,
+  so there's no **Allow…** to click by mistake). The permissions you gave:
+  every rule and mode that lets chats on this computer go without asking,
+  in your user settings and the `.claude` settings of every folder Claude
+  ran in, the rules Claude saved when you answered *don't ask again*
+  included; **Revoke…** says what it takes out of which file, then does (a
+  folder's `.claude/settings.json` is shared through git: listed, not
+  changed). Red marks on the timeline where a usage limit
   stopped a chat, and how full your plan's windows are now, with how they
   filled up. The turns that cost most, the costliest chats, and what coming
   back to chats after their cache had expired cost. A trend line of the last

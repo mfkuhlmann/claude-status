@@ -110,7 +110,7 @@ export function App() {
           <main class="content">
             <Guarded what="the week">
               <WeekView hosts={state.hosts.filter((h) => h.ok && !!h.result).map((h) => h.name)}
-                currency={state.settings.recapCurrency ?? "USD"} />
+                currency={state.settings.recapCurrency ?? "USD"} rules={state.settings.recapRules !== false} />
             </Guarded>
           </main>
         ) : (

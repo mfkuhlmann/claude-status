@@ -497,6 +497,13 @@ export class Dashboard implements vscode.Disposable {
     return this.backend.action("week.py", ask.allow ? ["--allow", ask.kind, ask.value, ask.project] : ["--undo", ask.id]);
   }
 
+  // Takes one of the permissions you gave (the Recap's list of what lets
+  // chats go without asking) out of its file
+  async weekRevoke(id: string): Promise<{ ok: boolean; message: string }> {
+    if (this.demoPhase !== null) return { ok: false, message: "Not in the demo: nothing was changed" };
+    return this.backend.action("week.py", ["--revoke", id, ...configDirArgs()]);
+  }
+
   state(): ViewState {
     const now = Date.now();
     if (this.demoPhase !== null) {

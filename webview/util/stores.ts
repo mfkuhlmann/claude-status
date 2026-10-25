@@ -18,3 +18,4 @@ export const weekAnswer = createStore<Extract<HostMessage, { type: "week" }> | n
 
 // What allowing (or taking back) a rule of the Recap tab's did
 export const weekRuleAnswer = createStore<Extract<HostMessage, { type: "weekRule" }> | null>(null);
+export const weekRevokeAnswer = createStore<Extract<HostMessage, { type: "weekRevoke" }> | null>(null);

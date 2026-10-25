@@ -126,7 +126,10 @@ As an editor tab (**Claude Status: Open in Editor Tab**):
   expired cost; the permission prompts you answered, with the rules that
   would have let the most of them through (**Allow…** writes one into the
   `.claude/settings.local.json` of the folder its chats started in, **Undo**
-  takes it back); and what would use less of your plan: the tips of Claude
+  takes it back; `claudeStatus.recapRules` leaves them out); the permissions
+  you gave, every rule and mode that lets chats on this computer go without
+  asking, wherever it is (**Revoke…** takes one out of its file); and what
+  would use less of your plan: the tips of Claude
   Code's own `/usage` (*Start fresh when you switch tasks*, *Save max effort
   for hard tasks*, …), each with the share of the week's usage it touches
   and a command to copy. For all your accounts or one, with the SSH hosts
@@ -317,6 +320,7 @@ code --install-extension claude-status-*.vsix
 | `claudeStatus.showPet` / `chatPets` | `true` / `5` | Talpa, and pets per account |
 | `claudeStatus.showTokens`, `showUsageInStatusBar`, `recentChats`, `keepDoneHours` | | What the view shows |
 | `claudeStatus.recapCurrency` | `USD` | The Recap tab's amounts: US dollars (Claude's API prices), or another currency at the European Central Bank's rate of the day |
+| `claudeStatus.recapRules` | `true` | The Recap tab suggests rules for the permission prompts you answered, each with **Allow…**; off, it only counts the prompts |
 | `claudeStatus.pythonPath` | `python3` | Python on this computer |
 
 ## Privacy
@@ -343,7 +347,10 @@ too, and keeps what it read in `~/.cache/claude-widget/week-2.json`; it calls
 no model. A rule you **Allow…** there is one entry in the
 `.claude/settings.local.json` of the folder its chats started in (only
 there, never your user settings), and `~/.cache/claude-widget/rules.json`
-remembers it so **Undo** can take it back. It writes only to
+remembers it so **Undo** can take it back. **Revoke…** on one of the
+permissions you gave takes that one entry out of the settings file it's in
+(your user settings or a folder's `.claude/settings.local.json`; never a
+folder's `.claude/settings.json`, which git shares). It writes only to
 `~/.cache/claude-widget` (caches, the list of chats you removed, the tasks
 you queue until they start, copies of the files a comparison shows, kept for
 a day) and, if you

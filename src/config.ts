@@ -35,6 +35,7 @@ export const settings = {
     const v = cfg().get<string>("recapCurrency", "USD");
     return typeof v === "string" && /^[A-Z]{3}$/.test(v) ? v : "USD";
   },
+  recapRules: () => cfg().get<boolean>("recapRules", true) !== false,
   notifyWaiting: () => cfg().get<boolean>("notifyWaiting", true),
   notifyDone: () => cfg().get<boolean>("notifyDone", true),
   notifyDoneMinSeconds: () => num("notifyDoneMinSeconds", 30, 0, 3600),
@@ -78,6 +79,7 @@ export function viewSettings(): ViewSettings {
     recentChats: settings.recentChats(),
     reopenIn: settings.reopenIn(),
     recapCurrency: settings.recapCurrency(),
+    recapRules: settings.recapRules(),
   };
 }
 
