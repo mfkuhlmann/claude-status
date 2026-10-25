@@ -9,7 +9,7 @@ import Clutter from 'gi://Clutter';
 import St from 'gi://St';
 
 import * as L from '../logic.js';
-import {box, column, dot, iconButton, label, link, meter, paragraph, tag, textButton} from './widgets.js';
+import {box, column, dot, iconButton, label, link, meter, nameLine, paragraph, tag, textButton} from './widgets.js';
 
 export function buildSessionRow(ctx, session, {showProfile = false, remoteHost = ''} = {}) {
     const s = session;
@@ -45,23 +45,22 @@ export function buildSessionRow(ctx, session, {showProfile = false, remoteHost =
     const body = column('claude-session-body', {x_expand: true});
     row.add_child(body);
 
-    // First line: name, tags, state, buttons
-    const line1 = box('claude-line', {x_expand: true});
+    // First line: name, tags, state, buttons (the tags go under the name when
+    // they don't all fit beside it: widgets.js nameLine)
     const name = link(s.name, open, 'claude-session-name');
-    name.x_expand = true;
     tips.add(name, L.openHint(s, remoteHost));
-    line1.add_child(name);
+    const tags = [];
 
     if (showProfile)
-        line1.add_child(tips.add(tag(s.profile), 'The Claude profile (config folder) this session runs in'));
+        tags.push(tips.add(tag(s.profile), 'The Claude profile (config folder) this session runs in'));
     const kindTag = s.entrypoint === 'claude-vscode' ? 'VS Code' : s.kind === 'bg' ? 'background' : '';
     if (kindTag) {
-        line1.add_child(tips.add(tag(kindTag), s.entrypoint === 'claude-vscode'
+        tags.push(tips.add(tag(kindTag), s.entrypoint === 'claude-vscode'
             ? "Runs in VS Code's Claude panel. Click the name to open the conversation there."
             : "A background session: Claude's background service runs it, with no terminal of its own. Click the name to open it in a terminal (claude attach)."));
     }
     if (s.shared)
-        line1.add_child(tips.add(tag(s.shared.forkOf ? '⇄ shared copy' : '⇄ shared'), () => sharedTooltip(s)));
+        tags.push(tips.add(tag(s.shared.forkOf ? '⇄ shared copy' : '⇄ shared'), () => sharedTooltip(s)));
     if (agents) {
         const t = tag(L.fmt('agents %1/%2', agents.done, agents.total), agents.running > 0);
         t.add_style_class_name('claude-clickable');
@@ -69,7 +68,7 @@ export function buildSessionRow(ctx, session, {showProfile = false, remoteHost =
             ctx.toggleAgents(rowKey);
             return Clutter.EVENT_STOP;
         });
-        line1.add_child(tips.add(t, () => ['Subagents', L.fmt('%1 done, %2 running, %3 stopped. Click to %4 what each one is doing.',
+        tags.push(tips.add(t, () => ['Subagents', L.fmt('%1 done, %2 running, %3 stopped. Click to %4 what each one is doing.',
             agents.done, agents.running, agents.stopped + (agents.failed || 0), showAgents ? 'hide' : 'show')]));
     }
     if (tasks) {
@@ -80,7 +79,7 @@ export function buildSessionRow(ctx, session, {showProfile = false, remoteHost =
             ctx.togglePeek(rowKey);
             return Clutter.EVENT_STOP;
         });
-        line1.add_child(tips.add(t, () => L.tasksTooltip(tasks, showPeek)));
+        tags.push(tips.add(t, () => L.tasksTooltip(tasks, showPeek)));
     }
     if (s.changes) {
         // the files it changed: compared in VS Code (chats on this computer)
@@ -92,9 +91,10 @@ export function buildSessionRow(ctx, session, {showProfile = false, remoteHost =
                 return Clutter.EVENT_STOP;
             });
         }
-        line1.add_child(tips.add(t, () => L.changesTooltip(s.changes, remoteHost)));
+        tags.push(tips.add(t, () => L.changesTooltip(s.changes, remoteHost)));
     }
-    line1.add_child(label(L.stateText(s, ctx.now),
+    const end = box('claude-line');
+    end.add_child(label(L.stateText(s, ctx.now),
         `claude-state${s.state === 'waiting' ? ' claude-fg-waiting claude-strong' : ''}`));
 
     const hoverButtons = [];
@@ -106,7 +106,7 @@ export function buildSessionRow(ctx, session, {showProfile = false, remoteHost =
         tips.add(share, ['Continue on another account',
             'Share this chat with your other accounts and pick it up there, or keep it on one account only.']);
         hoverButtons.push(share);
-        line1.add_child(share);
+        end.add_child(share);
     }
     if (s.state === 'done') {
         // Remove a finished session from the list (nothing is deleted)
@@ -115,7 +115,7 @@ export function buildSessionRow(ctx, session, {showProfile = false, remoteHost =
         tips.add(remove, ['Remove from the list',
             'Only hides it here; nothing is deleted. It comes back if the session runs again, or with “Show removed sessions again” at the bottom of this menu.']);
         hoverButtons.push(remove);
-        line1.add_child(remove);
+        end.add_child(remove);
     }
     if (canStop) {
         const stop = iconButton('media-playback-stop-symbolic',
@@ -123,7 +123,7 @@ export function buildSessionRow(ctx, session, {showProfile = false, remoteHost =
         tips.add(stop, L.stopTip(s));
         if (!confirmingStop)
             hoverButtons.push(stop);
-        line1.add_child(stop);
+        end.add_child(stop);
     }
     const syncHover = () => {
         for (const b of hoverButtons)
@@ -131,7 +131,7 @@ export function buildSessionRow(ctx, session, {showProfile = false, remoteHost =
     };
     row.connect('notify::hover', syncHover);
     syncHover();
-    body.add_child(line1);
+    body.add_child(nameLine(name, tags, end));
 
     // Second line: folder, model, context fill
     const line2 = box('claude-line claude-small', {x_expand: true});

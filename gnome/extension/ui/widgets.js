@@ -3,6 +3,7 @@
 
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
+import GObject from 'gi://GObject';
 import Pango from 'gi://Pango';
 import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
@@ -69,6 +70,102 @@ export function tag(text, active = false) {
         text, style_class: `claude-tag${active ? ' claude-tag-active' : ''}`,
         y_align: Clutter.ActorAlign.CENTER, reactive: true, track_hover: true,
     });
+}
+
+// A chat's first line: its name, its tags and, at the end of the line, its
+// state and buttons. The tags go beside the name while the whole name and all
+// of them fit there, else under it (on more lines if need be), so the tags
+// never cut the name short (as in the Plasma widget's SessionRow.qml; the VS
+// Code extension wraps them too). Spacing: the line's style (claude-line).
+const NameLineLayout = GObject.registerClass(
+class ClaudeNameLineLayout extends Clutter.LayoutManager {
+    _init(name, end) {
+        super._init();
+        this._name = name;
+        this._end = end;
+    }
+
+    _gap(container) {
+        const node = container.peek_theme_node();
+        return node ? node.get_length('spacing') : 0;
+    }
+
+    // Where each shown child goes in a line `width` wide ([actor, x, y, w, h]),
+    // and the height of it all; each line's parts are centered on it
+    _place(container, width) {
+        const gap = this._gap(container);
+        const sized = (actor, max) => {
+            const w = Math.max(0, Math.min(actor.get_preferred_width(-1)[1], max));
+            return [actor, w, actor.get_preferred_height(w)[1]];
+        };
+        const end = this._end.visible ? sized(this._end, width) : null;
+        const room = end ? Math.max(0, width - end[1] - gap) : width;
+        const lines = [[sized(this._name, room)]];
+        const tags = container.get_children()
+            .filter(c => c.visible && c !== this._name && c !== this._end)
+            .map(c => sized(c, room));
+        const beside = tags.reduce((x, [, w]) => x + gap + w, lines[0][0][1]) <= room;
+        let x = 0;
+        for (const t of tags) {
+            if (!beside && (lines.length === 1 || x + gap + t[1] > room)) {
+                lines.push([]);
+                x = -gap;
+            }
+            lines[lines.length - 1].push(t);
+            x += gap + t[1];
+        }
+        const placed = [];
+        let y = 0;
+        lines.forEach((line, i) => {
+            const height = Math.max(...line.map(([, , h]) => h), i === 0 && end ? end[2] : 0);
+            const at = ([actor, w, h], left) => placed.push([actor, left, y + Math.round((height - h) / 2), w, h]);
+            let left = 0;
+            for (const part of line) {
+                at(part, left);
+                left += part[1] + gap;
+            }
+            if (i === 0 && end)
+                at(end, width - end[1]);
+            y += height + Math.round(gap / 2);
+        });
+        return [placed, Math.max(0, y - Math.round(gap / 2))];
+    }
+
+    vfunc_get_preferred_width(container, _forHeight) {
+        const gap = this._gap(container);
+        let min = 0, nat = -gap;
+        for (const c of container.get_children().filter(a => a.visible)) {
+            const [m, n] = c.get_preferred_width(-1);
+            if (c !== this._end)
+                min = Math.max(min, m);
+            nat += gap + n;
+        }
+        if (this._end.visible)
+            min += gap + this._end.get_preferred_width(-1)[1];
+        return [min, Math.max(0, nat)];
+    }
+
+    vfunc_get_preferred_height(container, forWidth) {
+        const [, height] = this._place(container, forWidth >= 0 ? forWidth : this.vfunc_get_preferred_width(container, -1)[1]);
+        return [height, height];
+    }
+
+    vfunc_allocate(container, box) {
+        const [placed] = this._place(container, box.get_width());
+        for (const [actor, x, y, w, h] of placed) {
+            const childBox = new Clutter.ActorBox();
+            childBox.set_origin(box.x1 + x, box.y1 + y);
+            childBox.set_size(w, h);
+            actor.allocate(childBox);
+        }
+    }
+});
+
+export function nameLine(name, tags, end) {
+    const line = new St.Widget({style_class: 'claude-line', x_expand: true, layout_manager: new NameLineLayout(name, end)});
+    for (const actor of [name, ...tags, end])
+        line.add_child(actor);
+    return line;
 }
 
 // A bar filled to pct% in the color class (working, waiting, bad)
