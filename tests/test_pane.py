@@ -7,6 +7,7 @@ import contextlib
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -402,6 +403,7 @@ class SendTests(PaneFixture):
         self.assertEqual(cs.load_queue(self.cache), [])
 
 
+HAVE_GIT = shutil.which("git") is not None
 GIT_ENV = {"GIT_AUTHOR_NAME": "T", "GIT_AUTHOR_EMAIL": "t@example.org", "GIT_COMMITTER_NAME": "T",
            "GIT_COMMITTER_EMAIL": "t@example.org", "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
 
@@ -412,11 +414,12 @@ class ReviewTests(PaneFixture):
         p = mock.patch.dict(os.environ, GIT_ENV)
         p.start()
         self.addCleanup(p.stop)
-        self.git("init", "-q")
         write(self.folder / "a.py", "x = 1\ny = 2\n")
         write(self.folder / "other.py", "keep\n")
-        self.git("add", ".")
-        self.git("commit", "-qm", "start")
+        if HAVE_GIT:  # (the Python 3.7 image CI uses for SSH hosts has none)
+            self.git("init", "-q")
+            self.git("add", ".")
+            self.git("commit", "-qm", "start")
         # the chat: a.py edited (a backup of how it was), new.py made; other.py isn't the chat's
         write(self.home / f".claude-work/file-history/{SID}/aa11@v1", "x = 1\ny = 2\n")
         t = self.now - 100
@@ -448,7 +451,7 @@ class ReviewTests(PaneFixture):
                          [("a.py", 1, 1, False), ("new.py", 1, 0, True)])
         self.assertEqual(r["files"][0]["diff"][-3:], ["-x = 1", "+x = 3", " y = 2"])
         self.assertEqual((r["tests"]["command"], r["tests"]["ok"]), ("python3 -m pytest -q", True))
-        self.assertEqual(r["repos"], [str(self.folder)])
+        self.assertEqual(r["repos"], [str(self.folder)] if HAVE_GIT else [])
         self.assertEqual(r["message"], "change x\n\nYou changed x to 3 and added new.py.")
 
     def test_undo(self):
@@ -459,6 +462,13 @@ class ReviewTests(PaneFixture):
         self.assertEqual((self.folder / "a.py").read_text(), "x = 1\ny = 2\n")
         self.assertEqual((self.folder / "other.py").read_text(), "mine, not the chat's\n")  # (not the chat's)
 
+    def test_without_git_it_reviews_but_doesnt_commit(self):
+        with mock.patch.object(pane.shutil, "which", return_value=None):
+            self.assertEqual([f["label"] for f in self.cli("--review", SID)["files"]], ["a.py", "new.py"])
+            answer = self.cli("--commit", SID, "--message", "Set x to 3")
+        self.assertEqual(answer, {"ok": False, "message": "None of its files is in a git repository"})
+
+    @unittest.skipUnless(HAVE_GIT, "needs git")
     def test_commit_only_its_files(self):
         answer = self.cli("--commit", SID, "--message", "Set x to 3\n\nAnd new.py.")
         self.assertTrue(answer["ok"], answer)
