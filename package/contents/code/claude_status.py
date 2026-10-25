@@ -526,6 +526,9 @@ def make_session(profile, home, *, sid, pid, name, cwd, kind, entrypoint, state,
         # other chats with a process that changed some of the same files (note_overlaps)
         "overlaps": None,
         "stopped": None,  # what stopped it: a usage limit or an expired login (stopped_by, limit_stop)
+        "reply": "background",  # how it takes a message from the chat pane (reply_route)
+        "review": None,  # a chat that changed files: {"editedAt", "tests"} (TestsCache.review)
+        "permission": None,  # what it asks while it waits for a permission (note_permissions)
     }
 
 
@@ -709,6 +712,7 @@ def finish_row(row, job, job_id, profile, ctx, alive):
     """Which conversation the row shows, whether it's shared, its status-line
     snapshot and its subagents."""
     row["jobId"] = job_id
+    row["reply"] = reply_route(row)
     row["jobSessionId"] = job["sessionId"] if isinstance(job, dict) and valid_id(job.get("sessionId")) else None
     row["chatId"], row["shared"] = chat_link(row, job, profile, ctx)
     attach_snapshot(row, ctx.snapshot_root, profile, [row["sessionId"], row["chatId"], row["jobSessionId"]])
@@ -740,6 +744,8 @@ def finish_row(row, job, job_id, profile, ctx, alive):
         row["stopped"] = dict(peek["stopped"]) if peek.get("stopped") and row["state"] in ("idle", "done") else None
         files = chats.changed_files(path, row["cwd"], ctx.own_folders)
         row["changes"] = chats.changes(path, row["cwd"], ctx.home, ctx.own_folders, files)
+        tests = getattr(ctx, "tests", None)
+        row["review"] = tests.review(path) if files and tests is not None else None
         if files and isinstance(getattr(ctx, "changed", None), dict):
             ctx.changed[row["key"]] = set(files)
         row["tasks"] = task_progress(ctx.profiles, [row["sessionId"], row["chatId"], row.get("jobSessionId")])
@@ -2060,6 +2066,375 @@ class ChatCache:
                 pass
 
 
+# ---------------------------------------------------------------- permission prompts
+#
+# A chat waiting for a permission shows what it asks (the command, the file
+# and the change) and, where the widget can answer, Allow once, Always allow
+# and Deny. Without the hook, what it asks comes from the transcript: its
+# newest tool call without a result (pending_tool), and a chat in tmux can be
+# answered with keys (pane.py --keys). With the hook (permission_hook.py,
+# pane.py --relay on), each request is in the cache (permission_requests)
+# and the widget's answer goes back through it (pane.py --answer).
+
+DIFF_LINES = 400  # of one file's diff, in the review (and of an edit a prompt asks for)
+DIFF_CHARS = 60000
+PERMISSIONS = "permissions"
+REQUEST_MAX_AGE_MS = 86400_000
+
+
+def read_file(path):
+    try:
+        with open(path, "rb") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def edit_diff(name, inp, current):
+    """The lines of a unified diff of the change an Edit, MultiEdit, Write or
+    NotebookEdit call asks for (current: the file's text now, for Write)."""
+    import difflib
+    if name == "Edit":
+        old, new = inp.get("old_string"), inp.get("new_string")
+        pairs = [(old, new)] if isinstance(old, str) and isinstance(new, str) else []
+    elif name == "MultiEdit":
+        pairs = [(e.get("old_string"), e.get("new_string")) for e in inp.get("edits") or []
+                 if isinstance(e, dict) and isinstance(e.get("old_string"), str) and isinstance(e.get("new_string"), str)]
+    elif name == "Write":
+        pairs = [(current or "", inp.get("content"))] if isinstance(inp.get("content"), str) else []
+    elif name == "NotebookEdit":
+        pairs = [("", inp.get("new_source"))] if isinstance(inp.get("new_source"), str) else []
+    else:
+        pairs = []
+    out = []
+    for old, new in pairs:
+        diff = list(difflib.unified_diff(old.splitlines(), new.splitlines(), lineterm="", n=2))
+        out += diff[2:]
+    return out[:DIFF_LINES]
+
+
+def permission_view(tool, inp, cwd, suggestions=()):
+    """What a permission prompt asks, as the pane and the row show it:
+    {"tool", "line" (one line), "command" (a Bash command), "file", "diff"
+    (lines), "always" (what Always allow lets through, or "")}."""
+    inp = inp if isinstance(inp, dict) else {}
+    view = {"tool": tool or "", "line": describe_tool({"name": tool, "input": inp}), "command": "", "file": "",
+            "diff": [], "always": ""}
+    if tool == "Bash" and isinstance(inp.get("command"), str):
+        view["command"] = inp["command"]
+    path = inp.get("file_path") or inp.get("notebook_path")
+    if isinstance(path, str) and path:
+        view["file"] = file_label(path, cwd or "", Path.home())
+        current = None
+        if tool == "Write":
+            data = read_file(path)
+            current = data.decode("utf-8", "replace") if data is not None else ""
+        view["diff"] = edit_diff(tool, inp, current)
+    suggestions = [s for s in suggestions or () if isinstance(s, dict)]
+    rules = [r for s in suggestions if s.get("type") == "addRules" for r in s.get("rules") or () if isinstance(r, dict)]
+    dirs = [d for s in suggestions if s.get("type") == "addDirectories"
+            for d in s.get("directories") or () if isinstance(d, str)]
+    modes = [s.get("mode") for s in suggestions if s.get("type") == "setMode" and isinstance(s.get("mode"), str)]
+    if rules:
+        view["always"] = ", ".join(f"{r.get('toolName')}({r['ruleContent']})" if r.get("ruleContent")
+                                   else str(r.get("toolName")) for r in rules)
+    elif dirs:
+        view["always"] = "the folder " + ", ".join(short_path(d, Path.home()) for d in dirs)
+    elif modes:
+        view["always"] = f"everything in {modes[0]} mode"
+    return view
+
+
+def pending_tool(path):
+    """The newest tool call of a chat's last turn that has no result yet
+    (the one a permission prompt is about while the chat waits), or None."""
+    try:
+        size = path.stat().st_size
+        with open(path, "rb") as f:
+            f.seek(max(0, size - PEEK_TAIL_BYTES))
+            lines = f.read(min(size, PEEK_TAIL_BYTES)).split(b"\n")
+    except (OSError, AttributeError):
+        return None
+    if size > PEEK_TAIL_BYTES:
+        lines = lines[1:]
+    answered = set()
+    for line in reversed(lines):
+        if not PEEK_LINE.search(line):
+            continue
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(e, dict) or e.get("isSidechain") or e.get("type") not in ("user", "assistant"):
+            continue
+        _, blocks = blocks_of(e)
+        if e["type"] == "user":
+            if human_prompt(e) is not None:
+                return None
+            answered.update(c.get("tool_use_id") for c in blocks if c.get("type") == "tool_result")
+            continue
+        for c in reversed([c for c in blocks if c.get("type") == "tool_use"]):
+            if c.get("id") not in answered:
+                return c
+    return None
+
+
+def pending_permission(path, cwd):
+    """permission_view of what a waiting chat asks, from its transcript, or None."""
+    use = pending_tool(path) if path is not None else None
+    return permission_view(use.get("name"), use.get("input"), cwd) if use else None
+
+
+def requests_dir(cache_root):
+    return cache_root / PERMISSIONS
+
+
+def pid_alive(pid):
+    if not isinstance(pid, int) or pid <= 1:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
+def permission_requests(cache_root, now_ms=None):
+    """{session id: its oldest open request} of the requests the hook wrote
+    (relayed), whose hook still waits; the files of the others are removed."""
+    now_ms = int(time.time() * 1000) if now_ms is None else now_ms
+    folder = requests_dir(cache_root)
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return {}
+    out = {}
+    for name in sorted(names):
+        if not name.endswith(".json") or name.endswith(".answer.json"):
+            continue
+        path = folder / name
+        req = read_json(path)
+        stale = not isinstance(req, dict) or not pid_alive(req.get("hookPid")) \
+            or now_ms - (req.get("at") or 0) > REQUEST_MAX_AGE_MS
+        if stale:
+            for p in (path, folder / (name[:-5] + ".answer.json")):
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
+            continue
+        sid = req.get("sessionId")
+        if valid_id(sid or "") and (sid not in out or req.get("at", 0) < out[sid].get("at", 0)):
+            out[sid] = req
+    return out
+
+
+def request_view(req):
+    """A relayed request as a row carries it: permission_view plus its id."""
+    view = permission_view(req.get("tool"), req.get("input"), req.get("cwd") or "", req.get("suggestions"))
+    view["request"] = req.get("id")
+    return view
+
+
+def note_permissions(groups, ctx, requests):
+    """A chat waiting for a permission gets "permission": what it asks
+    (request_view, or pending_permission without the hook) and "answer":
+    how the widget can answer it ("hook", "keys" in tmux, or "")."""
+    for g in groups:
+        for s in g["sessions"]:
+            s["permission"] = None
+            if s["state"] != "waiting" or s.get("waitingFor") not in PERMISSION_WAITS:
+                continue
+            req = requests.get(s["sessionId"])
+            if req is not None:
+                s["permission"] = dict(request_view(req), answer="hook")
+                continue
+            profile = next((p for p in ctx.profiles if p.key == s.get("profileDir")), None)
+            path = transcript_path(profile, s.get("chatId") or s["sessionId"]) if profile is not None else None
+            view = pending_permission(path, s.get("cwd") or "")
+            if view is not None:
+                s["permission"] = dict(view, request=None, answer="keys" if s.get("tmux") else "")
+
+
+PERMISSION_WAITS = ("permission prompt",)
+
+
+def reply_route(row):
+    """How a chat takes a message: "tmux" (typed into its pane), "vscode"
+    (its VS Code tab's input), "background" (claude --bg --resume: a chat
+    with no process, or a background session) or "terminal" (a terminal
+    that takes no text from outside: going on in the background or the
+    clipboard)."""
+    if not row.get("pid") or row.get("kind") == "bg":
+        return "background"
+    if row.get("entrypoint") == "claude-vscode":
+        return "vscode"
+    return "tmux" if row.get("tmux") else "terminal"
+
+
+# ---------------------------------------------------------------- tests after the last edit, reviewed chats
+#
+# A finished chat that changed files is "to review" until you mark it
+# reviewed (reviewed.json: {"chats": {"[host|]chat id": when}}), or again
+# once it changes files after that. Its row says whether tests ran after its
+# last edit and how they went: a Bash command that looks like a test run
+# (TEST_COMMAND), and its result (an exit code other than 0 is an error).
+
+REVIEWED = "reviewed.json"
+REVIEWED_KEEP_MS = 60 * 86400_000
+TESTS_CACHE_VERSION = 1
+TEST_COMMAND = re.compile(
+    r"(?:^|[\s;&|(/])(?:py\.?test|pytest|unittest|nose2|tox|nox|jest|vitest|mocha|ava|karma|rspec|phpunit|ctest"
+    r"|bats|go\s+test|cargo\s+(?:test|nextest)|deno\s+test|bun\s+test|node\s+--test|dotnet\s+test|mix\s+test"
+    r"|swift\s+test|zig\s+build\s+test|meson\s+test|ninja\s+test|playwright\s+test|cypress\s+run"
+    r"|(?:npm|pnpm|yarn)\s+(?:run\s+)?test\S*|make\s+(?:\S+\s+)*(?:test|check)\b|mvnw?\s+(?:\S+\s+)*test"
+    r"|(?:\./)?gradlew?\s+(?:\S+\s+)*test|(?:run_?)?tests?\.(?:sh|py))(?=$|[\s;&|)'\"])")
+BASH_LINE = re.compile(rb'"name":\s*"Bash"')
+
+
+def review_key(chat_id, host=""):
+    return f"{host}|{chat_id}" if host else chat_id
+
+
+def load_reviewed(cache_root):
+    """{review_key: when} of the chats marked reviewed."""
+    data = read_json(cache_root / REVIEWED)
+    chats = data.get("chats") if isinstance(data, dict) else None
+    return {k: v for k, v in chats.items() if isinstance(v, (int, float))} if isinstance(chats, dict) else {}
+
+
+def new_tests():
+    """A transcript's last edit (editAt, ms) and its newest test run
+    ({"command", "ok": True/False, "at"}), with the test runs that have no
+    result yet (pending: {tool id: [command, at]})."""
+    return {"editAt": None, "run": None, "pending": {}}
+
+
+QUOTED = re.compile(r"'[^']*'|\"(?:[^\"\\\\]|\\\\.)*\"")
+
+
+def is_test_run(command):
+    """Does a Bash command run tests? Its first line, quotes left out (not
+    a script it pipes in, nor a commit message that names a test tool)."""
+    if not isinstance(command, str):
+        return False
+    return bool(TEST_COMMAND.search(QUOTED.sub("''", command.split("\n", 1)[0])))
+
+
+def fold_tests(rec, e):
+    kind = e.get("type")
+    at = to_ms(e.get("timestamp"))
+    if kind == "assistant":
+        for c in blocks_of(e)[1]:
+            if c.get("type") != "tool_use" or not isinstance(c.get("input"), dict):
+                continue
+            if c.get("name") in EDIT_TOOLS:
+                rec["editAt"] = at if rec["editAt"] is None or (at or 0) >= rec["editAt"] else rec["editAt"]
+            elif c.get("name") == "Bash" and is_test_run(c["input"].get("command")) and isinstance(c.get("id"), str):
+                rec["pending"][c["id"]] = [short_text(c["input"]["command"].split("\n", 1)[0], 120), at]
+    elif kind == "user":
+        for c in blocks_of(e)[1]:
+            if c.get("type") == "tool_result" and c.get("tool_use_id") in rec["pending"]:
+                command, started = rec["pending"].pop(c["tool_use_id"])
+                rec["run"] = {"command": command, "ok": not c.get("is_error"), "at": at or started}
+
+
+def scan_tests(path, rec, start=0):
+    """Fold a transcript's lines from byte offset start into rec (new_tests);
+    returns the offset read up to."""
+    offset = start
+    try:
+        with open(path, "rb") as f:
+            f.seek(start)
+            for line in f:
+                if not line.endswith(b"\n"):
+                    break
+                offset += len(line)
+                wanted = (ASSISTANT_LINE.search(line) and (EDIT_LINE.search(line) or BASH_LINE.search(line))) or (
+                    rec["pending"] and b'"tool_result"' in line
+                    and any(i.encode() in line for i in rec["pending"]))
+                if not wanted:
+                    continue
+                try:
+                    e = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(e, dict) and not e.get("isSidechain"):
+                    fold_tests(rec, e)
+    except OSError:
+        pass
+    return offset
+
+
+def merge_tests(recs):
+    """{"editAt", "run"} of a chat from its transcript's and its subagents'
+    (newest edit; newest run), run None if it came before the last edit."""
+    edit = max((r["editAt"] for r in recs if r["editAt"] is not None), default=None)
+    runs = [r["run"] for r in recs if r["run"]]
+    run = max(runs, key=lambda r: r.get("at") or 0) if runs else None
+    if run is not None and edit is not None and (run.get("at") or 0) < edit:
+        run = None
+    return {"editAt": edit, "run": run}
+
+
+def chat_tests(path):
+    """merge_tests of a chat, read in full (pane.py --review)."""
+    recs = []
+    for p in [path] + subagent_transcripts(path):
+        rec = new_tests()
+        scan_tests(p, rec)
+        recs.append(rec)
+    return merge_tests(recs)
+
+
+class TestsCache:
+    """new_tests of the transcripts of listed and recent chats that changed
+    files, kept between polls in tests.json (only what was appended is read)."""
+
+    def __init__(self, path):
+        self.path = path
+        data = read_json(path)
+        ok = isinstance(data, dict) and data.get("version") == TESTS_CACHE_VERSION
+        self.old = data.get("files", {}) if ok and isinstance(data.get("files"), dict) else {}
+        self.data = {}
+        self.changed = not ok
+
+    def rec(self, path):
+        try:
+            st = path.stat()
+        except OSError:
+            return new_tests()
+        key = file_key(st)
+        old = self.data.get(key) or self.old.get(key)
+        if isinstance(old, list) and len(old) == 2 and isinstance(old[0], int) and old[0] <= st.st_size \
+                and isinstance(old[1], dict) and all(k in old[1] for k in ("editAt", "run", "pending")):
+            size, rec = old
+        else:
+            size, rec = 0, new_tests()
+        if size < st.st_size:
+            rec = json.loads(json.dumps(rec))
+            size = scan_tests(path, rec, size)
+            self.changed = True
+        self.data[key] = [size, rec]
+        return rec
+
+    def review(self, path):
+        """{"editedAt", "tests"} of a chat (merge_tests), or None."""
+        if path is None:
+            return None
+        merged = merge_tests([self.rec(p) for p in [path] + subagent_transcripts(path)])
+        return {"editedAt": merged["editAt"], "tests": merged["run"]} if merged["editAt"] is not None else None
+
+    def save(self):
+        if self.changed or set(self.data) != set(self.old):
+            try:
+                write_json_atomic(self.path, {"version": TESTS_CACHE_VERSION, "files": self.data})
+            except OSError:
+                pass
+
+
 # ---------------------------------------------------------------- shared chats
 #
 # A chat shared across profiles is one transcript file hard-linked into each
@@ -2801,7 +3176,7 @@ def recent_chats(groups, ctx, limit=RECENT_CHATS, starred=frozenset()):
             "profileDir": home.key,
             "shared": bool(shared),
             "starred": star,
-            **recent_extras(ctx, f, g),
+            **recent_extras(ctx, f, g, cwd),
         }
         if room:
             g["recent"].append(chat)
@@ -2810,13 +3185,18 @@ def recent_chats(groups, ctx, limit=RECENT_CHATS, starred=frozenset()):
             g["starred"].append(dict(chat, key=f"{home.key}/{f.stem}/starred"))
 
 
-def recent_extras(ctx, path, group):
-    """A recent chat's recap and what stopped it, from the end of its transcript."""
+def recent_extras(ctx, path, group, cwd=""):
+    """A recent chat's recap and what stopped it, from the end of its
+    transcript; the files it changed and its review (TestsCache.review)."""
     chats = getattr(ctx, "chats", None)
     peek = (chats.peek(path) if chats is not None else None) or {}
     stopped = peek.get("stopped")
+    files = chats.changed_files(path, cwd, ctx.own_folders) if chats is not None else []
+    tests = getattr(ctx, "tests", None)
     return {"recap": peek.get("recap"),
-            "stopped": limit_stop(stopped, group.get("limits"), ctx.now_ms) if stopped else None}
+            "stopped": limit_stop(stopped, group.get("limits"), ctx.now_ms) if stopped else None,
+            "changes": chats.changes(path, cwd, ctx.home, ctx.own_folders, files) if files else None,
+            "review": tests.review(path) if files and tests is not None else None}
 
 
 # ---------------------------------------------------------------- usage limits that stopped chats
@@ -3022,6 +3402,8 @@ def queued_tasks(cache_root, now_ms):
     for t in load_queue(cache_root):
         t = {"chat": None, "name": "", "scheduled": False, **t}
         t["due"] = not t.get("error") and isinstance(t.get("startAt"), (int, float)) and t["startAt"] <= now_ms
+        if t.get("afterTurn"):  # (a message for when its turn ends: the widget sees that, and sends it)
+            t["due"] = False
         t["folderShort"] = short_path(t["folder"], Path.home()) if not t.get("host") else t.get("folder") or "~"
         out.append(t)
     return out
@@ -5591,6 +5973,7 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
         keep_done_ms=int(keep_done_hours * 3600_000),
         agents=AgentCache(cache_root / "agents.json"), links=LinkCache(cache_root / "links.json"),
         chats=ChatCache(cache_root / "chats.json"), slugs=SlugCache(cache_root / "plans.json"), changed={},
+        tests=TestsCache(cache_root / "tests.json"),
         own_folders=own_folders(profiles),
         prompts={real: last_prompts(entries) for real, entries in histories.items()},
         errors=errors, unknown={},
@@ -5720,6 +6103,10 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
     except Exception as exc:
         errors.append(f"chats changing the same files: {exc}")
     try:
+        note_permissions(groups, ctx, permission_requests(cache_root, now_ms))
+    except Exception as exc:
+        errors.append(f"permission prompts: {exc}")
+    try:
         if starred is None:
             starred = starred_of(load_stars(cache_root))
     except Exception as exc:
@@ -5757,6 +6144,7 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
     ctx.links.save()
     ctx.chats.save()
     ctx.slugs.save()
+    ctx.tests.save()
     if forget:
         try:
             change_dismissed(cache_root, forget=forget)
@@ -5789,6 +6177,7 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
         "groups": groups,
         "dismissed": hidden,
         "canShare": True,  # jump.py shares chats between this computer's profiles (sharing.py)
+        "reviewed": load_reviewed(cache_root),  # {review_key: when}: chats marked reviewed (pane.py --reviewed)
         "errors": errors,
     }
 

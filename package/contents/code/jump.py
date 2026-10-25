@@ -1103,7 +1103,23 @@ def start_queued(home, extra_dirs, task_id):
     task = Task(entry.get("prompt") or "", entry.get("plan"), entry.get("planProfile"), entry.get("model"),
                 entry.get("effort"), entry.get("mode"))
     try:
-        if entry.get("chat") and entry.get("host"):
+        if entry.get("afterTurn"):  # a message for when the chat's turn ended (pane.py --send --after-turn)
+            how = entry.get("how") or "auto"
+            args = ["--send", entry["chat"], "--profile", entry["profile"], "--text", task.text, "--how", how]
+            if entry.get("session"):
+                args += ["--session", entry["session"]]
+            if entry.get("host"):
+                import remote
+                answer = remote.host_answer(entry["host"], args, name="pane.py")
+            else:
+                import pane
+                answer = pane.send(home, extra_dirs, entry["profile"], entry["chat"], task.text, entry.get("session"),
+                                   how, claude_path(home))
+            ok, message = bool(answer.get("ok")) and answer.get("how") != "ask", answer.get("message") or ""
+            if answer.get("how") == "vscode" and answer.get("link") and shutil.which("xdg-open"):
+                subprocess.Popen([shutil.which("xdg-open"), answer["link"]], stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        elif entry.get("chat") and entry.get("host"):
             import remote
             answer = remote.continue_chat(entry["host"], entry["profile"], entry["chat"], entry.get("folder") or "",
                                           task.text)
