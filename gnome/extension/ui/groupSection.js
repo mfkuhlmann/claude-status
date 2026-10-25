@@ -360,7 +360,9 @@ export function buildHostSection(ctx, host) {
     const groups = info.result ? info.result.groups : [];
     const stale = !!info.error && info.result !== null;
     const section = column('claude-host', {x_expand: true});
-    section.add_child(separator());
+    const rule = separator();   // (set off from this computer's accounts, and from the host before)
+    rule.add_style_class_name('claude-host-rule');
+    section.add_child(rule);
 
     const head = box('claude-group-head', {x_expand: true});
     head.add_child(new St.Icon({icon_name: 'network-server-symbolic', style_class: 'claude-button-icon'}));

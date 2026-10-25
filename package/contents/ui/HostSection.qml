@@ -18,8 +18,11 @@ ColumnLayout {
 
     spacing: Kirigami.Units.smallSpacing
 
+    // (set off from this computer's accounts, and from the host before)
     Kirigami.Separator {
         Layout.fillWidth: true
+        Layout.topMargin: Kirigami.Units.gridUnit
+        Layout.bottomMargin: Kirigami.Units.smallSpacing
     }
 
     RowLayout {
@@ -35,7 +38,8 @@ ColumnLayout {
         }
         Kirigami.Heading {
             textFormat: Text.PlainText
-            level: 3
+            level: 1   // (above its accounts' titles)
+            font.weight: Font.Bold
             text: hostSection.host
             elide: Text.ElideRight
             Layout.maximumWidth: hostSection.width / 2

@@ -91,6 +91,11 @@ PlasmaComponents3.ScrollView {
         return g.value.indexOf("Bash") === 0 ? "utilities-terminal" : "checkmark"
     }
 
+    // What a plan window's bar says beside it: "45% · resets 20:10"
+    function planText(win) {
+        return Math.round(win.pct) + "%" + (win.resetsAt ? " · " + resetText(win.resetsAt) : "")
+    }
+
     // A section's title: big and bold, under a line that sets the section
     // off from the one before
     component SectionTitle: ColumnLayout {
@@ -803,10 +808,23 @@ PlasmaComponents3.ScrollView {
         // (the widget's usage history); a limit that stopped a chat is a
         // red mark on the days above
         ColumnLayout {
+            id: planSection
             Layout.fillWidth: true
             visible: view.hasData && view.plan.length > 0
             spacing: Math.round(view.gu * 0.2)
+            // (the widest text beside the bars, for all of them: the bars get one length)
+            readonly property real textWidth: {
+                let w = 0
+                for (const a of view.plan)
+                    for (const win of a.windows)
+                        w = Math.max(w, planFont.advanceWidth(view.planText(win)))
+                return Math.ceil(w)
+            }
 
+            FontMetrics {
+                id: planFont
+                font: Kirigami.Theme.smallFont
+            }
             SectionTitle {
                 text: i18n("Your plan's limits now")
             }
@@ -893,7 +911,8 @@ PlasmaComponents3.ScrollView {
                             }
                             PlasmaComponents3.Label {
                                 textFormat: Text.PlainText
-                                text: Math.round(planRow.win.pct) + "%" + (planRow.win.resetsAt ? " · " + view.resetText(planRow.win.resetsAt) : "")
+                                Layout.preferredWidth: planSection.textWidth
+                                text: view.planText(planRow.win)
                                 font: Kirigami.Theme.smallFont
                                 color: planRow.win.pct >= 90 ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.textColor
                                 opacity: 0.8

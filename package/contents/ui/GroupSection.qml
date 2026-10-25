@@ -48,7 +48,8 @@ ColumnLayout {
         Kirigami.Heading {
             id: heading
             textFormat: Text.PlainText
-            level: 4
+            level: 2   // (as the Recap tab's section titles)
+            font.weight: Font.Bold
             text: section.group.title
             elide: Text.ElideRight
             Layout.maximumWidth: section.width - newChatButton.width - (defaultTag.visible ? defaultTag.width : 0) - Kirigami.Units.gridUnit * 6
