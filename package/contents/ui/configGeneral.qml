@@ -46,6 +46,7 @@ KCM.SimpleKCM {
     property string cfg_sshHosts
     property string cfg_sshUsage
     property string cfg_markdownApp
+    property string cfg_recapCurrency
     property alias cfg_notifySound: notifySound.checked
     property alias cfg_soundVolume: soundVolume.value
     property alias cfg_soundWaiting: soundWaiting.value
@@ -81,6 +82,7 @@ KCM.SimpleKCM {
     property string cfg_sshHostsDefault
     property string cfg_sshUsageDefault
     property string cfg_markdownAppDefault
+    property string cfg_recapCurrencyDefault
     property bool cfg_notifySoundDefault
     property int cfg_soundVolumeDefault
     property string cfg_soundWaitingDefault
@@ -443,6 +445,35 @@ KCM.SimpleKCM {
             id: showTokens
             Kirigami.FormData.label: i18n("Popup:")
             text: i18n("Show token totals from local transcripts")
+        }
+
+        QQC2.ComboBox {
+            id: recapCurrency
+            // (the currencies of the European Central Bank's reference rates)
+            readonly property var values: ["USD", "EUR", "GBP", "CHF", "JPY", "CNY", "INR", "CAD", "AUD", "NZD", "SEK", "NOK",
+                                           "DKK", "PLN", "CZK", "HUF", "RON", "ISK", "TRY", "BRL", "MXN", "ZAR", "KRW", "SGD",
+                                           "HKD", "ILS", "IDR", "MYR", "PHP", "THB"]
+            Kirigami.FormData.label: i18n("Recap amounts in:")
+            model: [i18n("US dollars (USD)"), i18n("Euros (EUR)"), i18n("Pounds sterling (GBP)"), i18n("Swiss francs (CHF)"),
+                    i18n("Japanese yen (JPY)"), i18n("Chinese yuan (CNY)"), i18n("Indian rupees (INR)"),
+                    i18n("Canadian dollars (CAD)"), i18n("Australian dollars (AUD)"), i18n("New Zealand dollars (NZD)"),
+                    i18n("Swedish kronor (SEK)"), i18n("Norwegian kroner (NOK)"), i18n("Danish kroner (DKK)"),
+                    i18n("Polish złoty (PLN)"), i18n("Czech koruny (CZK)"), i18n("Hungarian forints (HUF)"),
+                    i18n("Romanian lei (RON)"), i18n("Icelandic krónur (ISK)"), i18n("Turkish lira (TRY)"),
+                    i18n("Brazilian reais (BRL)"), i18n("Mexican pesos (MXN)"), i18n("South African rand (ZAR)"),
+                    i18n("South Korean won (KRW)"), i18n("Singapore dollars (SGD)"), i18n("Hong Kong dollars (HKD)"),
+                    i18n("Israeli shekels (ILS)"), i18n("Indonesian rupiah (IDR)"), i18n("Malaysian ringgit (MYR)"),
+                    i18n("Philippine pesos (PHP)"), i18n("Thai baht (THB)")]
+            currentIndex: Math.max(0, values.indexOf(page.cfg_recapCurrency))
+            onActivated: page.cfg_recapCurrency = values[currentIndex]
+        }
+
+        QQC2.Label {
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 20
+            wrapMode: Text.Wrap
+            font: Kirigami.Theme.smallFont
+            opacity: 0.7
+            text: i18n("Claude's API prices are in US dollars. For another currency, the Recap tab downloads the European Central Bank's reference rates of the day from ecb.europa.eu, at most every 6 hours and only while the tab is open; offline, it uses the last rates it has. Nothing about your chats is sent.")
         }
 
         QQC2.ComboBox {
