@@ -63,12 +63,17 @@ class Transcript:
         e.update(extra)
         return self.add(e)
 
-    def result(self, ms, tool_id, source="config", text="done"):
+    def result(self, ms, tool_id, source="config", text="done", reason=None, decision="accept"):
+        pd = {"decision": decision, "source": source}
+        if reason:
+            pd["reasonCode"] = reason
         return self.add({"type": "user", "timestamp": iso(ms),
                          "message": {"role": "user", "content": [{"tool_use_id": tool_id, "type": "tool_result",
                                                                   "content": text}]},
-                         "toolUseResult": {"stdout": text},
-                         "permissionDecision": {"decision": "accept", "source": source}})
+                         "toolUseResult": {"stdout": text}, "permissionDecision": pd})
+
+    def compacted(self, ms):
+        return self.add({"type": "system", "subtype": "compact_boundary", "timestamp": iso(ms)})
 
     def duration(self, ms, worked):
         return self.add({"type": "system", "subtype": "turn_duration", "durationMs": worked, "timestamp": iso(ms)})
@@ -123,15 +128,15 @@ class Home(unittest.TestCase):
         week.scan(self.profiles(), cache, self.now)
         return cache
 
-    def chats(self, cache=None):
+    def chats(self, cache=None, days=14):
         cache = self.scan(cache)
-        return week.chats_between(cache, self.profiles(), self.now - 14 * week.DAY_MS, self.now + week.DAY_MS, self.home)
+        return week.chats_between(cache, self.profiles(), self.now - days * week.DAY_MS, self.now + week.DAY_MS, self.home)
 
-    def recap(self, account="", back=0, extra=()):
-        chats = self.chats()
+    def recap(self, account="", back=0, extra=(), days=14, usage=None, added=()):
+        chats = self.chats(days=days)
         _, accounts = week.account_ids(self.profiles())
         return week.recap([{"host": "", "chats": chats, "accounts": accounts}, *extra], back, account, self.now,
-                          self.home)
+                          self.home, usage, added)
 
 
 class PriceTests(unittest.TestCase):
@@ -170,7 +175,7 @@ class TurnTests(Home):
 
     def turns(self, transcript, chat="chat-a"):
         self.write(transcript, chat)
-        return self.chats()[chat]["turns"]
+        return [t[:4] for t in self.chats()[chat]["turns"]]  # (without their tokens)
 
     def test_waiting_for_your_permission_isnt_work(self):
         t0 = self.t0
@@ -226,6 +231,15 @@ class TurnTests(Home):
         tr = (Transcript().prompt(t0).reply(t0 + 5000, "a", tools=[("T", "Edit", {})])
               .result(t0 + 65_000, "T", source="user_permanent").reply(t0 + 90_000, "b"))
         self.assertEqual(self.turns(tr), [[t0, t0 + 90_000, 30_000, [[t0 + 5000, t0 + 65_000, "y"]]]])
+
+    def test_a_turn_carries_its_tokens(self):
+        t0 = self.t0
+        tr = (Transcript().prompt(t0).reply(t0 + 1000, "a", output=100, read=1000).reply(t0 + 2000, "b", output=50, read=0)
+              .duration(t0 + 3000, 3000).prompt(t0 + 60_000).reply(t0 + 61_000, "c", model="claude-haiku-5-5"))
+        self.write(tr)
+        first, second = self.chats()["chat-a"]["turns"]
+        self.assertEqual(first[4], {"claude-opus-5-5": [10, 150, 1000, 0, 0, 0]})
+        self.assertEqual(second[4], {"claude-haiku-5-5": [5, 100, 1000, 0, 0, 0]})  # (the turn going on)
 
 
 class UsageTests(Home):
@@ -369,7 +383,32 @@ class RecapTests(Home):
         t0, hour = self.t0, 3600_000
         self.write(Transcript().prompt(t0).limit(t0 + 1000).limit(t0 + 60_000), "chat-a")
         self.write(Transcript().prompt(t0).limit(t0 + 2000).limit(t0 + 5 * hour), "chat-b")
-        self.assertEqual(self.recap()["sum"]["limits"], 2)
+        r = self.recap()
+        self.assertEqual(r["sum"]["limits"], 2)
+        self.assertEqual(r["days"][-1]["limits"], [t0 + 1000, t0 + 2000, t0 + 60_000, t0 + 5 * hour])  # (marks on the timeline)
+
+    def test_a_days_chats_and_a_projects(self):
+        t0 = self.t0
+        self.write(Transcript().prompt(t0).reply(t0 + 1000, "a").duration(t0 + 120_000, 120_000).title("Fix it"), "chat-a")
+        self.write(Transcript().prompt(t0 - week.DAY_MS).reply(t0 - week.DAY_MS + 1000, "b")
+                   .duration(t0 - week.DAY_MS + 90_000, 90_000), "chat-b")
+        r = self.recap()
+        self.assertEqual([(c["chatId"], c["name"], c["workedMs"], c["prompts"]) for c in r["days"][-1]["chats"]],
+                         [("chat-a", "Fix it", 120_000, 1)])
+        self.assertEqual([c["chatId"] for c in r["days"][-2]["chats"]], ["chat-b"])
+        self.assertEqual([c["chatId"] for c in r["projects"][0]["chats"]], ["chat-a", "chat-b"])
+        self.assertEqual(r["projects"][0]["chatCount"], 2)
+
+    def test_the_trend_of_five_weeks(self):
+        t0 = self.t0
+        self.write(Transcript().prompt(t0).reply(t0 + 1000, "a").duration(t0 + 60_000, 60_000), "chat-a")
+        old = t0 - 21 * week.DAY_MS
+        self.write(Transcript().prompt(old).reply(old + 1000, "b").duration(old + 30_000, 30_000), "chat-b")
+        r = self.recap(days=40)
+        self.assertEqual([w["workedMs"] for w in r["trend"]], [0, 30_000, 0, 0, 60_000])
+        self.assertEqual(r["trend"][-1]["start"], r["days"][0]["start"])
+        self.assertEqual(r["trend"][3]["workedMs"], r["previous"]["workedMs"])
+        self.assertEqual(self.recap(back=4, days=40)["trend"][:4], [None] * 4)  # (older than the cache keeps)
 
 
 class TipTests(Home):
@@ -428,6 +467,215 @@ class TipTests(Home):
         self.assertNotIn("long_context", keys)  # (150k is the limit, not over it)
 
 
+class SpendTests(Home):
+    def test_the_costliest_turns_and_cold_resumes(self):
+        t0, hour = self.t0, 3600_000
+        tr = Transcript().prompt(t0).reply(t0 + 1000, "a", output=1000, read=0, write=100_000, hour_writes=True)
+        tr.duration(t0 + 2000, 2000).prompt(t0 + 2 * hour)
+        tr.reply(t0 + 2 * hour + 1000, "b", output=1000, read=0, write=100_000, hour_writes=True)  # (its cache gone)
+        tr.duration(t0 + 2 * hour + 2000, 2000).prompt(t0 + 2 * hour + 60_000)
+        tr.reply(t0 + 2 * hour + 61_000, "c", output=10, read=100_000).duration(t0 + 2 * hour + 62_000, 2000)
+        self.write(tr)
+        s = self.recap()["spend"]
+        self.assertEqual([round(t["cost"], 4) for t in s["turns"]], [0.82, 0.82, 0.0202])
+        self.assertEqual(s["turns"][0]["chatId"], "chat-a")
+        self.assertEqual((s["cold"]["count"], s["cold"]["cost"]), (1, 0.78))  # (written again at 8, not read at 0.2)
+        self.assertEqual(s["cold"]["chats"][0]["resumes"], 1)
+        self.assertEqual(round(s["chats"][0]["cost"], 2), 1.66)
+
+
+class WorkTests(Home):
+    def test_what_claude_did(self):
+        t0 = self.t0
+        edit = {"file_path": "/w/app/a.py", "old_string": "a\nb\n", "new_string": "a\nc\nd\n"}
+        tr = Transcript().prompt(t0).reply(t0 + 1000, "a", tools=[
+            ("E", "Edit", edit), ("W", "Write", {"file_path": "/w/app/b.py", "content": "x\ny\n"}),
+            ("E2", "Edit", dict(edit, old_string="a")), ("B", "Bash", {"command": "make test"}),
+            ("A", "Agent", {"prompt": "look"}), ("M", "mcp__github__search", {})])
+        tr.compacted(t0 + 50_000).reply(t0 + 60_000, "b", tools=[("S", "WebFetch", {"url": "https://x.org"})])
+        tr.duration(t0 + 70_000, 70_000)
+        self.write(tr)
+        w = self.recap()["work"]
+        self.assertEqual((w["toolCalls"], w["commands"], w["edits"], w["files"], w["subagents"], w["compactions"],
+                          w["webFetches"]), (7, 1, 3, 2, 1, 1, 1))
+        self.assertEqual((w["linesAdded"], w["linesRemoved"]), (2 + 2 + 2, 1 + 0 + 0))
+        self.assertIn(["MCP: github", 1], w["tools"])
+        self.assertEqual(week.edit_lines("Write", {"content": "1\n2\n3"}), (3, 0))
+        self.assertEqual(week.edit_lines("MultiEdit", {"edits": [edit, edit]}), (4, 2))
+
+
+class PlanTests(Home):
+    def test_how_the_windows_filled(self):
+        profiles = self.profiles()
+        gid = {m.label: cs.short_id(g) for g, members in cs.group_profiles(profiles) for m in members}
+        t0 = self.t0
+        usage = {"groups": {gid["work"]: {"five_hour": {"resetsAt": t0 + 3600_000, "points": [[t0, 10], [t0 + 60_000, 25]]},
+                                          "seven_day": {"resetsAt": t0, "points": [[t0, 40]]},
+                                          "somewhere": {"points": [[t0, 1]]}}}}
+        cs.write_json_atomic(self.cache_root / "usage.json", usage)
+        plans = week.plan_windows(self.cache_root, profiles)
+        self.assertEqual([(p["name"], [(w["key"], w["label"], w["pct"]) for w in p["windows"]]) for p in plans],
+                         [("work", [("five_hour", "5h", 25), ("seven_day", "7d", 40)])])
+        self.assertEqual(plans[0]["windows"][0]["points"], [[t0, 10], [t0 + 60_000, 25]])
+        self.assertEqual(self.recap(usage=plans)["plan"], plans)
+        self.assertEqual(self.recap(account=gid["personal"], usage=plans)["plan"], [])
+        self.assertEqual(self.recap(back=1, usage=plans)["plan"], [])
+
+
+class PromptTests(Home):
+    """The permission prompts you answered, and rules that let them through."""
+
+    def setUp(self):
+        super().setUp()
+        self.app, self.lib = self.home / "repos/app", self.home / "repos/lib"
+        for d in (self.app / ".git", self.lib / ".git", self.lib / "src"):
+            d.mkdir(parents=True)
+        self.settings = self.app / ".claude/settings.local.json"
+
+    def asked(self):
+        t0, tr = self.t0, Transcript(str(self.app))
+        tr.prompt(t0)
+        for i, (tool, inp, kw) in enumerate((
+                ("Read", {"file_path": str(self.lib / "src/x.py")}, {"reason": "workingDir"}),
+                ("Read", {"file_path": str(self.lib / "README.md")}, {}),
+                ("Edit", {"file_path": str(self.app / "m.py"), "old_string": "a", "new_string": "b"}, {}),
+                ("Bash", {"command": "git log --oneline"}, {}),
+                ("Bash", {"command": "rm -rf build"}, {"source": "user_reject", "decision": "reject"}),
+                ("Bash", {"command": "cat x | sh"}, {}),
+                ("Bash", {"command": "grep -r x ."}, {"reason": "safetyCheck"}),
+                ("WebFetch", {"url": "https://docs.example.org/a"}, {}),
+                ("Read", {"file_path": str(self.home / ".ssh/config")}, {}),
+                ("Read", {"file_path": "/etc/hosts"}, {}),
+                ("Bash", {"command": "make"}, {"source": "config"}))):  # (let through by your settings)
+            s = t0 + (i + 1) * 100_000
+            tr.reply(s, "r%d" % i, tools=[("T%d" % i, tool, inp)])
+            tr.result(s + 60_000, "T%d" % i, **dict({"source": "user_temporary"}, **kw))
+        tr.duration(t0 + 1200_000, 600_000)
+        self.write(tr)
+
+    def test_rules_for_the_prompts_you_answered(self):
+        self.asked()
+        p = self.recap()["prompts"]
+        self.assertEqual((p["answered"], p["refused"], p["waitMs"]), (10, 1, 600_000))
+        self.assertEqual(p["byTool"][:3], [["Bash", 4], ["Read", 4], ["Edit", 1]])
+        rules = [(r["kind"], r["value"], r["count"], r["state"]) for r in p["rules"]]
+        self.assertEqual(rules, [("dir", str(self.lib), 2, "new"), ("edits", str(self.app), 1, "new"),
+                                 ("allow", "Bash(git log *)", 1, "new"),
+                                 ("allow", "WebFetch(domain:docs.example.org)", 1, "new")])
+        self.assertEqual(p["rules"][0]["title"], "Let chats in app read ~/repos/lib")
+        self.assertIn("additionalDirectories", p["rules"][0]["change"])
+
+    def test_prompts_at_once_wait_once(self):
+        t0, tr = self.t0, Transcript(str(self.app))
+        tr.prompt(t0).reply(t0 + 1000, "a", tools=[("A", "Read", {"file_path": str(self.lib / "a")}),
+                                                   ("B", "Read", {"file_path": str(self.lib / "b")})])
+        tr.result(t0 + 61_000, "A", source="user_temporary").result(t0 + 61_000, "B", source="user_temporary")
+        self.write(tr)
+        p = self.recap()["prompts"]
+        self.assertEqual((p["answered"], p["waitMs"], p["rules"][0]["waitMs"]), (2, 60_000, 60_000))
+
+    def test_a_rule_your_settings_have_already(self):
+        self.asked()
+        cs.write_json_atomic(self.home / ".claude-work/settings.json", {"permissions": {"allow": ["Bash(git log *)"]}})
+        states = {r["value"]: r["state"] for r in self.recap()["prompts"]["rules"]}
+        self.assertEqual(states["Bash(git log *)"], "allowed")
+
+    def test_allow_and_undo(self):
+        self.asked()
+        week.updated_cache(self.cache_root, self.profiles(), self.now)
+        ok, message, rid = week.allow_rule(self.home, self.cache_root, "dir", str(self.lib), str(self.app))
+        self.assertTrue(ok, message)
+        self.assertEqual(json.loads(self.settings.read_text()), {"permissions": {"additionalDirectories": [str(self.lib)]}})
+        states = {r["value"]: r["state"] for r in self.recap(added=week.load_added(self.cache_root))["prompts"]["rules"]}
+        self.assertEqual(states[str(self.lib)], "added")
+        self.assertEqual(week.undo_rule(self.home, self.cache_root, rid)[0], True)
+        self.assertFalse(self.settings.exists())  # (the file it made, gone again)
+        self.assertEqual(week.load_added(self.cache_root), [])
+        self.assertFalse(week.undo_rule(self.home, self.cache_root, rid)[0])
+
+    def test_your_own_settings_stay(self):
+        self.asked()
+        week.updated_cache(self.cache_root, self.profiles(), self.now)
+        mine = {"env": {"A": "1"}, "permissions": {"allow": ["Bash(make *)"], "defaultMode": "plan"}}
+        cs.write_json_atomic(self.settings, mine)
+        ids = [week.allow_rule(self.home, self.cache_root, kind, value, str(self.app))[2]
+               for kind, value in (("edits", str(self.app)), ("allow", "Bash(git log *)"))]
+        self.assertEqual(json.loads(self.settings.read_text())["permissions"],
+                         {"allow": ["Bash(make *)", "Bash(git log *)"], "defaultMode": "acceptEdits"})
+        self.assertEqual(week.allow_rule(self.home, self.cache_root, "allow", "Bash(git log *)", str(self.app))[:2],
+                         (True, "Already allowed in ~/repos/app/.claude/settings.local.json"))
+        for rid in ids:
+            self.assertTrue(week.undo_rule(self.home, self.cache_root, rid)[0])
+        self.assertEqual(json.loads(self.settings.read_text()), mine)
+
+    def test_rules_it_never_writes(self):
+        self.asked()
+        week.updated_cache(self.cache_root, self.profiles(), self.now)
+        app = str(self.app)
+        for kind, value, project in (("allow", "Bash(ls *)", str(self.lib)),  # (no chat started there)
+                                     ("allow", "Bash(rm *)", app), ("allow", "Bash(git log *) && rm", app),
+                                     ("allow", "Read(**)", app), ("dir", str(self.lib / "src"), app),  # (not a project)
+                                     ("dir", str(self.home / ".ssh"), app), ("dir", "/etc", app),
+                                     ("edits", str(self.lib), app), ("allow", "Bash(ls *)", str(self.home / ".ssh")),
+                                     ("allow", "Bash(ls *)", "relative/app")):
+            ok, message, _ = week.allow_rule(self.home, self.cache_root, kind, value, project)
+            self.assertFalse(ok, (kind, value, project))
+        self.assertFalse(self.settings.exists())
+        self.assertFalse((self.lib / ".claude").exists())
+        cs.write_json_atomic(self.settings, ["not", "settings"])
+        self.assertFalse(week.allow_rule(self.home, self.cache_root, "allow", "Bash(ls *)", app)[0])
+        self.assertEqual(json.loads(self.settings.read_text()), ["not", "settings"])
+
+
+RATES = """<?xml version="1.0" encoding="UTF-8"?>
+<gesmes:Envelope xmlns:gesmes="http://www.gesmes.org/xml/2002-08-01" xmlns="http://www.ecb.int/vocabulary/2002-08-01/eurofxref">
+<Cube><Cube time='2026-10-23'><Cube currency='USD' rate='1.1250'/><Cube currency='GBP' rate='0.8500'/></Cube></Cube>
+</gesmes:Envelope>"""
+
+
+class CurrencyTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.fetched = 0
+
+    def fetch(self, text=RATES):
+        def get():
+            self.fetched += 1
+            if text is None:
+                raise OSError("offline")
+            return text
+        return get
+
+    def test_the_ecbs_rates(self):
+        self.assertEqual(week.parse_rates(RATES), {"date": "2026-10-23", "rates": {"USD": 1.125, "GBP": 0.85, "EUR": 1.0}})
+        self.assertIsNone(week.parse_rates("<html>maintenance</html>"))
+        eur = week.currency_of("eur", self.root, 1000, self.fetch())
+        self.assertEqual((eur["code"], round(eur["rate"], 4), eur["date"]), ("EUR", 0.8889, "2026-10-23"))
+        gbp = week.currency_of("GBP", self.root, 2000, self.fetch(None))  # (the saved rates: fetched a moment ago)
+        self.assertEqual((round(gbp["rate"], 4), self.fetched), (0.7556, 1))
+
+    def test_offline_the_last_rates_serve(self):
+        week.currency_of("EUR", self.root, 1000, self.fetch())
+        later = week.currency_of("EUR", self.root, 1000 + week.RATES_EVERY_S + 1, self.fetch(None))
+        self.assertEqual((later["code"], later["date"], self.fetched), ("EUR", "2026-10-23", 2))
+        week.currency_of("EUR", self.root, 1000 + week.RATES_EVERY_S + 60, self.fetch(None))  # (not again so soon)
+        self.assertEqual(self.fetched, 2)
+        week.currency_of("EUR", self.root, 1000 + week.RATES_EVERY_S + week.RATES_RETRY_S + 2, self.fetch())
+        self.assertEqual(self.fetched, 3)
+
+    def test_dollars_need_nothing(self):
+        self.assertEqual(week.currency_of("USD", self.root, 1000, self.fetch(None)),
+                         {"code": "USD", "rate": 1.0, "date": "", "error": ""})
+        self.assertEqual(week.currency_of("../x", self.root, 1000, self.fetch(None))["code"], "USD")
+        self.assertEqual(self.fetched, 0)
+        none = week.currency_of("EUR", self.root, 1000, self.fetch(None))
+        self.assertEqual(none["code"], "USD")
+        self.assertIn("European Central Bank", none["error"])
+        self.assertIn("XYZ", week.currency_of("XYZ", self.root, 1000, self.fetch())["error"])
+
+
 sys.path.insert(0, str(ROOT / "tests"))
 from test_remote import FakeSSH  # noqa: E402  (a stand-in ssh: runs the command here, in a made-up home)
 
@@ -472,6 +720,7 @@ class OutputTests(Home):
         result = json.loads(out.getvalue())
         self.assertTrue(result["ok"], result)
         self.assertEqual(result["sum"]["turns"], 1)
+        self.assertEqual(result["currency"]["code"], "USD")
         self.assertTrue((self.cache_root / "claude-widget" / week.CACHE_FILE).is_file())
         out = io.StringIO()
         with redirect_stdout(out):

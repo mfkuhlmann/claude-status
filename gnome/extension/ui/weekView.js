@@ -1,9 +1,10 @@
 // The popup's Recap tab: your last 7 days with Claude (week.py, which the
 // indicator runs only while this tab is open). How long you were at it and
 // how long Claude worked, a day per row on a timeline (drawn with Cairo),
-// what the same work would cost at API prices, where it went, and what would
-// use less of your plan (the rules of Claude Code's own /usage). No tokens
-// used, nothing sent anywhere: it's all read from the chats' transcripts.
+// what the same work would cost at API prices, where it went, the
+// permission prompts you answered, and what would use less of your plan (the
+// rules of Claude Code's own /usage). No tokens used: it's all read from the
+// chats' transcripts.
 
 import Clutter from 'gi://Clutter';
 import St from 'gi://St';
@@ -12,11 +13,13 @@ import * as L from '../logic.js';
 import {box, column, iconButton, label, meter, paragraph, textButton} from './widgets.js';
 
 const ROW_PX = 18;
+const FILL_PX = 18;
 // The colors of the timeline: mid tones, as the rest of the popup, so they
 // read on the dark and the light shell theme
 const YOU = [154 / 255, 153 / 255, 150 / 255, 0.85];
 const WORK = [53 / 255, 132 / 255, 228 / 255];
 const WAIT = [245 / 255, 121 / 255, 0, 0.85];
+const LIMIT = [224 / 255, 27 / 255, 36 / 255];
 const GRID = [0.5, 0.5, 0.5, 0.25];
 const MARK = [0.5, 0.5, 0.5, 0.9];
 
@@ -69,6 +72,7 @@ export function buildWeekView(ctx) {
             'claude-dim claude-week-note'));
     if (!hasData)
         return view;
+    const cur = L.weekCurrency(recap);
 
     const tiles = box('claude-week-tiles', {x_expand: true});
     for (const t of L.weekTiles(recap)) {
@@ -77,6 +81,8 @@ export function buildWeekView(ctx) {
         tile.add_child(label(t.value, 'claude-week-value'));
         if (t.delta)
             tile.add_child(label(t.delta, 'claude-small claude-dim'));
+        if (t.trend.length > 1)
+            tile.add_child(trendBars(t.trend));
         ctx.tips.add(tile, [t.label, t.tip]);
         tiles.add_child(tile);
     }
@@ -85,54 +91,85 @@ export function buildWeekView(ctx) {
     if (facts)
         view.add_child(paragraph(facts, 'claude-small claude-dim'));
 
-    view.add_child(buildTimeline(ctx, recap));
-    view.add_child(buildBars(ctx, 'Where Claude worked', recap.projects.map(p => ({
-        name: (p.host ? `${p.host}: ` : '') + p.name, share: p.workedMs / Math.max(1, ...recap.projects.map(q => q.workedMs)),
-        value: `${L.hoursText(p.workedMs)} · ${L.moneyText(p.cost)}`, color: 'working',
-        tip: [(p.host ? `${p.host}: ` : '') + p.path, `Claude worked ${L.hoursText(p.workedMs)} · ${L.moneyText(p.cost)} at API prices\n` +
-            `${p.prompts} prompts · ${p.chats} chats`],
-    }))));
+    view.add_child(buildTimeline(ctx, recap, cur));
+    view.add_child(buildPlan(ctx, recap));
+    view.add_child(buildProjects(ctx, recap, cur));
     if (recap.chats.length) {
         const chats = column('claude-week-section', {x_expand: true});
         chats.add_child(heading('Chats it worked on most'));
-        for (const c of recap.chats) {
-            const line = box('claude-week-chat', {x_expand: true});
-            line.add_child(label(c.name, '', {x_expand: true}));
-            line.add_child(label((c.host ? `${c.host}: ` : '') + c.folder, 'claude-small claude-dim claude-week-folder'));
-            line.add_child(label(`${L.hoursText(c.workedMs)} · ${L.moneyText(c.cost)}`, 'claude-small claude-dim'));
-            const button = new St.Button({style_class: 'claude-row-button', child: line, x_expand: true, can_focus: !c.host,
-                reactive: !c.host});
-            button.connect('clicked', () => ctx.jumpTo(c.chatId, c.profileDir));
-            ctx.tips.add(button, c.host ? `${c.name} on ${c.host}: its row under ${c.host} opens it` : `Open “${c.name}”`);
-            chats.add_child(button);
-        }
+        for (const c of recap.chats)
+            chats.add_child(chatLine(ctx, c, cur));
         view.add_child(chats);
     }
+    const did = L.weekWorkText(recap.work);
+    if (did) {
+        const work = column('claude-week-section', {x_expand: true});
+        work.add_child(heading('What Claude did'));
+        work.add_child(paragraph(did, ''));
+        if (L.weekToolsText(recap.work))
+            work.add_child(paragraph(L.weekToolsText(recap.work), 'claude-small claude-dim'));
+        view.add_child(work);
+    }
     const models = buildBars(ctx, 'At API prices', recap.models.map(m => ({
-        name: m.model, share: m.share, value: `${L.moneyText(m.cost)} · ${L.weekShareText(m.share)}`, color: 'none',
-        tip: `${m.model}: ${L.moneyText(m.cost)} · ${m.requests} requests`,
+        name: m.model, share: m.share, value: `${L.moneyText(m.cost, cur)} · ${L.weekShareText(m.share)}`, color: 'none',
+        tip: `${m.model}: ${L.moneyText(m.cost, cur)} · ${m.requests} requests`,
     })));
     const cache = L.weekCacheText(recap);
     if (cache)
         models.add_child(paragraph(cache, 'claude-small claude-dim'));
     view.add_child(models);
+    view.add_child(buildSpend(ctx, recap, cur));
+    view.add_child(buildPrompts(ctx, recap));
     view.add_child(buildTips(ctx, recap));
     view.add_child(paragraph(L.weekFootText(recap), 'claude-small claude-dim claude-week-foot'));
     return view;
 }
 
+// The same number over the 5 weeks up to these days, these last (a week
+// the widget no longer has: a dot)
+function trendBars(values) {
+    const bars = box('claude-week-trend', {y_align: Clutter.ActorAlign.END});
+    const top = Math.max(1e-9, ...values.filter(v => v !== null));
+    values.forEach((v, i) => {
+        const height = v === null ? 3 : Math.max(1, Math.round(12 * v / top));
+        bars.add_child(new St.Widget({
+            style_class: `claude-week-trend-bar${i === values.length - 1 ? ' claude-week-trend-now' : ''}`,
+            style: `height: ${height}px;${v === null ? ' opacity: 0.3;' : ''}`, y_align: Clutter.ActorAlign.END,
+        }));
+    });
+    return bars;
+}
+
+// A chat in the tab's lists: click one of this computer's to bring it up
+function chatLine(ctx, c, cur, where = null, sub = false) {
+    const line = box('claude-week-chat', {x_expand: true});
+    line.add_child(label(c.name, sub ? 'claude-small' : '', {x_expand: true}));
+    const place = where !== null ? where : (c.host ? `${c.host}: ` : '') + c.folder;
+    if (place)
+        line.add_child(label(place, 'claude-small claude-dim claude-week-folder'));
+    line.add_child(label(`${L.hoursText(c.workedMs)} · ${L.moneyText(c.cost, cur)}`, 'claude-small claude-dim'));
+    const button = new St.Button({style_class: `claude-row-button${sub ? ' claude-week-sub' : ''}`, child: line, x_expand: true,
+        can_focus: !c.host && !!c.chatId, reactive: !c.host && !!c.chatId});
+    button.connect('clicked', () => ctx.jumpTo(c.chatId, c.profileDir));
+    ctx.tips.add(button, c.host ? `${c.name} on ${c.host}: its row under ${c.host} opens it` : `Open “${c.name}”`);
+    return button;
+}
+
 // A day per row: when you were at it, when Claude worked (darker where
-// several chats worked at once), when it waited for your answer
-function buildTimeline(ctx, recap) {
+// several chats worked at once), when it waited for your answer, where a
+// usage limit stopped a chat. Click a day for its chats.
+function buildTimeline(ctx, recap, cur) {
     const section = column('claude-week-section', {x_expand: true});
-    const head = box('claude-week-head', {x_expand: true});
-    head.add_child(heading('Day by day'));
-    head.add_child(new St.Widget({x_expand: true}));
-    for (const [cls, text] of [['claude-week-swatch-you', 'You'], ['claude-bg-working', 'Claude working'], ['claude-bg-waiting', 'Waiting for you']]) {
-        head.add_child(new St.Widget({style_class: `claude-week-swatch ${cls}`, y_align: Clutter.ActorAlign.CENTER}));
-        head.add_child(label(text, 'claude-small claude-dim'));
+    section.add_child(heading('Day by day'));
+    const legend = box('claude-week-head', {x_expand: true});
+    const keys = [['claude-week-swatch-you', 'You'], ['claude-bg-working', 'Claude working'], ['claude-bg-waiting', 'Waiting for you']];
+    if (recap.days.some(d => d.limits && d.limits.length))
+        keys.push(['claude-week-swatch-limit', 'A usage limit stopped a chat']);
+    for (const [cls, text] of keys) {
+        legend.add_child(new St.Widget({style_class: `claude-week-swatch ${cls}`, y_align: Clutter.ActorAlign.CENTER}));
+        legend.add_child(label(text, 'claude-small claude-dim'));
     }
-    section.add_child(head);
+    section.add_child(legend);
 
     const axis = box('claude-week-row', {x_expand: true});
     axis.add_child(label('', 'claude-week-day'));
@@ -145,13 +182,16 @@ function buildTimeline(ctx, recap) {
     axis.add_child(label('Claude', 'claude-small claude-dim claude-week-num'));
     section.add_child(axis);
 
-    const readout = label('Point at a day to see what went on then.', 'claude-small claude-dim claude-week-readout', {x_expand: true});
+    const hint = 'Point at a day to see what went on then; click it for its chats.';
+    const readout = label(hint, 'claude-small claude-dim claude-week-readout', {x_expand: true});
     const areas = [];
     const last = recap.days.length - 1;
     recap.days.forEach((d, i) => {
         const today = i === last && recap.back === 0;
+        const open = ctx.week.open === `day:${d.day}` && d.chats && d.chats.length > 0;
         const row = box('claude-week-row', {x_expand: true});
-        row.add_child(label(L.weekRowDay(d.day), `claude-small claude-week-day${today ? ' claude-strong' : ''}`));
+        const dayLabel = label(L.weekRowDay(d.day), `claude-small claude-week-day${today || open ? ' claude-strong' : ''}`);
+        row.add_child(dayLabel);
         const area = new St.DrawingArea({x_expand: true, height: ROW_PX, reactive: true, track_hover: true});
         area._week = {day: d, today, hoverX: -1};
         area.connect('repaint', a => paintDay(a, recap.generatedAt));
@@ -177,17 +217,27 @@ function buildTimeline(ctx, recap) {
         area.connect('leave-event', a => {
             a._week.hoverX = -1;
             a.queue_repaint();
-            readout.text = 'Point at a day to see what went on then.';
+            readout.text = hint;
             readout.add_style_class_name('claude-dim');
             return Clutter.EVENT_PROPAGATE;
         });
+        if (d.chats && d.chats.length) {
+            area.connect('button-release-event', () => {
+                ctx.weekUnfold(`day:${d.day}`);
+                return Clutter.EVENT_STOP;
+            });
+        }
         areas.push(area);
         row.add_child(area);
         row.add_child(label(d.youMs >= 60000 ? L.hoursText(d.youMs) : '–', 'claude-small claude-dim claude-week-num'));
         const worked = label(d.workedMs >= 60000 ? L.hoursText(d.workedMs) : '–', 'claude-small claude-week-num');
-        ctx.tips.add(worked, L.weekDayTip(d));
+        ctx.tips.add(worked, L.weekDayTip(d, cur));
         row.add_child(worked);
         section.add_child(row);
+        if (open) {
+            for (const c of d.chats)
+                section.add_child(chatLine(ctx, c, cur, null, true));
+        }
     });
     section.add_child(readout);
     return section;
@@ -220,6 +270,11 @@ function paintDay(area, now) {
         cr.setSourceRGBA(...WORK, n >= 3 ? 1 : n === 2 ? 0.8 : 0.55);
         bar(a, b, 7, 9);
     }
+    cr.setSourceRGBA(...LIMIT, 1);
+    for (const t of d.limits || []) {
+        cr.rectangle(Math.round(x(t)) - 1, 0, 2, h);
+        cr.fill();
+    }
     cr.setSourceRGBA(...MARK);
     if (today) {
         cr.rectangle(Math.round(x(now)), 0, 1, h);
@@ -230,6 +285,99 @@ function paintDay(area, now) {
         cr.fill();
     }
     cr.$dispose();
+}
+
+// How full your plan's windows are now, and how they filled up (this
+// computer's accounts, from the widget's usage history)
+function buildPlan(ctx, recap) {
+    const section = column('claude-week-section', {x_expand: true});
+    const plans = recap.plan || [];
+    if (!plans.length)
+        return section;
+    section.add_child(heading("Your plan's limits now"));
+    for (const p of plans) {
+        for (const w of p.windows) {
+            const line = box('claude-stats-project', {x_expand: true});
+            line.add_child(label((plans.length > 1 ? `${p.name} · ` : '') + w.label, 'claude-small claude-week-name'));
+            const area = new St.DrawingArea({x_expand: true, height: FILL_PX, y_align: Clutter.ActorAlign.CENTER});
+            area.connect('repaint', a => paintFill(a, w, recap.generatedAt));
+            line.add_child(area);
+            const reset = L.weekResetText(w.resetsAt, recap.generatedAt);
+            line.add_child(label(`${Math.round(w.pct)}%${reset ? ` · ${reset}` : ''}`,
+                `claude-small claude-stats-numbers ${w.pct >= 90 ? 'claude-fg-bad' : 'claude-dim'}`));
+            ctx.tips.add(line, [L.fmt('%1: %2% used', w.label, Math.round(w.pct)),
+                'How this window of your plan filled up, from its start (on the left) to when it resets (on the right), as the extension saw it.']);
+            section.add_child(line);
+        }
+    }
+    return section;
+}
+
+function paintFill(area, win, now) {
+    const cr = area.get_context();
+    const [w, h] = area.get_surface_size();
+    const [from, until] = L.weekWindowSpan(win);
+    const x = ms => Math.max(0, Math.min(w, (ms - from) / (until - from) * w));
+    const y = pct => h - 0.5 - Math.max(0, Math.min(100, pct)) / 100 * (h - 1);
+    cr.setSourceRGBA(...GRID);
+    cr.rectangle(0, 0, w, h);
+    cr.fill();
+    const points = win.points.filter(p => p[0] >= from);
+    if (points.length) {
+        const color = win.pct >= 90 ? LIMIT : win.pct >= 70 ? WAIT.slice(0, 3) : WORK;
+        const end = Math.min(now, until);
+        const lastPct = points[points.length - 1][1];
+        cr.moveTo(x(points[0][0]), h);
+        for (const [t, pct] of points)
+            cr.lineTo(x(t), y(pct));
+        cr.lineTo(x(end), y(lastPct));
+        cr.lineTo(x(end), h);
+        cr.closePath();
+        cr.setSourceRGBA(...color, 0.3);
+        cr.fill();
+        cr.moveTo(x(points[0][0]), y(points[0][1]));
+        for (const [t, pct] of points)
+            cr.lineTo(x(t), y(pct));
+        cr.lineTo(x(end), y(lastPct));
+        cr.setSourceRGBA(...color, 1);
+        cr.setLineWidth(1.5);
+        cr.stroke();
+    }
+    cr.$dispose();
+}
+
+// The project folders Claude worked in most (a chat started in a subfolder
+// of a repository counts for the repository): click one for its chats
+function buildProjects(ctx, recap, cur) {
+    const section = column('claude-week-section', {x_expand: true});
+    if (!recap.projects.length)
+        return section;
+    section.add_child(heading('Where Claude worked'));
+    const most = Math.max(1, ...recap.projects.map(q => q.workedMs));
+    for (const p of recap.projects) {
+        const key = `project:${p.host}|${p.path}`;
+        const open = ctx.week.open === key;
+        const chats = Array.isArray(p.chats) ? p.chats : [];
+        const line = box('claude-stats-project', {x_expand: true});
+        line.add_child(new St.Icon({icon_name: open ? 'pan-down-symbolic' : 'pan-end-symbolic', style_class: 'claude-week-fold'}));
+        line.add_child(label((p.host ? `${p.host}: ` : '') + p.name, `claude-small claude-week-name${open ? ' claude-strong' : ''}`));
+        line.add_child(meter(100 * p.workedMs / most, 'working', 'claude-meter claude-stats-meter'));
+        line.add_child(label(`${L.hoursText(p.workedMs)} · ${L.moneyText(p.cost, cur)}`, 'claude-small claude-dim claude-stats-numbers'));
+        const button = new St.Button({style_class: 'claude-row-button', child: line, x_expand: true, can_focus: true, reactive: true});
+        button.connect('clicked', () => ctx.weekUnfold(key));
+        ctx.tips.add(button, [(p.host ? `${p.host}: ` : '') + p.path,
+            `Claude worked ${L.hoursText(p.workedMs)} · ${L.moneyText(p.cost, cur)} at API prices\n` +
+            `${p.prompts} prompts · ${p.chatCount !== undefined ? p.chatCount : chats.length} chats\nClick for its chats`]);
+        section.add_child(button);
+        if (open) {
+            for (const c of chats)
+                section.add_child(chatLine(ctx, c, cur, '', true));
+            const more = (p.chatCount || 0) - chats.length;
+            if (more > 0)
+                section.add_child(label(more === 1 ? 'and 1 more chat' : `and ${more} more chats`, 'claude-small claude-dim claude-week-more'));
+        }
+    }
+    return section;
 }
 
 function buildBars(ctx, title, rows) {
@@ -245,6 +393,77 @@ function buildBars(ctx, title, rows) {
         ctx.tips.add(line, r.tip);
         section.add_child(line);
     }
+    return section;
+}
+
+// Where the money went: the turns that cost most, the chats, and coming
+// back to chats whose cache had expired
+function buildSpend(ctx, recap, cur) {
+    const section = column('claude-week-section', {x_expand: true});
+    const spend = recap.spend;
+    if (!spend || (!spend.turns.length && !spend.cold.count))
+        return section;
+    if (spend.turns.length) {
+        section.add_child(heading('Turns that cost the most'));
+        for (const t of spend.turns)
+            section.add_child(chatLine(ctx, t, cur, t.startedAt ? L.weekWhenText(t.startedAt) : ''));
+    }
+    for (const text of [L.weekCostliestText(recap), L.weekColdText(recap)]) {
+        if (text)
+            section.add_child(paragraph(text, 'claude-small claude-dim'));
+    }
+    return section;
+}
+
+// The permission prompts you answered, and the rules that would have let
+// the most of them through (written only when you allow one)
+function buildPrompts(ctx, recap) {
+    const section = column('claude-week-section', {x_expand: true});
+    const p = recap.prompts;
+    if (!p || !p.answered)
+        return section;
+    const week = ctx.week;
+    section.add_child(heading('Permission prompts'));
+    section.add_child(paragraph(L.weekPromptsText(p), ''));
+    if (p.byTool.length)
+        section.add_child(paragraph(`For: ${p.byTool.map(([tool, n]) => `${tool} ${n}`).join(' · ')}`, 'claude-small claude-dim'));
+    if (p.rules.length)
+        section.add_child(paragraph('These rules would have let the most of them through. One you allow goes into the ' +
+            '.claude/settings.local.json of the folder the chats started in (not shared through git), and only chats started there follow it.',
+        'claude-small claude-dim'));
+    for (const r of p.rules) {
+        const line = box('claude-week-tip', {x_expand: true});
+        const text = column('', {x_expand: true});
+        text.add_child(paragraph(r.title, ''));
+        text.add_child(paragraph(L.weekRuleMeta(r), 'claude-small claude-dim'));
+        if (week.asking === r.id) {
+            text.add_child(paragraph(`This ${r.change}.`, 'claude-small'));
+            const buttons = box('claude-week-accounts');
+            buttons.add_child(textButton('Allow', () => ctx.changeWeekRule(r, true), 'claude-chip claude-chip-on'));
+            buttons.add_child(textButton('Cancel', () => ctx.weekAsk(''), 'claude-chip'));
+            text.add_child(buttons);
+        }
+        line.add_child(text);
+        if (week.ruleBusy === r.id) {
+            line.add_child(label('…', 'claude-small claude-dim', {y_align: Clutter.ActorAlign.START}));
+        } else if (r.state === 'allowed') {
+            line.add_child(label('Allowed now', 'claude-small claude-dim', {y_align: Clutter.ActorAlign.START}));
+        } else if (r.state === 'added') {
+            const undo = textButton('Undo', () => ctx.changeWeekRule(r, false), 'claude-chip');
+            undo.y_align = Clutter.ActorAlign.START;
+            undo.reactive = !week.ruleBusy;
+            ctx.tips.add(undo, ['Take this rule back', 'You allowed it here: Undo removes it from the file it went into, as it was before.']);
+            line.add_child(undo);
+        } else if (week.asking !== r.id) {
+            const allow = textButton('Allow…', () => ctx.weekAsk(r.id), 'claude-chip');
+            allow.y_align = Clutter.ActorAlign.START;
+            allow.reactive = !week.ruleBusy;
+            line.add_child(allow);
+        }
+        section.add_child(line);
+    }
+    if (week.ruleMessage)
+        section.add_child(paragraph(week.ruleMessage, 'claude-small'));
     return section;
 }
 

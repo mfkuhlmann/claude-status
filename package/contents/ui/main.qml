@@ -2487,6 +2487,9 @@ PlasmoidItem {
     property string weekAccount: ""   // an account's id, or "" for all
     property string weekAsked: ""     // the command whose answer is awaited
     readonly property bool weekShown: popupTab === "week" && dashboardShown && !coveredByWindow
+    readonly property string weekCurrency: Plasmoid.configuration.recapCurrency || "USD"
+    property string weekRuleBusy: ""     // the rule being written or taken back: its id
+    property string weekRuleMessage: ""  // what the last one did
 
     onWeekShownChanged: {
         if (weekShown)
@@ -2494,6 +2497,7 @@ PlasmoidItem {
     }
     onWeekBackChanged: loadWeek()
     onWeekAccountChanged: loadWeek()
+    onWeekCurrencyChanged: loadWeek()
 
     Timer {
         interval: 600000   // 10 minutes
@@ -2508,6 +2512,8 @@ PlasmoidItem {
         let cmd = "python3 -I " + shellQuote(codeDir + "week.py") + " --back " + weekBack
         if (weekAccount)
             cmd += " --account " + shellQuote(weekAccount)
+        if (weekCurrency !== "USD")
+            cmd += " --currency " + shellQuote(weekCurrency)
         for (const host of shownHosts)   // (the ones that answered their last check: no waiting on one out of reach)
             if (remote[host] && remote[host].result && !remote[host].error)
                 cmd += " --host " + shellQuote(host)
@@ -2532,6 +2538,31 @@ PlasmoidItem {
             } else {
                 root.weekError = result.message || result.error || i18n("no answer")
             }
+        }
+    }
+
+    // A rule the Recap tab offers for permission prompts you answered:
+    // allow (into the chats' folder's .claude/settings.local.json), or take
+    // back one it added
+    function changeWeekRule(rule, allow) {
+        let cmd = "python3 -I " + shellQuote(codeDir + "week.py")
+        cmd += allow ? " --allow " + shellQuote(rule.kind) + " " + shellQuote(rule.value) + " " + shellQuote(rule.project)
+                     : " --undo " + shellQuote(rule.id)
+        weekRuleBusy = rule.id
+        weekRuleMessage = ""
+        ruleWriter.connectSource(cmd + " # " + Date.now())
+    }
+
+    P5Support.DataSource {
+        id: ruleWriter
+        engine: "executable"
+        connectedSources: []
+        onNewData: (source, data) => {
+            disconnectSource(source)
+            root.weekRuleBusy = ""
+            const result = root.helperResult(data)
+            root.weekRuleMessage = result.ok ? result.message || "" : i18n("Nothing changed: %1", result.message || i18n("no answer"))
+            root.loadWeek()
         }
     }
 
