@@ -459,8 +459,8 @@ button:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 1em;
-  font-weight: 600;
+  font-size: 1.25em; /* (as the Recap tab's section titles) */
+  font-weight: 700;
 }
 
 /* When the numbers are from: a hint while you look at the account */
@@ -1410,9 +1410,10 @@ button:focus-visible {
 /* ---------------------------------------------------------------------------
    An SSH host */
 
+/* set off from this computer's accounts, and from the host before */
 .host {
-  margin-top: 4px;
-  padding-top: 8px;
+  margin-top: 16px;
+  padding-top: 12px;
   border-top: 1px solid var(--cs-border);
 }
 
@@ -1430,8 +1431,8 @@ button:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 1.05em;
-  font-weight: 600;
+  font-size: 1.4em; /* (above its accounts' titles) */
+  font-weight: 700;
 }
 
 .host-machine,
