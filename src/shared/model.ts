@@ -78,7 +78,7 @@ export function findChatRef(status: Status | null, hosts: HostState[], host: unk
   for (const g of where?.groups ?? []) {
     const h = host ? (host as string) : undefined;
     for (const s of g.sessions ?? []) if (s.key === key) return chatRefOf(s, h);
-    for (const c of g.recent ?? []) if (c.key === key) return recentRef(c, h);
+    for (const c of [...(g.recent ?? []), ...(g.starred ?? [])]) if (c.key === key) return recentRef(c, h);
     for (const p of g.sharedHere ?? []) if (p.key === key) return sharedRef(p, h);
   }
   return null;
@@ -104,13 +104,13 @@ export function toLocalClock(result: Status, offset: number): Status {
       shift(s.stats as unknown as Record<string, unknown>, ["startedAt", "lastAt"]);
       for (const a of s.agents?.tree ?? []) shift(a as unknown as Record<string, unknown>, ["started", "updated"]);
     }
-    for (const c of g.recent ?? []) {
+    for (const c of [...(g.recent ?? []), ...(g.starred ?? [])]) {
       shift(c as unknown as Record<string, unknown>, ["lastActive"]);
       shift(c.recap as unknown as Record<string, unknown>, ["at"]);
       shift(c.stopped as unknown as Record<string, unknown>, ["at", "resetsAt"]);
     }
     for (const c of g.sharedHere ?? []) shift(c as unknown as Record<string, unknown>, ["lastActive", "since"]);
-    for (const p of g.plans ?? []) shift(p as unknown as Record<string, unknown>, ["updatedAt"]);
+    for (const p of [...(g.plans ?? []), ...(g.starredPlans ?? [])]) shift(p as unknown as Record<string, unknown>, ["updatedAt"]);
     for (const m of g.memories ?? []) shift(m as unknown as Record<string, unknown>, ["updatedAt"]);
     if (g.limits) {
       shift(g.limits as unknown as Record<string, unknown>, ["updatedAt"]);
@@ -675,7 +675,7 @@ export function findPlan(status: Status | null, hosts: HostState[], host: unknow
   if (typeof key !== "string" || !key || typeof groupId !== "string" || (host !== undefined && host !== null && typeof host !== "string")) return null;
   const where = host ? hosts.find((h) => h.name === host)?.result : status;
   const group = where?.groups.find((g) => g.id === groupId);
-  const plan = group?.plans?.find((p) => p.key === key);
+  const plan = [...(group?.plans ?? []), ...(group?.starredPlans ?? [])].find((p) => p.key === key);
   return plan && group ? { plan, group: host ? { ...group, host: host as string } : group } : null;
 }
 

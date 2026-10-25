@@ -101,6 +101,16 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
           <button type="button" class="link session-name" title={openHint(s, host)} onClick={() => post({ type: "open", chat })}>
             {s.name}
           </button>
+          {s.starred ? (
+            <button
+              type="button"
+              class="star-mark"
+              title="Starred: once it isn't listed here any more, it stays under Recent chats → Starred. Click to unstar it."
+              onClick={() => post({ type: "star", chat, on: false })}
+            >
+              ★
+            </button>
+          ) : null}
           {showProfile && s.profile ? <Tag text={s.profile} title="The Claude profile (config folder) this chat runs in" /> : null}
           {tag ? (
             <Tag
@@ -288,8 +298,16 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
         {showAgents && agents ? <AgentTree tree={agents.tree} now={now} rowKey={rowKey} chat={chat} host={host} /> : null}
       </div>
 
-      {share || remove || stop || canKeep ? (
+      {share || remove || stop || canKeep || !s.starred ? (
         <div class="row-actions">
+          {s.starred ? null : (
+            <IconButton
+              icon="star"
+              label="Star"
+              title="Star this chat: once it isn't listed here any more, it stays under Recent chats → Starred, however old it is."
+              onClick={() => post({ type: "star", chat, on: true })}
+            />
+          )}
           {canKeep ? (
             <IconButton
               icon="repeat"

@@ -1062,6 +1062,15 @@ def keep_off(home, extra_dirs, chat_id):
     return True, "It won't go on by itself any more"
 
 
+def star(home, kind, item_id, host="", on=True):
+    """Star a chat or a plan (kind "chats" or "plans") of this computer or
+    of host, or (not on) not any more: its account lists it under Starred."""
+    if not (cs.valid_id(item_id) if kind == "chats" else cs.PLAN_SLUG.match(item_id or "")):
+        return False, f"Not a {'chat' if kind == 'chats' else 'plan'}: {item_id}"
+    cs.change_stars(cs.cache_dir(home), kind, item_id, host, on)
+    return True, ""
+
+
 def requeue(home, extra_dirs, task_id, start_at):
     """A queued task waits on, until start_at (its account is at its usage
     limit when its time came: it starts after that resets instead)."""
@@ -1966,6 +1975,8 @@ USAGE = ("usage: jump.py [--stop [--busy] | --interrupt] SESSION_ID [--profile P
          "       jump.py --keep-going CHAT_ID --profile PROFILE [--cwd FOLDER] [--name NAME] | --keep-off CHAT_ID\n"
          "               (a chat goes on by itself after each usage limit, until it's done)\n"
          "       jump.py --unqueue|--start-queued TASK_ID\n"
+         "       jump.py --star|--unstar CHAT_ID [--host HOST]   (starred: listed under the account's Starred)\n"
+         "       jump.py --star-plan|--unstar-plan SLUG [--host HOST]\n"
          "       jump.py --requeue TASK_ID --at MS   (it waits on until MS)\n"
          "       jump.py --share SESSION_ID\n"
          "       jump.py --remote-vscode HOST SESSION_ID [--cwd FOLDER_ON_HOST]\n"
@@ -2024,6 +2035,8 @@ def main(argv=None):
             action, session_id = (keep_going if arg == "--keep-going" else keep_off), args.pop(0)  # the chat
         elif arg == "--requeue" and args:
             action, session_id = requeue, args.pop(0)  # the task's id
+        elif arg in ("--star", "--unstar", "--star-plan", "--unstar-plan") and args:
+            action, session_id = arg, args.pop(0)  # the chat, or the plan's slug
         elif arg in ("--unqueue", "--start-queued") and args:
             action, session_id = (unqueue if arg == "--unqueue" else start_queued), args.pop(0)  # the task's id
         elif arg == "--at" and args and args[0].isdigit():
@@ -2129,7 +2142,8 @@ def main(argv=None):
     if (task or background) and action not in (new_chat, "--remote-new-vscode", queue_task, queue_continue):
         sys.exit(USAGE)
     if (action in (queue_task, queue_continue, requeue)) != (start_at is not None) \
-            or (queue_host and action not in (queue_task, queue_continue)):
+            or (queue_host and action not in (queue_task, queue_continue, "--star", "--unstar", "--star-plan",
+                                              "--unstar-plan")):
         sys.exit(USAGE)
     if action is queue_continue and (task.plan or background):
         sys.exit(USAGE)
@@ -2176,6 +2190,9 @@ def main(argv=None):
             ok, message = action(Path.home(), extra, session_id)
         elif action is requeue:
             ok, message = requeue(Path.home(), extra, session_id, start_at)
+        elif action in ("--star", "--unstar", "--star-plan", "--unstar-plan"):
+            ok, message = star(Path.home(), "plans" if action.endswith("plan") else "chats", session_id, queue_host,
+                               on=action.startswith("--star"))
         elif action in (open_plan, edit_plan, unshare_plan):
             ok, message = action(Path.home(), extra, session_id, profile_dir)
         elif action == "--remote-edit":

@@ -66,6 +66,9 @@ As an editor tab (**Claude Status: Open in Editor Tab**):
   later limit too, until the chat is done; a chat at work gets the same from
   its ↻ button. In **Recent chats**, click a chat's **limit** tag (once) or
   **↻** (keep going) for the same.
+- **Star chats and plans** (the star button next to them): each account
+  lists its starred ones under **Recent chats → ★ Starred** and **Plans → ★
+  Starred**, however old they are. ★ unstars one.
 - **Find a Chat…** (the search button in the view's title bar): every chat
   with all the words you type in its name, folder or prompts, here and on
   the SSH hosts shown. Pick one to go to it, or to reopen it. It finds

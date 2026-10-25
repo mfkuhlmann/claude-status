@@ -12,7 +12,7 @@ import { chatOptionArgs } from "../src/config";
 import { Dashboard } from "../src/dashboard";
 import type { Notifier } from "../src/notify";
 import { demoState } from "../src/shared/demo";
-import { clockText, keptChat, keptTitle, limitReset, resetAtText } from "../src/shared/model";
+import { clockText, findChatRef, findPlan, keptChat, keptTitle, limitReset, resetAtText, toLocalClock } from "../src/shared/model";
 import type { Group, KeptChat } from "../src/shared/types";
 
 const NOW = new Date(2026, 9, 24, 10, 0).getTime();
@@ -58,6 +58,21 @@ test("new chats start with the model, effort and permission mode picked: Opus, e
   } finally {
     overrides.clear();
   }
+});
+
+test("a starred chat or plan under Starred is one the extension knows, and an SSH host's is on this computer's clock", () => {
+  const status = demoState(NOW).status!;
+  const g = status.groups[0];
+  const recent = g.recent[0];
+  const plan = g.plans![0];
+  g.starred = [{ ...recent, key: "old|starred", sessionId: "old", lastActive: NOW - 86400_000, starred: true }];
+  g.starredPlans = [{ ...plan, key: "old-plan|starred", slug: "old-plan", updatedAt: NOW - 86400_000, starred: true }];
+  assert.equal(findChatRef(status, [], undefined, "old|starred")?.sessionId, "old");
+  assert.equal(findPlan(status, [], undefined, g.id, "old-plan|starred")?.plan.slug, "old-plan");
+  assert.equal(findChatRef(status, [], undefined, "nope|starred"), null);
+  const shifted = toLocalClock(status, 60_000);
+  assert.equal(shifted.groups[0].starred![0].lastActive, NOW - 86400_000 + 60_000);
+  assert.equal(shifted.groups[0].starredPlans![0].updatedAt, NOW - 86400_000 + 60_000);
 });
 
 test("this computer's check has the usage cap, and the window that notifies looks after the chats that keep going", async () => {

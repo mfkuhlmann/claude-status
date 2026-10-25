@@ -274,6 +274,10 @@ def status(host, done_hours=None, recent=None, tokens=True):
         args += ["--recent", str(recent)]
     if not tokens:
         args.append("--no-tokens")
+    stars = cs.starred_of(cs.load_stars(cs.cache_dir(Path.home())), host)  # (the stars are kept here)
+    for kind in cs.STAR_KINDS:
+        if stars[kind]:
+            args += [f"--starred-{kind}", ",".join(sorted(stars[kind]))]
     started = time.time()
     try:
         r = ssh(host, "python3 -I - " + " ".join(shlex.quote(a) for a in args), host_script(), STATUS_TIMEOUT)

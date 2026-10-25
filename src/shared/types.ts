@@ -124,6 +124,7 @@ export interface PlanItem extends ChatPlan {
   cwd: string; // that chat's folder
   cwdShort: string;
   openCommand?: string | null; // --remote: reopens that chat there
+  starred?: boolean; // you starred it (older backends leave it out)
 }
 
 // One of Claude's memories on an account (claude_status.py: account_memories):
@@ -162,6 +163,7 @@ export interface Session {
   profileDir: string;
   sessionId: string;
   chatId: string;
+  starred?: boolean; // you starred it: once it isn't listed, it stays under Starred
   pid: number | null;
   name: string;
   cwd: string;
@@ -288,6 +290,7 @@ export interface RecentChat {
   openCommand?: string | null;
   recap?: { text: string; at: number | null } | null;
   stopped?: Stop | null;
+  starred?: boolean; // you starred it
 }
 
 // A chat "Find a Chat" found (claude_status.py: find_chats)
@@ -364,7 +367,9 @@ export interface Group {
   projects: Project[];
   sharedHere: SharedPointer[];
   recent: RecentChat[];
+  starred?: RecentChat[]; // the chats you starred that aren't listed, newest first, however old. Older backends leave it out.
   plans?: PlanItem[]; // newest first. Older backends leave it out.
+  starredPlans?: PlanItem[]; // the plans you starred, newest first, however old
   memories?: Memory[]; // newest first. Older backends leave it out.
   homeChatCommand?: string;
   // VS Code's Claude runs on this account (the backend's view of it; an SSH
@@ -627,6 +632,7 @@ export type WebviewMessage =
   | { type: "unqueue"; id: string }
   | { type: "queueContinue"; chat: ChatRef; keep?: boolean } // go on by itself once the limit resets (keep: and after later limits)
   | { type: "keepGoing"; chat: ChatRef; on: boolean } // keep going after each usage limit (or not any more)
+  | { type: "star"; chat?: ChatRef; groupId?: string; host?: string; plan?: string; on: boolean } // a chat or an account's plan: starred, or not any more
   | { type: "loginHost"; host: string }
   | { type: "disconnectHost"; host: string }
   | { type: "login"; groupId: string; host?: string }

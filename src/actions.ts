@@ -1038,6 +1038,15 @@ export class Actions {
     this.refresh();
   }
 
+  // A chat or a plan starred (its account lists it under Starred, however
+  // old it is), or not any more; an SSH host's stars are kept here too
+  async star(kind: "chats" | "plans", id: string, host: string | undefined, on: boolean): Promise<void> {
+    if (this.demoOnly()) return;
+    const flag = kind === "plans" ? (on ? "--star-plan" : "--unstar-plan") : on ? "--star" : "--unstar";
+    this.report(await this.backend.action("jump.py", [flag, id, ...(host ? ["--host", host] : []), ...configDirArgs()]), "Couldn't star it");
+    this.refresh(host);
+  }
+
   // A queued task: cancelled (it doesn't start)
   async unqueue(id: string): Promise<void> {
     if (this.demoOnly()) return;

@@ -42,6 +42,13 @@
   this computer are stopped once one of its plan windows reaches the
   percentage you set, once in that window. Queued tasks wait until it
   resets, and chats that keep going go on then.
+- **Starred chats and plans:** the star button next to a chat (a running
+  one or a recent one) or a plan stars it. Each account then lists its
+  starred ones under **Recent chats → ★ Starred** and **Plans → ★ Starred**,
+  newest first, however old they are; those folds stay closed until you
+  open them. Click ★ to unstar. An SSH host's chats and plans can be starred
+  too. The stars are kept on this computer and shared with the Plasma
+  widget.
 - **Model, effort and permissions for new chats:** **New Chat…** has the
   model (Opus, Sonnet, Fable, Haiku or Claude's default), the reasoning
   effort (low to max) and the permission mode (manual, accept edits, plan,

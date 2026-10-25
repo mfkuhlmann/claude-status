@@ -2731,19 +2731,22 @@ def read_chat_info(path, size):
     return clean_text(name, 80), cwd, messages
 
 
-def recent_chats(groups, ctx, limit=RECENT_CHATS):
+def recent_chats(groups, ctx, limit=RECENT_CHATS, starred=frozenset()):
     """Each account's latest chats that aren't listed as a session already
-    (group["recent"]). A chat shared across accounts shows up under the one
-    it was used on last; of a chat and its copies (same first entry), only
-    the newest; a shared chat that moved on to a listed copy, not at all."""
+    (group["recent"]), and of those its starred ones (ids in starred),
+    however old (group["starred"]). A chat shared across accounts shows up
+    under the one it was used on last; of a chat and its copies (same first
+    entry), only the newest; a shared chat that moved on to a listed copy,
+    not at all."""
     listed = {i for g in groups for s in g["sessions"] for i in (s["sessionId"], s.get("chatId"), s.get("jobSessionId")) if i}
     listed |= getattr(ctx, "moved_on", set())
     by_key = {p.key: p for p in ctx.profiles}
     group_of = {key: g for g in groups for key in g["profileKeys"]}
     candidates = [c for c in all_transcripts(ctx) if c[1].key in group_of and c[2].stem not in listed]
     for g in groups:
-        g["recent"] = []
-    if limit <= 0:
+        g["recent"], g["starred"] = [], []
+    wanted = set(starred)  # (starred chats not found yet)
+    if limit <= 0 and not wanted:
         return
     seen, firsts = set(), set()
     # A listed chat's older copies (they start with the same entry) are that
@@ -2756,8 +2759,12 @@ def recent_chats(groups, ctx, limit=RECENT_CHATS):
             if first:
                 firsts.add(first)
     for t, p, f, st in candidates:
-        if all(len(g["recent"]) >= limit for g in groups):
+        full = all(len(g["recent"]) >= limit for g in groups)
+        if full and not wanted:
             break
+        star = f.stem in wanted
+        if full and not star:
+            continue
         inode = (st.st_dev, st.st_ino)
         if inode in seen:
             continue
@@ -2780,9 +2787,10 @@ def recent_chats(groups, ctx, limit=RECENT_CHATS):
                 if home.key not in group_of:
                     home = p
         g = group_of[home.key]
-        if len(g["recent"]) >= limit:
+        room = len(g["recent"]) < limit
+        if not room and not star:
             continue
-        g["recent"].append({
+        chat = {
             "key": f"{home.key}/{f.stem}/recent",
             "sessionId": f.stem,
             "name": name or f.stem[:8],
@@ -2792,8 +2800,14 @@ def recent_chats(groups, ctx, limit=RECENT_CHATS):
             "profile": home.label,
             "profileDir": home.key,
             "shared": bool(shared),
+            "starred": star,
             **recent_extras(ctx, f, g),
-        })
+        }
+        if room:
+            g["recent"].append(chat)
+        if star:
+            wanted.discard(f.stem)
+            g["starred"].append(dict(chat, key=f"{home.key}/{f.stem}/starred"))
 
 
 def recent_extras(ctx, path, group):
@@ -3458,11 +3472,12 @@ def all_transcripts(ctx):
     return found
 
 
-def account_plans(group, ctx, limit=PLANS_LISTED):
+def account_plans(group, ctx, limit=PLANS_LISTED, starred=frozenset()):
     """The plans of an account's profiles, newest first: [{"key", "slug",
     "title", "path", "profileDir", "profile", "updatedAt", "shared", "chatId",
-    "cwd", "cwdShort"}], the chat being the one that made it (where it's
-    still there; None else)."""
+    "cwd", "cwdShort", "starred"}], the chat being the one that made it
+    (where it's still there; None else). The first limit of them, then the
+    starred ones (slugs in starred) that are older."""
     by_key = {p.key: p for p in ctx.profiles}
     found, seen = [], set()
     for key in group["profileKeys"]:
@@ -3481,7 +3496,7 @@ def account_plans(group, ctx, limit=PLANS_LISTED):
             seen.add((st.st_dev, st.st_ino))
             found.append((st.st_mtime, p, f, st))
     found.sort(key=lambda c: -c[0])
-    found = found[:limit]
+    found = [c for i, c in enumerate(found) if i < limit or c[2].stem in starred]
     plans = []
     for t, p, f, st in found:
         plans.append({
@@ -3496,6 +3511,7 @@ def account_plans(group, ctx, limit=PLANS_LISTED):
             "shared": st.st_nlink > 1 and any(q.real != p.real and same_file(plan_path(q, f.stem), st)
                                               for q in ctx.profiles),
             "chatId": None, "chatProfileDir": None, "cwd": "", "cwdShort": "", "edited": False,
+            "starred": f.stem in starred,
         })
     if plans:
         find_plan_chats(plans, ctx)
@@ -5465,6 +5481,51 @@ def cache_dir(home):
     return Path(os.environ.get("XDG_CACHE_HOME") or home / ".cache") / "claude-widget"
 
 
+# ---------------------------------------------------------------- starred chats and plans
+#
+# Chats and plans you starred stay at hand: each account lists its starred
+# ones however old they are (group["starred"], group["starredPlans"]). The
+# stars are this computer's (stars.json in the widget's cache, an SSH host's
+# under its name): the status run on a host gets that host's from here
+# (remote.status: --starred-chats, --starred-plans).
+
+STAR_KINDS = ("chats", "plans")
+
+
+def load_stars(cache_root):
+    """{"chats": [{"id", "host"}], "plans": [{"id", "host"}]}: what you
+    starred, in the order you did ("host": "" for this computer's)."""
+    data = read_json(cache_root / "stars.json")
+    data = data if isinstance(data, dict) else {}
+    valid = {"chats": valid_id, "plans": lambda v: isinstance(v, str) and bool(PLAN_SLUG.match(v))}
+    out = {}
+    for kind in STAR_KINDS:
+        items = data.get(kind) if isinstance(data.get(kind), list) else []
+        out[kind] = [{"id": i["id"], "host": i.get("host") or ""} for i in items
+                     if isinstance(i, dict) and valid[kind](i.get("id")) and isinstance(i.get("host") or "", str)]
+    return out
+
+
+def change_stars(cache_root, kind, item_id, host="", on=True):
+    """Star a chat or a plan (kind "chats" or "plans"), or (not on) not any
+    more, under a lock: every copy of the widget writes stars.json."""
+    private_dir(cache_root)
+    with open(cache_root / "stars.lock", "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        stars = load_stars(cache_root)
+        items = [i for i in stars[kind] if (i["id"], i["host"]) != (item_id, host or "")]
+        if on:
+            items.append({"id": item_id, "host": host or ""})
+        if items != stars[kind]:
+            stars[kind] = items
+            write_json_atomic(cache_root / "stars.json", stars)
+
+
+def starred_of(stars, host=""):
+    """{"chats": ids, "plans": slugs} starred of this computer (or of host)."""
+    return {kind: {i["id"] for i in stars[kind] if i["host"] == (host or "")} for kind in STAR_KINDS}
+
+
 def load_dismissed(cache_root):
     """Finished sessions the user removed from the widget's list: {session id: when}."""
     data = read_json(cache_root / "dismissed.json")
@@ -5510,7 +5571,9 @@ class Context:
 
 
 def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_done_hours=KEEP_DONE_HOURS,
-            recent=RECENT_CHATS, plans=PLANS_LISTED, usage_cap=0):
+            recent=RECENT_CHATS, plans=PLANS_LISTED, usage_cap=0, starred=None):
+    """starred: {"chats", "plans"} starred here (starred_of), else this
+    computer's from the cache."""
     now = time.time() if now is None else now
     now_ms = int(now * 1000)
     snapshot_root = cache_root / "statusline"
@@ -5657,20 +5720,31 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
     except Exception as exc:
         errors.append(f"chats changing the same files: {exc}")
     try:
+        if starred is None:
+            starred = starred_of(load_stars(cache_root))
+    except Exception as exc:
+        errors.append(f"starred chats and plans: {exc}")
+        starred = {kind: set() for kind in STAR_KINDS}
+    try:
         # a finished session you removed from the list is still one of your
         # recent chats: it shows there
-        recent_chats(groups, ctx, recent)
+        recent_chats(groups, ctx, recent, starred["chats"])
     except Exception as exc:
         errors.append(f"recent chats: {exc}")
         for g in groups:
             g.setdefault("recent", [])
+            g.setdefault("starred", [])
     for g in groups:
+        for s in g["sessions"]:
+            s["starred"] = (s.get("chatId") or s["sessionId"]) in starred["chats"]
         note_limit_hits(g)  # (of its listed chats and its recent ones)
         try:
-            g["plans"] = account_plans(g, ctx, plans)
+            listed = account_plans(g, ctx, plans, starred["plans"])
+            g["plans"] = listed[:max(0, plans)]
+            g["starredPlans"] = [dict(pl, key=pl["key"][:-len("/plan")] + "/starred") for pl in listed if pl["starred"]]
         except Exception as exc:
             errors.append(f"{g['title']}: plans: {exc}")
-            g["plans"] = []
+            g["plans"], g["starredPlans"] = [], []
         try:
             g["memories"] = account_memories(g, ctx)
         except Exception as exc:
@@ -6310,6 +6384,7 @@ def main(argv=None):
     continue_id, continue_folder = None, None
     vscode_account, vscode_server = None, VSCODE_SERVERS["Code"]
     keep_going, usage_cap, model, effort, mode = False, 0, None, None, None
+    starred_chats, starred_plans = set(), set()
     while args:
         arg = args.pop(0)
         if arg == "--config-dir" and args:
@@ -6379,6 +6454,8 @@ def main(argv=None):
             remote = True
         elif arg == "--local":
             local = True
+        elif arg in ("--starred-chats", "--starred-plans") and args:
+            (starred_chats if arg == "--starred-chats" else starred_plans).update(i for i in args.pop(0).split(",") if i)
         elif arg == "--dismiss" and args:
             dismiss = args.pop(0)
         elif arg == "--undismiss-all":
@@ -6451,7 +6528,9 @@ def main(argv=None):
     else:
         try:
             result = collect(home, cache_root, config_dirs, with_tokens=with_tokens, keep_done_hours=done_hours,
-                             recent=recent, plans=plans, usage_cap=usage_cap if not remote or local else 0)
+                             recent=recent, plans=plans, usage_cap=usage_cap if not remote or local else 0,
+                             # (on an SSH host: the host's stars, from the computer that asks)
+                             starred={"chats": starred_chats, "plans": starred_plans} if remote and not local else None)
             try:
                 add_vscode(result, home, config_dirs, remote and not local, cache_root)
             except Exception as exc:
