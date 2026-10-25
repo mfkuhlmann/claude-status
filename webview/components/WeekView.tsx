@@ -1,5 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
-import type { WeekChat, WeekDay, WeekGrant, WeekPlanWindow, WeekRecap, WeekRule } from "../../src/shared/types";
+import type { WeekChat, WeekDay, WeekPlanWindow, WeekRecap } from "../../src/shared/types";
 import {
   cacheText,
   coldText,
@@ -9,17 +9,12 @@ import {
   factsText,
   fillPaths,
   footText,
-  GRANTED_FEW,
-  grantedIntro,
-  grantMeta,
   hoursText,
   hoverText,
   moneyText,
   periodText,
-  promptsText,
   resetText,
   rowDay,
-  ruleMeta,
   shareText,
   toolsText,
   weekTiles,
@@ -31,18 +26,17 @@ import { post } from "../env";
 import { Icon } from "../util/icons";
 import { useViewVisible } from "../util/petStage";
 import { useStore } from "../util/store";
-import { weekAnswer, weekRevokeAnswer, weekRuleAnswer } from "../util/stores";
+import { weekAnswer } from "../util/stores";
 
 const REFRESH_MS = 10 * 60000; // while the tab is in sight
 
 // The Recap tab: your last 7 days with Claude. How long you were at it and
 // how long Claude worked, a day per row on a timeline, what the same work
-// would cost at API prices, where it went, what would use less of your plan
-// (the rules of Claude Code's own /usage), and at the end the permission
-// prompts you answered and the permissions you gave. The extension runs the
+// would cost at API prices, where it went, and what would use less of your
+// plan (the rules of Claude Code's own /usage). The extension runs the
 // widget's week.py for it (only while this tab is open): read from the chats'
 // transcripts, no tokens used.
-export function WeekView({ hosts, currency, rules }: { hosts: string[]; currency: string; rules: boolean }) {
+export function WeekView({ hosts, currency }: { hosts: string[]; currency: string }) {
   const visible = useViewVisible();
   const answer = useStore(weekAnswer);
   const [back, setBack] = useState(answer?.back ?? 0);
@@ -139,8 +133,6 @@ export function WeekView({ hosts, currency, rules }: { hosts: string[]; currency
           <Models recap={recap} />
           <Spend recap={recap} />
           <Tips recap={recap} copied={copied} onCopy={copy} />
-          <Prompts recap={recap} rules={rules} reload={ask} />
-          <Granted recap={recap} reload={ask} />
           <div class="week-foot small muted">{footText(recap)}</div>
         </>
       ) : null}
@@ -400,136 +392,6 @@ function Spend({ recap }: { recap: WeekRecap }) {
       ) : null}
       {costliestText(recap) ? <div class="small muted">{costliestText(recap)}</div> : null}
       {coldText(recap) ? <div class="small muted">{coldText(recap)}</div> : null}
-    </section>
-  );
-}
-
-// The permission prompts you answered, and the rules that would have let
-// the most of them through (written only when you allow one; the settings
-// can leave them out)
-function Prompts({ recap, rules: suggest, reload }: { recap: WeekRecap; rules: boolean; reload: () => void }) {
-  const p = recap.prompts;
-  const ruleAnswer = useStore(weekRuleAnswer);
-  const [asking, setAsking] = useState("");
-  const [busy, setBusy] = useState("");
-  useEffect(() => {
-    if (!ruleAnswer) return;
-    setBusy("");
-    reload();
-  }, [ruleAnswer]);
-  if (!p || !p.answered) return null;
-  const rules = suggest ? p.rules : [];
-
-  function change(rule: WeekRule, allow: boolean) {
-    setAsking("");
-    setBusy(rule.id);
-    post(allow
-      ? { type: "weekRule", allow: true, kind: rule.kind, value: rule.value, project: rule.project, id: "" }
-      : { type: "weekRule", allow: false, kind: "", value: "", project: "", id: rule.id });
-  }
-
-  return (
-    <section class="week-section">
-      <h2>Permission prompts</h2>
-      <div>{promptsText(p)}</div>
-      {p.byTool.length ? <div class="small muted">For: {p.byTool.map(([tool, n]) => `${tool} ${n}`).join(" · ")}</div> : null}
-      {rules.length ? (
-        <div class="small muted">
-          These rules would have let the most of them through. One you allow goes into the .claude/settings.local.json of the
-          folder the chats started in (not shared through git), and only chats started there follow it.
-        </div>
-      ) : null}
-      <ul class="week-rules">
-        {rules.map((r) => (
-          <li key={r.id} class="week-rule">
-            <span class="week-rule-text">
-              <span>{r.title}</span>
-              <span class="small muted">{ruleMeta(r)}</span>
-              {asking === r.id ? (
-                <span class="week-rule-ask">
-                  <span class="small">This {r.change}.</span>
-                  <span class="week-rule-buttons">
-                    <button type="button" class="chip on" onClick={() => change(r, true)}>Allow</button>
-                    <button type="button" class="chip" onClick={() => setAsking("")}>Cancel</button>
-                  </span>
-                </span>
-              ) : null}
-            </span>
-            {busy === r.id ? <span class="small muted">…</span>
-              : r.state === "allowed" ? <span class="small muted">Allowed now</span>
-              : r.state === "added" ? (
-                <button type="button" class="chip" disabled={!!busy} onClick={() => change(r, false)}
-                  title="You allowed it here: Undo removes it from the file it went into, as it was before.">Undo</button>
-              ) : asking !== r.id ? (
-                <button type="button" class="chip" disabled={!!busy} onClick={() => setAsking(r.id)}>Allow…</button>
-              ) : null}
-          </li>
-        ))}
-      </ul>
-      {ruleAnswer?.message ? (
-        <div class={"small" + (ruleAnswer.ok ? "" : " error")} role="status">{ruleAnswer.ok ? ruleAnswer.message : `Nothing changed: ${ruleAnswer.message}`}</div>
-      ) : null}
-    </section>
-  );
-}
-
-// The permissions you gave: every rule and mode that lets chats on this
-// computer go without asking, each to revoke (it asks first)
-function Granted({ recap, reload }: { recap: WeekRecap; reload: () => void }) {
-  const answer = useStore(weekRevokeAnswer);
-  const [asking, setAsking] = useState("");
-  const [busy, setBusy] = useState("");
-  const [all, setAll] = useState(false);
-  useEffect(() => {
-    if (!answer) return;
-    setBusy("");
-    reload();
-  }, [answer]);
-  const granted = recap.granted;
-  if (!granted) return null;
-
-  function revoke(g: WeekGrant) {
-    setAsking("");
-    setBusy(g.id);
-    post({ type: "weekRevoke", id: g.id });
-  }
-
-  const shown = all ? granted : granted.slice(0, GRANTED_FEW);
-  return (
-    <section class="week-section">
-      <h2>Permissions you gave</h2>
-      <div class="small muted">{grantedIntro(granted)}</div>
-      <ul class="week-rules">
-        {shown.map((g) => (
-          <li key={g.id} class="week-rule">
-            <span class="week-rule-text">
-              <span>{g.title}</span>
-              <span class="small muted">{grantMeta(g)}</span>
-              {asking === g.id ? (
-                <span class="week-rule-ask">
-                  <span class="small">This {g.change}.</span>
-                  <span class="week-rule-buttons">
-                    <button type="button" class="chip on" onClick={() => revoke(g)}>Revoke</button>
-                    <button type="button" class="chip" onClick={() => setAsking("")}>Cancel</button>
-                  </span>
-                </span>
-              ) : null}
-            </span>
-            {busy === g.id ? <span class="small muted">…</span>
-              : g.shared ? (
-                <span class="small muted" title="This folder's .claude/settings.json is shared with whoever uses its repository: change it there.">In git</span>
-              ) : asking !== g.id ? (
-                <button type="button" class="chip" disabled={!!busy} onClick={() => setAsking(g.id)}>Revoke…</button>
-              ) : null}
-          </li>
-        ))}
-      </ul>
-      {!all && granted.length > GRANTED_FEW ? (
-        <button type="button" class="chip" onClick={() => setAll(true)}>Show {granted.length - GRANTED_FEW} more</button>
-      ) : null}
-      {answer?.message ? (
-        <div class={"small" + (answer.ok ? "" : " error")} role="status">{answer.ok ? answer.message : `Nothing changed: ${answer.message}`}</div>
-      ) : null}
     </section>
   );
 }

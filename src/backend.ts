@@ -6,7 +6,7 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { isComparison, type Comparison } from "./changes";
-import type { FoundChat, FoundMemory, FoundPlan, FoundProject, Status, WeekRecap } from "./shared/types";
+import type { FoundChat, FoundMemory, FoundPlan, FoundProject, PermsData, Status, WeekRecap } from "./shared/types";
 
 export const REMOTE_MARK = "@@claude-status@@";
 const KILL_GRACE_MS = 3000;
@@ -206,6 +206,13 @@ export class Backend {
     const r = await this.json(["week.py", ...args], 180000);
     if (!r || !r.ok) return { error: String(r?.error ?? r?.message ?? "no answer") };
     return { recap: r as WeekRecap };
+  }
+
+  // The Permissions tab's data (week.py --permissions)
+  async perms(args: string[]): Promise<{ data?: PermsData; error?: string }> {
+    const r = await this.json(["week.py", "--permissions", ...args], 180000);
+    if (!r || !r.ok) return { error: String(r?.error ?? r?.message ?? "no answer") };
+    return { data: r as PermsData };
   }
 
   // jump.py / remote.py actions; they print {"ok": bool, "message": str}

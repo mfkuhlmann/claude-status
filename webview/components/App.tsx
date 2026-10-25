@@ -23,6 +23,7 @@ import { Header } from "./Header";
 import { HeroStage } from "./HeroStage";
 import { HostSection } from "./HostSection";
 import { Messages } from "./Messages";
+import { PermsView } from "./PermsView";
 import { WeekView } from "./WeekView";
 
 const appClass = "app" + (editorTab ? " tab" : "");
@@ -67,7 +68,9 @@ export function App() {
   // pets changed color: repaint the bars next to their rows
   useStore(petColorsVersion);
   const scrolled = useScrolled();
-  const week = useStore(uiState).tab === "week";
+  const tab = useStore(uiState).tab;
+  const week = tab === "week";
+  const perms = tab === "perms";
 
   if (!state)
     return (
@@ -104,13 +107,19 @@ export function App() {
             unavailable={!state.status && !!state.errorText}
             heroShown={state.settings.showPet}
           />
-          {state.settings.showPet && !week ? <HeroStage input={hero} /> : null}
+          {state.settings.showPet && !week && !perms ? <HeroStage input={hero} /> : null}
         </div>
         {week ? (
           <main class="content">
             <Guarded what="the week">
               <WeekView hosts={state.hosts.filter((h) => h.ok && !!h.result).map((h) => h.name)}
-                currency={state.settings.recapCurrency ?? "USD"} rules={state.settings.recapRules !== false} />
+                currency={state.settings.recapCurrency ?? "USD"} />
+            </Guarded>
+          </main>
+        ) : perms ? (
+          <main class="content">
+            <Guarded what="the permissions">
+              <PermsView rules={state.settings.recapRules !== false} />
             </Guarded>
           </main>
         ) : (

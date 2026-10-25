@@ -39,12 +39,12 @@ export function Header(props: {
       <h1 class="title" title={tooltipLines(groups, counts, hosts).join("\n")}>
         Claude Code
       </h1>
-      {/* Your chats now, or your last 7 days with Claude (WeekView.tsx) */}
+      {/* Your chats now, your last 7 days with Claude (WeekView.tsx), or the permissions you gave (PermsView.tsx) */}
       <div class="tabs" role="tablist">
-        {(["chats", "week"] as const).map((t) => (
+        {(["chats", "week", "perms"] as const).map((t) => (
           <button key={t} type="button" role="tab" aria-selected={tab === t} class={"tab-btn" + (tab === t ? " on" : "")}
             onClick={() => setTab(t)}>
-            {t === "chats" ? "Chats" : "Recap"}
+            {t === "chats" ? "Chats" : t === "week" ? "Recap" : "Permissions"}
           </button>
         ))}
       </div>

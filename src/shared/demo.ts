@@ -2,7 +2,7 @@
 // Claude Code) and for the webview's dev harness. Nothing here is real: the
 // accounts, folders, hosts and chats are invented, times are relative to now.
 
-import type { Agent, ChatStats, Group, HostState, Session, Status, UsageStats, ViewState, WeekChat, WeekDay, WeekRecap } from "./types";
+import type { Agent, ChatStats, Group, HostState, PermsData, Session, Status, UsageStats, ViewState, WeekChat, WeekDay, WeekRecap } from "./types";
 
 const MIN = 60000;
 const HOUR = 60 * MIN;
@@ -494,6 +494,23 @@ export function demoWeek(now: number, back = 0, account = ""): WeekRecap {
           change: "adds Bash(git log *) to permissions.allow in ~/projects/date-parser/.claude/settings.local.json" },
       ],
     },
+    tips: [
+      { key: "long_context", pct: 41, title: "Start fresh when you switch tasks", detail: "812 requests carried over 150k tokens of context", command: "/clear" },
+      { key: "max_effort", pct: 22, title: "Save max effort for hard tasks", detail: "22% of your usage ran at max effort", command: "/effort xhigh" },
+      { key: "cache_miss", pct: 12, title: "Compact before you step away", detail: "37 requests sent over 100k tokens the cache had let go", command: "/compact" },
+      { key: "waits", pct: null, title: "Let Claude go on without asking", detail: "it waited 3h 18m for your answers, 9 times · auto mode, or allow what you always allow", command: "/permissions" },
+    ],
+    prices: { asOf: "2026-10-24", guessed: [] },
+    sources: [{ host: "", ok: true, error: "" }, { host: "build-server", ok: true, error: "" }],
+  };
+}
+
+// The Permissions tab of made-up settings: the week's prompts, and a rule in
+// the user settings, two in folders' local settings, one shared through git
+export function demoPerms(now: number): PermsData {
+  const week = demoWeek(now);
+  return {
+    ok: true, generatedAt: now, from: week.from, to: week.to, prompts: week.prompts,
     granted: [
       { id: "1a2b3c4d5e6f", kind: "allow", value: "Bash(npm test *)", title: "Run “npm test *”", place: "every chat of personal, work",
         where: "~/.claude-shared/settings.json", shared: false, added: false,
@@ -508,13 +525,5 @@ export function demoWeek(now: number, back = 0, account = ""): WeekRecap {
         where: "~/projects/webapp/.claude/settings.json", shared: true, added: false,
         change: "takes WebSearch out of permissions.allow in ~/projects/webapp/.claude/settings.json" },
     ],
-    tips: [
-      { key: "long_context", pct: 41, title: "Start fresh when you switch tasks", detail: "812 requests carried over 150k tokens of context", command: "/clear" },
-      { key: "max_effort", pct: 22, title: "Save max effort for hard tasks", detail: "22% of your usage ran at max effort", command: "/effort xhigh" },
-      { key: "cache_miss", pct: 12, title: "Compact before you step away", detail: "37 requests sent over 100k tokens the cache had let go", command: "/compact" },
-      { key: "waits", pct: null, title: "Let Claude go on without asking", detail: "it waited 3h 18m for your answers, 9 times · auto mode, or allow what you always allow", command: "/permissions" },
-    ],
-    prices: { asOf: "2026-10-24", guessed: [] },
-    sources: [{ host: "", ok: true, error: "" }, { host: "build-server", ok: true, error: "" }],
   };
 }

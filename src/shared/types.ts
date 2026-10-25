@@ -614,6 +614,18 @@ export interface WeekGrant {
   change: string; // what revoking it does, in words
 }
 
+// The Permissions tab (week.py --permissions): the prompts you answered in
+// the last 7 days on this computer, with the rules that would have let them
+// through, and the permissions you gave
+export interface PermsData {
+  ok: true;
+  generatedAt: number;
+  from: string;
+  to: string;
+  prompts: WeekRecap["prompts"];
+  granted: WeekGrant[];
+}
+
 export interface WeekRecap {
   ok: true;
   generatedAt: number;
@@ -651,7 +663,6 @@ export interface WeekRecap {
   };
   plan: { account: string; name: string; windows: WeekPlanWindow[] }[]; // (this computer's accounts, these 7 days only)
   prompts: { answered: number; refused: number; waitMs: number; byTool: [string, number][]; rules: WeekRule[] };
-  granted?: WeekGrant[]; // (this computer's; a widget older than the list sends none)
   tips: WeekTip[];
   prices: { asOf: string; guessed: string[] };
   currency?: { code: string; rate: number; date: string; error: string }; // rate: per US dollar
@@ -719,6 +730,7 @@ export type WebviewMessage =
   | { type: "openWeekChat"; chatId: string; profileDir: string; name: string; cwd?: string } // one of the week's chats here
   | { type: "weekRule"; allow: boolean; kind: string; value: string; project: string; id: string } // allow a rule the tab offers, or take one back
   | { type: "weekRevoke"; id: string } // take a permission you gave out of its file
+  | { type: "perms" } // the Permissions tab wants what it shows
   | { type: "copy"; text: string }; // a tip's command, to the clipboard
 
 // extension -> webview
@@ -728,4 +740,5 @@ export type HostMessage =
   | { type: "visible"; visible: boolean }
   | { type: "week"; back: number; account: string; recap: WeekRecap | null; error: string }
   | { type: "weekRule"; id: string; ok: boolean; message: string }
-  | { type: "weekRevoke"; id: string; ok: boolean; message: string };
+  | { type: "weekRevoke"; id: string; ok: boolean; message: string }
+  | { type: "perms"; data: PermsData | null; error: string };

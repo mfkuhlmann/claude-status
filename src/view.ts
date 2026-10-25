@@ -308,6 +308,11 @@ export class ViewHost implements vscode.WebviewViewProvider, vscode.Disposable {
         );
         break;
       }
+      case "perms":
+        void this.dash.perms().then(({ data, error }) =>
+          webview.postMessage({ type: "perms", data: data ?? null, error: error ?? "" } satisfies HostMessage),
+        );
+        break;
       case "weekRevoke": {
         const id = weekRevokeAsked(m.id);
         if (!id) break;

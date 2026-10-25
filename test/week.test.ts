@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import * as vscode from "vscode";
-import { demoState, demoWeek } from "../src/shared/demo";
+import { demoPerms, demoState, demoWeek } from "../src/shared/demo";
 import type { WeekDay } from "../src/shared/types";
 import {
   coldText, currencyOf, deltaText, factsText, fillPaths, footText, hoursText, hoverText, moneyText, periodText, promptsText, ruleMeta,
@@ -112,7 +112,7 @@ test("a rule message is taken only in the shapes the tab sends", () => {
 test("a permission you gave is revoked only by an id of week.py's list", () => {
   assert.equal(weekRevokeAsked("a1b2c3d4e5f6"), "a1b2c3d4e5f6");
   for (const bad of ["../x", "A1B2C3D4E5F6", "a1b2c3d4e5f", 12, null]) assert.equal(weekRevokeAsked(bad), null);
-  const g = demoWeek(NOW).granted![1];
+  const g = demoPerms(NOW).granted[1];
   assert.equal(grantMeta(g), "chats started in date-parser · ~/projects/date-parser/.claude/settings.local.json");
   assert.equal(grantedIntro([]), "Nothing lets chats on this computer skip a permission prompt: they ask you each time.");
 });
@@ -122,7 +122,8 @@ function setup() {
   const posted: unknown[] = [];
   const record = (name: string) => (...args: unknown[]) => {
     calls.push({ name, args });
-    return Promise.resolve(name === "weekRule" || name === "weekRevoke" ? { ok: true, message: "done" } : { recap: demoWeek(NOW) });
+    return Promise.resolve(name === "weekRule" || name === "weekRevoke" ? { ok: true, message: "done" }
+      : name === "perms" ? { data: demoPerms(NOW) } : { recap: demoWeek(NOW) });
   };
   const state = demoState(NOW);
   const actions = new Proxy({}, { get: (_target, name: string) => record(name) });
@@ -134,6 +135,7 @@ function setup() {
     week: record("week"),
     weekRule: record("weekRule"),
     weekRevoke: record("weekRevoke"),
+    perms: record("perms"),
   };
   const host = new ViewHost(vscode.Uri.file("/ext") as never, dash as never, actions as never);
   const priv = host as unknown as { receive(webview: unknown, m: unknown): void };
@@ -170,6 +172,17 @@ test("Allow and Undo reach the backend only as rules; the answer goes back to th
     { type: "weekRule", id: "", ok: true, message: "done" },
     { type: "weekRule", id: "a1b2c3d4e5f6", ok: true, message: "done" },
   ]);
+});
+
+test("the Permissions tab asks for what it shows; the answer goes back to the page", async () => {
+  const { calls, posted, receive } = setup();
+  receive({ type: "perms" });
+  assert.deepEqual(calls, [{ name: "perms", args: [] }]);
+  await new Promise((r) => setTimeout(r, 0));
+  const answer = posted[0] as { type: string; data: { prompts: unknown; granted: unknown[] } | null; error: string };
+  assert.equal(answer.type, "perms");
+  assert.equal(answer.data?.granted.length, 4);
+  assert.equal(answer.error, "");
 });
 
 test("Revoke reaches the backend only as an id; the answer goes back to the page", async () => {

@@ -123,19 +123,20 @@ As an editor tab (**Claude Status: Open in Editor Tab**):
   files and lines, subagents, web searches, compactions); what the same work
   would cost at Claude's API prices, by model, with what the cache saved, the
   turns that cost most and what coming back to chats after their cache had
-  expired cost; the permission prompts you answered, with the rules that
-  would have let the most of them through (**Allow…** writes one into the
-  `.claude/settings.local.json` of the folder its chats started in, **Undo**
-  takes it back; `claudeStatus.recapRules` leaves them out); the permissions
-  you gave, every rule and mode that lets chats on this computer go without
-  asking, wherever it is (**Revoke…** takes one out of its file); and what
-  would use less of your plan: the tips of Claude
+  expired cost; and what would use less of your plan: the tips of Claude
   Code's own `/usage` (*Start fresh when you switch tasks*, *Save max effort
   for hard tasks*, …), each with the share of the week's usage it touches
   and a command to copy. For all your accounts or one, with the SSH hosts
   shown, in US dollars or your currency (`claudeStatus.recapCurrency`). It's read from the chats' transcripts, so it uses no tokens,
   and only while the tab is open: the first time takes a few seconds, after
   that only what's new is read.
+- **The permissions you gave, in one place**: the view's **Permissions** tab
+  lists every rule and mode that lets chats on this computer go without
+  asking you, wherever it is (your settings, the `.claude` settings of every
+  folder Claude ran in), and **Revoke…** takes one out of its file. Under it,
+  the permission prompts you answered in the last 7 days, with the rules
+  that would have let the most of them through (**Allow…** writes one,
+  **Undo** takes it back; `claudeStatus.recapRules` leaves them out).
 - **A chat's recap**: the unfolded peek ends with the chat's numbers: your
   prompts, how long Claude worked (each turn from your prompt to its last
   step), its tool calls by tool, its tokens with its subagents', and what it
@@ -320,7 +321,7 @@ code --install-extension claude-status-*.vsix
 | `claudeStatus.showPet` / `chatPets` | `true` / `5` | Talpa, and pets per account |
 | `claudeStatus.showTokens`, `showUsageInStatusBar`, `recentChats`, `keepDoneHours` | | What the view shows |
 | `claudeStatus.recapCurrency` | `USD` | The Recap tab's amounts: US dollars (Claude's API prices), or another currency at the European Central Bank's rate of the day |
-| `claudeStatus.recapRules` | `true` | The Recap tab suggests rules for the permission prompts you answered, each with **Allow…**; off, it only counts the prompts |
+| `claudeStatus.recapRules` | `true` | The Permissions tab suggests rules for the permission prompts you answered, each with **Allow…**; off, it only counts the prompts |
 | `claudeStatus.pythonPath` | `python3` | Python on this computer |
 
 ## Privacy
@@ -344,7 +345,7 @@ the plans chats wrote (`<config>/plans`), Claude's memories
 the account name and plan from `.claude.json`, and the status-line copies in
 `~/.cache/claude-widget/statusline`. The **Recap** tab reads the transcripts
 too, and keeps what it read in `~/.cache/claude-widget/week-2.json`; it calls
-no model. A rule you **Allow…** there is one entry in the
+no model. A rule you **Allow…** in the **Permissions** tab is one entry in the
 `.claude/settings.local.json` of the folder its chats started in (only
 there, never your user settings), and `~/.cache/claude-widget/rules.json`
 remembers it so **Undo** can take it back. **Revoke…** on one of the

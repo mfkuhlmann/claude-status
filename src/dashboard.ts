@@ -10,10 +10,10 @@ import { claudePanelAvailable, localPanelProfileKey } from "./claudePanel";
 import { settings, statusArgs, configDirArgs, viewSettings } from "./config";
 import type { Notifier } from "./notify";
 import { currentRemoteHost } from "./remoteHost";
-import { demoState, demoWeek } from "./shared/demo";
+import { demoPerms, demoState, demoWeek } from "./shared/demo";
 import { allGroups, chatsNeedingYou, keptChat, limitReset, queuedWhat, shareUsage, toLocalClock, trackKey, type ChatSpot } from "./shared/model";
 import { chatRef } from "./notify";
-import type { ClaudeCodeInfo, DigestCard, HostState, PetEventKind, QueuedTask, Status, ViewState, WeekRecap } from "./shared/types";
+import type { ClaudeCodeInfo, DigestCard, HostState, PermsData, PetEventKind, QueuedTask, Status, ViewState, WeekRecap } from "./shared/types";
 import type { WeekRuleAsk } from "./shared/week";
 import { mergeChanges, TransitionTracker, type Changes, type PetEvent } from "./transitions";
 
@@ -497,8 +497,15 @@ export class Dashboard implements vscode.Disposable {
     return this.backend.action("week.py", ask.allow ? ["--allow", ask.kind, ask.value, ask.project] : ["--undo", ask.id]);
   }
 
-  // Takes one of the permissions you gave (the Recap's list of what lets
-  // chats go without asking) out of its file
+  // The Permissions tab: the permissions you gave and the prompts of the
+  // last 7 days (this computer's)
+  async perms(): Promise<{ data?: PermsData; error?: string }> {
+    if (this.demoPhase !== null) return { data: demoPerms(Date.now()) };
+    return this.backend.perms(configDirArgs());
+  }
+
+  // Takes one of the permissions you gave (what lets chats go without
+  // asking) out of its file
   async weekRevoke(id: string): Promise<{ ok: boolean; message: string }> {
     if (this.demoPhase !== null) return { ok: false, message: "Not in the demo: nothing was changed" };
     return this.backend.action("week.py", ["--revoke", id, ...configDirArgs()]);

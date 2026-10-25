@@ -5,10 +5,10 @@
 import { savedState, saveState } from "../env";
 import { createStore } from "./store";
 
-export type Tab = "chats" | "week";
+export type Tab = "chats" | "week" | "perms";
 
 interface UiState {
-  tab: Tab; // the view's tab: your chats now, or your last 7 days
+  tab: Tab; // the view's tab: your chats now, your last 7 days, or the permissions you gave
   agents: Record<string, true>;
   agentDetail: Record<string, true>; // by agentDetailKey(): row key + "|" + agent id
   peek: Record<string, true>;
@@ -27,7 +27,7 @@ const MAX_KEYS = 100;
 function load(): UiState {
   const saved = savedState<Record<string, unknown>>()[KEY] as Partial<UiState> | undefined;
   return {
-    tab: saved?.tab === "week" ? "week" : "chats",
+    tab: saved?.tab === "week" || saved?.tab === "perms" ? saved.tab : "chats",
     agents: { ...(saved?.agents ?? {}) },
     agentDetail: { ...(saved?.agentDetail ?? {}) },
     peek: { ...(saved?.peek ?? {}) },
