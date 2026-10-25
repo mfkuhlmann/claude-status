@@ -595,6 +595,28 @@ class RecentChatTests(World):
         self.assertEqual(got["work"], [("c4", "about c4"), ("c3", "about c3"), ("c2", "about c2")])
         self.assertEqual(self.recent(recent=0), {"personal": [], "work": []})
 
+    def test_starred_chats_stay_listed_however_old(self):
+        for i, age in enumerate([50, 400, 300, 200, 100, 600]):
+            self.chat("work", f"c{i}", age)
+        self.job("work", "c0", age=10)  # listed as a session: marked there, not repeated
+        for sid in ("c5", "c4", "c0"):
+            cs.change_stars(self.cache, "chats", sid)
+        cs.change_stars(self.cache, "chats", "c1", host="lab")  # an SSH host's chat of that id: not this one
+        work = next(g for g in self.collect(recent=3)["groups"] if g["name"] == "work")
+        self.assertEqual([(c["sessionId"], c["starred"]) for c in work["recent"]], [("c4", True), ("c3", False), ("c2", False)])
+        self.assertEqual([(c["sessionId"], c["key"]) for c in work["starred"]],
+                         [("c4", ".claude-work/c4/starred"), ("c5", ".claude-work/c5/starred")], "newest first")
+        self.assertTrue(next(s for s in work["sessions"] if s["sessionId"] == "c0")["starred"])
+        # also with no recent chats asked for; not any more once unstarred
+        cs.change_stars(self.cache, "chats", "c5", on=False)
+        work = next(g for g in self.collect(recent=0)["groups"] if g["name"] == "work")
+        self.assertEqual(([c["sessionId"] for c in work["starred"]], work["recent"]), (["c4"], []))
+        # a host's status run gets the host's (from the computer that asks), not the cache's
+        self.assertEqual(cs.starred_of(cs.load_stars(self.cache), "lab"), {"chats": {"c1"}, "plans": set()})
+        work = next(g for g in self.collect(recent=3, starred=cs.starred_of(cs.load_stars(self.cache), "lab"))["groups"]
+                    if g["name"] == "work")
+        self.assertEqual([c["sessionId"] for c in work["starred"]], ["c1"])
+
     def test_name_precedence(self):
         def base(sid):  # each chat's own entries (same uuids would make them copies of each other)
             return [user(f"{sid}-u", self.now - 9, sid, text="first prompt here"), reply(f"{sid}-a", self.now - 9, sid)]

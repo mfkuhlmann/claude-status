@@ -283,6 +283,42 @@ class RowTests(Fixture):
         self.assertEqual([x["slug"] for x in self.group(r, "personal")["plans"]], ["new-plan"])
         self.assertEqual(self.collect(with_tokens=False, plans=1)["groups"][1]["plans"][0]["slug"], "new-plan")
 
+    def test_starred_plans_stay_listed(self):
+        w = self.home / ".claude-work"
+        for i, slug in enumerate(["old-plan", "mid-plan", "new-plan"]):
+            write(w / f"plans/{slug}.md", f"# {slug}\n")
+            os.utime(w / f"plans/{slug}.md", (self.now - 1000 + i, self.now - 1000 + i))
+        cs.change_stars(self.cache, "plans", "old-plan")
+        cs.change_stars(self.cache, "plans", "mid-plan", host="lab")  # (an SSH host's)
+        work = self.group(self.collect(with_tokens=False, plans=1), "work")
+        self.assertEqual([(x["slug"], x["starred"]) for x in work["plans"]], [("new-plan", False)])
+        self.assertEqual([(x["slug"], x["title"], x["key"]) for x in work["starredPlans"]],
+                         [("old-plan", "old-plan", ".claude-work/old-plan/starred")])
+        cs.change_stars(self.cache, "plans", "new-plan")
+        work = self.group(self.collect(with_tokens=False), "work")
+        self.assertEqual([(x["slug"], x["starred"]) for x in work["plans"]],
+                         [("new-plan", True), ("mid-plan", False), ("old-plan", True)])
+        self.assertEqual([x["slug"] for x in work["starredPlans"]], ["new-plan", "old-plan"])
+
+    def test_starring_and_an_ssh_hosts_stars(self):
+        home = self.home
+        with mock.patch.object(jump.Path, "home", return_value=home):
+            self.assertEqual(jump.star(home, "chats", "e3de1242-7bc8-40a5-938f-aadb5f5aa9ee"), (True, ""))
+            self.assertEqual(jump.star(home, "plans", "calm-red-owl", "lab"), (True, ""))
+            self.assertFalse(jump.star(home, "plans", "../etc/passwd")[0])
+        stars = cs.load_stars(cs.cache_dir(home))
+        self.assertEqual(stars, {"chats": [{"id": "e3de1242-7bc8-40a5-938f-aadb5f5aa9ee", "host": ""}],
+                                 "plans": [{"id": "calm-red-owl", "host": "lab"}]})
+        # the host's status run gets them from here
+        import remote
+        with mock.patch.object(remote.Path, "home", return_value=home), \
+                mock.patch.object(remote, "ssh", side_effect=OSError("stop here")) as ssh:
+            remote.status("lab")
+        self.assertIn("--starred-plans calm-red-owl", ssh.call_args[0][1])
+        self.assertNotIn("--starred-chats", ssh.call_args[0][1])
+        jump.star(home, "plans", "calm-red-owl", "lab", on=False)
+        self.assertEqual(cs.load_stars(cs.cache_dir(home))["plans"], [])
+
     def test_slugs_are_read_from_what_was_appended(self):
         path = self.home / ".claude-work/projects/-p/chat7.jsonl"
         write(path, lines(prompt("plan it", self.now - 60, slug="calm-red-owl")))

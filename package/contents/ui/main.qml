@@ -46,7 +46,7 @@ PlasmoidItem {
                                          profileDir: "", groupId: "", account: "", shared: false, match: "", openCommand: "" })
     readonly property var emptyPlan: ({ key: "", slug: "", title: "", path: "", profileDir: "", profile: "", updatedAt: 0,
                                         shared: false, chatId: null, chatProfileDir: null, cwd: "", cwdShort: "", edited: false,
-                                        openCommand: null })
+                                        openCommand: null, starred: false })
     readonly property var emptyTask: ({ subject: "", status: "pending" })
     readonly property var emptyDay: ({ day: "", total: 0, output: 0, messages: 0, chats: 0, prompts: 0 })
     readonly property var emptyProject: ({ name: "", path: "", total: 0, output: 0, prompts: 0 })
@@ -2490,6 +2490,56 @@ PlasmoidItem {
 
     function togglePlans(groupKey, wasOpen) {
         expandedPlans = Object.assign({}, expandedPlans, { [groupKey]: !wasOpen })
+    }
+
+    // ---------------------------------------------------------------- starred chats and plans
+    // Chats and plans you star stay at hand: each account lists its starred
+    // ones under Recent chats and under Plans, however old they are (jump.py
+    // --star, kept in the widget's cache; an SSH host's too, kept here).
+
+    property var expandedStarred: ({})   // groupKey + "|chats" or "|plans" -> unfolded
+
+    function toggleStarred(key, wasOpen) {
+        expandedStarred = Object.assign({}, expandedStarred, { [key]: !wasOpen })
+    }
+
+    property var starRuns: ({})   // command -> the host whose chat or plan it stars ("": here)
+
+    // kind: "chats" (id: the chat's) or "plans" (id: the plan's slug)
+    function setStar(kind, id, host, on) {
+        if (!id)
+            return
+        const cmd = "python3 -I " + shellQuote(codeDir + "jump.py") + " "
+                    + (kind === "plans" ? (on ? "--star-plan " : "--unstar-plan ") : (on ? "--star " : "--unstar "))
+                    + shellQuote(id) + (host ? " --host " + shellQuote(host) : "") + configDirArgs + " # " + Date.now()
+        starRuns[cmd] = host || ""
+        starrer.connectSource(cmd)
+    }
+
+    function starHint(kind, starred) {
+        return starred ? i18n("Click to unstar it.")
+                       : kind === "plans" ? i18n("A starred plan stays listed under Plans → Starred, however old it is.")
+                                          : i18n("A starred chat stays listed under Recent chats → Starred, however old it is.")
+    }
+
+    P5Support.DataSource {
+        id: starrer
+        engine: "executable"
+        connectedSources: []
+        onNewData: (source, data) => {
+            disconnectSource(source)
+            const host = root.starRuns[source] || ""
+            delete root.starRuns[source]
+            const result = root.helperResult(data)
+            if (!result.ok) {
+                root.actionError = i18n("Couldn't star it: %1", result.message)
+                actionErrorTimer.restart()
+            }
+            if (host)
+                root.pollHost(host)
+            else
+                root.refresh()
+        }
     }
 
     property var expandedMemories: ({})   // accounts showing their memories

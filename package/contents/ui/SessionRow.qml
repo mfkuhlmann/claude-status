@@ -300,6 +300,25 @@ RowLayout {
                 }
             }
             PlasmaComponents3.ToolButton {
+                // star it: once it isn't listed here any more, it stays under Recent chats → Starred
+                visible: !!(row.session.chatId || row.session.sessionId)
+                opacity: row.session.starred || rowHover.hovered ? 1 : 0
+                icon.name: row.session.starred ? "starred-symbolic" : "non-starred-symbolic"
+                display: PlasmaComponents3.AbstractButton.IconOnly
+                text: row.session.starred ? i18n("Unstar") : i18n("Star")
+                Layout.preferredHeight: nameLabel.implicitHeight
+                Layout.preferredWidth: Layout.preferredHeight
+                onClicked: root.setStar("chats", row.session.chatId || row.session.sessionId, row.remoteHost, !row.session.starred)
+
+                PlasmaCore.ToolTipArea {
+                    textFormat: Text.PlainText
+                    anchors.fill: parent
+                    mainText: row.session.starred ? i18n("Starred") : i18n("Star this chat")
+                    subText: row.session.starred ? i18n("Click to unstar it.")
+                                                 : i18n("Once it isn't listed here any more, a starred chat stays under Recent chats → Starred, however old it is.")
+                }
+            }
+            PlasmaComponents3.ToolButton {
                 // keep going until it's done: on by itself after each usage limit
                 visible: row.kept === null && root.canKeepGoing(row.session, row.remoteHost)
                 opacity: rowHover.hovered ? 1 : 0

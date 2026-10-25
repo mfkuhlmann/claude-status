@@ -201,7 +201,7 @@ The same dashboard as a GNOME Shell extension: Talpa in the top bar, the popup w
 
 **What's different from Plasma:**
 
-- Not on GNOME yet: chats a usage limit stopped (and their **Continue on …** and **Go on at …**), Claude's recaps and permission modes, starting a chat with a task or in the background, queued tasks, finding a chat, plans, memories and **⚠ same files**. Nor are the share button on an SSH host's chats, **Log in…** for an SSH host that wants a password, and the *Phone* setting.
+- Not on GNOME yet: chats a usage limit stopped (and their **Continue on …** and **Go on at …**), Claude's recaps and permission modes, starting a chat with a task or in the background, queued tasks, finding a chat, starred chats, plans, memories and **⚠ same files**. Nor are the share button on an SSH host's chats, **Log in…** for an SSH host that wants a password, and the *Phone* setting.
 - Jumping to a session brings its window to the front. Konsole and tmux also switch to the right tab or pane; in Ptyxis and GNOME Terminal the window comes up, but not the tab. New chats open in your default terminal (`xdg-terminal-exec`, else Ptyxis, GNOME Terminal or Console).
 - You can't pick the pets up (they do everything else, with the same Talpa as the widget).
 - The menu at the bottom of the popup replaces the right-click menu; a middle click on the icon refreshes.
@@ -238,6 +238,7 @@ The same dashboard as a GNOME Shell extension: Talpa in the top bar, the popup w
 | *Memories* | Unfolds the account's `CLAUDE.md` and what Claude remembers: click one to read it, ✎ to change it. |
 | **Continue on …** under a session | A usage limit stopped it: continues it on that account, which has room left. |
 | **Go on at …** under a session | A usage limit stopped it: it goes on by itself in the background once the limit resets (click again to cancel). In *Recent chats*, its **limit** tag does the same. |
+| **☆** next to a session, recent chat or plan | Stars it: the account lists it under *Recent chats → ★ Starred* or *Plans → ★ Starred*, however old it is. **★** unstars it. |
 | **Keep going** under a session | The same, and again after every later limit, until it's done (in *Recent chats*: **↻**). Click **↻ keeps going** to stop that. |
 | A queued task under an account | Starts it now, or cancels it. |
 | **⚠ same files** next to a session | Goes to the other chat that changes the same files. |
