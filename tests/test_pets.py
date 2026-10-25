@@ -150,6 +150,17 @@ console.log(JSON.stringify({ scoot: length('scoot'), dig: length('dig'),
         self.assertIn("digTo(homeX, true)", pet)
         self.assertIn('react(quick ? "scoot" : "dig")', pet)
 
+    def test_the_hero_walks_anywhere_on_its_stage_over_the_headline(self):
+        # The user wanted the big Talpa free to go left too, not kept to the
+        # right half clear of the headline: it walks in front of the words
+        pet = (ROOT / "ui/Pet.qml").read_text()
+        strip = (ROOT / "ui/PetStrip.qml").read_text()
+        gnome = (ROOT.parent.parent / "gnome/extension/ui/pets.js").read_text()
+        self.assertIn("readonly property real minX: reach\n", pet)
+        self.assertNotIn("strip.width * 0.5", pet)
+        self.assertNotIn("stage.width * 0.5", gnome)
+        self.assertIn("z: pets.parent.hero ? 2 : 0", strip)
+
     def test_the_pets_stand_in_the_order_of_the_list(self):
         # The user got confused when the pets stood in the order their chats
         # came, not in the list's

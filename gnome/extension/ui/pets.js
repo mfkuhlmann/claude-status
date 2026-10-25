@@ -293,10 +293,9 @@ class Pet {
 
     clampX(x) {
         const s = this.stage.size, reach = s.box * 27 / 64 + 4;
-        // the burrow stays on the stage; the hero keeps to the right half, clear of the headline
-        const min = this.lone ? Math.max(reach, this.stage.width * 0.5) : reach;
-        const max = Math.max(min, this.stage.width - reach);
-        return Math.max(min, Math.min(max, x));
+        // the burrow stays on the stage; the hero walks anywhere on it, over the headline too
+        const max = Math.max(reach, this.stage.width - reach);
+        return Math.max(reach, Math.min(max, x));
     }
 
     // Digs over to x (it dives in, tunnels across, pops up there); quick: its

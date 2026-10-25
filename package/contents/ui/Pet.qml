@@ -51,10 +51,10 @@ Item {
     readonly property real bodyWidth: strip.bodyWidth
     readonly property real bodyHeight: strip.bodyHeight
     readonly property real ground: lone ? strip.loneGround : strip.chatGround
-    // Where it can be: its burrow (wider than its body) stays on the stage, and
-    // the lone Talpa keeps to the right half, clear of the headline
+    // Where it can be: anywhere on the stage, its burrow (wider than its body)
+    // staying on it; the lone Talpa walks over the headline
     readonly property real reach: box * 27 / 64 + Kirigami.Units.smallSpacing
-    readonly property real minX: lone ? Math.max(reach, strip.width * 0.5) : reach
+    readonly property real minX: reach
     readonly property real maxX: Math.max(minX, strip.width - reach)
     readonly property bool live: strip.live
     readonly property bool playing: strip.playing   // not under a window: it moves

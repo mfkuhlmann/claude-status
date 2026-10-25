@@ -425,6 +425,7 @@ Item {
             chat: pets.parent.chatByKey[model.petKey] ? pets.parent.chatByKey[model.petKey].session : null
             homeX: pets.parent.slotX(model.petKey)
             isMain: pets.parent.hero
+            z: pets.parent.hero ? 2 : 0   // the hero walks in front of the headline
             onGone: pets.parent.removePet(model.petKey)
         }
     }
