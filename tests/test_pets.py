@@ -31,7 +31,8 @@ def run_node(script):
     if not shutil.which("node"):
         raise unittest.SkipTest("node isn't installed")
     code = (f"import {{ Talpa }} from {json.dumps(str(TALPA / 'talpa.mjs'))};\n"
-            f"import {{ ACTIONS, MOODS }} from {json.dumps(str(TALPA / 'actions.mjs'))};\n" + script)
+            f"import {{ ACTIONS, MOODS }} from {json.dumps(str(TALPA / 'actions.mjs'))};\n"
+            f"import {{ Pictures }} from {json.dumps(str(TALPA / 'pictures.mjs'))};\n" + script)
     out = subprocess.run(["node", "--input-type=module", "-e", code], capture_output=True, text=True, timeout=120)
     if out.returncode:
         raise AssertionError(out.stderr)
@@ -269,6 +270,118 @@ console.log(JSON.stringify(out));""")
         self.assertLess(result["quiet"], 25)                   # 10 s asleep: a few pictures, not 250
         pet = (ROOT / "ui/Pet.qml").read_text()
         self.assertIn("stills: !pet.lone && !pet.landing", pet)
+
+    def test_a_new_pose_mixes_in_and_never_shows_the_background(self):
+        # Pictures faded half see-through one over the other let a quarter of
+        # the background through: chat pets went darker, then lighter again,
+        # at every new pose (2026-10-25). A pose now fades in mixed with the
+        # one in front, added up, and both pictures are there all along.
+        result = run_node(NULL_CANVAS + """
+let seed = 7;
+Math.random = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+const out = { fades: 0, bad: [] };
+for (const mood of ['working', 'agents', 'needs', 'idle', 'done', 'failed', 'limit']) {
+    const t = new Talpa({}); let now = 1e12; t.tick(now); t.setMood(mood);
+    const p = new Pictures(t, 5);
+    let fading = false;
+    for (let i = 0; i < 3000; i++) {
+        now += 40; t.tick(now); p.tick(now);
+        for (const s of p.sheets) if (s.paint) { s.paint = false; p.paint(s, ctx); }
+        if (p.coming) {
+            if (!fading) out.fades++;
+            if (!p.coming.ready || !p.front.ready || p.coming === p.front || !(p.mix >= 0 && p.mix < 1))
+                out.bad.push([mood, i, p.mix]);
+        }
+        fading = p.coming !== null;
+    }
+}
+console.log(JSON.stringify(out));""")
+        self.assertEqual(result["bad"], [])
+        self.assertGreater(result["fades"], 50)
+        # the hosts add the two up (not one over the other)
+        view = (ROOT / "ui/TalpaView.qml").read_text()
+        self.assertIn('ctx.globalCompositeOperation = "lighter"', view)
+        gnome = (ROOT.parent.parent / "gnome/extension/ui/pets.js").read_text()
+        self.assertIn("cr.setOperator(Cairo.Operator.ADD)", gnome)
+
+    def test_qt_adds_the_next_pose_up_at_full_strength_pixel_for_pixel(self):
+        # Qt's "lighter" with globalAlpha under 1 adds, caps at full, then
+        # mixes with what was there: the background showed through again. So
+        # the next pose is made mix × itself first, then added at full
+        # strength. And a sheet drawn into another at the view's size (108.8
+        # px wide, the sheet 109) shifted the edges by a sliver.
+        view = (ROOT / "ui/TalpaView.qml").read_text()
+        blend = view[view.index("id: blend"):]
+        self.assertIn("next.globalAlpha = p.mix", blend)
+        self.assertIn('ctx.globalAlpha = 1\n            ctx.globalCompositeOperation = "lighter"\n'
+                      '            ctx.drawImage(fader, 0, 0)\n', blend)
+        self.assertEqual(re.findall(r"drawImage\((\w+), 0, 0, ", blend), [])
+
+    def test_a_quick_move_goes_round_its_pictures_without_drawing_them_again(self):
+        # Typing showed two pictures a beat apart (choppy); now four, each
+        # drawn once and then shown again as the hands go round
+        result = run_node(NULL_CANVAS + """
+const t = new Talpa({ brain: false }); let now = 1e12; t.tick(now);
+t.pose({ arms: 'type', prop: 'laptop', depth: 'high', look: [0, 1.6], mouth: 'none' });
+const p = new Pictures(t, 5);
+const paints = [], shown = new Set();
+for (let i = 0; i < 100; i++) {
+    now += 40; t.tick(now); p.tick(now);
+    for (const s of p.sheets) if (s.paint) { s.paint = false; p.paint(s, ctx); paints.push(i); }
+    if (p.front.ready) shown.add(p.front.key);
+}
+console.log(JSON.stringify({ shown: shown.size, late: paints.filter(i => i > 30).length, all: paints.length }));""")
+        self.assertGreaterEqual(result["shown"], 3)    # the hands down, halfway, up
+        self.assertLessEqual(result["all"], 5)
+        self.assertEqual(result["late"], 0)             # after the first round: no drawing
+
+    def test_a_big_move_is_drawn_live_and_whatever_flies_lands_first(self):
+        # A jump, popping out of the burrow: no picture shows those, so
+        # they're drawn live (12 a second), and the confetti lands before
+        # there are pictures again
+        result = run_node(NULL_CANVAS + """
+const t = new Talpa({}); let now = 1e12; t.tick(now); t.setMood('working');
+for (let i = 0; i < 10; i++) { now += 40; t.tick(now); }
+const p = new Pictures(t, 5);
+t.react('finished');
+let live = 0, paints = 0, confettiAtEnd = -1;
+for (let i = 0; i < 120; i++) {
+    now += 40; t.tick(now); p.tick(now);
+    for (const s of p.sheets) if (s.paint) { s.paint = false; p.paint(s, ctx); if (s.key === '') paints++; }
+    if (p.front.key === '') {
+        live++;
+        confettiAtEnd = t.fx.filter(f => f.kind === 'confetti' && now - f.born < f.o.dur * 1000).length;
+    }
+}
+console.log(JSON.stringify({ live: live, paints: paints, confetti: confettiAtEnd, still: p.front.key !== '' }));""")
+        self.assertGreater(result["live"], 20)                            # the jump (800 ms) and the confetti
+        self.assertLessEqual(result["paints"], result["live"] / 2 + 2)   # at most every 80 ms
+        self.assertLessEqual(result["confetti"], 1)
+        self.assertTrue(result["still"])
+
+    def test_pictures_cost_about_what_they_did(self):
+        # Pictures are there to keep Plasma Shell quiet (four desktop
+        # dashboards): drawings per second per pet, by mood (before smooth
+        # moves and mixing in: 1.0 to 2.6)
+        result = run_node(NULL_CANVAS + """
+let seed = 7;
+Math.random = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+const out = {};
+for (const mood of ['working', 'agents', 'needs', 'idle', 'done', 'failed', 'limit']) {
+    seed = 7;
+    const t = new Talpa({}); let now = 1e12; t.tick(now); t.setMood(mood);
+    const p = new Pictures(t, 5);
+    let paints = 0;
+    for (let i = 0; i < 4500; i++) {
+        now += 40; t.tick(now); p.tick(now);
+        for (const s of p.sheets) if (s.paint) { s.paint = false; p.paint(s, ctx); paints++; }
+    }
+    out[mood] = paints / 180;
+}
+console.log(JSON.stringify(out));""")
+        limits = {"working": 2, "agents": 2.5, "needs": 4, "idle": 4, "done": 1.6, "failed": 3, "limit": 1.6}
+        for mood, most in limits.items():
+            self.assertLess(result[mood], most, mood)
 
     def test_nothing_shows_under_the_burrows_lip(self):
         # Talpa and what it holds are cut along the same edge the lip is drawn
