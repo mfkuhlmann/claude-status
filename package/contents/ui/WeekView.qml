@@ -91,6 +91,27 @@ PlasmaComponents3.ScrollView {
         return g.value.indexOf("Bash") === 0 ? "utilities-terminal" : "checkmark"
     }
 
+    // A section's title: big and bold, under a line that sets the section
+    // off from the one before
+    component SectionTitle: ColumnLayout {
+        property alias text: title.text
+        Layout.fillWidth: true
+        Layout.topMargin: Math.round(view.gu * 0.7)
+        spacing: Math.round(view.gu * 0.35)
+
+        Kirigami.Separator {
+            Layout.fillWidth: true
+        }
+        Kirigami.Heading {
+            id: title
+            Layout.fillWidth: true
+            textFormat: Text.PlainText
+            level: 2
+            font.weight: Font.Bold
+            wrapMode: Text.Wrap
+        }
+    }
+
     // 3h 05m, 45m: a week of work reads better in hours than in days
     function hours(ms) {
         const m = Math.round(Math.max(0, ms) / 60000)
@@ -508,9 +529,7 @@ PlasmaComponents3.ScrollView {
             visible: view.hasData
             spacing: Math.round(view.gu * 0.2)
 
-            Kirigami.Heading {
-                textFormat: Text.PlainText
-                level: 4
+            SectionTitle {
                 text: i18n("Day by day")
             }
             Flow {
@@ -788,9 +807,7 @@ PlasmaComponents3.ScrollView {
             visible: view.hasData && view.plan.length > 0
             spacing: Math.round(view.gu * 0.2)
 
-            Kirigami.Heading {
-                textFormat: Text.PlainText
-                level: 4
+            SectionTitle {
                 text: i18n("Your plan's limits now")
             }
             Repeater {
@@ -895,9 +912,7 @@ PlasmaComponents3.ScrollView {
             visible: view.hasData && view.projects.length > 0
             spacing: Math.round(view.gu * 0.2)
 
-            Kirigami.Heading {
-                textFormat: Text.PlainText
-                level: 4
+            SectionTitle {
                 text: i18n("Where Claude worked")
             }
             Repeater {
@@ -999,9 +1014,7 @@ PlasmaComponents3.ScrollView {
             visible: view.hasData && view.chats.length > 0
             spacing: 0
 
-            Kirigami.Heading {
-                textFormat: Text.PlainText
-                level: 4
+            SectionTitle {
                 text: i18n("Chats it worked on most")
                 Layout.bottomMargin: Math.round(view.gu * 0.2)
             }
@@ -1021,9 +1034,7 @@ PlasmaComponents3.ScrollView {
             visible: view.hasData && !!view.work && view.work.toolCalls > 0
             spacing: Math.round(view.gu * 0.2)
 
-            Kirigami.Heading {
-                textFormat: Text.PlainText
-                level: 4
+            SectionTitle {
                 text: i18n("What Claude did")
             }
             PlasmaComponents3.Label {
@@ -1049,9 +1060,7 @@ PlasmaComponents3.ScrollView {
             visible: view.hasData && view.models.length > 0
             spacing: Math.round(view.gu * 0.2)
 
-            Kirigami.Heading {
-                textFormat: Text.PlainText
-                level: 4
+            SectionTitle {
                 text: i18n("At API prices")
             }
             Repeater {
@@ -1115,9 +1124,7 @@ PlasmaComponents3.ScrollView {
             visible: view.hasData && !!view.spend && (view.spend.turns.length > 0 || view.spend.cold.count > 0)
             spacing: 0
 
-            Kirigami.Heading {
-                textFormat: Text.PlainText
-                level: 4
+            SectionTitle {
                 text: i18n("Turns that cost the most")
                 visible: !!view.spend && view.spend.turns.length > 0
                 Layout.bottomMargin: Math.round(view.gu * 0.2)
@@ -1161,6 +1168,97 @@ PlasmaComponents3.ScrollView {
             }
         }
 
+        // What would use less of your plan (Claude Code's /usage rules)
+        ColumnLayout {
+            Layout.fillWidth: true
+            visible: view.hasData
+            spacing: Kirigami.Units.smallSpacing
+
+            SectionTitle {
+                text: i18n("What could use less of your plan")
+            }
+            PlasmaComponents3.Label {
+                textFormat: Text.PlainText
+                Layout.fillWidth: true
+                visible: view.tips.length === 0
+                wrapMode: Text.Wrap
+                opacity: 0.7
+                text: i18n("Nothing stands out: no habit takes a tenth of this week's usage.")
+            }
+            Repeater {
+                model: view.tips.length
+                delegate: RowLayout {
+                    id: tipRow
+                    required property int index
+                    readonly property var tip: view.tips[index] || view.emptyTip
+                    Layout.fillWidth: true
+                    spacing: Kirigami.Units.smallSpacing
+
+                    Kirigami.Icon {
+                        Layout.alignment: Qt.AlignTop
+                        Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                        Layout.preferredHeight: Kirigami.Units.iconSizes.small
+                        source: view.tipIcon(tipRow.tip.key)
+                        opacity: 0.8
+                    }
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 0
+
+                        PlasmaComponents3.Label {
+                            textFormat: Text.PlainText
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            text: tipRow.tip.title
+                        }
+                        PlasmaComponents3.Label {
+                            textFormat: Text.PlainText
+                            Layout.fillWidth: true
+                            visible: text !== ""
+                            wrapMode: Text.Wrap
+                            text: tipRow.tip.detail
+                            font: Kirigami.Theme.smallFont
+                            opacity: 0.7
+                        }
+                    }
+                    PlasmaComponents3.Label {
+                        textFormat: Text.PlainText
+                        Layout.alignment: Qt.AlignTop
+                        visible: tipRow.tip.pct !== null && tipRow.tip.pct !== undefined
+                        text: (tipRow.tip.pct || 0) + "%"
+                        font: Kirigami.Theme.smallFont
+                        opacity: 0.8
+
+                        PlasmaCore.ToolTipArea {
+                            textFormat: Text.PlainText
+                            anchors.fill: parent
+                            mainText: i18n("%1% of this week's usage", tipRow.tip.pct || 0)
+                            subText: i18n("Of the usage of these 7 days, as Claude Code's /usage weighs it toward your plan's limits. A request can count for several of these.")
+                        }
+                    }
+                    PlasmaComponents3.ToolButton {
+                        Layout.alignment: Qt.AlignTop
+                        visible: tipRow.tip.command !== ""
+                        text: view.copied === tipRow.tip.command && tipRow.tip.command ? i18n("Copied") : tipRow.tip.command
+                        font.family: "monospace"
+                        font.pointSize: Kirigami.Theme.smallFont.pointSize
+                        onClicked: {
+                            clipboard.put(tipRow.tip.command)
+                            view.copied = tipRow.tip.command
+                            copiedTimer.restart()
+                        }
+
+                        PlasmaCore.ToolTipArea {
+                            textFormat: Text.PlainText
+                            anchors.fill: parent
+                            mainText: i18n("Copy %1", tipRow.tip.command)
+                            subText: i18n("Type it in a chat of yours.")
+                        }
+                    }
+                }
+            }
+        }
+
         // The permission prompts you answered, and the rules that would have
         // let the most of them through (written only when you allow one)
         ColumnLayout {
@@ -1168,9 +1266,7 @@ PlasmaComponents3.ScrollView {
             visible: view.hasData && !!view.prompts && view.prompts.answered > 0
             spacing: Math.round(view.gu * 0.2)
 
-            Kirigami.Heading {
-                textFormat: Text.PlainText
-                level: 4
+            SectionTitle {
                 text: i18n("Permission prompts")
             }
             PlasmaComponents3.Label {
@@ -1340,9 +1436,7 @@ PlasmaComponents3.ScrollView {
             visible: view.hasData && !!view.recap && !!view.recap.granted
             spacing: Math.round(view.gu * 0.2)
 
-            Kirigami.Heading {
-                textFormat: Text.PlainText
-                level: 4
+            SectionTitle {
                 text: i18n("Permissions you gave")
             }
             PlasmaComponents3.Label {
@@ -1470,99 +1564,6 @@ PlasmaComponents3.ScrollView {
                 wrapMode: Text.Wrap
                 font: Kirigami.Theme.smallFont
                 text: root.weekRuleMessage
-            }
-        }
-
-        // What would use less of your plan (Claude Code's /usage rules)
-        ColumnLayout {
-            Layout.fillWidth: true
-            visible: view.hasData
-            spacing: Kirigami.Units.smallSpacing
-
-            Kirigami.Heading {
-                textFormat: Text.PlainText
-                level: 4
-                text: i18n("What could use less of your plan")
-            }
-            PlasmaComponents3.Label {
-                textFormat: Text.PlainText
-                Layout.fillWidth: true
-                visible: view.tips.length === 0
-                wrapMode: Text.Wrap
-                opacity: 0.7
-                text: i18n("Nothing stands out: no habit takes a tenth of this week's usage.")
-            }
-            Repeater {
-                model: view.tips.length
-                delegate: RowLayout {
-                    id: tipRow
-                    required property int index
-                    readonly property var tip: view.tips[index] || view.emptyTip
-                    Layout.fillWidth: true
-                    spacing: Kirigami.Units.smallSpacing
-
-                    Kirigami.Icon {
-                        Layout.alignment: Qt.AlignTop
-                        Layout.preferredWidth: Kirigami.Units.iconSizes.small
-                        Layout.preferredHeight: Kirigami.Units.iconSizes.small
-                        source: view.tipIcon(tipRow.tip.key)
-                        opacity: 0.8
-                    }
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 0
-
-                        PlasmaComponents3.Label {
-                            textFormat: Text.PlainText
-                            Layout.fillWidth: true
-                            wrapMode: Text.Wrap
-                            text: tipRow.tip.title
-                        }
-                        PlasmaComponents3.Label {
-                            textFormat: Text.PlainText
-                            Layout.fillWidth: true
-                            visible: text !== ""
-                            wrapMode: Text.Wrap
-                            text: tipRow.tip.detail
-                            font: Kirigami.Theme.smallFont
-                            opacity: 0.7
-                        }
-                    }
-                    PlasmaComponents3.Label {
-                        textFormat: Text.PlainText
-                        Layout.alignment: Qt.AlignTop
-                        visible: tipRow.tip.pct !== null && tipRow.tip.pct !== undefined
-                        text: (tipRow.tip.pct || 0) + "%"
-                        font: Kirigami.Theme.smallFont
-                        opacity: 0.8
-
-                        PlasmaCore.ToolTipArea {
-                            textFormat: Text.PlainText
-                            anchors.fill: parent
-                            mainText: i18n("%1% of this week's usage", tipRow.tip.pct || 0)
-                            subText: i18n("Of the usage of these 7 days, as Claude Code's /usage weighs it toward your plan's limits. A request can count for several of these.")
-                        }
-                    }
-                    PlasmaComponents3.ToolButton {
-                        Layout.alignment: Qt.AlignTop
-                        visible: tipRow.tip.command !== ""
-                        text: view.copied === tipRow.tip.command && tipRow.tip.command ? i18n("Copied") : tipRow.tip.command
-                        font.family: "monospace"
-                        font.pointSize: Kirigami.Theme.smallFont.pointSize
-                        onClicked: {
-                            clipboard.put(tipRow.tip.command)
-                            view.copied = tipRow.tip.command
-                            copiedTimer.restart()
-                        }
-
-                        PlasmaCore.ToolTipArea {
-                            textFormat: Text.PlainText
-                            anchors.fill: parent
-                            mainText: i18n("Copy %1", tipRow.tip.command)
-                            subText: i18n("Type it in a chat of yours.")
-                        }
-                    }
-                }
             }
         }
 

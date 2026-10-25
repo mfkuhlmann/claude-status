@@ -1,10 +1,10 @@
 // The popup's Recap tab: your last 7 days with Claude (week.py, which the
 // indicator runs only while this tab is open). How long you were at it and
 // how long Claude worked, a day per row on a timeline (drawn with Cairo),
-// what the same work would cost at API prices, where it went, the
-// permission prompts you answered, and what would use less of your plan (the
-// rules of Claude Code's own /usage). No tokens used: it's all read from the
-// chats' transcripts.
+// what the same work would cost at API prices, where it went, what would use
+// less of your plan (the rules of Claude Code's own /usage), and at the end
+// the permission prompts you answered and the permissions you gave. No tokens
+// used: it's all read from the chats' transcripts.
 
 import Clutter from 'gi://Clutter';
 import St from 'gi://St';
@@ -23,8 +23,13 @@ const LIMIT = [224 / 255, 27 / 255, 36 / 255];
 const GRID = [0.5, 0.5, 0.5, 0.25];
 const MARK = [0.5, 0.5, 0.5, 0.9];
 
+// A section's title: big and bold, under a line that sets the section off
+// from the one before
 function heading(text) {
-    return label(text, 'claude-week-heading');
+    const title = column('claude-week-title', {x_expand: true});
+    title.add_child(new St.Widget({style_class: 'claude-week-rule', x_expand: true}));
+    title.add_child(label(text, 'claude-week-heading'));
+    return title;
 }
 
 export function buildWeekView(ctx) {
@@ -119,9 +124,9 @@ export function buildWeekView(ctx) {
         models.add_child(paragraph(cache, 'claude-small claude-dim'));
     view.add_child(models);
     view.add_child(buildSpend(ctx, recap, cur));
+    view.add_child(buildTips(ctx, recap));
     view.add_child(buildPrompts(ctx, recap));
     view.add_child(buildGranted(ctx, recap));
-    view.add_child(buildTips(ctx, recap));
     view.add_child(paragraph(L.weekFootText(recap), 'claude-small claude-dim claude-week-foot'));
     return view;
 }

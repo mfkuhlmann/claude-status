@@ -209,7 +209,9 @@
 .claude-week-tile { spacing: 0; }
 .claude-week-value { font-size: 1.5em; font-weight: bold; }
 .claude-week-section { spacing: 3px; }
-.claude-week-heading { font-weight: bold; }
+.claude-week-title { spacing: 6px; margin-top: 10px; }
+.claude-week-rule { height: 1px; background-color: rgba(127, 127, 127, 0.35); }
+.claude-week-heading { font-weight: bold; font-size: 1.2em; }
 .claude-week-head { spacing: 4px; }
 .claude-week-swatch { width: 12px; height: 6px; border-radius: 1px; margin-left: 4px; }
 .claude-week-swatch-you { background-color: rgba(154, 153, 150, 0.85); }
