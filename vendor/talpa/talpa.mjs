@@ -204,14 +204,24 @@ function plumeAngle(name, ms, it) {
 
 // A host may show a pet as pictures instead of drawing it every frame (each
 // drawing costs; the widget does it for the chats' pets, the big one moves
-// all the time): stillKey() says what a picture of it shows now, drawStill()
-// draws that picture, settled. A quick move shows as two pictures in turn, a
-// beat apart: these are its two ends (ms into the move).
-const BEAT_MS = 280;
+// all the time; see pictures.mjs): stillKey() says what a picture of it shows
+// now, drawStill() draws that picture, settled. A quick move goes round four
+// pictures, a beat each: one end of its swing, halfway, the other end,
+// halfway back (the beats below: ms from one end to the other). A beat is a
+// quarter of the quickest move's round, in whole steps of BEAT_MS, so all
+// pets change pictures on the same ticks (each costs a window). A big move
+// has no picture: one that happens once (a jump, a spin), a long way in or out
+// of the burrow, its hole opening or closing; stillKey() is '' until it's over
+// and what flew off meanwhile has landed, and the host draws it live.
+const BEAT_MS = 140;
 const ARM_BEATS = { wave: 380, waveboth: 340, sign: 500, type: 130, juggle: 375, dance: 500, flail: 180, scratch: 160 };
 const BODY_BEATS = { bounce: 210, bob: 230, wiggle: 180, shake: 90, sway: 500, shiver: 70, nod: 1200, float: 1400 };
 const PLUME_BEATS = { bob: 550, wild: 160 };
-const PROP_BEATS = { phone: 39, juggle: 250 };   // (time for its prop's own motion)
+const PROP_BEATS = { phone: 78, juggle: 250 };   // (its prop's own motion)
+const TUNNEL_BEAT = 260;
+const ONE_WAY = { waveboth: 1, juggle: 1, nod: 1, phone: 1 };   // (halfway back doesn't look like halfway there)
+const ONCE = { hop: 550, jump: 800, spin: 1100, jolt: 400, tumble: 1000, land: 400 };   // (ms; a hop or a jump × it)
+const BIG_DEPTH = 8;   // (from low to high is no big move, from half to peeking out is)
 
 // ---------------------------------------------------------------- the creature
 
@@ -237,6 +247,10 @@ export class Talpa {
         this.held = false;
         this.heldAt = 0;
         this.frameMs = 40;        // see tick()
+        this.stepAt = 0;          // when the pose shown began
+        this.big = false;         // a big move is under way (see stills), since bigAt
+        this.bigAt = 0;
+        this.landsAt = 0;         // what flew off during it has landed by then
         this.away = false;        // it left (leave): it stays down there until it arrives again
         this.fx = [];
         this.v = { depth: DEPTH.half, depthFrom: DEPTH.half, depthTo: DEPTH.half, depthAt: -1e9, hole: 1, holeFrom: 1, holeTo: 1,
@@ -377,6 +391,7 @@ export class Talpa {
     }
 
     apply(step, snap) {
+        this.stepAt = this.now;
         const prev = this.st, st = {};
         for (const k of KEYS) {
             const v = step[k] !== undefined ? step[k] : this.base[k];
@@ -485,6 +500,15 @@ export class Talpa {
         slow = slow || (body !== null && RESTING_BODY[st.body] !== 1) || this.fx.some(p => p.kind !== 'z') || st.tunnel === '1' || st.orbit === '1'
             || st.think === '1' || SLOW_PROPS[st.prop] === 1;
         this.frameMs = quick ? 40 : slow ? 80 : 200;
+        // A big move (no picture shows it, see stills), and when what it threw meanwhile lands
+        const once = ONCE[st.body];
+        const big = (once !== undefined && now - (this.since.body || 0) < once * (st.body === 'hop' || st.body === 'jump' ? Number(st.it) : 1))
+            || (Math.abs(v.depthTo - v.depthFrom) >= BIG_DEPTH && dp < 1) || (v.holeTo !== v.holeFrom && hp < 1);
+        if (big && !this.big)
+            this.bigAt = this.stepAt;   // (the step that started it: maybe a reaction since the last tick)
+        this.big = big;
+        if (big)
+            this.landsAt = this.fx.reduce((t, p) => p.born >= this.bigAt ? Math.max(t, p.born + (p.o.dur || 1.6) * 1000) : t, now);
     }
 
     think() {
@@ -518,20 +542,27 @@ export class Talpa {
 
     beat() {
         const st = this.st;
-        const beats = ARM_BEATS[st.arms] !== undefined || BODY_BEATS[st.body] !== undefined || PLUME_BEATS[st.plume] !== undefined
-            || PROP_BEATS[st.prop] !== undefined || st.tunnel === '1';
-        return beats ? Math.floor(this.now / BEAT_MS) % 2 : -1;
+        const beats = [ARM_BEATS[st.arms], BODY_BEATS[st.body], PLUME_BEATS[st.plume], PROP_BEATS[st.prop], st.tunnel === '1' ? TUNNEL_BEAT : undefined]
+            .filter(b => b !== undefined);
+        if (!beats.length)
+            return -1;
+        const step = BEAT_MS * Math.max(1, Math.round(Math.min.apply(null, beats) / 2 / BEAT_MS));
+        const beat = Math.floor(this.now / step) % 4;
+        return beat === 3 && !ONE_WAY[st.arms] && !ONE_WAY[st.body] && !ONE_WAY[st.prop] && st.tunnel !== '1' ? 1 : beat;
     }
 
+    // (busy with a quick move, it looks ahead: each glance would take four new pictures)
     stillLook() {
-        const look = this.st.look || this.glance;
+        const look = this.st.look || (this.beat() >= 0 ? [0, 0] : this.glance);
         return [Math.round(look[0] * 2) / 2, Math.round(look[1] * 2) / 2];
     }
 
     // What a picture of it shows now, as "pose#details": the host fades over
     // to a new pose, and just changes the picture for new details (a blink, a
-    // glance, a beat)
+    // glance, a beat); '' during a big move
     stillKey() {
+        if (this.big || this.now < this.landsAt)
+            return '';
         const st = this.st;
         const blink = this.now < this.blinkUntil && BLINKING[st.eyes] === 1;
         return KEYS.map(k => st[k]).join(',') + ',' + st.it + ',' + (st.gum || '') + (this.facingLeft ? ',L' : ',R')
@@ -554,11 +585,12 @@ export class Talpa {
             step.gum = st.gum;
         if (this.now < this.blinkUntil && BLINKING[st.eyes] === 1)
             step.eyes = 'closed';
+        // a quick move where this beat has it (ms into it)
         const beat = Math.max(0, this.beat());
-        s.now = 1e6 + beat * (PROP_BEATS[st.prop] || (st.tunnel === '1' ? 260 : 0));
+        const at = beats => beat * beats / 2;
+        s.now = 1e6 + at(PROP_BEATS[st.prop] || (st.tunnel === '1' ? TUNNEL_BEAT : 0));
         s.pose(step);
-        // a quick move at one end or the other of its swing
-        const arms = ARM_BEATS[st.arms] !== undefined ? armMove(st.arms, beat * ARM_BEATS[st.arms]) : null;
+        const arms = ARM_BEATS[st.arms] !== undefined ? armMove(st.arms, at(ARM_BEATS[st.arms])) : null;
         if (arms) {
             s.v.armL = arms[0];
             s.v.armR = arms[1];
@@ -566,11 +598,11 @@ export class Talpa {
             s.v.armRy = arms[3];
         }
         if (st.tunnel === '1')
-            s.v.plume = plumeAngle('wild', beat * 160, 1);
+            s.v.plume = plumeAngle('wild', at(PLUME_BEATS.wild), 1);
         else if (PLUME_BEATS[st.plume] !== undefined)
-            s.v.plume = plumeAngle(st.plume, beat * PLUME_BEATS[st.plume], 1);
+            s.v.plume = plumeAngle(st.plume, at(PLUME_BEATS[st.plume]), 1);
         // (a move that happens once shows as done)
-        s.since.body = s.now - (BODY_BEATS[st.body] !== undefined ? beat * BODY_BEATS[st.body] : 1e7);
+        s.since.body = s.now - (BODY_BEATS[st.body] !== undefined ? at(BODY_BEATS[st.body]) : 1e7);
         s.draw(ctx);
     }
 
