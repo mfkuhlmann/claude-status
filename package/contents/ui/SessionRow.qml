@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
+import org.kde.plasma.plasmoid
 import org.kde.plasma.components as PlasmaComponents3
 import org.kde.plasma.core as PlasmaCore
 import org.kde.kirigami as Kirigami
@@ -163,14 +164,16 @@ RowLayout {
                     textFormat: Text.PlainText
                     width: nameLabel.contentWidth
                     height: parent.height
-                    mainText: row.openHint
+                    mainText: Plasmoid.configuration.clickOpensPane
+                              ? i18n("Open this chat beside the popup: its conversation, a box to reply, and what it changed")
+                              : row.openHint
 
                     MouseArea {
                         id: nameMouse
                         anchors.fill: parent
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: row.open()
+                        onClicked: root.clickChat(row.session, row.remoteHost)
                     }
                 }
             }
@@ -297,6 +300,37 @@ RowLayout {
                     anchors.fill: parent
                     active: !!row.stopped && !row.stopped.over && row.stopped.resetsAt > root.now
                     mainText: active ? root.resetAtText(row.stopped.resetsAt) : ""
+                }
+            }
+            Tag {
+                // it changed files and is done: to review until you mark it reviewed (ChatPane.qml)
+                visible: root.reviewPending(row.session, row.remoteHost)
+                text: i18nc("a finished chat's changes, not reviewed yet", "to review")
+                active: true
+                clickable: true
+                onClicked: root.openPane(row.session, row.remoteHost, "review")
+                tooltipTitle: i18n("Not reviewed yet")
+                tooltip: i18n("It changed files and its turn is over. Click to see what it changed, against how the files were before the chat: undo it, commit only its files, or mark it reviewed.")
+            }
+            TestsBadge {
+                review: root.reviewPending(row.session, row.remoteHost) ? row.session.review : null
+            }
+            PlasmaComponents3.ToolButton {
+                // the other way to open it than a click on its name: its window, or the pane
+                opacity: rowHover.hovered ? 1 : 0
+                icon.name: Plasmoid.configuration.clickOpensPane ? "window" : "dialog-messages"
+                display: PlasmaComponents3.AbstractButton.IconOnly
+                text: Plasmoid.configuration.clickOpensPane ? i18n("Open its window") : i18n("Open in the chat pane")
+                Layout.preferredHeight: nameLabel.implicitHeight
+                Layout.preferredWidth: Layout.preferredHeight
+                onClicked: Plasmoid.configuration.clickOpensPane ? row.open() : root.openPane(row.session, row.remoteHost, "chat")
+
+                PlasmaCore.ToolTipArea {
+                    textFormat: Text.PlainText
+                    anchors.fill: parent
+                    mainText: Plasmoid.configuration.clickOpensPane ? row.openHint : i18n("Open in the chat pane")
+                    subText: Plasmoid.configuration.clickOpensPane ? ""
+                             : i18n("Beside the popup: its conversation, a box to reply, and what it changed.")
                 }
             }
             PlasmaComponents3.ToolButton {
@@ -626,6 +660,16 @@ RowLayout {
                     opacity: stepMouse.containsMouse ? 0.9 : 0.4
                 }
             }
+        }
+
+        // What it asks while it waits for a permission: Allow once, Always allow, Deny
+        PermissionAsk {
+            visible: row.session.state === "waiting" && !!row.session.permission
+            Layout.fillWidth: true
+            Layout.topMargin: Kirigami.Units.smallSpacing
+            permission: visible ? row.session.permission : null
+            diffLines: 6
+            onAnswered: (decision, note) => root.answerPermission(row.session, row.remoteHost, decision, note)
         }
 
         // Your last prompt, Claude's reply since, the chat's tasks, and what it changed

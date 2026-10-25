@@ -26,6 +26,7 @@ KCM.SimpleKCM {
     property alias cfg_notifyWaiting: notifyWaiting.checked
     property alias cfg_notifyDone: notifyDone.checked
     property alias cfg_notifyDoneMinSeconds: notifyDoneMinSeconds.value
+    property alias cfg_clickOpensPane: clickOpensPane.checked
     property alias cfg_awayDigest: awayDigest.checked
     property alias cfg_awayMinutes: awayMinutes.value
     property alias cfg_shortcutGoesToChat: shortcutGoesToChat.checked
@@ -64,6 +65,7 @@ KCM.SimpleKCM {
     property bool cfg_notifyWaitingDefault
     property bool cfg_notifyDoneDefault
     property int cfg_notifyDoneMinSecondsDefault
+    property bool cfg_clickOpensPaneDefault
     property bool cfg_awayDigestDefault
     property int cfg_awayMinutesDefault
     property bool cfg_shortcutGoesToChatDefault
@@ -162,6 +164,46 @@ KCM.SimpleKCM {
         }
     }
 
+    // The permission hook (pane.py --relay status|on|off): in Claude's own
+    // settings, so it changes at once (not with Apply)
+    property var relay: null          // {on, some, settings}
+    property string relayMessage: ""
+
+    P5Support.DataSource {
+        id: relayHelper
+        engine: "executable"
+        connectedSources: []
+        onNewData: (source, data) => {
+            disconnectSource(source)
+            let result = null
+            try {
+                result = JSON.parse(data["stdout"])
+            } catch (e) {
+                page.relayMessage = i18n("Couldn't ask about the permission hook")
+                return
+            }
+            if (result.on !== undefined) {
+                page.relay = result
+            } else if (source.indexOf("--host") < 0) {
+                page.relayMessage = result.message || ""
+                page.runRelay(["status"])
+            } else if (!result.ok) {
+                page.relayMessage = result.message || ""
+            }
+        }
+    }
+
+    function runRelay(args) {
+        const q = s => "'" + String(s).replace(/'/g, "'\\''") + "'"
+        relayHelper.connectSource("python3 -I " + q(codeDir + "pane.py") + " --relay " + args.map(q).join(" ") + " # " + Date.now())
+    }
+
+    function setRelay(on) {
+        runRelay([on ? "on" : "off"])
+        for (const host of Plasmoid.configuration.sshHosts.split(",").map(h => h.trim()).filter(h => h))
+            runRelay([on ? "on" : "off", "--host", host])
+    }
+
     function runHistory(args) {
         const q = s => "'" + String(s).replace(/'/g, "'\\''") + "'"
         historyHelper.connectSource("python3 -I " + q(codeDir + "week.py") + " " + args.map(q).join(" ") + " # " + Date.now())
@@ -175,6 +217,7 @@ KCM.SimpleKCM {
     Component.onCompleted: {
         phoneHelper.connectSource(jumpCommand(["--phone-devices"]))
         runHistory(["--history-status"])
+        runRelay(["status"])
     }
 
     function play(sound) {
@@ -226,6 +269,31 @@ KCM.SimpleKCM {
             from: 0
             to: 3600
             stepSize: 10
+        }
+
+        QQC2.CheckBox {
+            id: clickOpensPane
+            Kirigami.FormData.label: i18n("Chats:")
+            text: i18n("A click on a chat opens it beside the popup")
+            QQC2.ToolTip.visible: hovered
+            QQC2.ToolTip.text: i18n("The chat pane: its conversation as it goes, a box to reply, what it asks for, and what it changed. Off: a click goes to the chat's terminal or VS Code tab (the pane is then a button beside it).")
+        }
+
+        QQC2.CheckBox {
+            id: relayBox
+            text: i18n("Answer permission prompts from the widget")
+            checked: page.relay !== null && page.relay.on
+            enabled: page.relay !== null
+            onToggled: page.setRelay(checked)
+        }
+
+        QQC2.Label {
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 20
+            wrapMode: Text.Wrap
+            font: Kirigami.Theme.smallFont
+            opacity: 0.7
+            text: (page.relayMessage ? page.relayMessage + "\n" : "")
+                  + i18n("Adds a hook to each Claude profile's settings.json (and on the SSH hosts shown): a chat that asks for a permission shows Allow once, Always allow and Deny in its row and its notification. Claude still asks in the chat too; the first answer counts. Chats in tmux can be answered without it. Applies at once.")
         }
 
         QQC2.CheckBox {

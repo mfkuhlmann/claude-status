@@ -602,10 +602,11 @@ ColumnLayout {
                         MouseArea {
                             id: recentMouse
                             anchors.fill: parent
-                            enabled: recentLine.canOpen
+                            enabled: recentLine.canOpen || Plasmoid.configuration.clickOpensPane
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: recentLine.open()
+                            onClicked: Plasmoid.configuration.clickOpensPane
+                                       ? root.openPane(recentLine.chat, section.remoteHost, "chat") : recentLine.open()
                         }
                     }
                 }
@@ -660,6 +661,38 @@ ColumnLayout {
                             root.keepGoing(recentLine.chat, false)
                         else
                             root.queueContinue(recentLine.chat, section.remoteHost, section.group.title, true)
+                    }
+                }
+                // it changed files: to review until you mark it reviewed (ChatPane.qml)
+                Tag {
+                    visible: root.reviewPending(recentLine.chat, section.remoteHost)
+                    text: i18nc("a finished chat's changes, not reviewed yet", "to review")
+                    active: true
+                    clickable: true
+                    onClicked: root.openPane(recentLine.chat, section.remoteHost, "review")
+                    tooltipTitle: i18n("Not reviewed yet")
+                    tooltip: i18n("It changed files. Click to see what it changed, against how the files were before the chat: undo it, commit only its files, or mark it reviewed.")
+                }
+                TestsBadge {
+                    review: root.reviewPending(recentLine.chat, section.remoteHost) ? recentLine.chat.review : null
+                }
+                PlasmaComponents3.ToolButton {
+                    // with clicks opening the pane: reopen the chat itself
+                    visible: Plasmoid.configuration.clickOpensPane && recentLine.canOpen
+                    opacity: recentHover.hovered ? 1 : 0
+                    icon.name: "window"
+                    display: PlasmaComponents3.AbstractButton.IconOnly
+                    text: i18n("Reopen this chat")
+                    Layout.preferredHeight: recentName.implicitHeight
+                    Layout.preferredWidth: Layout.preferredHeight
+                    onClicked: recentLine.open()
+
+                    PlasmaCore.ToolTipArea {
+                        textFormat: Text.PlainText
+                        anchors.fill: parent
+                        mainText: i18n("Reopen this chat")
+                        subText: recentOpenIn.inVscode ? root.vscodeHint(section.group, section.remoteHost, true)
+                                                       : root.terminalHint(section.remoteHost, true)
                     }
                 }
                 PlasmaComponents3.Label {

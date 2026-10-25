@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
+import QtQuick.Window
 import org.kde.plasma.plasmoid
 import org.kde.plasma.core as PlasmaCore
 import org.kde.plasma.plasma5support as P5Support
@@ -354,7 +355,7 @@ PlasmoidItem {
         "notifyDoneMinSeconds", "notifySound", "soundVolume", "soundWaiting", "soundDone", "soundFailed", "recentChats",
         "sshHosts", "remotePollSeconds", "sshUsage", "keepDoneHours", "showUsageInPanel", "showPet", "chatPets", "showTokens",
         "newChatInVscode", "iconBlink", "awayDigest", "awayMinutes", "phoneWhileAway", "phoneFinished", "phoneDevice",
-        "markdownApp", "newChatModel", "newChatEffort", "newChatMode", "usageCap", "recapRules"]
+        "markdownApp", "newChatModel", "newChatEffort", "newChatMode", "usageCap", "recapRules", "clickOpensPane"]
     property real settingsSeenAt: 0     // the newest shared settings this copy has seen
     property string settingsSeen: ""    // its own settings as of the last check (to see changes)
 
@@ -820,22 +821,71 @@ PlasmoidItem {
             property string host           // an SSH host's session...
             property string openCommand    // ...opens with this command there
             property var session: null     // (or, running there, is shown here)
+            property var row: null         // the chat's row: a reply goes to it, a click opens the pane
             componentName: "plasma_workspace"
             eventId: "notification"
             hints: ({ "x-kde-display-appname": "Claude Code" })
             defaultAction: NotificationAction {
                 label: i18n("Open")
-                onActivated: root.openFromNotification(notification)
+                onActivated: root.openFromNotification(notification, true)
             }
             actions: [
                 NotificationAction {
                     label: i18n("Open session")
-                    onActivated: root.openFromNotification(notification)
+                    onActivated: root.openFromNotification(notification, false)
                 }
             ]
             onClosed: {
                 root.forgetNotification(notification)
                 notification.destroy()   // (QML's notifications don't delete themselves once closed: autoDelete false)
+            }
+        }
+    }
+
+    // A chat that waits for a permission the widget can answer: its buttons
+    Component {
+        id: askNotificationComponent
+        Notification {
+            id: ask
+            property string sessionId
+            property string profileDir
+            property string kind
+            property string host
+            property string openCommand
+            property var session: null
+            property var row: null
+            readonly property bool withAlways: !!row && !!row.permission
+                                               && (row.permission.answer === "keys" || row.permission.always !== "")
+            property QtObject allowAction: NotificationAction {
+                label: i18n("Allow once")
+                onActivated: root.answerPermission(ask.row, ask.host, "allow", "")
+            }
+            property QtObject alwaysAction: NotificationAction {
+                label: i18n("Always allow")
+                onActivated: root.answerPermission(ask.row, ask.host, "always", "")
+            }
+            property QtObject denyAction: NotificationAction {
+                label: i18n("Deny")
+                onActivated: root.answerPermission(ask.row, ask.host, "deny", "")
+            }
+            componentName: "plasma_workspace"
+            eventId: "notification"
+            hints: ({ "x-kde-display-appname": "Claude Code" })
+            defaultAction: NotificationAction {
+                label: i18n("Open")
+                onActivated: root.openFromNotification(ask, true)
+            }
+            actions: withAlways ? [allowAction, alwaysAction, denyAction] : [allowAction, denyAction]
+            replyAction {
+                label: i18n("Deny with a note")
+                placeholderText: i18n("What should Claude do instead?")
+                submitButtonText: i18n("Deny")
+                submitButtonIconName: "dialog-cancel"
+                onReplied: text => root.answerPermission(ask.row, ask.host, "deny", text)
+            }
+            onClosed: {
+                root.forgetNotification(ask)
+                ask.destroy()
             }
         }
     }
@@ -998,6 +1048,15 @@ PlasmoidItem {
                     turnEnded(sid, s, host, ended[sid], true)
                     continue
                 }
+                const told = notifications[sid]
+                if (prev === "waiting" && s.state === "waiting" && told && told.kind === "waiting" && told.allowAction === undefined
+                        && s.permission && (s.permission.answer === "hook" || s.permission.answer === "keys")) {
+                    // (the hook's request came a check after the chat began to wait: now with its buttons)
+                    const p = s.permission
+                    notify(sid, s, "waiting", i18n("%1 asks for a permission", s.name),
+                           (p.command || (p.file ? i18n("Change %1", p.file) : p.line)) + "\n" + s.cwdShort + where,
+                           "dialog-warning", host)
+                }
                 if (prev === s.state)
                     continue
                 if (s.state === "waiting") {
@@ -1010,8 +1069,10 @@ PlasmoidItem {
                         toPhone(i18n("Claude: %1 needs you", s.name + where) + (s.detail ? " (" + s.detail + ")" : "")
                                 + " · " + s.cwdShort)
                         if (Plasmoid.configuration.notifyWaiting && root.notifier && !holdingBack()) {
-                            notify(sid, s, "waiting", i18n("%1 needs your input", s.name),
-                                   (s.detail || reasonText(s.reason)) + "\n" + s.cwdShort + where, "dialog-warning", host)
+                            const p = s.permission
+                            notify(sid, s, "waiting", p ? i18n("%1 asks for a permission", s.name) : i18n("%1 needs your input", s.name),
+                                   (p ? (p.command || (p.file ? i18n("Change %1", p.file) : p.line))
+                                      : (s.detail || reasonText(s.reason))) + "\n" + s.cwdShort + where, "dialog-warning", host)
                             queueSound("waiting")
                         }
                     }
@@ -1105,21 +1166,34 @@ PlasmoidItem {
     function notify(key, session, kind, title, body, icon, host) {
         // One notification per row: a newer one replaces the previous.
         closeNotification(key, notifications[key] ? notifications[key].kind : "")
+        // (a chat waiting for a permission the widget can answer: Allow / Deny buttons)
+        const asks = kind === "waiting" && session && session.permission
+                     && (session.permission.answer === "hook" || session.permission.answer === "keys")
         // With the pet on, notifications show Talpa in a matching pose.
         const summary = kind === "digest"   // while you were away: someone waits for you, or all went well
         const pose = kind === "done" && session && session.reason === "failed" ? "sad"
                    : summary ? (session ? "oncall" : "trophy")
                    : { waiting: "oncall", overlap: "oncall", done: "trophy", reset: "trophy", started: "trophy", error: "error",
                        limit: "limit", login: "error" }[kind]
-        const n = notificationComponent.createObject(root, {
+
+        const n = (asks ? askNotificationComponent : notificationComponent).createObject(root, {
             sessionId: session ? session.sessionId : "", profileDir: session ? session.profileDir || "" : "",
             host: host || "", openCommand: session && session.openCommand ? session.openCommand : "",
-            session: host && session ? session : null,
+            session: host && session ? session : null, row: session && session.sessionId !== undefined ? session : null,
             kind: kind, title: title, text: escapeHtml(body.trim()),   // Plasma shows markup in the text
             iconName: Plasmoid.configuration.showPet && pose ? petsDir + "notify-" + pose + ".svg" : icon
         })
         if (!n)
             return
+        if (!asks && session && session.sessionId && (kind === "done" || kind === "waiting")
+                && !(session.permission && kind === "waiting")) {
+            // reply in the notification (pane.py --send, as the chat takes one)
+            n.replyAction.label = i18n("Reply")
+            n.replyAction.placeholderText = i18n("Reply to %1…", session.name)
+            n.replyAction.submitButtonText = i18n("Send")
+            n.replyAction.submitButtonIconName = "document-send"
+            n.replyAction.replied.connect(text => root.replyTo(session, host || "", text))
+        }
         notifications[key] = n
         n.sendEvent()
     }
@@ -1139,7 +1213,12 @@ PlasmoidItem {
         }
     }
 
-    function openFromNotification(n) {
+    // clicked: a chat's notification opens the pane (as a click on its name does)
+    function openFromNotification(n, clicked) {
+        if (clicked && n.row && Plasmoid.configuration.clickOpensPane) {
+            openPane(n.row, n.host, "chat")
+            return
+        }
         if (!n.sessionId && !n.host) {
             popupTab = "chats"
             root.expanded = true   // nothing waits for you, or what went wrong: show the popup
@@ -2168,6 +2247,13 @@ PlasmoidItem {
         if (!root.notifier)
             return
         for (const t of queue) {
+            if (t.afterTurn) {   // a reply for when the chat's turn ends: now it has (or the chat isn't listed)
+                const known = !t.host || (remote[t.host] && remote[t.host].result)
+                const s = known ? listedRow(t.chat, t.profile, t.host || "") : null
+                if (known && !t.error && !startingTasks[t.id] && (!s || (s.state !== "working" && s.state !== "waiting")))
+                    startQueued(t)
+                continue
+            }
             if (!t.due || startingTasks[t.id])
                 continue
             const group = hostGroups(t.host || "").find(g => g.profileKeys.indexOf(t.profile) >= 0)
@@ -2208,7 +2294,11 @@ PlasmoidItem {
                 delete rest[t.id]
                 root.startingTasks = rest
             }
-            if (result.ok && result.message && t) {   // ("": another copy started it)
+            if (result.ok && result.message && t && t.afterTurn) {   // your reply, sent as its turn ended
+                if (root.notifier && Plasmoid.configuration.notifyDone && !root.holdingBack() && !root.dashboardShown)
+                    root.notify("queued|" + t.id, null, "started", i18n("Sent to %1", t.name || i18n("the chat")),
+                                t.prompt + "\n" + result.message, "document-send", "")
+            } else if (result.ok && result.message && t) {   // ("": another copy started it)
                 root.petEvent("reset", i18n("Started: %1", what), "")
                 if (root.notifier && Plasmoid.configuration.notifyDone && !root.holdingBack())
                     root.notify("queued|" + t.id, null, "started", i18n("Started on %1: %2", t.account, what),
@@ -2299,6 +2389,182 @@ PlasmoidItem {
         default: return i18n("Shift+Tab in the chat changes it.")
         }
     }
+
+    // ---------------------------------------------------------------- the chat pane
+    // A chat beside the popup (ChatPane.qml): its conversation, a box to
+    // reply, what it asks for, and its review (pane.py). A click on a chat's
+    // name opens it there (or, with clickOpensPane off, the chat's window).
+
+    property var paneChat: null   // {chatId, sessionId, profileDir, host, name, cwd, tab}
+    // the chat's row in the status now: a listed session, else a recent chat (or null)
+    readonly property var paneRow: {
+        const c = paneChat
+        if (!c)
+            return null
+        const groupList = hostGroups(c.host || "")
+        let found = null
+        for (const g of groupList)
+            for (const s of g.sessions || [])
+                if (!found && ((s.chatId || s.sessionId) === c.chatId || s.sessionId === c.chatId))
+                    found = s
+        if (found)
+            return found
+        for (const g of groupList)
+            for (const r of (g.recent || []).concat(g.starred || []))
+                if (!found && r.sessionId === c.chatId)
+                    found = Object.assign({ state: "done", pid: null, kind: "chat", reply: "background", chatId: r.sessionId }, r)
+        return found
+    }
+
+    // s: a session row or a recent chat (sessionId is its chat then); tab: "chat" or "review"
+    function openPane(s, host, tab) {
+        paneChat = { chatId: s.chatId || s.sessionId, sessionId: s.sessionId || "", profileDir: s.profileDir || "",
+                     host: host || "", name: s.name || "", cwd: s.cwd || "", tab: tab || "chat", at: Date.now() }
+    }
+
+    function closePane() {
+        paneChat = null
+    }
+
+    // A click on a chat: the pane, or the chat's own window
+    function clickChat(s, host) {
+        if (Plasmoid.configuration.clickOpensPane)
+            openPane(s, host, "chat")
+        else
+            openRow(s, host)
+    }
+
+    // The chat's own window: its terminal or VS Code tab; one that isn't open
+    // reopens (as the switch says)
+    function openRow(s, host) {
+        if (s && s.pid !== undefined && s.key && s.key.indexOf("/recent") < 0 && s.key.indexOf("/starred") < 0) {
+            if (host)
+                remoteShow(host, s)
+            else
+                jumpTo(s.sessionId, s.profileDir)
+        } else if (s) {
+            const chatId = s.chatId || s.sessionId
+            openChatById(chatId, s.profileDir || "", s.cwd || "", s.openCommand || "", "", host || "")
+        }
+    }
+
+    Loader {
+        id: paneLoader
+        active: root.paneChat !== null
+        source: "ChatPane.qml"
+        onLoaded: {
+            item.visible = true
+            paneTimer.restart()
+        }
+    }
+
+    // Beside the popup, on the side with more room (KWin moves it: jump.py --place-window)
+    Timer {
+        id: paneTimer
+        interval: 300
+        onTriggered: root.placePane()
+    }
+
+    function placePane() {
+        const win = paneLoader.item
+        const item = root.fullRepresentationItem
+        if (!win || !item || !root.expanded || !item.visible || !item.Window.window)
+            return
+        const p = item.mapToGlobal(0, 0)
+        const sx = item.Screen.virtualX, sy = item.Screen.virtualY, sw = item.Screen.width, sh = item.Screen.height
+        const gap = Kirigami.Units.smallSpacing
+        const right = sx + sw - (p.x + item.width) - gap, left = p.x - sx - gap
+        const width = Math.round(Math.max(win.minimumWidth, Math.min(win.width, Math.max(right, left))))
+        const x = right >= width || right >= left ? p.x + item.width + gap : p.x - gap - width
+        const height = Math.round(Math.min(sh, Math.max(item.height, win.minimumHeight)))
+        const y = p.y - sy > sh / 2 ? p.y + item.height - height : p.y   // (bottoms lined up under a bottom panel)
+        const geometry = [Math.round(x), Math.round(Math.max(sy, Math.min(y, sy + sh - height))), width, height]
+        placer.connectSource("python3 -I " + shellQuote(codeDir + "jump.py") + " --place-window " + shellQuote(win.title)
+                             + " " + geometry.join(",") + " # " + Date.now())
+    }
+
+    P5Support.DataSource {
+        id: placer
+        engine: "executable"
+        connectedSources: []
+        onNewData: (source, data) => disconnectSource(source)
+    }
+
+    // Finished, changed files, and not marked reviewed since (pane.py
+    // --reviewed; 0: marked not reviewed). What chats changed before the
+    // widget first looked (reviewedSince) isn't to review.
+    function reviewPending(s, host) {
+        if (!s || !s.review || !s.review.editedAt || s.state === "working" || s.state === "waiting")
+            return false
+        const marks = status && status.reviewed ? status.reviewed : {}
+        const id = s.chatId || s.sessionId
+        const mark = marks[host ? host + "|" + id : id]
+        const seen = mark === 0 ? 0 : Math.max(mark || 0, status && status.reviewedSince ? status.reviewedSince : 0)
+        return seen < s.review.editedAt
+    }
+
+    // The message waiting to be sent when the chat's turn ends (pane.py --send --after-turn)
+    function queuedMessage(chatId, host) {
+        return (status && status.queue ? status.queue : []).find(t => t.afterTurn && t.chat === chatId
+                                                                       && (t.host || "") === (host || "")) || null
+    }
+
+    // An answer to what a chat asks, from its row or a notification (pane.py --answer / --keys)
+    function answerPermission(s, host, decision, note) {
+        const p = s ? s.permission : null
+        if (!p || (p.answer !== "hook" && p.answer !== "keys"))
+            return
+        const args = p.answer === "hook"
+            ? "--answer " + shellQuote(p.request)
+            : "--keys " + shellQuote(s.sessionId) + profileArg(s.profileDir)
+        paneActions.connectSource("python3 -I " + shellQuote(codeDir + "pane.py") + " " + args + " --decision " + decision
+                                  + (note ? " --note " + shellQuote(note) : "") + (host ? " --host " + shellQuote(host) : "")
+                                  + configDirArgs + " # " + Date.now())
+    }
+
+    // A reply from a notification: sent as the chat takes one; one in a
+    // terminal that takes no text opens the pane with it
+    property var replyDrafts: ({})   // command -> {session, host, text}
+
+    function replyTo(s, host, text) {
+        text = (text || "").trim()
+        if (!s || !text)
+            return
+        const cmd = "python3 -I " + shellQuote(codeDir + "pane.py") + " --send " + shellQuote(s.chatId || s.sessionId)
+                    + " --text " + shellQuote(text) + (s.sessionId ? " --session " + shellQuote(s.sessionId) : "")
+                    + profileArg(s.profileDir) + (host ? " --host " + shellQuote(host) : "") + configDirArgs + " # " + Date.now()
+        replyDrafts[cmd] = { session: s, host: host || "", text: text }
+        paneActions.connectSource(cmd)
+    }
+
+    P5Support.DataSource {
+        id: paneActions
+        engine: "executable"
+        connectedSources: []
+        onNewData: (source, data) => {
+            disconnectSource(source)
+            const draft = root.replyDrafts[source]
+            delete root.replyDrafts[source]
+            const result = root.helperResult(data)
+            if (!result.ok) {
+                root.actionError = result.message
+                actionErrorTimer.restart()
+            } else if (draft && result.how === "ask") {
+                root.openPane(draft.session, draft.host, "chat")   // (its terminal takes no text: you choose there)
+                root.paneDraft = draft.text
+            } else {
+                if (draft && result.how === "vscode" && result.link)
+                    Qt.openUrlExternally(result.link)
+                root.actionError = ""
+                if (result.message) {
+                    root.actionInfo = result.message
+                    actionInfoTimer.restart()
+                }
+            }
+            root.refresh()
+        }
+    }
+    property string paneDraft: ""   // (a reply the pane takes into its box)
 
     // ---------------------------------------------------------------- opening a chat by its id
     // A chat found by the search, or the one that made a plan: its row when

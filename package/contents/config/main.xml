@@ -135,6 +135,10 @@
       <label>The widget's keyboard shortcut goes to the chat that needs you (else it opens the popup)</label>
       <default>true</default>
     </entry>
+    <entry name="clickOpensPane" type="Bool">
+      <label>A click on a chat opens it in the chat pane beside the popup (else in its own window: terminal or VS Code)</label>
+      <default>true</default>
+    </entry>
     <entry name="newChatInVscode" type="Bool">
       <label>New and recent chats open in VS Code (the Terminal | VS Code switch at the top of their lists)</label>
       <default>false</default>

@@ -118,10 +118,11 @@ def tool_input_text(block):
 def conversation_items(lines):
     """The pane's items from transcript lines (oldest first): {"kind": "you",
     "text"} for a prompt of yours, {"kind": "claude", "text"} for Claude's
-    reply (markdown), {"kind": "tool", "id", "name", "line", "status":
+    reply (markdown), {"kind": "tool", "name", "line", "status":
     "ok"|"error"|"open", "input", "output"} for a tool call and {"kind":
     "note", "text"} for an interruption, a usage limit or a compaction;
-    each with "at" (ms). Entries of subagents (sidechains) aren't in it."""
+    each with "at" (ms) and "key" (the same in the next answer, as long as
+    the item is listed). Entries of subagents (sidechains) aren't in it."""
     items, tools = [], {}
     for line in lines:
         if not PANE_LINE.search(line):
@@ -133,9 +134,10 @@ def conversation_items(lines):
         if not isinstance(e, dict) or e.get("isSidechain"):
             continue
         kind, at = e.get("type"), cs.to_ms(e.get("timestamp"))
+        uid = e["uuid"] if isinstance(e.get("uuid"), str) else f"{kind}-{at}-{len(items)}"
         if kind == "system":
             if e.get("subtype") == "compact_boundary":
-                items.append({"kind": "note", "text": "The conversation was compacted", "at": at})
+                items.append({"kind": "note", "key": uid, "text": "The conversation was compacted", "at": at})
             continue
         msg, blocks = cs.blocks_of(e)
         if kind == "user":
@@ -148,35 +150,33 @@ def conversation_items(lines):
                     item["output"] = clip(result_text(c))
             prompt = cs.human_prompt(e)
             if prompt is not None:
-                items.append({"kind": "you", "text": clip(prompt, TEXT_CHARS, 10 ** 6), "at": at})
+                items.append({"kind": "you", "key": uid, "text": clip(prompt, TEXT_CHARS, 10 ** 6), "at": at})
                 continue
             text = cs.message_text(msg).strip()
             if text.startswith(INTERRUPTED):
-                items.append({"kind": "note", "text": "Interrupted", "at": at})
+                items.append({"kind": "note", "key": uid, "text": "Interrupted", "at": at})
             continue
         if kind != "assistant":
             continue
         if e.get("isApiErrorMessage"):
             text = " ".join(cs.message_text(msg).split())
             if text:
-                items.append({"kind": "note", "text": cs.short_text(text, 300), "at": at, "error": True})
+                items.append({"kind": "note", "key": uid, "text": cs.short_text(text, 300), "at": at, "error": True})
             continue
         mid = msg.get("id") if isinstance(msg.get("id"), str) else None
         for c in blocks:
             if c.get("type") == "text" and isinstance(c.get("text"), str) and c["text"].strip():
                 last = items[-1] if items else None
-                if last is not None and last["kind"] == "claude" and mid is not None and last.get("id") == mid:
+                if last is not None and last["kind"] == "claude" and mid is not None and last["key"] == mid:
                     last["text"] = clip(last["text"] + "\n\n" + c["text"].strip(), TEXT_CHARS, 10 ** 6)
                 else:
-                    items.append({"kind": "claude", "id": mid, "text": clip(c["text"].strip(), TEXT_CHARS, 10 ** 6),
+                    items.append({"kind": "claude", "key": mid or uid, "text": clip(c["text"].strip(), TEXT_CHARS, 10 ** 6),
                                   "at": at})
             elif c.get("type") == "tool_use" and isinstance(c.get("id"), str):
-                item = {"kind": "tool", "id": c["id"], "name": c.get("name") or "tool", "line": cs.describe_tool(c),
+                item = {"kind": "tool", "key": c["id"], "name": c.get("name") or "tool", "line": cs.describe_tool(c),
                         "status": "open", "input": clip(tool_input_text(c)), "output": "", "at": at}
                 tools[c["id"]] = item
                 items.append(item)
-    for item in items:
-        item.pop("id", None) if item["kind"] == "claude" else None
     return items
 
 
@@ -716,17 +716,16 @@ def last_line(text):
 # ---------------------------------------------------------------- marked reviewed
 
 def mark_reviewed(cache_root, chat_id, host="", on=True, now_ms=None):
-    """Mark a chat (of host) reviewed now, or not any more."""
+    """Mark a chat (of host) reviewed now, or not reviewed (0: also if it
+    changed its files before cs.reviewed_since)."""
     now_ms = int(time.time() * 1000) if now_ms is None else now_ms
     cs.private_dir(cache_root)
     with open(cache_root / "reviewed.lock", "a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        chats = {k: v for k, v in cs.load_reviewed(cache_root).items() if now_ms - v < cs.REVIEWED_KEEP_MS}
-        if on:
-            chats[cs.review_key(chat_id, host)] = now_ms
-        else:
-            chats.pop(cs.review_key(chat_id, host), None)
-        cs.write_json_atomic(cache_root / cs.REVIEWED, {"chats": chats})
+        since = cs.reviewed_since(cache_root, now_ms)
+        chats = {k: v for k, v in cs.load_reviewed(cache_root).items() if v == 0 or now_ms - v < cs.REVIEWED_KEEP_MS}
+        chats[cs.review_key(chat_id, host)] = now_ms if on else 0
+        cs.write_json_atomic(cache_root / cs.REVIEWED, {"since": since, "chats": chats})
 
 
 # ---------------------------------------------------------------- the hook in Claude's settings

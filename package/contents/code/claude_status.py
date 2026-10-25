@@ -2299,10 +2299,25 @@ def review_key(chat_id, host=""):
 
 
 def load_reviewed(cache_root):
-    """{review_key: when} of the chats marked reviewed."""
+    """{review_key: when} of the chats marked reviewed (0: marked not
+    reviewed, also if their last edit came before reviewed_since)."""
     data = read_json(cache_root / REVIEWED)
     chats = data.get("chats") if isinstance(data, dict) else None
     return {k: v for k, v in chats.items() if isinstance(v, (int, float))} if isinstance(chats, dict) else {}
+
+
+def reviewed_since(cache_root, now_ms):
+    """Since when chats are to review: what they changed before the widget
+    first looked isn't (else every chat that ever changed a file would be)."""
+    data = read_json(cache_root / REVIEWED)
+    if isinstance(data, dict) and isinstance(data.get("since"), (int, float)):
+        return data["since"]
+    try:
+        private_dir(cache_root)
+        write_json_atomic(cache_root / REVIEWED, {"since": now_ms, "chats": load_reviewed(cache_root)})
+    except OSError:
+        pass
+    return now_ms
 
 
 def new_tests():
@@ -6178,6 +6193,7 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
         "dismissed": hidden,
         "canShare": True,  # jump.py shares chats between this computer's profiles (sharing.py)
         "reviewed": load_reviewed(cache_root),  # {review_key: when}: chats marked reviewed (pane.py --reviewed)
+        "reviewedSince": reviewed_since(cache_root, now_ms),  # (what chats changed before isn't to review)
         "errors": errors,
     }
 

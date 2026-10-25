@@ -110,6 +110,8 @@ class ConversationTests(PaneFixture):
         self.assertEqual(edit["status"], "open")  # (no result yet: it asks, or runs)
         self.assertIn("-x = 1", edit["input"])
         self.assertIn("+x = 2", edit["input"])
+        self.assertEqual([i["key"] for i in items[1:4]], ["m1", "t1", "t2"])
+        self.assertEqual(len({i["key"] for i in items}), len(items))
 
     def test_the_newest_items_and_more(self):
         t = self.now - 1000
@@ -466,14 +468,18 @@ class ReviewTests(PaneFixture):
         self.assertIn("other.py", self.git("status", "--porcelain"))  # yours stays as it was
 
     def test_marked_reviewed(self):
+        since = cs.collect(self.home, self.cache, with_tokens=False, now=self.now)["reviewedSince"]
+        self.assertEqual(since, int(self.now * 1000))  # (what chats changed before the first look isn't to review)
         self.cli("--reviewed", SID)
-        self.assertIn(SID, cs.load_reviewed(self.cache))
+        self.assertGreater(cs.load_reviewed(self.cache)[SID], 0)
         self.assertIsNotNone(self.cli("--review", SID)["reviewedAt"])
         self.cli("--reviewed", SID, "--host", "gpu")  # (a host's chat: marked here)
         self.assertIn("gpu|" + SID, cs.load_reviewed(self.cache))
         self.cli("--reviewed", SID, "--off")
-        self.assertNotIn(SID, cs.load_reviewed(self.cache))
-        self.assertIn("gpu|" + SID, cs.collect(self.home, self.cache, with_tokens=False)["reviewed"])
+        self.assertEqual(cs.load_reviewed(self.cache)[SID], 0)  # not reviewed, however old its changes
+        result = cs.collect(self.home, self.cache, with_tokens=False, now=self.now + 60)
+        self.assertIn("gpu|" + SID, result["reviewed"])
+        self.assertEqual(result["reviewedSince"], since)
 
 
 class TestsAfterEditTests(PaneFixture):
