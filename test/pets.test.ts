@@ -227,9 +227,11 @@ test("a pet on a stage in view draws itself, the canvas as sharp as the screen",
   show();
   stage.render();
   const pet = stage.petFor("p/1");
-  const canvas = pet.front.canvas; // (the first picture is drawn on the sheet behind it, then shown)
+  const canvas = pet.view; // (the picture is drawn on a sheet off the page, then shown on it)
   assert.equal(canvas.width, Math.round(stage.canvasW * 2)); // devicePixelRatio 2
-  assert.ok([...canvas.drawn, ...pet.back.canvas.drawn].includes("fill"), "nothing drawn");
+  assert.ok(pet.canvases.some((c: Any) => c.drawn.includes("fill")), "nothing drawn");
+  assert.ok(canvas.drawn.includes("drawImage"), "not shown");
+  assert.equal(pet.canvases[0].width, canvas.width);
   assert.equal(canvas.style.width, `${stage.canvasW}px`);
   stage.destroy();
 });
@@ -240,8 +242,14 @@ test("a chat's pet draws a picture only when what it shows changes", async () =>
   lay();
   show();
   const pet = stage.petFor("p/1");
-  wait(pet, 3000);
-  const drawn = () => pet.front.canvas.drawn.length + pet.back.canvas.drawn.length;
+  // up out of the ground (drawn live: a big move), 3 s on the stage's own
+  // clock, which Talpa's must follow
+  const clock = stage.clock as Any;
+  for (let i = 0; i < 60; i++) {
+    clock.base += 50;
+    pet.talpa.tick(clock.now());
+  }
+  const drawn = () => pet.canvases.reduce((n: number, c: Any) => n + c.drawn.length, 0);
   const fadeOver = () => new Promise((done) => setTimeout(done, 260)); // (the stage's clock is real time)
   stage.render(); // its first picture, fading in
   await fadeOver();

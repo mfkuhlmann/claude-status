@@ -16,6 +16,17 @@
   week at a time (up to four), and look at all accounts or one. SSH hosts
   shown count too. It reads the chats' transcripts, so it uses no tokens, and
   only while the tab is open; the status checks don't change.
+- **Chat pets without the flicker, and smoother:** a chat's pet went a
+  little darker and lighter again whenever it changed pose: while one
+  picture faded into the next, both were half see-through, and the view's
+  background showed through Talpa. The next pose now fades in mixed with
+  the one shown, so its colors hold. Quick moves (typing, waving, bouncing,
+  juggling) go round four pictures instead of two, slow ones (nodding off,
+  swaying, floating) at their own pace, and the big moves are drawn as they
+  happen again instead of fading: jumping out of its burrow when its chat
+  is done, popping up when a chat starts, ducking down and peeking out, with
+  what flies off landing first. While it types or bounces it looks straight
+  at you.
 - **Keep going until it's done:** a chat at work on this computer can keep
   going while you're away (the ↻ button on its row): when a usage limit
   stops it, it goes on by itself in the background a minute after the limit
