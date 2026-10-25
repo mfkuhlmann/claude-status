@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.15.0
 
 - **Chat with any chat from the view:** a click on a chat opens it in an
   editor tab: its conversation as it goes, Claude's replies rendered and each

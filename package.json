@@ -2,7 +2,7 @@
   "name": "claude-status",
   "displayName": "Claude Status",
   "description": "Every Claude Code chat on this computer and your SSH hosts in one view: who needs you, plan usage, subagents, and Talpa, the animated pet. Runs on your side, also in Remote-SSH windows.",
-  "version": "1.14.1",
+  "version": "1.15.0",
   "publisher": "wzaielamri",
   "author": {
     "name": "Wadhah Zai El Amri",
