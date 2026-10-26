@@ -10,7 +10,7 @@ import * as vscode from "vscode";
 import { ChatPanes } from "../src/chatPane";
 import { demoState } from "../src/shared/demo";
 import { chatRefOf } from "../src/shared/model";
-import { queuedReply, reviewPending, routeHint, testsText } from "../src/shared/pane";
+import { answersOf, oneChoice, queuedReply, reviewPending, routeHint, testsText } from "../src/shared/pane";
 import type { ViewState } from "../src/shared/types";
 import { ViewHost } from "../src/view";
 import { clipboardWrites, overrides } from "./vscode-stub";
@@ -52,6 +52,29 @@ test("an answer goes to the hook's request the state names, else to the chat's k
   const two = panes(keys);
   await two.p.answer(chatRefOf(row2), "always");
   assert.deepEqual(two.calls[0], ["--keys", row2.sessionId, "--profile", row2.profileDir, "--decision", "always"]);
+});
+
+test("a question's answers go to the hook's request as JSON; none chosen, nothing goes", async () => {
+  const state = waitingState("hook");
+  const row = state.status!.groups.flatMap((g) => g.sessions).find((x) => x.state === "waiting")!;
+  row.permission!.questions = [{ question: "Which crust?", header: "Crust", multiSelect: false, options: [{ label: "Thin", description: "" }] }];
+  const { p, calls } = panes(state);
+  await p.answer(chatRefOf(row), "answer", "", { "Which crust?": ["Thin"] });
+  assert.deepEqual(calls[0], ["--answer", "1792957203525-37d298fb", "--decision", "answer", "--answers", '{"Which crust?":["Thin"]}']);
+  assert.equal((await p.answer(chatRefOf(row), "answer", "", {})).ok, false);
+  assert.equal(calls.length, 1);
+});
+
+test("answers a page sends: {question: [strings]}, not too many", () => {
+  assert.deepEqual(answersOf({ Q: ["a", "b"] }), { Q: ["a", "b"] });
+  for (const bad of [null, [], "x", {}, { Q: "a" }, { Q: [1] }, Object.fromEntries(Array.from({ length: 17 }, (_, i) => [`q${i}`, ["a"]]))])
+    assert.equal(answersOf(bad), null);
+  const ask = { tool: "AskUserQuestion", line: "", command: "", file: "", diff: [], always: "", request: "r", answer: "hook" as const };
+  const q = (multiSelect: boolean, n: number) => ({ question: "Q", header: "", multiSelect, options: Array.from({ length: n }, (_, i) => ({ label: `o${i}`, description: "" })) });
+  assert.equal(oneChoice({ ...ask, questions: [q(false, 5)] }).length, 4);
+  assert.deepEqual(oneChoice({ ...ask, questions: [q(true, 2)] }), []);
+  assert.deepEqual(oneChoice({ ...ask, questions: [q(false, 2), q(false, 2)] }), []);
+  assert.deepEqual(oneChoice(null), []);
 });
 
 test("nothing is answered for a chat that doesn't ask, or that only its own dialog can answer", async () => {
@@ -136,6 +159,13 @@ test("a chat waiting for a permission is told with its question, once more when 
   const late = t.track("", row("waiting", ask), NOW + 4000, undefined, opts);
   assert.deepEqual(late.notices.map((n) => [n.title, n.body.split(" · ")[0]]), [["k asks for a permission", "make deploy"]]);
   assert.deepEqual(t.track("", row("waiting", ask), NOW + 6000, undefined, opts).notices, []); // (told once)
+  // Claude's questions: "asks you", each question
+  const t2 = new TransitionTracker();
+  const question = { ...ask, tool: "AskUserQuestion", command: "", questions: [
+    { question: "Which crust?", header: "", multiSelect: false, options: [] }, { question: "Which toppings?", header: "", multiSelect: true, options: [] }] };
+  t2.track("", row("working", null), NOW, undefined, opts);
+  const asked = t2.track("", row("waiting", question), NOW + 2000, undefined, opts);
+  assert.deepEqual(asked.notices.map((n) => [n.title, n.body.split(" · ")[0]]), [["k asks you", "Which crust? Which toppings?"]]);
 });
 
 test("the tests badge, a queued reply and how a reply goes", () => {

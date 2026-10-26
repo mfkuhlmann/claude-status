@@ -3,7 +3,7 @@
 // waits for a permission, and its review (what it changed, Undo, Commit,
 // Mark reviewed). Shared by the extension and the tab's page.
 
-import type { Decision, PermissionAsk, QueuedTask, RecentChat, Review, Session, SessionState, Status } from "./types";
+import type { Answers, Decision, PermissionAsk, Question, QueuedTask, RecentChat, Review, Session, SessionState, Status } from "./types";
 
 // One item of a chat's conversation (pane.py: conversation_items)
 export interface PaneItem {
@@ -89,13 +89,40 @@ export type PaneMessage =
   | { type: "more" } // older items too
   | { type: "send"; text: string; how: "auto" | "background" | "copy"; afterTurn: boolean }
   | { type: "unqueue" } // the reply waiting for the turn to end
-  | { type: "answer"; decision: Decision; note: string }
+  | { type: "answer"; decision: Decision; note: string; answers?: Answers }
   | { type: "review" }
   | { type: "diff"; path: string } // a file's change in VS Code's diff editor
   | { type: "undo"; path: string } // "*": all of them
   | { type: "commit"; message: string }
   | { type: "reviewed"; on: boolean }
   | { type: "openWindow" };
+
+// Claude's questions a waiting chat asks ([] for a permission prompt)
+export function questionsOf(ask: PermissionAsk | null | undefined): Question[] {
+  return ask?.questions ?? [];
+}
+
+// One question with one answer: its options, to be buttons (at most 4, as Claude asks); else []
+export function oneChoice(ask: PermissionAsk | null | undefined): Question["options"] {
+  const qs = questionsOf(ask);
+  return qs.length === 1 && !qs[0].multiSelect ? qs[0].options.slice(0, 4) : [];
+}
+
+const ANSWERS_MAX = 16;
+const ANSWER_CHARS = 10_000;
+
+// Answers a page sent, if they are answers ({question: [strings]}, not too many), else null
+export function answersOf(x: unknown): Answers | null {
+  if (typeof x !== "object" || x === null || Array.isArray(x)) return null;
+  const out: Answers = {};
+  const entries = Object.entries(x as Record<string, unknown>);
+  if (!entries.length || entries.length > ANSWERS_MAX) return null;
+  for (const [q, v] of entries) {
+    if (!Array.isArray(v) || v.length > ANSWERS_MAX || !v.every((a) => typeof a === "string" && a.length <= ANSWER_CHARS)) return null;
+    out[q] = v as string[];
+  }
+  return out;
+}
 
 // The key of a chat's mark in status.reviewed
 export function reviewKey(chatId: string, host?: string): string {

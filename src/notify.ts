@@ -10,7 +10,8 @@ import type { ChatPanes } from "./chatPane";
 import { cacheDir, settings } from "./config";
 import { gnomeSoundTheme } from "./desktop";
 import type { Digest } from "./away";
-import type { ChatRef, Session } from "./shared/types";
+import { oneChoice, questionsOf } from "./shared/pane";
+import type { Answers, ChatRef, Question, Session } from "./shared/types";
 import type { Changes } from "./transitions";
 
 export function chatRef(s: Session, host?: string): ChatRef {
@@ -93,6 +94,10 @@ export class Notifier implements vscode.Disposable {
       const chat = chatRef(n.session, n.host);
       const p = n.kind === "waiting" ? n.session.permission : null;
       const asks = !!p && (p.answer === "hook" || p.answer === "keys") && !!this.panes;
+      if (asks && questionsOf(p).length) {
+        this.askQuestions(text, show, chat, n.session);
+        continue;
+      }
       // a permission prompt: answer it here, in Claude's own order (Yes, Yes
       // and don't ask again, No); a chat that waits or finished: reply here
       const buttons = asks
@@ -120,6 +125,61 @@ export class Notifier implements vscode.Disposable {
         sound === "waiting" ? settings.soundWaiting() : sound === "failed" ? settings.soundFailed() : settings.soundDone();
       if (file) void gnomeSoundTheme().then((theme) => this.backend.sound(file, settings.soundVolume(), theme));
     }
+  }
+
+  // Claude's questions: one with one answer has a button per option, then
+  // Other… (your own words); else Answer… goes through them one by one
+  // (VS Code's pickers); Open shows the chat
+  private askQuestions(text: string, show: typeof vscode.window.showWarningMessage, chat: ChatRef, s: Session): void {
+    const choices = oneChoice(s.permission);
+    const items: (vscode.MessageItem & { run: () => Promise<Answers | null | "open"> })[] = [
+      ...choices.map((o) => ({ title: o.label, run: async () => ({ [questionsOf(s.permission)[0].question]: [o.label] }) })),
+      choices.length
+        ? { title: "Other…", run: () => this.ownWords(s, questionsOf(s.permission)[0]) }
+        : { title: "Answer…", run: () => this.pickAnswers(s, questionsOf(s.permission)) },
+      { title: "Open", run: async () => "open" as const },
+    ];
+    void show(text, ...items).then(async (item) => {
+      const panes = this.panes;
+      const answer = item ? await item.run() : null;
+      if (!panes || !answer) return;
+      if (answer === "open") {
+        if (settings.clickOpensPane()) panes.open(chat, "chat");
+        else this.open(chat);
+      } else await panes.answer(chat, "answer", "", answer);
+    });
+  }
+
+  // A question answered in your own words (null: you closed the box)
+  private async ownWords(s: Session, q: Question): Promise<Answers | null> {
+    const text = await vscode.window.showInputBox({ title: `${s.name}: ${q.header || "your answer"}`, prompt: q.question, ignoreFocusOut: true });
+    return text?.trim() ? { [q.question]: [text.trim()] } : null;
+  }
+
+  // Each question in a picker of its options (several to tick for a
+  // multiSelect one), with "Other…" for your own words; null if you stop
+  private async pickAnswers(s: Session, questions: Question[]): Promise<Answers | null> {
+    const answers: Answers = {};
+    for (const [i, q] of questions.entries()) {
+      const items: (vscode.QuickPickItem & { own?: boolean })[] = [
+        ...q.options.map((o) => ({ label: o.label, detail: o.description || undefined })),
+        { label: "Other…", description: "answer in your own words", own: true },
+      ];
+      const title = `${s.name}: ${q.header || "question"}${questions.length > 1 ? ` (${i + 1}/${questions.length})` : ""}`;
+      const opts = { title, placeHolder: q.question, ignoreFocusOut: true, matchOnDetail: true };
+      const picked = q.multiSelect
+        ? await vscode.window.showQuickPick(items, { ...opts, canPickMany: true })
+        : await vscode.window.showQuickPick(items, opts).then((one) => (one ? [one] : undefined));
+      if (!picked?.length) return null;
+      const values = picked.filter((it) => !it.own).map((it) => it.label);
+      if (picked.some((it) => it.own)) {
+        const own = await this.ownWords(s, q);
+        if (!own) return null;
+        values.push(...own[q.question]);
+      }
+      answers[q.question] = values;
+    }
+    return answers;
   }
 
   // What happened while you were away, in one notification

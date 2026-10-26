@@ -9,6 +9,7 @@ import type { ChatPanes } from "./chatPane";
 import { setReopenIn, settings } from "./config";
 import type { Dashboard } from "./dashboard";
 import { findChatRef, findMemory, findPlan, goOnAt, machineStatus, shareAccounts } from "./shared/model";
+import { answersOf } from "./shared/pane";
 import { permsHost, weekAsked, weekRevokeAsked, weekRuleAsked } from "./shared/week";
 import type { ChatRef, Group, HostMessage, PlanItem, WebviewMessage } from "./shared/types";
 
@@ -161,8 +162,8 @@ export class ViewHost implements vscode.WebviewViewProvider, vscode.Disposable {
         if (chat) void this.actions.open(chat);
         break;
       case "answerPermission":
-        if (chat && this.panes && (m.decision === "allow" || m.decision === "always" || m.decision === "deny"))
-          void this.panes.answer(chat, m.decision, typeof m.note === "string" ? m.note : "");
+        if (chat && this.panes && (m.decision === "allow" || m.decision === "always" || m.decision === "deny" || m.decision === "answer"))
+          void this.panes.answer(chat, m.decision, typeof m.note === "string" ? m.note : "", answersOf(m.answers) ?? undefined);
         break;
       case "openInClaudeCode":
         if (chat) void this.actions.openInClaudeCode(chat);

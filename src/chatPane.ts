@@ -16,8 +16,8 @@ import { openComparison } from "./changes";
 import { configDirArgs } from "./config";
 import type { Dashboard } from "./dashboard";
 import { chatRefOf, recentRef, stateText } from "./shared/model";
-import { queuedReply, reviewPending, type PaneChat, type PaneHostMessage, type PaneMessage } from "./shared/pane";
-import type { ChatRef, Decision, RecentChat, Session, ViewState } from "./shared/types";
+import { answersOf, queuedReply, reviewPending, type PaneChat, type PaneHostMessage, type PaneMessage } from "./shared/pane";
+import type { Answers, ChatRef, Decision, RecentChat, Session, ViewState } from "./shared/types";
 import { localAncestors, type Terminals } from "./terminals";
 
 const TEXT_MAX = 100_000; // (as a queued task's prompt may be)
@@ -61,8 +61,9 @@ export class ChatPanes implements vscode.Disposable {
   }
 
   // An answer to what a waiting chat asks (its row, the tab, a notification):
-  // through the hook's request, or with keys in its tmux pane
-  async answer(chat: ChatRef, decision: Decision, note = ""): Promise<{ ok: boolean; message: string }> {
+  // through the hook's request, or with keys in its tmux pane; Claude's
+  // questions: decision "answer" with the answers
+  async answer(chat: ChatRef, decision: Decision, note = "", answers?: Answers): Promise<{ ok: boolean; message: string }> {
     const host = chat.host ?? "";
     const { session } = findPaneRow(this.dash.state(), host, chat.chatId || chat.sessionId);
     const p = session?.state === "waiting" ? session.permission : null;
@@ -71,7 +72,10 @@ export class ChatPanes implements vscode.Disposable {
       p.answer === "hook" && p.request
         ? ["--answer", p.request]
         : ["--keys", session.sessionId, ...(session.profileDir ? ["--profile", session.profileDir] : [])];
+    const given = decision === "answer" ? answersOf(answers) : null;
+    if (decision === "answer" && !given) return { ok: false, message: "Choose your answers first" };
     const r = await this.backend.pane([...args, "--decision", decision, ...(note.trim() ? ["--note", note.trim()] : []),
+                                        ...(given ? ["--answers", JSON.stringify(given)] : []),
                                         ...(host ? ["--host", host] : configDirArgs())], 60000);
     const answer = { ok: !!r.ok, message: String(r.message ?? "") };
     if (!answer.ok) this.dash.setActionError(`Couldn't answer ${session.name}: ${answer.message}`);
@@ -312,8 +316,9 @@ class Pane implements vscode.Disposable {
         break;
       }
       case "answer":
-        if (m.decision === "allow" || m.decision === "always" || m.decision === "deny")
-          this.result("answer", await this.owner.answer(this.chat, m.decision, typeof m.note === "string" ? m.note : ""));
+        if (m.decision === "allow" || m.decision === "always" || m.decision === "deny" || m.decision === "answer")
+          this.result("answer", await this.owner.answer(this.chat, m.decision, typeof m.note === "string" ? m.note : "",
+                                                        answersOf(m.answers) ?? undefined));
         break;
       case "review":
         await this.loadReview();

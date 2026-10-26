@@ -7,6 +7,15 @@ import type { PaneChat, PaneHostMessage, PaneItem, ReviewAnswer } from "../src/s
 const params = new URLSearchParams(location.search);
 const now = Date.now();
 const ask = params.get("ask");
+// ?ask=question: Claude's questions, answered through the hook
+const questions = [
+  { question: "Which weeks should the fix cover?", header: "Weeks", multiSelect: false,
+    options: [{ label: "ISO weeks only (Recommended)", description: "Week 1 holds the year's first Thursday; 52 or 53 weeks." },
+              { label: "US weeks too", description: "Weeks start on Sunday; a setting picks the rule." }] },
+  { question: "Which tests should run after the fix?", header: "Tests", multiSelect: true,
+    options: [{ label: "Parser tests", description: "npm test -- parser" }, { label: "All unit tests", description: "" },
+              { label: "End-to-end", description: "Slow: about 4 minutes" }] },
+];
 
 function send(message: PaneHostMessage): void {
   window.postMessage(message, "*");
@@ -24,7 +33,10 @@ const chat: PaneChat = {
   route: params.get("route") === "terminal" ? "terminal" : "tmux",
   busy: true,
   activity: "Bash: npm test -- parser",
-  permission: ask
+  permission: ask === "question"
+    ? { tool: "AskUserQuestion", line: questions[0].question, command: "", file: "", diff: [], always: "", questions,
+        request: "1-abcdef02", answer: "hook" }
+    : ask
     ? {
         tool: "Edit",
         line: "Edit: src/parse.ts",

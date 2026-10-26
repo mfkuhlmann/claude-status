@@ -236,6 +236,16 @@ still asks in the chat too; whichever you answer first counts. **Always
 allow** saves the rule Claude suggests, as its own *don't ask again* does. Chats in tmux can be
 answered without the hook, with their dialog's keys.
 
+**Claude's questions:** when Claude asks you a multiple-choice question, its
+row and its tab show each question with its options (choose one, or any for a
+question that takes several) and a field to answer in your own words, then
+**Send answers** or **Decline…** (with a note for Claude). Its notification
+has a button for each option when it's one question with one answer, then
+**Other…** (your own words); with more questions, **Answer…** goes through
+them one by one in VS Code's pickers. Your answers reach Claude as they would
+from its own dialog. This takes the same hook (without it, the question
+shows, to answer in the chat).
+
 **Review:** the tab's **Review** lists the files a chat changed with their
 added and removed lines, against how they were before the chat (from Claude's
 own backups), each with its diff, **Diff** (VS Code's diff editor) and

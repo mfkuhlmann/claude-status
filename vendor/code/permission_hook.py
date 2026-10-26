@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Claude Code's PermissionRequest hook for the Claude Status widget, so a
 permission prompt can be answered from the widget (Allow once, Always
-allow, Deny with a note) as well as in the chat.
+allow, Deny with a note) as well as in the chat; and Claude's questions
+(AskUserQuestion asks for a permission too: the answers go back in it).
 
 Claude runs it whenever a chat asks for a permission, side by side with its
 own dialog: whichever is answered first counts. It writes the request to

@@ -50,10 +50,17 @@ export interface NotifyOptions {
 
 const SOUND_RANK: Record<SoundKind, number> = { "": 0, done: 1, failed: 2, waiting: 3 };
 
-// What a chat waiting for a permission asks, in a line
+// What a chat waiting for a permission asks, in a line (Claude's questions: one after the other)
 export function askText(s: Session): string {
   const p = s.permission;
-  return p ? p.command || (p.file ? `Change ${p.file}` : p.line) : "";
+  if (!p) return "";
+  const questions = p.questions ?? [];
+  return questions.length ? questions.map((q) => q.question).join(" ") : p.command || (p.file ? `Change ${p.file}` : p.line);
+}
+
+// The title of its notification
+export function askTitle(s: Session): string {
+  return s.permission?.questions?.length ? `${s.name} asks you` : `${s.name} asks for a permission`;
 }
 const WAITING_QUIET_MS = 60000;
 
@@ -115,7 +122,7 @@ export class TransitionTracker {
         if (prev === "waiting" && asks && !this.toldAsks.has(sid) && opts.notifyWaiting) {
           // (the hook's request came a poll after the chat began to wait: now with its buttons)
           this.toldAsks.add(sid);
-          changes.notices.push({ key: sid, kind: "waiting", title: `${s.name} asks for a permission`,
+          changes.notices.push({ key: sid, kind: "waiting", title: askTitle(s),
                                  body: `${askText(s)} · ${s.cwdShort}${where}`, session: s, host });
         }
         if (prev === s.state) continue;
@@ -130,7 +137,7 @@ export class TransitionTracker {
             changes.notices.push({
               key: sid,
               kind: "waiting",
-              title: s.permission ? `${s.name} asks for a permission` : `${s.name} needs your input`,
+              title: s.permission ? askTitle(s) : `${s.name} needs your input`,
               body: `${s.permission ? askText(s) : s.detail || reasonText(s.reason)} · ${s.cwdShort}${where}`,
               session: s,
               host,

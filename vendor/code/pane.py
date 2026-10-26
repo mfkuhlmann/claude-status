@@ -18,8 +18,10 @@ its permission prompt and its review.
         that takes no text from outside asks first (how background: it goes
         on in the background; copy: the message goes to the clipboard).
         --after-turn: queued, it's sent once the chat's turn ends.
-  --answer REQUEST --decision allow|always|deny [--note T]
-        answer a permission request the hook relayed (permission_hook.py)
+  --answer REQUEST --decision allow|always|deny|answer [--note T] [--answers JSON]
+        answer a permission request the hook relayed (permission_hook.py);
+        Claude's questions (AskUserQuestion): answer, with JSON {question:
+        [chosen labels, or what you typed]}, or deny (decline, with a note)
   --keys CHAT --decision allow|always|deny [--note T] [--profile P]
         answer a permission prompt of a chat in tmux with its keys
   --review CHAT [--profile P]
@@ -240,24 +242,53 @@ def chat_conversation(home, extra_dirs, chat_id, profile_key=None, limit=PANE_IT
 
 # ---------------------------------------------------------------- permission requests the hook relays
 
-DECISIONS = ("allow", "always", "deny")
+DECISIONS = ("allow", "always", "deny", "answer")
 
 
-def decision_of(decision, note, suggestions):
-    """The hook's answer to Claude (its "decision") for the widget's button."""
+def answer_text(values, multi):
+    """One question's answer as Claude's dialog sends it: the option chosen
+    (or what you typed); several, comma-separated (one with ", " or a quote
+    in it quoted, as Claude quotes it)."""
+    values = [v.strip() for v in values if isinstance(v, str) and v.strip()]
+    if not multi:
+        return values[0] if values else ""
+    return ", ".join(json.dumps(v, ensure_ascii=False) if ", " in v or '"' in v else v for v in values)
+
+
+def question_answers(inp, answers):
+    """{question: answer text} for the AskUserQuestion call inp, from
+    answers {question: [labels or text]}: the questions it asks only."""
+    out = {}
+    for q in cs.question_view(inp):
+        given = answers.get(q["question"]) if isinstance(answers, dict) else None
+        text = answer_text(given if isinstance(given, list) else [given], q["multiSelect"])
+        if text:
+            out[q["question"]] = text
+    return out
+
+
+def decision_of(decision, note, suggestions, inp=None, answers=None):
+    """The hook's answer to Claude (its "decision") for the widget's button
+    (a question's: the call's input with the answers in it)."""
+    question = isinstance(inp, dict) and answers is not None
     if decision == "deny":
         note = (note or "").strip()
         if note:  # (said as yours: Claude reads it in the tool's result)
-            return {"behavior": "deny", "message": f"The user denied this and said: {note}"}
-        return {"behavior": "deny", "message": "The user denied this.", "interrupt": True}
+            said = "didn't answer" if question else "denied this"
+            return {"behavior": "deny", "message": f"The user {said} and said: {note}"}
+        return {"behavior": "deny", "message": "The user didn't answer." if question else "The user denied this.",
+                "interrupt": True}
     out = {"behavior": "allow"}
-    if decision == "always" and suggestions:
+    if question:
+        out["updatedInput"] = dict(inp, answers=answers)
+    elif decision == "always" and suggestions:
         out["updatedPermissions"] = suggestions
     return out
 
 
-def answer_request(cache_root, request_id, decision, note=""):
-    """Answer a relayed request: (ok, message)."""
+def answer_request(cache_root, request_id, decision, note="", answers=None):
+    """Answer a relayed request: (ok, message). A question takes "answer"
+    (answers: {question: [labels or text]}) or "deny"."""
     if decision not in DECISIONS:
         return False, f"Not an answer: {decision}"
     if not re.fullmatch(r"[0-9]+-[0-9a-f]{8}", request_id or ""):
@@ -266,13 +297,25 @@ def answer_request(cache_root, request_id, decision, note=""):
     req = cs.read_json(folder / (request_id + ".json"))
     if not isinstance(req, dict) or not cs.pid_alive(req.get("hookPid")):
         return False, "It isn't asking any more (answered in the chat?)"
-    answer = decision_of(decision, note, req.get("suggestions") or [])
+    inp, given = None, None
+    if req.get("tool") == cs.ASK_TOOL:
+        inp = req.get("input") if isinstance(req.get("input"), dict) else {}
+        if decision in ("allow", "always"):
+            return False, "Choose your answers first"
+        given = question_answers(inp, answers) if decision == "answer" else {}
+        if decision == "answer" and not given:
+            return False, "Choose your answers first"
+    elif decision == "answer":
+        return False, "It asks for a permission, not a question"
+    answer = decision_of(decision, note, req.get("suggestions") or [], inp, given)
     cs.write_json_atomic(folder / (request_id + ".answer.json"), answer)
     deadline = time.time() + 5
     while (folder / (request_id + ".json")).exists() and time.time() < deadline:
         time.sleep(0.1)
     if (folder / (request_id + ".json")).exists():
         return False, "The chat didn't take the answer: answer it there"
+    if inp is not None:
+        return True, "Answered" if decision == "answer" else "Not answered"
     return True, {"allow": "Allowed", "always": "Allowed, and from now on", "deny": "Denied"}[decision]
 
 
@@ -334,6 +377,8 @@ def answer_with_keys(entry, decision, note=""):
     number (Deny with a note: No, then the note as your next message)."""
     if decision not in DECISIONS:
         return False, f"Not an answer: {decision}"
+    if decision == "answer":
+        return False, "Answer its questions in the chat"
     base, target = tmux_base(entry)
     if base is None:
         return False, "It doesn't run in tmux: answer it in the chat"
@@ -853,7 +898,7 @@ def main(argv=None):
         i += 1
     action, target = None, None
     profile, how, note, decision, message, name = None, "auto", "", None, "", ""
-    session, text, stamp, limit, files, config_dirs = None, None, None, PANE_ITEMS, [], []
+    session, text, stamp, limit, files, config_dirs, answers = None, None, None, PANE_ITEMS, [], [], None
     after, off, remote, pretty, source = False, False, False, False, None
     actions = ("--conversation", "--send", "--answer", "--keys", "--review", "--undo", "--commit", "--reviewed",
                "--relay")
@@ -875,6 +920,11 @@ def main(argv=None):
             note = args.pop(0)
         elif arg == "--decision" and args:
             decision = args.pop(0)
+        elif arg == "--answers" and args:
+            try:
+                answers = json.loads(args.pop(0))
+            except ValueError:
+                answers = None
         elif arg == "--message" and args:
             message = args.pop(0)
         elif arg == "--name" and args:
@@ -938,7 +988,7 @@ def main(argv=None):
             else:
                 result = send(home, config_dirs, profile, target, text, session, how)
         elif action == "--answer":
-            ok, said = answer_request(cache_root, target, decision, note)
+            ok, said = answer_request(cache_root, target, decision, note, answers)
             result = {"ok": ok, "message": said}
         elif action == "--keys":
             entry = cs.find_chat_entry(home, config_dirs, target, profile)
