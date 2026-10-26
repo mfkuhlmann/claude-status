@@ -3,8 +3,8 @@ import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 import org.kde.kcmutils as KCM
-import org.kde.plasma.plasma5support as P5Support
 import org.kde.plasma.plasmoid
+import "hub"
 
 // The Claude accounts on this computer or an SSH host (code/accounts.py; a
 // host's through remote.py --accounts): add one (a ~/.claude-NAME folder that
@@ -88,10 +88,8 @@ KCM.SimpleKCM {
         helper.connectSource(command(args))
     }
 
-    P5Support.DataSource {
+    Exec {
         id: helper
-        engine: "executable"
-        connectedSources: []
         onNewData: (source, data) => {
             disconnectSource(source)
             const machine = page.pending[source]

@@ -584,6 +584,66 @@ class SeveralCopiesTests(unittest.TestCase):
         self.assertNotIn("remotePoller", main)
         self.assertNotRegex(main, r'connectSource\([^)]*--status')
 
+    def test_commands_run_in_a_datasource_of_their_own(self):
+        # Plasma tells every executable DataSource in plasmashell about each
+        # command that ends, and each keeps a property for its name for good:
+        # with ~30 DataSources a copy and names that never repeat, each new
+        # command took plasmashell longer, a second after a few hours, and
+        # the panel and the chat pane froze (2026-10-26). Only hub/Exec.qml
+        # makes DataSources, one per command, gone with its answer.
+        for path in sorted((ROOT / "ui").rglob("*.qml")):
+            if path.name != "Exec.qml":
+                self.assertFalse(re.search(r"plasma5support|DataSource \{", path.read_text()), path.name)
+        exec_ = (ROOT / "ui/hub/Exec.qml").read_text()
+        self.assertIn("runner.createObject(exec)", exec_)
+        self.assertRegex(exec_, r"disconnectSource\(source\)\s+destroy\(\)")
+        self.assertIn("Exec 1.0 Exec.qml", (ROOT / "ui/hub/qmldir").read_text())
+        # what runs on a clock goes under the same name each time
+        main = (ROOT / "ui/main.qml").read_text()
+        self.assertRegex(main, r'ScreenSaver\.GetActive"\)')
+        self.assertIn('(kind === "conversation" ? "" : " # " + Date.now())', (ROOT / "ui/ChatPane.qml").read_text())
+
+    @unittest.skipUnless(shutil.which("python3") and subprocess.run(
+        ["python3", "-c", "import PySide6.QtQuick, PySide6.QtCore as c, os; os.stat(os.path.join("
+         "c.QLibraryInfo.path(c.QLibraryInfo.LibraryPath.QmlImportsPath), 'org/kde/plasma/plasma5support'))"],
+        capture_output=True).returncode == 0, "needs PySide6 and Plasma's plasma5support QML module")
+    def test_a_command_costs_the_same_after_thousands(self):
+        # 20 idle copies beside one that runs 1500 commands with new names:
+        # a DataSource each took 0.8 ms a command at first and 112 ms at the
+        # end; with Exec it stays under a millisecond
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            qml = Path(tmp) / "t.qml"
+            qml.write_text(('import QtQuick\nimport "HUB"\nItem {\n  id: t\n'
+                            '  property int done: 0\n  signal batch()\n'
+                            '  Repeater { model: 20; Item { Exec {} } }\n'
+                            '  Exec { id: one; onNewData: (source, data) => { disconnectSource(source);'
+                            ' if (++t.done % 300 === 0) t.batch(); if (t.done < 1500) Qt.callLater(t.next) } }\n'
+                            '  function next() { one.connectSource("true # " + Date.now() + "." + done) }\n}\n')
+                           .replace("HUB", (ROOT / "ui/hub").as_uri()))
+            script = (
+                "import sys, time\n"
+                "from PySide6.QtCore import QUrl, QTimer\n"
+                "from PySide6.QtGui import QGuiApplication\n"
+                "from PySide6.QtQuick import QQuickView\n"
+                "app = QGuiApplication(sys.argv)\n"
+                "view = QQuickView()\n"
+                "view.setSource(QUrl.fromLocalFile(sys.argv[1]))\n"
+                "r = view.rootObject()\n"
+                "last = [time.thread_time()]\n"
+                "def batch():\n"
+                "    t = time.thread_time(); print(1000 * (t - last[0]) / 300, flush=True); last[0] = t\n"
+                "    r.property('done') >= 1500 and app.quit()\n"
+                "r.batch.connect(batch)\n"
+                "QTimer.singleShot(0, r.next)\n"
+                "QTimer.singleShot(120000, app.quit)\n"
+                "app.exec()\n")
+            out = subprocess.run(["python3", "-c", script, str(qml)], capture_output=True, text=True, timeout=180,
+                                 env=dict(__import__("os").environ, QT_QPA_PLATFORM="offscreen"))
+        costs = [float(line) for line in out.stdout.split()]
+        self.assertEqual(len(costs), 5, out.stderr[-2000:])
+        self.assertLess(costs[-1], 2 * costs[0] + 1, costs)
+
     def test_looping_animations_stop_under_a_window(self):
         # Every repeating timer and endless animation of the pets runs only
         # while it can be seen (playing), not just while the popup is open

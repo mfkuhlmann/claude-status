@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Plasma no longer slows down the longer it runs:** each command the widget ran (its checks, the chat pane's updates, a click) cost Plasma's shell a little more than the one before, in every copy of the widget, so after a few hours the panel, the desktop and the chat pane froze for a moment now and then, and the whole computer felt slow. Now each command costs the same, however long Plasma has been running (Plasma).
 - **The hole stays where it was:** pulling Talpa out of its burrow carried its hole along under it, shrinking within a third of a second, as if the hole were dragged by. Now the hole stays where Talpa was while you hold it, and fills in once Talpa has landed; it digs a new one where it lands, as before (Plasma).
 - **Plans line up:** a plan whose chat is gone had no *Send your changes* and *Continue the chat* buttons, so its time sat further right than the others' and fewer icons showed. Now every plan keeps all its buttons in the same places; those two are greyed out when the chat that made the plan isn't there any more.
 - **Tokens in the Recap:** a **Tokens** number beside *At API prices*, for the day, the 7 days or everything (**Day | Week | Overall**): all the tokens your chats read and wrote, against the period before, with its trend line; point at it for how many were new input, read from the cache, written to the cache and written by Claude. A row of the timeline says its tokens too when you point at its numbers. On the Plasma widget and in the VS Code extension.

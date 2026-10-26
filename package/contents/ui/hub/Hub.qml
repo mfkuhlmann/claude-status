@@ -1,6 +1,5 @@
 pragma Singleton
 import QtQuick
-import org.kde.plasma.plasma5support as P5Support
 
 // One status check for every copy of the widget in plasmashell (panel,
 // tray, one per desktop…): Plasma runs them all in one QML engine, where a
@@ -138,9 +137,7 @@ QtObject {
         }
     }
 
-    property P5Support.DataSource poller: P5Support.DataSource {
-        engine: "executable"
-        connectedSources: []
+    property Exec poller: Exec {
         onNewData: (source, data) => {
             disconnectSource(source)
             const command = hub.running[source]
