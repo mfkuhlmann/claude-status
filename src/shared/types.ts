@@ -232,9 +232,24 @@ export interface PermissionAsk {
   file: string; // the file it would change, or ""
   diff: string[]; // the change, as unified diff lines
   always: string; // what Always allow lets through, or "" (nothing to remember)
+  // Claude's multiple-choice questions (its AskUserQuestion tool), answered
+  // with "answer"; older backends leave it out
+  questions?: Question[];
   request: string | null; // the hook's request, which the extension can answer
   answer: "hook" | "keys" | ""; // how it can be answered from here ("": only in the chat)
 }
+
+// One of Claude's questions (claude_status.py: question_view): pick one of
+// its options, or several for a multiSelect one, or answer in your own words
+export interface Question {
+  question: string;
+  header: string; // a short label, e.g. "Database"
+  multiSelect: boolean;
+  options: { label: string; description: string }[];
+}
+
+// Answers to Claude's questions: {question: [the labels chosen, or what you typed]}
+export type Answers = Record<string, string[]>;
 
 // A chat's numbers (claude_status.py: stats_summary): your prompts, its tool
 // calls by name, tokens (subagents included), how long Claude worked
@@ -740,7 +755,7 @@ export interface ChatRef {
   plan?: { slug: string; path: string } | null; // the plan it made
 }
 
-export type Decision = "allow" | "always" | "deny";
+export type Decision = "allow" | "always" | "deny" | "answer"; // "answer": Claude's questions, with Answers
 
 // webview -> extension
 export type WebviewMessage =
@@ -748,7 +763,7 @@ export type WebviewMessage =
   | { type: "open"; chat: ChatRef }
   | { type: "openPane"; chat: ChatRef; tab?: "chat" | "review" } // the chat's tab: its conversation, a reply box, its review
   | { type: "openWindow"; chat: ChatRef } // its own terminal or Claude Code tab, whatever a click does
-  | { type: "answerPermission"; chat: ChatRef; decision: Decision; note?: string } // what a waiting chat asks
+  | { type: "answerPermission"; chat: ChatRef; decision: Decision; note?: string; answers?: Answers } // what a waiting chat asks
   | { type: "openInClaudeCode"; chat: ChatRef }
   | { type: "setReopenIn"; where: ReopenIn }
   | { type: "stop"; chat: ChatRef }

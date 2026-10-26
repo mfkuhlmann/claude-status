@@ -8,6 +8,7 @@ import { render } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { routeHint, testsText, TEXT_SCALES, type Conversation, type PaneChat, type PaneHostMessage, type PaneItem, type PaneMessage, type ReviewAnswer } from "../src/shared/pane";
 import { AskBox, Diff } from "./components/AskBox";
+import type { Answers, Decision } from "../src/shared/types";
 import { Tag } from "./components/Tag";
 import { Markdown } from "./util/markdown";
 
@@ -200,9 +201,9 @@ function ChatApp() {
     if (!text.trim()) return;
     post({ type: "send", text, how, afterTurn });
   };
-  const answer = (decision: "allow" | "always" | "deny", note: string) => {
+  const answer = (decision: Decision, note: string, answers?: Answers) => {
     setAnswering((n) => n + 1);
-    post({ type: "answer", decision, note });
+    post({ type: "answer", decision, note, answers });
   };
 
   const terminal = chat?.route === "terminal" || askHow;

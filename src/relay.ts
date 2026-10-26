@@ -19,7 +19,7 @@ export async function answerPermissionsHere(backend: Backend, dash: Dashboard): 
     {
       label: `${on ? "$(check) " : ""}Answer them from Claude Status too`,
       description: on ? "on now" : "",
-      detail: `Adds a hook to each Claude profile's settings.json${where}: a chat that asks for a permission shows Allow once, Always allow and Deny in its row, its tab and its notification. Claude still asks in the chat; the first answer counts.`,
+      detail: `Adds a hook to each Claude profile's settings.json${where}: a chat that asks for a permission shows Allow once, Always allow and Deny in its row, its tab and its notification, and Claude's questions show their options there to answer. Claude still asks in the chat; the first answer counts.`,
       on: true,
     },
     {

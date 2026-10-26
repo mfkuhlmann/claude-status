@@ -315,7 +315,7 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
         ) : null}
 
         {s.state === "waiting" && s.permission ? (
-          <AskBox ask={s.permission} max={6} onAnswer={(decision, note) => post({ type: "answerPermission", chat, decision, note })} />
+          <AskBox ask={s.permission} max={6} compact onAnswer={(decision, note, answers) => post({ type: "answerPermission", chat, decision, note, answers })} />
         ) : null}
 
         {showPeek ? <PeekPanel session={s} host={host} chat={chat} /> : null}

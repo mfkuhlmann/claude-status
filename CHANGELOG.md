@@ -13,6 +13,17 @@
   **Copy** button, quotes and tables. While it works, the last line says so
   with Claude's spinner. **A−** / **A+** beside its name (or Ctrl+wheel) set
   the text size, kept in the new setting `claudeStatus.chatTextScale`.
+- **Answer Claude's questions from the view:** when Claude asks you a
+  multiple-choice question (its questions with options to pick from), the
+  chat's row and its tab show each question with its options (choose one, or
+  any for a question that takes several) and a field to answer in your own
+  words, then **Send answers**, or **Decline…** (a note for Claude optional).
+  Its notification has a button for each option when it's one question with
+  one answer, then **Other…** (your own words); with more, **Answer…** goes
+  through them one by one in VS Code's pickers. In the tab, what a chat asks
+  takes at most half its height, so the conversation stays in sight. That
+  takes **Claude Status: Answer Permission Prompts from Claude Status…**;
+  Claude still asks in the chat too, and the first answer counts.
 
 ## 1.15.0
 

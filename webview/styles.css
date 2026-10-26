@@ -2225,6 +2225,49 @@ body.vscode-high-contrast .top.scrolled {
   margin-top: 4px;
 }
 
+/* Claude's questions (AskBox: QuestionForm) */
+.ask-question {
+  margin-top: 6px;
+}
+
+.ask-question-header {
+  font-size: 0.85em;
+}
+
+.ask-question-text {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.ask-option {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  margin: 2px 0;
+  cursor: pointer;
+}
+
+.ask-option > input {
+  margin: 2px 0 0;
+}
+
+.ask-option-desc {
+  display: block;
+  font-size: 0.9em;
+}
+
+.ask-note.ask-own {
+  display: block;
+  width: 100%;
+  margin-top: 2px;
+}
+
+/* In the chat tab, what it asks takes at most half the height: the conversation stays in sight */
+body.chat-page .ask-box {
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
 .ask-note,
 .pane-reply {
   flex: 1 1 12em;

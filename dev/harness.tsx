@@ -71,6 +71,13 @@ function sendState(): void {
   // (?stars=1&open=1: the starred lists unfolded too)
   if (params.get("stars") === "1" && params.get("open") === "1" && first)
     for (const fold of ["|chats", "|plans"]) if (!uiState.get().starred[first.id + fold]) toggleStarred(first.id + fold);
+  // ?question=1: the chat that waits asks Claude's questions instead of a permission
+  const waiting = groups.flatMap((g) => g.sessions).find((s) => s.state === "waiting" && s.permission);
+  if (params.get("question") === "1" && waiting?.permission)
+    waiting.permission = { ...waiting.permission, tool: "AskUserQuestion", line: "Which changelog style?", command: "", file: "", diff: [], always: "",
+      questions: [{ question: "Which changelog style should the 2.0 notes use?", header: "Style", multiSelect: false,
+                    options: [{ label: "Keep a Changelog (Recommended)", description: "Added / Changed / Fixed sections" },
+                              { label: "One paragraph per feature", description: "As the 1.x notes" }] }] };
   // ?banner=0: without the "Demo data" line, for the README's screenshots
   if (params.get("banner") === "0") state.demo = false;
   // ?keep=1: the first chat at work keeps going (after each usage limit), and one gave up
