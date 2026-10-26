@@ -16,8 +16,8 @@
 
 import type { ChatRef, Session } from "../../src/shared/types";
 import { stateText } from "../../src/shared/model";
-import { Pictures } from "../../vendor/talpa/pictures.mjs";
-import { BOX, LILAC, Talpa, calmColors, drawHole } from "../../vendor/talpa/talpa.mjs";
+import { Films } from "../../vendor/talpa/films.mjs";
+import { BOX, LILAC, Talpa, calmColors, drawHole, drawHoleSide } from "../../vendor/talpa/talpa.mjs";
 import type { StageChat } from "./api";
 import { PALETTE, textOn } from "./colors";
 import { Timer, Tween, ease, reducedMotion } from "./motion";
@@ -88,13 +88,22 @@ export class Pet {
   private landing = false; // picked up, until it has landed and dug in: drawn live
 
   readonly talpa: Talpa;
-  // Talpa on its view (a canvas), drawn from its sheets (canvases off the
-  // page): a chat's pet as pictures (vendor/talpa/pictures.mjs), the hero
-  // live on its one sheet
-  private readonly pictures: Pictures;
+  // Talpa on its view (a canvas), as a film (vendor/talpa/films.mjs): each
+  // picture of a move drawn once on a sheet (a canvas off the page) and shown
+  // again as the move goes round, what flies about drawn over it; the open
+  // hole is drawn once on sheets of its own and copied into each picture
+  private readonly film: Films;
   private readonly sheets: HTMLDivElement;
   private readonly view: HTMLCanvasElement;
   private readonly canvases: HTMLCanvasElement[] = [];
+  private readonly holes: HTMLCanvasElement[] = [];
+  // Where it's drawn: at px, but while you hold it it trails your hand on a
+  // spring and swings with how fast you move it (and wobbles back after)
+  private shownX: number;
+  private shownV = 0;
+  private swing = 0;
+  private swingV = 0;
+  private lastStep = 0;
   // The hole it was pulled out of: empty where it was while you hold it, under
   // the pet (the hole doesn't come along), filled in once the pet has landed
   private readonly leftHole: HTMLCanvasElement;
@@ -126,6 +135,7 @@ export class Pet {
     this.colorIndex = colorIndex;
     this.homeX = homeX;
     this.px = homeX;
+    this.shownX = homeX;
     if (chat) this.takeChat(chat);
 
     const clock = stage.clock;
@@ -168,8 +178,15 @@ export class Pet {
 
     // Drawing: Talpa on its sheets (with room around it for what it throws
     // and holds up), its name tag, and a grab area around its body
-    this.pictures = new Pictures(this.talpa, this.lone ? 1 : 5);
-    this.pictures.slackMs = 10; // (frames come every 16.7 ms)
+    // The hero: every frame, live until a new pose has settled, breathing at
+    // rest; a chat's pet: 30 pictures a second, pictures in between poses,
+    // still at rest
+    this.film = new Films(
+      this.talpa,
+      this.lone
+        ? { frameMs: 16.7, maxFrames: 24, sheets: 26, tweenMs: 0, restMs: 200, slackMs: 8 }
+        : { frameMs: 33.3, maxFrames: 16, sheets: 20, tweenMs: 200, tweens: 4, slackMs: 8 },
+    );
     this.sheets = div("cs-pet-sheets");
     this.view = document.createElement("canvas");
     this.view.className = "cs-pet-sheet";
@@ -331,7 +348,7 @@ export class Pet {
 
   themeChanged(): void {
     this.talpa.setTheme(this.stage.theme());
-    this.pictures.reset(); // (the pictures are drawn again)
+    this.film.reset(); // (the pictures are drawn again)
     this.changed();
   }
 
@@ -439,7 +456,8 @@ export class Pet {
       this.talpa.react("shy");
       this.say("Aww, stop it…");
     } else {
-      this.talpa.react("pet");
+      const r = Math.random();
+      this.talpa.react(r < 0.2 ? "love" : r < 0.35 ? "wink" : r < 0.45 ? "blowkiss" : "pet");
       this.say(this.petLine());
     }
   }
@@ -450,7 +468,7 @@ export class Pet {
       this.say("…five more minutes.");
       return;
     }
-    this.talpa.react("dance");
+    this.talpa.react(Math.random() < 0.4 ? "boogie" : "dance");
     this.say("♪ ♫");
   }
 
@@ -510,7 +528,7 @@ export class Pet {
   // Something happened to its chat (or, for the hero, to an account)
   event(kind: string, text: string): void {
     if (this.held || this.leaving) return; // (a reaction now would stop it digging away)
-    const action = ({ done: "finished", failed: "failed", stopped: "shrug", limit: "battery", oops: "confused", reset: "charged" } as
+    const action = ({ done: Math.random() < 0.4 ? "yay" : "finished", failed: "failed", stopped: "shrug", limit: "battery", oops: "confused", reset: "charged" } as
       Record<string, string>)[kind];
     this.talpa.react(action || "alert");
     this.say(text);
@@ -572,7 +590,7 @@ export class Pet {
 
   // ------------------------------------------------------------ drawing
 
-  private put(el: HTMLElement, name: string, prop: "transform" | "cursor" | "maxWidth", value: string): void {
+  private put(el: HTMLElement, name: string, prop: "transform" | "transformOrigin" | "cursor" | "maxWidth", value: string): void {
     if (this.drawn[name] === value) return;
     this.drawn[name] = value;
     el.style[prop] = value;
@@ -583,9 +601,15 @@ export class Pet {
     const s = this.stage,
       box = s.box,
       ground = this.ground;
+    const now = s.clock.now();
+    this.spring(now);
     const px = Math.round(this.px * 10) / 10,
-      lift = Math.round(this.lift * 10) / 10;
-    this.put(this.sheets, "sheets", "transform", `translate(${px - s.canvasW / 2}px, ${ground - lift - s.floorY}px)`);
+      shown = Math.round(this.shownX * 10) / 10,
+      lift = Math.round(this.lift * 10) / 10,
+      swing = Math.round(this.swing * 10) / 10;
+    this.put(this.sheets, "origin", "transformOrigin", `${s.canvasW / 2}px ${s.floorY - (box * 27) / 64}px`);
+    this.put(this.sheets, "sheets", "transform",
+      `translate(${shown - s.canvasW / 2}px, ${ground - lift - s.floorY}px)${swing ? ` rotate(${swing}deg)` : ""}`);
     if (this.tag) {
       this.put(this.tag, "tag", "transform", `translate(${px}px, ${ground + (box * 6) / 64}px) translateX(-50%)`);
       this.put(this.tag, "tagWidth", "maxWidth", `${s.tagWidth}px`);
@@ -599,31 +623,53 @@ export class Pet {
       this.paintHole();
     }
 
-    const now = s.clock.now();
     this.talpa.tick(now);
     this.draw(now);
   }
 
-  // The hero, and a pet you hold until it has landed: as often as that shows
-  // something new (talpa.frameMs: 25 pictures a second for quick moves, down
-  // to 5 at rest); each picture costs. A chat's pet: pictures, each drawn
-  // once and shown while it's what Talpa looks like, a new pose fading in
-  // mixed with the one shown (so the page never shows through Talpa), a
-  // quick move going round its pictures; only big moves are drawn live.
+  // A damped spring for where it's drawn and how it swings while you hold it
+  // (a QML SpringAnimation in the widget); at rest it's simply where it is
+  private spring(now: number): void {
+    const dt = Math.min(0.05, Math.max(0, (now - (this.lastStep || now)) / 1000));
+    this.lastStep = now;
+    const unit = this.stage.box / 64;
+    const moving = this.held || Math.abs(this.shownV) > 0.5 || Math.abs(this.px - this.shownX) > 0.2
+      || Math.abs(this.swing) > 0.2 || Math.abs(this.swingV) > 0.5;
+    if (!moving || reducedMotion()) {
+      this.shownX = this.px;
+      this.shownV = this.swing = this.swingV = 0;
+      return;
+    }
+    // (stiffness and damping per second, about the widget's spring 5 / damping 0.32 and 3 / 0.16)
+    if (this.held) {
+      this.shownV += (140 * (this.px - this.shownX) - 8.3 * this.shownV) * dt;
+      this.shownX += this.shownV * dt;
+    } else {
+      this.shownX = this.px;
+      this.shownV = 0;
+    }
+    const target = this.held ? Math.max(-30, Math.min(30, ((this.px - this.shownX) * 1.8) / unit)) : 0;
+    this.swingV += (90 * (target - this.swing) - 3 * this.swingV) * dt;
+    this.swing += this.swingV * dt;
+    this.stage.invalidate();
+  }
+
+  // As a film (vendor/talpa/films.mjs): a picture of a move drawn once and
+  // shown again round after round, a new pose on its way through pictures in
+  // between (the hero: live until it has settled), a big move live. Drawn
+  // live while you hold it, until it has landed.
   private draw(now: number): void {
-    const p = this.pictures;
-    p.pictures = !this.lone && !this.landing;
-    p.fadeMs = this.stage.live && !reducedMotion() ? 200 : 0;
-    let changed = p.tick(now);
-    if (this.paintSheets()) changed = p.tick(now) || true; // (drawn at once: shown at once)
+    const f = this.film;
+    f.on = !this.landing && !reducedMotion();
+    let changed = f.tick(now);
+    if (this.paintSheets()) changed = true; // (drawn at once: shown at once)
     if (changed) this.compose();
   }
 
   // Draws the sheets that need it; true if there were any
   private paintSheets(): boolean {
     const s = this.stage,
-      p = this.pictures,
-      box = s.box,
+      f = this.film,
       k = devicePixelRatio || 1,
       w = Math.round(s.canvasW * k),
       h = Math.round(s.canvasH * k);
@@ -635,29 +681,54 @@ export class Pet {
       }
       this.view.style.width = `${s.canvasW}px`;
       this.view.style.height = `${s.canvasH}px`;
-      p.reset();
-      p.front.paint = true;
+      this.paintHoles(w, h);
+      f.reset();
     }
     let painted = false;
-    for (const sheet of p.sheets) {
+    for (const sheet of f.sheets) {
       if (!sheet.paint) continue;
-      sheet.paint = false;
       if (!this.canvases[sheet.index]) {
         this.canvases[sheet.index] = document.createElement("canvas");
         this.canvases[sheet.index].width = w;
         this.canvases[sheet.index].height = h;
       }
-      const ctx = this.canvases[sheet.index].getContext("2d");
+      const ctx = this.begin(this.canvases[sheet.index]);
       if (!ctx) continue;
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.clearRect(0, 0, w, h);
-      ctx.save();
-      ctx.setTransform((k * box) / 64, 0, 0, (k * box) / 64, k * box * 0.3, k * box * 0.45);
-      p.paint(sheet, ctx);
-      ctx.restore();
+      f.paint(sheet, ctx);
       painted = true;
     }
     return painted;
+  }
+
+  // A sheet cleared, its context at the box's transform
+  private begin(canvas: HTMLCanvasElement): CanvasRenderingContext2D | null {
+    const box = this.stage.box,
+      k = devicePixelRatio || 1;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.setTransform((k * box) / 64, 0, 0, (k * box) / 64, k * box * 0.3, k * box * 0.45);
+    return ctx;
+  }
+
+  // The open hole's back and front, turned right and left: drawn once at
+  // this size, copied into each picture pixel for pixel
+  private paintHoles(w: number, h: number): void {
+    for (let i = 0; i < 4; i++) {
+      const c = this.holes[i] ?? (this.holes[i] = document.createElement("canvas"));
+      c.width = w;
+      c.height = h;
+      const ctx = this.begin(c);
+      if (!ctx) {
+        this.talpa.holeImage = null;
+        return;
+      }
+      drawHoleSide(ctx, i % 2 ? "front" : "back", i >= 2);
+    }
+    this.talpa.holeImage = (part, left) => this.holes[(left ? 2 : 0) + (part === "front" ? 1 : 0)];
   }
 
   // The empty hole it left, when it has changed (or the zoom has)
@@ -689,27 +760,22 @@ export class Pet {
     drawHole(ctx, this.leftOpen);
   }
 
-  // The view: the sheet in front or, while a pose fades into the next, both
-  // mixed, (1 - mix) × front + mix × next, added up ("lighter"): where both
-  // cover, nothing shows through
+  // The view: the sheet in front, and what flies about over it
   private compose(): void {
-    const p = this.pictures,
-      front = this.canvases[p.front.index],
-      coming = p.coming ? this.canvases[p.coming.index] : undefined,
-      ctx = this.view.getContext("2d");
+    const f = this.film,
+      front = this.canvases[f.front.index];
+    const ctx = this.view.getContext("2d");
     if (!ctx) return;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.globalCompositeOperation = "source-over";
-    ctx.globalAlpha = 1;
     ctx.clearRect(0, 0, this.view.width, this.view.height);
-    if (front) {
-      ctx.globalAlpha = coming ? 1 - p.mix : 1;
-      ctx.drawImage(front, 0, 0);
-    }
-    if (coming) {
-      ctx.globalCompositeOperation = "lighter";
-      ctx.globalAlpha = p.mix;
-      ctx.drawImage(coming, 0, 0);
+    if (front) ctx.drawImage(front, 0, 0);
+    if (f.fx.on) {
+      const box = this.stage.box,
+        k = devicePixelRatio || 1;
+      ctx.setTransform((k * box) / 64, 0, 0, (k * box) / 64, k * box * 0.3, k * box * 0.45);
+      f.paintFx(ctx);
+    } else {
+      f.fx.paint = false;
     }
   }
 

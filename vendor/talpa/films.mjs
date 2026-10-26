@@ -1,0 +1,184 @@
+// Talpa (talpa.mjs) as a film: it moves smoothly without being drawn every
+// frame. Each picture of a quick move (a round of typing, a wave, a bounce)
+// is drawn once, kept, and shown again as the move goes round; a new pose
+// moves there through a few pictures in between (or is drawn live until it
+// has settled: tween 0); a big move (a jump, popping out of its burrow) is
+// drawn live; what flies about (dirt, hearts, z's) is drawn on a sheet of its
+// own over it, only while there is any. pictures.mjs did the same with four
+// pictures a move and a fade between poses (GNOME still does).
+//
+//   const film = new Films(talpa, { sheets: 12, frameMs: 33 });
+//   every tick: talpa.tick(now); const changed = film.tick(now); then
+//   - each sheet s with s.paint set: clear it and draw it with
+//     film.paint(s, ctx), ctx at the box's transform as for talpa.draw,
+//     before the next frame shows (a QML Canvas paints before the frame,
+//     an HTML canvas at once);
+//   - show film.front, no other sheet;
+//   - film.fx: if fx.paint, clear what flies about and draw it with
+//     film.paintFx(ctx); show it over Talpa while fx.on.
+//
+// Plain ES2017 (see paths.mjs).
+
+// (what pictures in between would show moving: else the new pose just shows)
+const moved = (a, b) => a.st.depth !== b.st.depth || a.st.arms !== b.st.arms || a.st.plume !== b.st.plume || a.st.sip !== b.st.sip;
+
+export class Films {
+    constructor(talpa, opts) {
+        opts = opts || {};
+        this.talpa = talpa;
+        this.on = true;                          // false: drawn live (a pet you hold)
+        this.frameMs = opts.frameMs || 33;       // a quick move's pictures at least this far apart; live ones too
+        this.maxFrames = opts.maxFrames || 12;   // and at most this many a round
+        this.restMs = opts.restMs || 0;          // at rest: drawn live (breathing, the lamp's glow) at most this often; 0: one picture
+        this.tweenMs = opts.tweenMs === undefined ? 150 : opts.tweenMs;   // a new pose: on its way there this long (0: live until settled)
+        this.tweens = opts.tweens || 3;          // in that many pictures
+        this.slackMs = opts.slackMs === undefined ? 5 : opts.slackMs;   // how much early a tick may come and still draw
+        this.sheets = [];
+        for (let i = 0; i < Math.max(2, opts.sheets || 8); i++)
+            this.sheets.push({ index: i, key: '~', paint: false, usedAt: 0, d: null, from: null, p: 1 });
+        this.front = this.sheets[0];
+        this.shown = null;                       // the film's picture shown last (talpa.still()), null while live
+        this.tween = null;                       // a pose on its way: { from, at }
+        this.liveAt = -1e9;
+        this.fx = { on: false, paint: false, at: -1e9 };
+    }
+
+    // New colors, theme or size: every picture is drawn again, what shows at once
+    reset() {
+        for (const s of this.sheets) {
+            if (s === this.front)
+                s.paint = true;
+            else if (!s.paint)
+                s.key = '~';
+        }
+        this.liveAt = -1e9;
+        this.fx.at = -1e9;
+        this.shown = null;
+        this.tween = null;
+    }
+
+    // Returns true when what shows changed
+    tick(now) {
+        const t = this.talpa;
+        let changed = this.tickFx(now);
+        const d = this.on ? t.still(this.frameMs, this.maxFrames) : null;
+        let every = 0;   // drawn live this often
+        if (!d)
+            every = this.on ? this.frameMs : Math.max(this.frameMs, t.frameMs >= 200 ? 2 * this.frameMs : this.frameMs);
+        else if (this.tweenMs <= 0 && !t.settled)
+            every = this.frameMs;
+        else if (d.rest && this.restMs > 0 && !this.tween)
+            every = t.frameMs >= 200 ? this.restMs : t.frameMs >= 80 ? 2 * this.frameMs : this.frameMs;
+        if (every > 0) {
+            this.tween = null;
+            this.shown = d && this.tweenMs <= 0 ? d : null;
+            return this.live(now, every) || changed;
+        }
+        let pic = { key: d.key, d: d, from: null, p: 1 };
+        // a new pose: on its way there through pictures in between
+        let was = this.shown;
+        if (this.tween && now - this.tween.at >= this.tweenMs) {
+            this.tween = null;
+            was = this.shown = d;   // (there)
+        }
+        if (!this.tween && was && was.pose !== d.pose && was.left === d.left && this.tweenMs > 0 && moved(was, d))
+            this.tween = { from: was, at: now };
+        if (this.tween) {
+            const k = Math.min(this.tweens, 1 + Math.floor((now - this.tween.at) * this.tweens / this.tweenMs));
+            const from = this.tween.from;
+            pic = { key: from.key + '>' + d.key + '@' + k, d: d, from: from, p: k / (this.tweens + 1) };
+        } else {
+            this.shown = d;
+        }
+        return this.show(pic, now) || changed;
+    }
+
+    // Drawn live on the sheet in front (or the one unused longest)
+    live(now, every) {
+        let s = this.front;
+        if (s.key !== '') {
+            s = this.free();
+            s.key = '';
+            s.d = null;
+            this.liveAt = -1e9;
+        }
+        let changed = s !== this.front;
+        this.toFront(s, now);
+        if (now - this.liveAt >= every - this.slackMs) {
+            this.liveAt = now;
+            s.paint = true;
+            changed = true;
+        }
+        return changed;
+    }
+
+    show(pic, now) {
+        if (this.front.key === pic.key)
+            return false;
+        let s = null;
+        for (const sheet of this.sheets) {
+            if (sheet.key === pic.key)
+                s = sheet;
+        }
+        if (!s) {
+            s = this.free();
+            s.key = pic.key;
+            s.d = pic.d;
+            s.from = pic.from;
+            s.p = pic.p;
+            s.paint = true;
+        }
+        this.toFront(s, now);
+        return true;
+    }
+
+    // The sheet unused longest (never the one in front)
+    free() {
+        let free = null;
+        for (const s of this.sheets) {
+            if (s !== this.front && (!free || s.usedAt < free.usedAt))
+                free = s;
+        }
+        return free;
+    }
+
+    toFront(s, now) {
+        this.front.usedAt = now;
+        s.usedAt = now;
+        this.front = s;
+    }
+
+    // What flies about: drawn as often as it moves (z's float up slowly)
+    tickFx(now) {
+        const fx = this.fx, flying = this.talpa.particles(now);
+        if (!flying) {
+            if (!fx.on)
+                return false;
+            fx.on = false;
+            return true;
+        }
+        const every = flying === 1 ? Math.max(this.frameMs, 200) : this.frameMs;
+        const changed = !fx.on || now - fx.at >= every - this.slackMs;
+        fx.on = true;
+        if (changed) {
+            fx.at = now;
+            fx.paint = true;
+        }
+        return changed;
+    }
+
+    // Draws sheet s: its picture, or Talpa now (live)
+    paint(s, ctx) {
+        if (s.key === '')
+            this.talpa.draw(ctx, true);
+        else if (s.d)
+            this.talpa.drawFilm(ctx, s.d, s.from, s.p);
+        s.paint = false;
+    }
+
+    paintFx(ctx) {
+        this.fx.paint = false;
+        if (this.fx.on)
+            this.talpa.drawParticles(ctx, this.talpa.now);
+    }
+}

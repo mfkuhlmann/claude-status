@@ -226,7 +226,7 @@ test("every mood and action a pet asks Talpa for is one it knows", () => {
   // what the pets react with: react("…"), the events' actions and the usage limit's
   const source = readFileSync(path.join(repo, "webview", "pets", "pet.ts"), "utf8");
   const reacts = [...source.matchAll(/react\(([^;]*)\);/g)].map((m) => m[1]);
-  const events = /\{ done: "finished"[^}]*\}/.exec(source)![0];
+  const events = /\{ done: [^}]*\}/.exec(source)![0];
   const names = new Set([...reacts, events].flatMap((s) => [...s.matchAll(/"(\w+)"/g)].map((m) => m[1])));
   assert.ok(names.has("dig") && names.has("charged") && names.has("mindblown"), [...names].join(" "));
   for (const name of names) assert.ok(name in ACTIONS, `Talpa has no "${name}"`);
@@ -243,7 +243,7 @@ test("a pet on a stage in view draws itself, the canvas as sharp as the screen",
   assert.equal(canvas.width, Math.round(stage.canvasW * 2)); // devicePixelRatio 2
   assert.ok(pet.canvases.some((c: Any) => c.drawn.includes("fill")), "nothing drawn");
   assert.ok(canvas.drawn.includes("drawImage"), "not shown");
-  assert.equal(pet.canvases[0].width, canvas.width);
+  assert.equal(pet.canvases.find(Boolean).width, canvas.width); // (sheets are made as they are needed)
   assert.equal(canvas.style.width, `${stage.canvasW}px`);
   stage.destroy();
 });
@@ -402,6 +402,55 @@ test("while you hold a pet nothing moves it", () => {
   assert.equal(pet.px, 200);
   assert.equal(pet.talpa.held, true);
   assert.equal(pet.talpa.run, null, "it acts while you hold it");
+  stage.destroy();
+});
+
+test("a pet you hold trails your hand on a spring and swings, then wobbles back", () => {
+  const s = account();
+  s.give([chat("p/1")]);
+  s.lay();
+  s.show();
+  const pet = s.stage.petFor("p/1");
+  wait(pet, 3000);
+  const clock = s.stage.clock as Any;
+  const frame = () => {
+    clock.base += 16;
+    pet.render();
+  };
+  frame();
+  pet.pickUp();
+  const from = pet.px;
+  pet.px = from + s.stage.gu * 8; // a quick pull to the right
+  frame();
+  assert.ok(pet.shownX < pet.px && pet.shownX >= from, "it's drawn where your hand is at once");
+  assert.ok(pet.swing > 0, "it doesn't swing");
+  for (let i = 0; i < 120; i++) frame();
+  assert.ok(Math.abs(pet.shownX - pet.px) < 1, "it never catches up");
+  pet.drop();
+  pet.faller.step(1e15);
+  for (let i = 0; i < 200; i++) frame();
+  assert.equal(pet.swing, 0, "it keeps swinging");
+  assert.equal(pet.shownX, pet.px);
+  s.stage.destroy();
+});
+
+test("the open hole is drawn once and copied into each picture", () => {
+  const { stage, lay, show, give } = account();
+  give([chat("p/1")]);
+  lay();
+  show();
+  const pet = stage.petFor("p/1");
+  stage.render();
+  assert.equal(pet.holes.length, 4); // back and front, turned right and left
+  const drawnOnce = pet.holes.map((c: Any) => c.drawn.length);
+  assert.ok(drawnOnce.every((n: number) => n > 10));
+  assert.equal(pet.talpa.holeImage("front", true), pet.holes[3]);
+  const clock = stage.clock as Any;
+  for (let i = 0; i < 100; i++) {
+    clock.base += 33;
+    stage.render();
+  }
+  assert.deepEqual(pet.holes.map((c: Any) => c.drawn.length), drawnOnce, "the hole was drawn again");
   stage.destroy();
 });
 

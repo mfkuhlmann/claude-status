@@ -24,11 +24,12 @@ export const LILAC = art.LILAC;
 export const calmColors = art.calmColors;
 
 const KEYS = ['eyes', 'mouth', 'arms', 'plume', 'body', 'prop', 'tail', 'blush', 'think', 'orbit', 'walk', 'held', 'sip',
-              'fail', 'depth', 'tunnel', 'hole', 'lamp', 'gum'];
+              'fail', 'depth', 'tunnel', 'hole', 'lamp', 'gum', 'bite'];
 const DEPTH = { out: -0.5, high: 6, half: 10, low: 13, peek: 19, hidden: 42, gone: 74 };
 const ARMS = { rest: [16, -16], up: [150, -150], hold: [16, 35], sip: [16, 62], both: [-50, 50], chin: [16, 60], scratch: [16, -165],
                ear: [16, 153], scope: [16, -164], sign: [16, -150], balloon: [150, -16], cover: [-101, 101], juggle: [-20, 20],
-               type: [-38, 38], held: [60, -60], wave: [16, -145], waveboth: [145, -145], dance: [90, -90], flail: [70, -70], throw: [16, -140] };
+               type: [-38, 38], held: [60, -60], wave: [16, -145], waveboth: [145, -145], dance: [90, -90], flail: [70, -70], throw: [16, -140],
+               selfie: [16, -152] };
 const BLINKING = { open: 1, wide: 1, sad: 1, tired: 1, wink: 1 };
 // How often a picture is worth drawing (frameMs): quick moves want 25 a
 // second, slow ones 12; at rest (breathing, the lamp's glow) 5 show it all.
@@ -222,6 +223,15 @@ const TUNNEL_BEAT = 260;
 const ONE_WAY = { waveboth: 1, juggle: 1, nod: 1, phone: 1 };   // (halfway back doesn't look like halfway there)
 const ONCE = { hop: 550, jump: 800, spin: 1100, jolt: 400, tumble: 1000, land: 400 };   // (ms; a hop or a jump × it)
 const BIG_DEPTH = 8;   // (from low to high is no big move, from half to peeking out is)
+// A film (films.mjs) plays a quick move as it is, round after round: each of
+// its pictures drawn once. What's eased between poses settles within
+// SETTLE_MS (the arms in about four of their 70 ms); TWEENED is what moves
+// between two pictures of a film when a pose changes.
+// A move that happens once and isn't big (a stretch, a throw, a twirl of the
+// lamp) has no pictures either: a film draws it live (ms it takes, × it).
+const SETTLE_MS = 280;
+const TWEENED = ['depth', 'armL', 'armR', 'armLy', 'armRy', 'plume', 'lx', 'ly', 'sip'];
+const ONE_SHOT = { body: { stretch: 1300, inhale: 450, trip: 1500 }, arms: { throw: 550 }, plume: { flick: 400, twirl: 800 } };
 
 // ---------------------------------------------------------------- the hole
 
@@ -243,6 +253,19 @@ export function drawHole(ctx, hole) {
     holePart(ctx, hole, art.holeFront);
 }
 
+// The open hole's back or front ('back', 'front'), turned left or not, in
+// the 64 × 64 box: a host may draw these once on sheets of their own and
+// give them to Talpa (holeImage): half of what drawing it costs is its hole
+export function drawHoleSide(ctx, part, left) {
+    ctx.save();
+    if (left) {
+        ctx.translate(BOX, 0);
+        ctx.scale(-1, 1);
+    }
+    holePart(ctx, 1, part === 'front' ? art.holeFront : art.holeBack);
+    ctx.restore();
+}
+
 // ---------------------------------------------------------------- the creature
 
 export class Talpa {
@@ -254,6 +277,9 @@ export class Talpa {
         this.travels = !!opts.travels;    // may dig over to another spot (the host moves it: onTravel)
         this.onTravel = null;
         this.facingLeft = false;
+        // (part, left) => the open hole's side drawn by drawHoleSide on a sheet the
+        // size of the canvas Talpa's drawn on, at the same transform; null: drawn
+        this.holeImage = null;
         this.mood = 'idle';
         this.base = Object.assign({}, MOODS.idle.base);
         this.st = {};
@@ -272,6 +298,8 @@ export class Talpa {
         this.bigAt = 0;
         this.landsAt = 0;         // what flew off during it has landed by then
         this.away = false;        // it left (leave): it stays down there until it arrives again
+        this.settled = false;     // what's eased between poses is where it's going (see films)
+        this.easeAt = 0;          // when that last changed
         this.fx = [];
         this.v = { depth: DEPTH.half, depthFrom: DEPTH.half, depthTo: DEPTH.half, depthAt: -1e9, hole: 1, holeFrom: 1, holeTo: 1,
                    holeAt: -1e9, armL: 16, armR: -16, plume: 0, lx: 0, ly: 0, sip: 0 };
@@ -432,6 +460,9 @@ export class Talpa {
         }
         st.it = step.it || 1;
         st.look = step.look || this.base.look || null;
+        if (st.depth !== prev.depth || st.arms !== prev.arms || st.plume !== prev.plume || st.sip !== prev.sip
+            || String(st.look) !== String(prev.look))
+            this.easeAt = this.now;
         if (step.gum)
             st.gum = String(step.gum);
         this.st = st;
@@ -536,6 +567,18 @@ export class Talpa {
         this.big = big;
         if (big)
             this.landsAt = this.fx.reduce((t, p) => p.born >= this.bigAt ? Math.max(t, p.born + (p.o.dur || 1.6) * 1000) : t, now);
+        // The new pose has settled (a film shows it from its pictures again)
+        this.settled = !big && dp >= 1 && hp >= 1 && now - this.easeAt >= SETTLE_MS && !this.oneShot();
+    }
+
+    // A move that happens once and has no pictures is under way (see films)
+    oneShot() {
+        for (const key in ONE_SHOT) {
+            const ms = ONE_SHOT[key][this.st[key]];
+            if (ms !== undefined && this.now - (this.since[key] || 0) < ms * (key === 'plume' ? Number(this.st.it) : 1))
+                return true;
+        }
+        return false;
     }
 
     think() {
@@ -617,12 +660,18 @@ export class Talpa {
         const at = beats => beat * beats / 2;
         s.now = 1e6 + at(PROP_BEATS[st.prop] || (st.tunnel === '1' ? TUNNEL_BEAT : 0));
         s.pose(step);
+        this.placeMoves(s, st, at);
+        s.draw(ctx);
+    }
+
+    // (the still one's quick moves where at(beats) has them)
+    placeMoves(s, st, at) {
         const arms = ARM_BEATS[st.arms] !== undefined ? armMove(st.arms, at(ARM_BEATS[st.arms])) : null;
+        s.v.armLy = arms ? arms[2] : 0;
+        s.v.armRy = arms ? arms[3] : 0;
         if (arms) {
             s.v.armL = arms[0];
             s.v.armR = arms[1];
-            s.v.armLy = arms[2];
-            s.v.armRy = arms[3];
         }
         if (st.tunnel === '1')
             s.v.plume = plumeAngle('wild', at(PLUME_BEATS.wild), 1);
@@ -630,13 +679,108 @@ export class Talpa {
             s.v.plume = plumeAngle(st.plume, at(PLUME_BEATS[st.plume]), 1);
         // (a move that happens once shows as done)
         s.since.body = s.now - (BODY_BEATS[st.body] !== undefined ? at(BODY_BEATS[st.body]) : 1e7);
-        s.draw(ctx);
+    }
+
+    // ------------------------------------------------------------ films (see films.mjs)
+
+    // The quick moves under way: [what moves, its beat] (beats as above)
+    moves() {
+        const st = this.st, out = [];
+        if (ARM_BEATS[st.arms] !== undefined)
+            out.push(['arms', ARM_BEATS[st.arms]]);
+        if (BODY_BEATS[st.body] !== undefined)
+            out.push(['body', BODY_BEATS[st.body]]);
+        if (PLUME_BEATS[st.plume] !== undefined)
+            out.push(['plume', PLUME_BEATS[st.plume]]);
+        if (PROP_BEATS[st.prop] !== undefined)
+            out.push(['prop', PROP_BEATS[st.prop]]);
+        if (st.tunnel === '1')
+            out.push(['tunnel', TUNNEL_BEAT]);
+        return out;
+    }
+
+    // What a film's picture of it shows now: its pose and details (as for
+    // stillKey) and where it is in a quick move's round, pictures at least
+    // frameMs apart and at most maxFrames a round (a move that swings back
+    // shows the same ones on the way back); null during a big move. rest: no
+    // quick move under way.
+    still(frameMs, maxFrames) {
+        if (this.big || this.now < this.landsAt || this.oneShot())
+            return null;
+        const st = this.st, moves = this.moves();
+        let frames = 1, frame = 0;
+        if (moves.length) {
+            let quick = moves[0];
+            for (const m of moves) {
+                if (m[1] < quick[1])
+                    quick = m;
+            }
+            const round = 2 * quick[1];
+            const oneWay = ONE_WAY[st.arms] === 1 || ONE_WAY[st.body] === 1 || ONE_WAY[st.prop] === 1 || st.tunnel === '1';
+            frames = Math.max(4, Math.min(maxFrames || 12, Math.round(round / Math.max(1, frameMs))));
+            if (!oneWay)
+                frames += frames % 2;
+            // (counted from when that move began, as it's drawn live)
+            const ms = Math.max(0, this.now - (this.since[quick[0]] || 0));
+            frame = Math.floor((ms % round) * frames / round);
+            if (!oneWay && frame > frames / 2)
+                frame = frames - frame;
+        }
+        const blink = this.now < this.blinkUntil && BLINKING[st.eyes] === 1;
+        const look = this.stillLook();
+        const pose = KEYS.map(k => st[k]).join(',') + ',' + st.it + ',' + (st.gum || '') + (this.facingLeft ? ',L' : ',R');
+        return { key: pose + '#' + look.join(',') + (blink ? ',blink' : '') + ',' + frame + '/' + frames, pose: pose, st: st,
+                 look: look, blink: blink, phase: frame / frames, rest: !moves.length, left: this.facingLeft };
+    }
+
+    // Draws film picture d (still()), or one on its way there from picture
+    // `from` (p: 0 there, 1 arrived), without what flies about
+    drawFilm(ctx, d, from, p) {
+        let was = null;
+        if (from && p < 1) {
+            const v = this.posed(from).v;
+            was = TWEENED.map(k => v[k] || 0);
+        }
+        const s = this.posed(d);
+        if (was) {
+            const e = sine(clamp01(p));
+            TWEENED.forEach((k, i) => {
+                s.v[k] = lerp(was[i], s.v[k] || 0, e);
+            });
+        }
+        s.draw(ctx, true);
+    }
+
+    // (the still one, posed as film picture d)
+    posed(d) {
+        let s = this.stillOne;
+        if (!s)
+            s = this.stillOne = new Talpa({ brain: false });
+        s.colors = this.colors;
+        s.theme = this.theme;
+        s.holeImage = this.holeImage;
+        s.facingLeft = d.left;
+        const st = d.st, step = { it: st.it, look: d.look };
+        for (const k of KEYS) {
+            if (st[k] !== '')
+                step[k] = st[k];
+        }
+        if (st.gum)
+            step.gum = st.gum;
+        if (d.blink)
+            step.eyes = 'closed';
+        const at = beats => d.phase * 2 * beats;
+        s.now = 1e6 + at(PROP_BEATS[st.prop] || (st.tunnel === '1' ? TUNNEL_BEAT : 0));
+        s.pose(step);
+        this.placeMoves(s, st, at);
+        return s;
     }
 
     // ------------------------------------------------------------ drawing
 
-    // Draws the 64 × 64 box at the context's current transform
-    draw(ctx) {
+    // Draws the 64 × 64 box at the context's current transform (without what
+    // flies about: a host that draws that on its own, see films.mjs)
+    draw(ctx, withoutParticles) {
         const now = this.now, st = this.st, v = this.v, pal = this.colors;
         const ms = key => now - (this.since[key] || 0);
         const move = bodyMove(st.body, ms('body'), Number(st.it)) || {};
@@ -654,7 +798,7 @@ export class Talpa {
         }
         const tunneling = st.tunnel === '1';
         if (!tunneling && v.hole > 0.02)
-            holePart(ctx, v.hole, art.holeBack);
+            this.drawHolePart(ctx, 'back');
         // the creature, cut along the burrow (art.traceCut) while it's in it or
         // its hole is there (out for a moment, its feet would hang in the hole)
         ctx.save();
@@ -675,10 +819,39 @@ export class Talpa {
             art.tunnel(ctx);
             ctx.restore();
         } else if (v.hole > 0.02) {
-            holePart(ctx, v.hole, art.holeFront);
+            this.drawHolePart(ctx, 'front');
         }
         ctx.restore();
-        this.drawParticles(ctx, now);
+        if (!withoutParticles)
+            this.drawParticles(ctx, now);
+    }
+
+    // Whether anything flies about now (drawParticles draws it), and whether
+    // it's quick: z's float up slowly
+    particles(now) {
+        let any = false;
+        for (const p of this.fx) {
+            if (now < p.born)
+                continue;
+            if (p.kind !== 'z')
+                return 2;
+            any = true;
+        }
+        return any ? 1 : 0;
+    }
+
+    // (the open hole from the host's sheet when it has one: pixel for pixel,
+    // since it was drawn at this transform)
+    drawHolePart(ctx, part) {
+        const image = this.holeImage && Math.abs(this.v.hole - 1) < 0.001 ? this.holeImage(part, this.facingLeft) : null;
+        if (!image) {
+            holePart(ctx, this.v.hole, part === 'front' ? art.holeFront : art.holeBack);
+            return;
+        }
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.drawImage(image, 0, 0);
+        ctx.restore();
     }
 
     drawCreature(ctx, now, st, v, pal, move, ms) {
@@ -719,8 +892,8 @@ export class Talpa {
         this.drawFace(ctx, now, st, v, pal, move, ms);
         art.propBack(ctx, st.prop, now, this.theme.fx, v.sip, art.FACE_Y);
         this.drawArm(ctx, 14.5, v.armL, v.armLy || 0, pal, st.prop === 'balloon' ? 'balloon' : '', now);
-        this.drawArm(ctx, 49.5, v.armR, v.armRy || 0, pal, st.prop === 'sign' ? 'sign' : '', now);
-        art.propFront(ctx, st.prop, now, ms('prop'), { fail: st.fail === '1', gum: Number(st.gum) || 2000 });
+        this.drawArm(ctx, 49.5, v.armR, v.armRy || 0, pal, st.prop === 'sign' ? 'sign' : st.arms === 'selfie' ? 'selfie' : '', now);
+        art.propFront(ctx, st.prop, now, ms('prop'), { fail: st.fail === '1', gum: Number(st.gum) || 2000, bite: Number(st.bite) || 0, skin: pal.skin });
         if (st.think === '1')
             art.think(ctx, now, this.theme.fx);
         ctx.restore();
@@ -807,6 +980,8 @@ export class Talpa {
             art.balloon(ctx, lerp(-6, 6, alt(now, 1600)));
         else if (holds === 'sign')
             art.sign(ctx);
+        else if (holds === 'selfie')
+            art.selfie(ctx);
         ctx.restore();
     }
 
@@ -839,6 +1014,23 @@ export class Talpa {
             } else if (o.path === 'pop') {
                 s = lerp(0.4, 1.5, q);
                 a = 1 - q;
+            } else if (o.path === 'rise') {        // a soap bubble: wobbles up, then pops
+                const e = ease('out', q);
+                x += (o.dx || 0) * e + Math.sin(q * 9) * 1.4;
+                y += (o.dy === undefined ? -20 : o.dy) * e;
+                s = q > 0.88 ? lerp(1, 1.5, (q - 0.88) / 0.12) : lerp(0.5, 1, Math.min(1, q * 4));
+                a = q > 0.88 ? (1 - q) / 0.12 : q < 0.1 ? q / 0.1 : 1;
+            } else if (o.path === 'grow') {        // a flower: grows up, sways, fades away
+                s = q < 0.2 ? outBack(q / 0.2) : 1;
+                rot = q > 0.2 ? Math.sin((q - 0.2) * 12) * 4 : 0;
+                a = q > 0.85 ? (1 - q) / 0.15 : 1;
+            } else if (o.path === 'breathe') {     // a bubble at its nose as it sleeps: in, out, bigger
+                s = (0.4 + 0.8 * (0.5 - 0.5 * Math.cos(q * 3 * 2 * Math.PI))) * Math.min(1, 0.5 + q);
+            } else if (o.path === 'shoot') {       // a shooting star across the sky
+                const e = ease('in', q);
+                x += 76 * e;
+                y += 12 * e;
+                a = q < 0.1 ? q / 0.1 : 1 - e;
             } else if (o.path === 'bulb') {
                 s = q < 0.25 ? lerp(0, 1.25, q / 0.25) : q < 0.4 ? lerp(1.25, 1, (q - 0.25) / 0.15) : 1;
                 a = q > 0.85 ? (1 - q) / 0.15 : 1;

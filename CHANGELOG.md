@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Smooth pets:** the chats' pets went through four pictures a move and
+  faded from pose to pose; now each pet plays its moves as they are, a
+  picture each frame of the move, each drawn once and shown again round
+  after round, and moves from pose to pose through pictures in between.
+  What flies about (dirt, hearts, z's, confetti) shows for every pet. The
+  open burrow is drawn once and copied into each picture, which halves what
+  a picture costs. A pet you pick up trails your mouse on a spring, swings
+  as you move it and wobbles when you let go.
+- **More for Talpa to do:** it blows soap bubbles, grows a flower and
+  smells it, eats a cookie, takes a selfie, hops like a bunny, boogies, and
+  cheers *yay!* when a chat finishes; petting it may get heart eyes, a wink
+  or a blown kiss; asleep it dreams with a bubble at its nose, watches a
+  shooting star or a firefly.
 - **Chats change the moment they do:** this computer's chats were checked
   every 2 seconds (every 10 while the view was hidden), so a chat that
   started, waited for you or finished showed up late, and each check cost a
