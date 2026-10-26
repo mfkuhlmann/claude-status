@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **The chat pane reads like Claude's terminal:** a dot before each of Claude's replies and tool calls (green when a call worked, red when it failed, blinking while it runs), what came of a call under it (*⎿ 3 lines*, *⎿ 2 lines added, 1 removed*, the first line of what a command printed, or its error), your prompts set off in your accent color, and a gap before each of them, so a turn starts where you see it. Claude's replies are in larger text: headings in Claude's orange and in their size, lists, inline code in color, code blocks framed with a **Copy** link, quotes and tables. While it works, the last line says so with Claude's spinner. **A−** / **A+** beside its name (or Ctrl+wheel, Ctrl+= / Ctrl+-) set the text size. Scrolling no longer jumps or draws the text over the tabs, and with the list at its end, new lines keep it there.
+
 ## 1.15.0 (2026-10-25)
 
 - **A chat's whole name:** its tags (*background*, *agents 0/1*, *auto mode*, *±4*, …) shared its line, so a long name was cut down to a few letters. Now the tags go under the name when they don't all fit beside it, as in the VS Code extension; a name is only cut short when it's too long for the line by itself. On GNOME too.

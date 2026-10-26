@@ -115,6 +115,37 @@ class ConversationTests(PaneFixture):
         self.assertEqual([i["key"] for i in items[1:4]], ["m1", "t1", "t2"])
         self.assertEqual(len({i["key"] for i in items}), len(items))
 
+    def test_what_came_of_each_tool_call(self):
+        t = self.now - 100
+        a = str(self.folder / "a.py")
+        long_output = "\n".join(f"line {n}" for n in range(40))
+        self.chat(tool_use("t1", "Bash", {"command": "pytest -q"}, t, "m1"),
+                  tool_result("t1", t + 1, error=True, text="\n  1 failed, 2 passed\nmore"),
+                  tool_use("t2", "Read", {"file_path": a}, t + 2, "m2"),
+                  tool_result("t2", t + 3, text="     1\timport os\n     2\t\n     3\tx = 1\n\n<system-reminder>…</system-reminder>"),
+                  tool_use("t3", "Edit", {"file_path": a, "old_string": "x = 1", "new_string": "x = 2\ny = 3"}, t + 4, "m3"),
+                  tool_result("t3", t + 5, text="The file was updated."),
+                  tool_use("t4", "Write", {"file_path": a, "content": "a\nb\nc\n"}, t + 6, "m4"),
+                  tool_result("t4", t + 7, text="File created."),
+                  tool_use("t5", "Bash", {"command": "seq 40"}, t + 8, "m5"),
+                  tool_result("t5", t + 9, text=long_output),  # (more than the unfolded detail keeps)
+                  tool_use("t6", "Bash", {"command": "true"}, t + 10, "m6"),
+                  tool_result("t6", t + 11, text=""),
+                  tool_use("t8", "Edit", {"file_path": a, "old_string": "x", "new_string": "y"}, t + 11, "m8"),
+                  tool_result("t8", t + 11, error=True, text="<tool_use_error>File has not been read yet.</tool_use_error>"),
+                  tool_use("t7", "Grep", {"pattern": "x"}, t + 12, "m7"))
+        items, _ = pane.conversation(self.transcript)
+        self.assertEqual([i["summary"] for i in items], [
+            "1 failed, 2 passed",
+            "3 lines",
+            "2 lines added, 1 removed",
+            "3 lines",
+            "line 0 … +39 lines",
+            "(no output)",
+            "File has not been read yet.",
+            "",  # (no result yet)
+        ])
+
     def test_the_newest_items_and_more(self):
         t = self.now - 1000
         self.chat(*[prompt(f"prompt {n}", t + n) for n in range(50)])
@@ -585,3 +616,66 @@ class RelayTests(PaneFixture):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+MARKDOWN = CODE.parent / "ui/markdown.mjs"
+STYLE = {"pt": 11, "mono": "Hack", "text": "#eeeeee", "muted": "#999999", "accent": "#d97757", "heading": "#d97757",
+         "code": "#b1b9f9", "codeBg": "#333333", "blockBg": "#111111", "border": "#444444", "link": "#3daee9"}
+
+
+def markdown(call):
+    """What node gets from markdown.mjs for call (an expression with toHtml, codeBlocks, …)."""
+    if not shutil.which("node"):
+        raise unittest.SkipTest("node isn't installed")
+    code = (f"import * as Md from {json.dumps(str(MARKDOWN))};\nconst style = {json.dumps(STYLE)};\n"
+            f"process.stdout.write(JSON.stringify({call}));")
+    out = subprocess.run(["node", "--input-type=module", "-e", code], capture_output=True, text=True, timeout=60)
+    if out.returncode:
+        raise AssertionError(out.stderr)
+    return json.loads(out.stdout)
+
+
+class PaneMarkdownTests(unittest.TestCase):
+    """Claude's replies as Qt rich text in the Plasma pane (markdown.mjs)."""
+
+    def test_nothing_in_a_reply_becomes_a_tag(self):
+        html = markdown('Md.toHtml("<img src=x onerror=1> & <b>bold?</b>\\n\\n```\\n<script>x</script>\\n```", style)')
+        self.assertNotIn("<img", html)
+        self.assertNotIn("<script", html)
+        self.assertNotIn("<b>bold", html)
+        self.assertIn("&lt;img src=x onerror=1&gt; &amp; &lt;b&gt;", html)
+        self.assertIn("&lt;script&gt;x&lt;/script&gt;", html)
+
+    def test_links_only_to_the_web_or_mail(self):
+        html = markdown('Md.toHtml("[a](https://example.org/x) [b](javascript:alert(1)) [c](file:///etc/passwd) '
+                        'https://example.com/y.", style)')
+        self.assertEqual(re.findall(r'href="([^"]*)"', html), ["https://example.org/x", "https://example.com/y"])
+        self.assertIn(" b", html)  # (as text)
+        self.assertIn(" c ", html)
+
+    def test_blocks(self):
+        text = ("# Title\n\nSome **bold**, *it*, snake_case_name and `code`.\n\n## Steps\n\n1. one\n2. two\n"
+                "   - nested\n\n```python\nprint(1)\n```\n\n> quoted\n\n---\n\n| a | b |\n|---|---|\n| 1 | 2 |\n")
+        kinds = markdown(f"Md.blocks({json.dumps(text)}).map(b => b.kind)")
+        self.assertEqual(kinds, ["heading", "para", "heading", "list", "code", "quote", "rule", "table"])
+        html = markdown(f"Md.toHtml({json.dumps(text)}, style)")
+        self.assertIn("snake_case_name", html)
+        self.assertIn("<b>bold</b>", html)
+        self.assertIn("<i>it</i>", html)
+        self.assertEqual(html.count("<ol"), html.count("</ol>"))
+        self.assertEqual(html.count("<ul"), html.count("</ul>"))
+        self.assertIn('href="copy:0"', html)
+        self.assertEqual(markdown(f"Md.codeBlocks({json.dumps(text)})"), ["print(1)"])
+
+    def test_tables_have_no_margin_of_their_own(self):
+        # (Qt Quick paints a table's background over its margin: the gap above
+        # one is a spacer line, never the table's own margin)
+        html = markdown('Md.toHtml("text\\n\\n```\\ncode\\n```\\n\\n| a |\\n|---|\\n| 1 |", style)')
+        for table in re.findall(r"<table[^>]*>", html):
+            self.assertNotIn("margin-top", table)
+
+    def test_it_runs_in_qt_javascript(self):
+        # Qt's JavaScript: no ?. or ??, no lookbehind in a pattern
+        text = "\n".join(line for line in MARKDOWN.read_text().splitlines() if not line.lstrip().startswith("//"))
+        self.assertNotRegex(text, r"\?\.[\w(\[]|\?\?")
+        self.assertNotIn("(?<", text)

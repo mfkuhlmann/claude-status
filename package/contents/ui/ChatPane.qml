@@ -6,9 +6,12 @@ import org.kde.plasma.components as PlasmaComponents3
 import org.kde.plasma.core as PlasmaCore
 import org.kde.plasma.plasma5support as P5Support
 import org.kde.kirigami as Kirigami
+import "markdown.mjs" as Md
 
 // A chat beside the popup (main.qml: openPane): its conversation, updating
-// while it works, with each tool call folded into one line; a box to reply
+// while it works, drawn the way Claude's terminal draws it (a dot before each
+// reply and tool call, a tool call's outcome under it, your prompts set off),
+// with each tool call folded into one line; a box to reply
 // (pane.py --send: typed into tmux, put in its VS Code tab's input, or it
 // goes on in the background); what it asks while it waits for a permission,
 // with Allow once / Always allow / Deny; and its review: the files it
@@ -33,12 +36,119 @@ Window {
     property string tab: "chat"
 
     title: i18nc("window title: a chat's name", "%1 — Claude chat", chatName || chatId.slice(0, 8))
-    width: Kirigami.Units.gridUnit * 34
-    height: Kirigami.Units.gridUnit * 36
+    width: Kirigami.Units.gridUnit * 38
+    height: Kirigami.Units.gridUnit * 40
     minimumWidth: Kirigami.Units.gridUnit * 22
     minimumHeight: Kirigami.Units.gridUnit * 18
     color: Kirigami.Theme.backgroundColor
     onClosing: root.closePane()
+
+    // ---------------------------------------------------------------- how it looks
+
+    // Text size: the desktop's font size times paneTextPercent (A− / A+, Ctrl+wheel, Ctrl+= / Ctrl+-)
+    readonly property var scales: [90, 100, 115, 130, 150, 175, 200]
+    readonly property int textPercent: Math.max(80, Math.min(200, Plasmoid.configuration.paneTextPercent || 115))
+    readonly property real pt: surface.Kirigami.Theme.defaultFont.pointSize * textPercent / 100
+    function zoom(step) {
+        let i = scales.findIndex(v => v >= textPercent)
+        i = i < 0 ? scales.length - 1 : i
+        Plasmoid.configuration.paneTextPercent = step === 0 ? 115 : scales[Math.max(0, Math.min(scales.length - 1, i + step))]
+    }
+
+    // Colors: Claude's own orange for its dots, headings and the working
+    // line; the theme's accent for you; inline code in the blue Claude's
+    // terminal uses. (From the window's surface: a Window's own Kirigami.Theme
+    // isn't the desktop's colors.)
+    function hex(c) {
+        return Qt.rgba(c.r, c.g, c.b, 1).toString()
+    }
+    function mix(c, a) {   // the text color, a of it over the background
+        return Qt.tint(surface.Kirigami.Theme.backgroundColor, Qt.rgba(c.r, c.g, c.b, a))
+    }
+    readonly property color textColor: surface.Kirigami.Theme.textColor
+    readonly property bool dark: surface.Kirigami.Theme.backgroundColor.hslLightness < 0.5
+    readonly property color claudeColor: dark ? "#d97757" : "#c15f3c"
+    readonly property color codeColor: dark ? "#b1b9f9" : "#5769f7"
+    readonly property color mutedColor: mix(textColor, 0.62)
+    readonly property color borderColor: mix(textColor, 0.16)
+    readonly property color youColor: surface.Kirigami.Theme.focusColor
+    readonly property var mdStyle: ({
+        pt: pt, mono: monoFamily, text: hex(textColor), muted: hex(mutedColor),
+        accent: hex(claudeColor), heading: hex(claudeColor), code: hex(codeColor), codeBg: hex(mix(textColor, 0.09)),
+        blockBg: hex(dark ? Qt.tint(surface.Kirigami.Theme.backgroundColor, Qt.rgba(0, 0, 0, 0.28)) : mix(textColor, 0.04)),
+        border: hex(borderColor), link: hex(surface.Kirigami.Theme.linkColor)
+    })
+
+    FontMetrics {
+        id: fm
+        font.pointSize: pane.pt
+    }
+    // Code in a fixed-width font: the desktop's, if it is one (it can be set to any font), else monospace
+    FontMetrics {
+        id: fixedFm
+        font.family: surface.Kirigami.Theme.fixedWidthFont.family
+    }
+    readonly property string monoFamily: Math.abs(fixedFm.advanceWidth("iiii") - fixedFm.advanceWidth("WWWW")) < 0.5
+                                         ? surface.Kirigami.Theme.fixedWidthFont.family : "monospace"
+    readonly property real gutter: Math.round(fm.height * 1.3)   // where the dots go
+
+    // ● before a reply or a tool call, on its first line (blinking: still going)
+    component Dot: Item {
+        id: dotItem
+        property color color
+        property bool blinking: false
+        property real gutter: 0
+        property real lineHeight: 0
+        Layout.preferredWidth: gutter
+        Layout.preferredHeight: lineHeight
+        Layout.alignment: Qt.AlignTop
+
+        Rectangle {
+            id: dot
+            width: Math.round(dotItem.lineHeight * 0.42)
+            height: width
+            radius: width / 2
+            x: Math.round((dotItem.gutter - width) * 0.4)
+            anchors.verticalCenter: parent.verticalCenter
+            color: dotItem.color
+
+            SequentialAnimation on opacity {
+                running: dotItem.blinking
+                loops: Animation.Infinite
+                onRunningChanged: if (!running) dot.opacity = 1
+                NumberAnimation { to: 0.25; duration: 600; easing.type: Easing.InOutSine }
+                NumberAnimation { to: 1; duration: 600; easing.type: Easing.InOutSine }
+            }
+        }
+    }
+
+    Shortcut {
+        sequences: [StandardKey.ZoomIn, "Ctrl+="]
+        onActivated: pane.zoom(1)
+    }
+    Shortcut {
+        sequences: [StandardKey.ZoomOut]
+        onActivated: pane.zoom(-1)
+    }
+    Shortcut {
+        sequence: "Ctrl+0"
+        onActivated: pane.zoom(0)
+    }
+
+    // A code block's Copy
+    TextEdit {
+        id: clipboard
+        visible: false
+    }
+    function copyText(text) {
+        clipboard.text = text
+        clipboard.selectAll()
+        clipboard.copy()
+        clipboard.text = ""
+        info = i18n("Copied")
+        infoBad = false
+        infoTimer.restart()
+    }
 
     // ---------------------------------------------------------------- the conversation
 
@@ -139,12 +249,12 @@ Window {
         for (let i = 0; i < list.length; i++) {
             const it = list[i]
             const flat = { kind: it.kind, key: String(it.key), text: it.text || "", line: it.line || "",
-                           status: it.status || "", input: it.input || "", output: it.output || "",
-                           at: it.at || 0, bad: !!it.error }
+                           name: it.name || "", status: it.status || "", input: it.input || "", output: it.output || "",
+                           summary: it.summary || "", at: it.at || 0, bad: !!it.error, prev: i > 0 ? list[i - 1].kind : "" }
             if (i < items.count && items.get(i).key === flat.key) {
                 const old = items.get(i)
                 if (old.text !== flat.text || old.status !== flat.status || old.output !== flat.output
-                        || old.input !== flat.input)
+                        || old.input !== flat.input || old.summary !== flat.summary || old.prev !== flat.prev)
                     items.set(i, flat)
             } else if (i < items.count) {
                 items.insert(i, flat)
@@ -156,6 +266,33 @@ Window {
             items.remove(items.count - 1)
     }
 
+    // The end of the conversation in view, with its working line, when you
+    // were at the end (scrolled up, it stays where you are). Rich text rows
+    // take a moment to get their height: it keeps the end in view while they do.
+    function nearEnd() {
+        return list.originY + list.contentHeight - list.contentY - list.height < Kirigami.Units.gridUnit * 2
+    }
+    function followEnd() {
+        list.contentY = Math.max(list.originY, list.originY + list.contentHeight - list.height)
+    }
+    Timer {
+        id: settle
+        property int left: 0
+        interval: 80
+        repeat: true
+        onTriggered: {
+            pane.followEnd()
+            if (--left <= 0)
+                stop()
+        }
+    }
+    function keepEnd() {
+        followEnd()
+        settle.left = 10
+        settle.restart()
+    }
+    onChatStateChanged: if (loaded && nearEnd()) keepEnd()   // (the working line comes or goes)
+
     function handle(kind, result) {
         if (kind === "conversation") {
             loading = false
@@ -166,13 +303,13 @@ Window {
             loadError = ""
             if (result.unchanged)
                 return
-            const following = !loaded || list.atYEnd
+            const following = !loaded || nearEnd()
             stamp = result.stamp || ""
             more = !!result.more
             merge(result.items || [])
             loaded = true
             if (following)
-                Qt.callLater(() => list.positionViewAtEnd())
+                keepEnd()
             return
         }
         if (kind === "review") {
@@ -315,6 +452,7 @@ Window {
     // ---------------------------------------------------------------- what's shown
 
     Rectangle {
+        id: surface
         anchors.fill: parent
         color: Kirigami.Theme.backgroundColor
         Kirigami.Theme.colorSet: Kirigami.Theme.Window
@@ -331,29 +469,58 @@ Window {
                 spacing: Kirigami.Units.smallSpacing
 
                 Rectangle {
-                    Layout.preferredWidth: Math.round(Kirigami.Units.gridUnit * 0.6)
+                    Layout.preferredWidth: Math.round(fm.height * 0.5)
                     Layout.preferredHeight: Layout.preferredWidth
                     radius: width / 2
                     color: root.stateColor(pane.chatState)
                 }
-                Kirigami.Heading {
-                    level: 4
+                PlasmaComponents3.Label {
                     textFormat: Text.PlainText
                     text: pane.chatName
                     elide: Text.ElideRight
                     Layout.fillWidth: true
+                    font.pointSize: pane.pt * 1.25
+                    font.weight: Font.Bold
                 }
                 Tag {
                     visible: pane.host !== ""
                     text: pane.host
                     tooltip: i18n("This chat runs on the SSH host %1.", pane.host)
                 }
-                PlasmaComponents3.Label {
-                    textFormat: Text.PlainText
-                    text: pane.row ? root.stateText(pane.row) : i18n("not running")
-                    color: pane.chatState === "waiting" ? Kirigami.Theme.neutralTextColor : Kirigami.Theme.textColor
-                    font.bold: pane.chatState === "waiting"
-                    opacity: 0.8
+                // what it's doing, in its state's color
+                Rectangle {
+                    readonly property color tone: pane.row ? root.stateColor(pane.chatState) : pane.mutedColor
+                    implicitWidth: stateLabel.implicitWidth + Kirigami.Units.largeSpacing * 1.5
+                    implicitHeight: stateLabel.implicitHeight + Kirigami.Units.smallSpacing
+                    radius: height / 2
+                    color: Qt.rgba(tone.r, tone.g, tone.b, 0.16)
+
+                    PlasmaComponents3.Label {
+                        id: stateLabel
+                        anchors.centerIn: parent
+                        textFormat: Text.PlainText
+                        text: pane.row ? root.stateText(pane.row) : i18n("not running")
+                        color: pane.chatState === "waiting" ? Kirigami.Theme.neutralTextColor : Kirigami.Theme.textColor
+                        font.weight: pane.chatState === "waiting" ? Font.Bold : Font.Normal
+                    }
+                }
+                PlasmaComponents3.ToolButton {
+                    icon.name: "zoom-out"
+                    display: PlasmaComponents3.AbstractButton.IconOnly
+                    text: i18n("Smaller text")
+                    enabled: pane.textPercent > pane.scales[0]
+                    onClicked: pane.zoom(-1)
+                    PlasmaComponents3.ToolTip.text: i18n("Smaller text (Ctrl+-, Ctrl+wheel)")
+                    PlasmaComponents3.ToolTip.visible: hovered
+                }
+                PlasmaComponents3.ToolButton {
+                    icon.name: "zoom-in"
+                    display: PlasmaComponents3.AbstractButton.IconOnly
+                    text: i18n("Larger text")
+                    enabled: pane.textPercent < pane.scales[pane.scales.length - 1]
+                    onClicked: pane.zoom(1)
+                    PlasmaComponents3.ToolTip.text: i18n("Larger text (Ctrl+=, Ctrl+wheel; Ctrl+0: as it was)")
+                    PlasmaComponents3.ToolTip.visible: hovered
                 }
                 PlasmaComponents3.ToolButton {
                     icon.name: "window"
@@ -372,28 +539,69 @@ Window {
             PlasmaComponents3.Label {
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
+                Layout.leftMargin: Math.round(fm.height * 0.5) + Kirigami.Units.smallSpacing
                 text: (pane.host ? pane.host + ":" : "") + (pane.row ? pane.row.cwdShort || pane.row.cwd || "" : pane.chat.cwd || "")
-                font: Kirigami.Theme.smallFont
-                opacity: 0.7
+                font.family: pane.monoFamily
+                font.pointSize: pane.pt * 0.85
+                color: pane.mutedColor
                 elide: Text.ElideMiddle
             }
 
-            PlasmaComponents3.TabBar {
-                id: tabBar
+            // Chat | Review, underlined in Claude's color
+            RowLayout {
                 Layout.fillWidth: true
-                currentIndex: pane.tab === "review" ? 1 : 0
+                Layout.topMargin: Kirigami.Units.smallSpacing
+                spacing: 0
 
-                PlasmaComponents3.TabButton {
-                    text: i18n("Chat")
-                    onClicked: pane.tab = "chat"
+                Repeater {
+                    model: [
+                        { tab: "chat", text: i18n("Chat") },
+                        { tab: "review", text: pane.row && pane.row.changes
+                              ? (pane.reviewPending ? i18nc("tab: the files a chat changed, not reviewed yet", "Review ±%1 •", pane.row.changes.count)
+                                                    : i18nc("tab: the files a chat changed", "Review ±%1", pane.row.changes.count))
+                              : i18n("Review") }
+                    ]
+                    delegate: MouseArea {
+                        id: tabButton
+                        required property var modelData
+                        readonly property bool on: pane.tab === modelData.tab
+                        implicitWidth: tabText.implicitWidth + Kirigami.Units.gridUnit * 1.5
+                        implicitHeight: tabText.implicitHeight + Kirigami.Units.largeSpacing * 1.5
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: pane.tab = modelData.tab
+                        Accessible.role: Accessible.PageTab
+                        Accessible.name: modelData.text
+
+                        PlasmaComponents3.Label {
+                            id: tabText
+                            anchors.centerIn: parent
+                            textFormat: Text.PlainText
+                            text: tabButton.modelData.text
+                            font.pointSize: pane.pt
+                            font.weight: tabButton.on ? Font.Bold : Font.Normal
+                            color: tabButton.on || tabButton.containsMouse ? Kirigami.Theme.textColor : pane.mutedColor
+                        }
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            height: 2
+                            radius: 1
+                            visible: tabButton.on
+                            color: pane.claudeColor
+                        }
+                    }
                 }
-                PlasmaComponents3.TabButton {
-                    text: pane.row && pane.row.changes
-                          ? (pane.reviewPending ? i18nc("tab: the files a chat changed, not reviewed yet", "Review ±%1 •", pane.row.changes.count)
-                                                : i18nc("tab: the files a chat changed", "Review ±%1", pane.row.changes.count))
-                          : i18n("Review")
-                    onClicked: pane.tab = "review"
+                Item {
+                    Layout.fillWidth: true
                 }
+            }
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.topMargin: -Kirigami.Units.smallSpacing
+                implicitHeight: 1
+                color: pane.borderColor
             }
 
             PlasmaComponents3.Label {
@@ -411,18 +619,28 @@ Window {
                 visible: pane.tab === "chat"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+                clip: true
                 PlasmaComponents3.ScrollBar.horizontal.policy: PlasmaComponents3.ScrollBar.AlwaysOff
 
                 ListView {
                     id: list
                     model: items
-                    spacing: Kirigami.Units.largeSpacing
+                    spacing: 0
                     clip: true
                     boundsBehavior: Flickable.StopAtBounds
+                    // every item made and laid out once (not as it scrolls in), so the
+                    // list doesn't jump while you scroll
+                    cacheBuffer: 100000
+
+                    // Ctrl+wheel: the text size
+                    WheelHandler {
+                        acceptedModifiers: Qt.ControlModifier
+                        onWheel: event => pane.zoom(event.angleDelta.y > 0 ? 1 : -1)
+                    }
 
                     header: Item {
                         width: list.width
-                        implicitHeight: headerColumn.implicitHeight + Kirigami.Units.smallSpacing
+                        implicitHeight: headerColumn.implicitHeight + Kirigami.Units.largeSpacing
 
                         ColumnLayout {
                             id: headerColumn
@@ -445,176 +663,310 @@ Window {
                                 visible: !pane.loaded || pane.loadError !== ""
                                 horizontalAlignment: Text.AlignHCenter
                                 text: pane.loadError || i18n("Reading the chat…")
-                                color: pane.loadError ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.textColor
-                                opacity: 0.7
+                                color: pane.loadError ? Kirigami.Theme.negativeTextColor : pane.mutedColor
+                                font.pointSize: pane.pt
                                 wrapMode: Text.Wrap
                             }
                         }
                     }
 
+                    // While it works: ✻ what it's doing, in Claude's color
                     footer: Item {
                         width: list.width
-                        implicitHeight: pane.chatState === "working" ? footerRow.implicitHeight + Kirigami.Units.largeSpacing : 0
+                        implicitHeight: pane.chatState === "working" ? workingLine.implicitHeight + Kirigami.Units.gridUnit : 0
                         visible: pane.chatState === "working"
 
                         RowLayout {
-                            id: footerRow
+                            id: workingLine
                             anchors.left: parent.left
                             anchors.right: parent.right
                             anchors.bottom: parent.bottom
-                            spacing: Kirigami.Units.smallSpacing
+                            spacing: 0
 
-                            PlasmaComponents3.BusyIndicator {
-                                Layout.preferredWidth: Kirigami.Units.iconSizes.small
-                                Layout.preferredHeight: Kirigami.Units.iconSizes.small
-                                running: footerRow.visible
+                            PlasmaComponents3.Label {
+                                id: spinner
+                                property int step: 0
+                                readonly property var glyphs: ["·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"]
+                                Layout.preferredWidth: pane.gutter
+                                textFormat: Text.PlainText
+                                text: glyphs[step % glyphs.length]
+                                color: pane.claudeColor
+                                font.pointSize: pane.pt
+                                font.weight: Font.Bold
+
+                                Timer {
+                                    interval: 120
+                                    repeat: true
+                                    running: workingLine.visible && pane.visible && pane.tab === "chat"
+                                    onTriggered: spinner.step += 1
+                                }
                             }
                             PlasmaComponents3.Label {
                                 textFormat: Text.PlainText
                                 Layout.fillWidth: true
-                                text: pane.row && pane.row.peek && pane.row.peek.activity ? pane.row.peek.activity : i18n("working…")
+                                // (what it's doing, unless that's the tool call just above)
+                                readonly property bool toolAbove: items.count > 0 && items.get(items.count - 1).status === "open"
+                                readonly property string activity: pane.row && pane.row.peek && pane.row.peek.activity ? pane.row.peek.activity.replace(/[….\s]+$/, "") : ""
+                                text: (activity && !toolAbove ? activity : i18n("Working")) + "…"
                                 elide: Text.ElideRight
-                                opacity: 0.7
+                                color: pane.claudeColor
+                                font.pointSize: pane.pt
                             }
                         }
                     }
 
-                    delegate: ColumnLayout {
+                    delegate: Item {
                         id: entry
                         required property int index
                         required property string kind
                         required property string key
                         required property string text
                         required property string line
+                        required property string name
                         required property string status
                         required property string input
                         required property string output
+                        required property string summary
+                        required property string prev
                         required property bool bad
                         readonly property bool unfolded: pane.openTools[key] === true
+                        // more room before your prompt (a new turn) than between steps
+                        readonly property real gap: index === 0 ? 0
+                            : kind === "you" ? Kirigami.Units.gridUnit * 1.6
+                            : kind === "tool" && prev === "tool" ? Kirigami.Units.smallSpacing * 1.5
+                            : Kirigami.Units.gridUnit * 0.8
                         width: list.width
-                        spacing: Kirigami.Units.smallSpacing
+                        implicitHeight: gap + body.implicitHeight
+                        height: implicitHeight
 
-                        // Yours: set off, on the right
-                        Rectangle {
-                            visible: entry.kind === "you"
-                            Layout.alignment: Qt.AlignRight
-                            Layout.maximumWidth: list.width * 0.85
-                            Layout.preferredWidth: Math.min(list.width * 0.85, youText.implicitWidth + Kirigami.Units.largeSpacing * 2)
-                            implicitHeight: youText.implicitHeight + Kirigami.Units.largeSpacing
-                            radius: Kirigami.Units.cornerRadius
-                            color: Qt.rgba(Kirigami.Theme.focusColor.r, Kirigami.Theme.focusColor.g, Kirigami.Theme.focusColor.b, 0.15)
-
-                            TextEdit {
-                                id: youText
-                                anchors.fill: parent
-                                anchors.margins: Kirigami.Units.largeSpacing / 2
-                                anchors.leftMargin: Kirigami.Units.largeSpacing
-                                anchors.rightMargin: Kirigami.Units.largeSpacing
-                                text: entry.kind === "you" ? entry.text : ""
-                                textFormat: TextEdit.PlainText
-                                readOnly: true
-                                selectByMouse: true
-                                wrapMode: TextEdit.Wrap
-                                color: Kirigami.Theme.textColor
-                                selectionColor: Kirigami.Theme.focusColor
-                                selectedTextColor: Kirigami.Theme.highlightedTextColor
-                                font: Kirigami.Theme.defaultFont
-                            }
+                        Loader {
+                            id: body
+                            y: entry.gap
+                            width: parent.width
+                            sourceComponent: entry.kind === "you" ? youItem : entry.kind === "claude" ? claudeItem
+                                           : entry.kind === "tool" ? toolItem : noteItem
                         }
 
-                        // Claude's reply, rendered
-                        TextEdit {
-                            visible: entry.kind === "claude"
-                            Layout.fillWidth: true
-                            text: entry.kind === "claude" ? entry.text : ""
-                            textFormat: TextEdit.MarkdownText
-                            readOnly: true
-                            selectByMouse: true
-                            wrapMode: TextEdit.Wrap
-                            color: Kirigami.Theme.textColor
-                            selectionColor: Kirigami.Theme.focusColor
-                            selectedTextColor: Kirigami.Theme.highlightedTextColor
-                            font: Kirigami.Theme.defaultFont
-                            onLinkActivated: link => Qt.openUrlExternally(link)
-                        }
+                        // Yours: a band in your accent color, after a ›
+                        Component {
+                            id: youItem
 
-                        // A tool call: one line (▸ Bash: pytest ✓); click for what it ran and got
-                        RowLayout {
-                            visible: entry.kind === "tool"
-                            Layout.fillWidth: true
-                            spacing: Kirigami.Units.smallSpacing
+                            Rectangle {
+                                implicitHeight: youRow.implicitHeight + Kirigami.Units.largeSpacing * 1.5
+                                radius: Kirigami.Units.cornerRadius
+                                color: Qt.tint(Kirigami.Theme.backgroundColor, Qt.rgba(pane.youColor.r, pane.youColor.g, pane.youColor.b, 0.13))
 
-                            PlasmaComponents3.Label {
-                                textFormat: Text.PlainText
-                                text: entry.unfolded ? "▾" : "▸"
-                                opacity: 0.6
-                            }
-                            PlasmaComponents3.Label {
-                                id: toolLine
-                                textFormat: Text.PlainText
-                                Layout.fillWidth: true
-                                text: entry.line
-                                elide: Text.ElideRight
-                                font.family: "monospace"
-                                font.pointSize: Kirigami.Theme.smallFont.pointSize
-                                opacity: 0.85
+                                Rectangle {
+                                    width: 3
+                                    height: parent.height
+                                    radius: 1.5
+                                    color: pane.youColor
+                                }
+                                RowLayout {
+                                    id: youRow
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    anchors.rightMargin: Kirigami.Units.largeSpacing
+                                    spacing: 0
 
-                                MouseArea {
-                                    anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: {
-                                        const next = Object.assign({}, pane.openTools)
-                                        next[entry.key] = !entry.unfolded
-                                        pane.openTools = next
+                                    PlasmaComponents3.Label {
+                                        Layout.preferredWidth: pane.gutter
+                                        Layout.alignment: Qt.AlignTop
+                                        horizontalAlignment: Text.AlignHCenter
+                                        textFormat: Text.PlainText
+                                        text: "›"
+                                        color: pane.youColor
+                                        font.pointSize: pane.pt
+                                        font.weight: Font.Bold
+                                    }
+                                    TextEdit {
+                                        Layout.fillWidth: true
+                                        text: entry.text
+                                        textFormat: TextEdit.PlainText
+                                        readOnly: true
+                                        selectByMouse: true
+                                        wrapMode: TextEdit.Wrap
+                                        color: Kirigami.Theme.textColor
+                                        selectionColor: Kirigami.Theme.focusColor
+                                        selectedTextColor: Kirigami.Theme.highlightedTextColor
+                                        font.family: Kirigami.Theme.defaultFont.family
+                                        font.pointSize: pane.pt
                                     }
                                 }
                             }
-                            PlasmaComponents3.Label {
-                                textFormat: Text.PlainText
-                                text: entry.status === "ok" ? "✓" : entry.status === "error" ? "✗"
-                                    : pane.permission && entry.index === items.count - 1 ? "?" : pane.busy ? "…" : "–"
-                                color: entry.status === "ok" ? Kirigami.Theme.positiveTextColor
-                                     : entry.status === "error" ? Kirigami.Theme.negativeTextColor
-                                     : Kirigami.Theme.neutralTextColor
-                                font.bold: true
-                            }
-                        }
-                        Rectangle {
-                            visible: entry.kind === "tool" && entry.unfolded && (entry.input !== "" || entry.output !== "")
-                            Layout.fillWidth: true
-                            Layout.leftMargin: Kirigami.Units.gridUnit
-                            implicitHeight: detail.implicitHeight + Kirigami.Units.smallSpacing * 2
-                            radius: Kirigami.Units.cornerRadius
-                            color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.06)
-
-                            TextEdit {
-                                id: detail
-                                anchors.fill: parent
-                                anchors.margins: Kirigami.Units.smallSpacing
-                                text: entry.kind !== "tool" ? "" : entry.input + (entry.input && entry.output ? "\n──\n" : "") + entry.output
-                                textFormat: TextEdit.PlainText
-                                readOnly: true
-                                selectByMouse: true
-                                wrapMode: TextEdit.Wrap
-                                color: Kirigami.Theme.textColor
-                                selectionColor: Kirigami.Theme.focusColor
-                                font.family: "monospace"
-                                font.pointSize: Kirigami.Theme.smallFont.pointSize
-                            }
                         }
 
-                        // A note: interrupted, a usage limit, compacted
-                        PlasmaComponents3.Label {
-                            visible: entry.kind === "note"
-                            Layout.fillWidth: true
-                            textFormat: Text.PlainText
-                            text: entry.kind === "note" ? "— " + entry.text + " —" : ""
-                            horizontalAlignment: Text.AlignHCenter
-                            wrapMode: Text.Wrap
-                            font.italic: true
-                            font.pointSize: Kirigami.Theme.smallFont.pointSize
-                            color: entry.bad ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.textColor
-                            opacity: entry.bad ? 1 : 0.6
+                        // Claude's reply: ● and its Markdown, rendered
+                        Component {
+                            id: claudeItem
+
+                            RowLayout {
+                                spacing: 0
+
+                                Dot {
+                                    color: pane.claudeColor
+                                    gutter: pane.gutter
+                                    lineHeight: fm.height
+                                }
+                                TextEdit {
+                                    Layout.fillWidth: true
+                                    text: Md.toHtml(entry.text, pane.mdStyle)
+                                    textFormat: TextEdit.RichText
+                                    readOnly: true
+                                    selectByMouse: true
+                                    wrapMode: TextEdit.Wrap
+                                    color: Kirigami.Theme.textColor
+                                    selectionColor: Kirigami.Theme.focusColor
+                                    selectedTextColor: Kirigami.Theme.highlightedTextColor
+                                    font.family: Kirigami.Theme.defaultFont.family
+                                    font.pointSize: pane.pt
+                                    onLinkActivated: link => {
+                                        if (link.indexOf("copy:") === 0)
+                                            pane.copyText(Md.codeBlocks(entry.text)[Number(link.slice(5))] || "")
+                                        else
+                                            Qt.openUrlExternally(link)
+                                    }
+
+                                    HoverHandler {
+                                        cursorShape: parent.hoveredLink ? Qt.PointingHandCursor : Qt.IBeamCursor
+                                    }
+                                }
+                            }
+                        }
+
+                        // A tool call: ● Bash(pytest) in green, red or (still going) blinking,
+                        // and under it ⎿ what came of it; click for what it ran and got
+                        Component {
+                            id: toolItem
+
+                            ColumnLayout {
+                                id: toolBox
+                                spacing: Kirigami.Units.smallSpacing
+                                readonly property bool asking: !!pane.permission && entry.status === "open" && entry.index === items.count - 1
+                                readonly property bool going: entry.status === "open" && pane.busy
+
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    implicitHeight: toolRow.implicitHeight + Kirigami.Units.smallSpacing
+                                    radius: Kirigami.Units.cornerRadius
+                                    color: toolHover.hovered ? pane.mix(pane.textColor, 0.06) : "transparent"
+
+                                    RowLayout {
+                                        id: toolRow
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        spacing: 0
+
+                                        Dot {
+                                            Layout.alignment: Qt.AlignTop
+                                            color: entry.status === "ok" ? Kirigami.Theme.positiveTextColor
+                                                 : entry.status === "error" ? Kirigami.Theme.negativeTextColor
+                                                 : toolBox.asking ? Kirigami.Theme.neutralTextColor : pane.mutedColor
+                                            blinking: toolBox.going && pane.visible
+                                            gutter: pane.gutter
+                                            lineHeight: fm.height
+                                        }
+                                        ColumnLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 0
+
+                                            PlasmaComponents3.Label {
+                                                Layout.fillWidth: true
+                                                readonly property string args: entry.line.indexOf(entry.name + ": ") === 0 ? entry.line.slice(entry.name.length + 2) : ""
+                                                textFormat: Text.StyledText
+                                                text: args ? "<b>" + Md.escape(entry.name) + "</b>" + "<font color=\"" + pane.hex(pane.mutedColor) + "\">(</font>"
+                                                             + Md.escape(args) + "<font color=\"" + pane.hex(pane.mutedColor) + "\">)</font>"
+                                                           : "<b>" + Md.escape(entry.line) + "</b>"
+                                                wrapMode: Text.Wrap
+                                                maximumLineCount: entry.unfolded ? 20 : 2
+                                                elide: Text.ElideRight
+                                                font.pointSize: pane.pt
+                                            }
+                                            PlasmaComponents3.Label {
+                                                Layout.fillWidth: true
+                                                visible: text !== ""
+                                                textFormat: Text.PlainText
+                                                text: entry.summary ? "⎿  " + entry.summary
+                                                    : toolBox.asking ? "⎿  " + i18n("Waiting for your answer")
+                                                    : ""
+                                                elide: Text.ElideRight
+                                                font.pointSize: pane.pt * 0.92
+                                                color: entry.status === "error" ? Kirigami.Theme.negativeTextColor
+                                                     : toolBox.asking ? Kirigami.Theme.neutralTextColor : pane.mutedColor
+                                            }
+                                        }
+                                    }
+                                    HoverHandler {
+                                        id: toolHover
+                                        cursorShape: Qt.PointingHandCursor
+                                    }
+                                    TapHandler {
+                                        onTapped: {
+                                            const next = Object.assign({}, pane.openTools)
+                                            next[entry.key] = !entry.unfolded
+                                            pane.openTools = next
+                                        }
+                                    }
+                                }
+                                Rectangle {
+                                    visible: entry.unfolded && (entry.input !== "" || entry.output !== "")
+                                    Layout.fillWidth: true
+                                    Layout.leftMargin: pane.gutter
+                                    implicitHeight: detail.implicitHeight + Kirigami.Units.largeSpacing * 1.5
+                                    radius: Kirigami.Units.cornerRadius
+                                    color: pane.mdStyle.blockBg
+                                    border.width: 1
+                                    border.color: pane.borderColor
+
+                                    TextEdit {
+                                        id: detail
+                                        anchors.fill: parent
+                                        anchors.margins: Kirigami.Units.largeSpacing * 0.75
+                                        text: entry.input + (entry.input && entry.output ? "\n──\n" : "") + entry.output
+                                        textFormat: TextEdit.PlainText
+                                        readOnly: true
+                                        selectByMouse: true
+                                        wrapMode: TextEdit.Wrap
+                                        color: Kirigami.Theme.textColor
+                                        selectionColor: Kirigami.Theme.focusColor
+                                        selectedTextColor: Kirigami.Theme.highlightedTextColor
+                                        font.family: pane.monoFamily
+                                        font.pointSize: pane.pt * 0.88
+                                    }
+                                }
+                            }
+                        }
+
+                        // A note: interrupted, a usage limit, compacted (── Interrupted ──)
+                        Component {
+                            id: noteItem
+
+                            RowLayout {
+                                spacing: Kirigami.Units.largeSpacing
+
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    implicitHeight: 1
+                                    color: entry.bad ? Kirigami.Theme.negativeTextColor : pane.borderColor
+                                }
+                                PlasmaComponents3.Label {
+                                    Layout.maximumWidth: list.width * 0.75
+                                    textFormat: Text.PlainText
+                                    text: entry.text
+                                    horizontalAlignment: Text.AlignHCenter
+                                    wrapMode: Text.Wrap
+                                    font.italic: true
+                                    font.pointSize: pane.pt * 0.9
+                                    color: entry.bad ? Kirigami.Theme.negativeTextColor : pane.mutedColor
+                                }
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    implicitHeight: 1
+                                    color: entry.bad ? Kirigami.Theme.negativeTextColor : pane.borderColor
+                                }
+                            }
                         }
                     }
                 }
@@ -664,20 +1016,47 @@ Window {
                         onClicked: root.unqueue(pane.queued)
                     }
                 }
-                PlasmaComponents3.ScrollView {
+                // a box like Claude's prompt: › and what you type, framed (your accent while you type)
+                Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: Math.min(Kirigami.Units.gridUnit * 8, Math.max(Kirigami.Units.gridUnit * 3, replyBox.implicitHeight))
+                    Layout.preferredHeight: Math.min(fm.height * 9, Math.max(fm.height * 3.2, replyBox.implicitHeight + Kirigami.Units.smallSpacing * 2))
+                    radius: Kirigami.Units.cornerRadius * 1.5
+                    color: pane.mix(pane.textColor, 0.035)
+                    border.width: replyBox.activeFocus ? 2 : 1
+                    border.color: replyBox.activeFocus ? pane.youColor : pane.borderColor
+                    opacity: replyBox.enabled ? 1 : 0.6
 
-                    PlasmaComponents3.TextArea {
-                        id: replyBox
-                        placeholderText: pane.permission ? i18n("It's asking you something: answer that first")
-                                                         : i18n("Reply to Claude… (Ctrl+Enter sends)")
-                        wrapMode: TextEdit.Wrap
-                        enabled: !(pane.permission && pane.route === "tmux")
-                        Keys.onPressed: event => {
-                            if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && (event.modifiers & Qt.ControlModifier)) {
-                                pane.send("auto", false)
-                                event.accepted = true
+                    PlasmaComponents3.Label {
+                        x: 0
+                        y: Kirigami.Units.smallSpacing + replyBox.topPadding
+                        width: pane.gutter
+                        horizontalAlignment: Text.AlignHCenter
+                        textFormat: Text.PlainText
+                        text: "›"
+                        color: replyBox.activeFocus ? pane.youColor : pane.mutedColor
+                        font.pointSize: pane.pt
+                        font.weight: Font.Bold
+                    }
+                    PlasmaComponents3.ScrollView {
+                        anchors.fill: parent
+                        anchors.leftMargin: pane.gutter - replyBox.leftPadding
+                        anchors.topMargin: Kirigami.Units.smallSpacing
+                        anchors.bottomMargin: Kirigami.Units.smallSpacing
+                        anchors.rightMargin: Kirigami.Units.smallSpacing
+
+                        PlasmaComponents3.TextArea {
+                            id: replyBox
+                            background: null
+                            placeholderText: pane.permission ? i18n("It's asking you something: answer that first")
+                                                             : i18n("Reply to Claude… (Ctrl+Enter sends)")
+                            wrapMode: TextEdit.Wrap
+                            font.pointSize: pane.pt
+                            enabled: !(pane.permission && pane.route === "tmux")
+                            Keys.onPressed: event => {
+                                if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && (event.modifiers & Qt.ControlModifier)) {
+                                    pane.send("auto", false)
+                                    event.accepted = true
+                                }
                             }
                         }
                     }
@@ -687,8 +1066,8 @@ Window {
                     Layout.fillWidth: true
                     text: pane.routeHint
                     wrapMode: Text.Wrap
-                    font: Kirigami.Theme.smallFont
-                    opacity: 0.7
+                    font.pointSize: pane.pt * 0.85
+                    color: pane.mutedColor
                 }
                 RowLayout {
                     Layout.fillWidth: true

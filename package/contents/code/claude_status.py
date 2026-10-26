@@ -2090,9 +2090,10 @@ def read_file(path):
         return None
 
 
-def edit_diff(name, inp, current):
+def edit_diff(name, inp, current, limit=DIFF_LINES):
     """The lines of a unified diff of the change an Edit, MultiEdit, Write or
-    NotebookEdit call asks for (current: the file's text now, for Write)."""
+    NotebookEdit call asks for (current: the file's text now, for Write); the
+    first limit of them (None: all)."""
     import difflib
     if name == "Edit":
         old, new = inp.get("old_string"), inp.get("new_string")
@@ -2110,7 +2111,7 @@ def edit_diff(name, inp, current):
     for old, new in pairs:
         diff = list(difflib.unified_diff(old.splitlines(), new.splitlines(), lineterm="", n=2))
         out += diff[2:]
-    return out[:DIFF_LINES]
+    return out[:limit]
 
 
 def permission_view(tool, inp, cwd, suggestions=()):
