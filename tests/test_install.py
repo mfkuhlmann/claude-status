@@ -1,6 +1,8 @@
-"""install.sh in a made-up home: stand-ins for kpackagetool6 and GNOME's
-tools only note how they were called, so nothing is installed for real."""
+"""install.sh in a made-up home: stand-ins for kpackagetool6, gdbus and
+GNOME's tools only note how they were called, so nothing is installed for
+real."""
 import os
+import shutil
 import stat
 import subprocess
 import tempfile
@@ -20,7 +22,7 @@ class InstallTests(unittest.TestCase):
         self.log = Path(tmp.name) / "stubs.log"
         self.home.mkdir()
         self.bin.mkdir()
-        for name in ("kpackagetool6", "gnome-extensions", "gsettings"):
+        for name in ("kpackagetool6", "gdbus", "gnome-extensions", "gsettings"):
             self.stub(name, STUB)
 
     def stub(self, name, text):
@@ -93,6 +95,31 @@ class InstallTests(unittest.TestCase):
         out = self.install("--uninstall")
         self.assertNotIn("permission-hook", (self.home / ".claude/settings.json").read_text())
         self.assertFalse((self.home / ".local/share/claude-widget/permission-hook.py").exists())
+
+    @unittest.skipUnless(shutil.which("kwriteconfig6") and shutil.which("kreadconfig6"), "needs KDE's kwriteconfig6")
+    def test_the_chat_panes_icon(self):
+        rules = self.home / ".config/kwinrulesrc"
+        rules.parent.mkdir(parents=True)
+        mine = "[General]\ncount=1\nrules=mine\n\n[mine]\nDescription=my rule\n"
+        rules.write_text(mine)
+        out = self.install()
+        self.assertIn("The chat pane shows Talpa in the taskbar", out.stdout)
+        text = rules.read_text()
+        self.assertIn("count=2\nrules=mine,claude-status-chat-pane\n", text)
+        self.assertIn("[claude-status-chat-pane]\n", text)
+        self.assertIn("title=— Claude chat\n", text)
+        self.assertIn("desktopfile=org.wzaielamri.claudestatus.chat\ndesktopfilerule=2\n", text)
+        self.assertIn("[mine]\nDescription=my rule\n", text)
+        desktop = self.home / ".local/share/applications/org.wzaielamri.claudestatus.chat.desktop"
+        self.assertIn(f"Icon={self.home}/.local/share/plasma/plasmoids/org.wzaielamri.claudestatus/contents/pets/window.svg\n",
+                      desktop.read_text())
+        self.assertIn("org.kde.KWin.reconfigure", self.log.read_text())
+        out = self.install()  # (an upgrade: the same rule, once)
+        self.assertNotIn("The chat pane shows Talpa", out.stdout)
+        self.assertIn("count=2\nrules=mine,claude-status-chat-pane\n", rules.read_text())
+        self.install("--uninstall")
+        self.assertEqual(rules.read_text(), mine)
+        self.assertFalse(desktop.exists())
 
     def test_gnome_45_to_48_refused(self):
         self.stub("gnome-shell", "#!/bin/sh\necho 'GNOME Shell 46.0'\n")

@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // Draws Talpa's still pictures as SVG files from the same code that animates
-// it (package/contents/ui/talpa): the notification icons, and on request the
-// VS Code extension's icons.
+// it (package/contents/ui/talpa): the notification icons, the chat pane's
+// window icon, and on request the VS Code extension's icons.
 //
-//   node tools/talpa_icons.mjs                    notification icons in package/contents/pets/
+//   node tools/talpa_icons.mjs                    notification and window icons in package/contents/pets/
 //   node tools/talpa_icons.mjs --store OUT.svg    the 128 px store icon (Talpa in its burrow on navy)
 //   node tools/talpa_icons.mjs --glyph OUT.svg    the one-color panel icon (VS Code's sidebar)
 //
@@ -170,4 +170,7 @@ if (args[0] === '--store') {
     for (const [name, step] of Object.entries(NOTIFY))   // (the sign needs room on the right)
         writeFileSync(join(dir, `notify-${name}.svg`), talpaPicture(step, name === 'oncall' ? '0 -6 70 70' : '1 -1 62 64'));
     writeFileSync(join(dir, 'talpa.svg'), talpaPicture({ depth: 'half', eyes: 'open', mouth: 'smile', lamp: 'idle' }, '1 -1 62 64'));
+    // the chat pane's icon in the taskbar (install.sh's window rule): further
+    // out of its burrow, filling the square as other apps' icons do
+    writeFileSync(join(dir, 'window.svg'), talpaPicture({ depth: 'high', eyes: 'open', mouth: 'smile', lamp: 'idle' }, '4 8.1 56 56'));
 }

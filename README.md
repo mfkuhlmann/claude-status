@@ -161,7 +161,7 @@ For VS Code, [Claude Status for VS Code](https://github.com/wzaielamri/claude-st
 
 `install.sh` does two things:
 
-1. It installs the widget for your user (into `~/.local/share/plasma/plasmoids/`) with `kpackagetool6`.
+1. It installs the widget for your user (into `~/.local/share/plasma/plasmoids/`) with `kpackagetool6`. So that the chat pane shows Talpa in the taskbar rather than Plasma's icon (it's a window of Plasma's shell), it adds a KWin window rule for it (*Claude Status: Talpa as the chat pane's icon*, in System Settings → Window Rules) and a desktop file hidden from menus (`~/.local/share/applications/org.wzaielamri.claudestatus.chat.desktop`).
 2. It adds a small snippet to the status-line script of each Claude profile (the script that `statusLine` in `~/.claude*/settings.json` runs). It shows the change and asks first (`--yes` skips the question), and keeps a backup next to the script. The snippet is plain POSIX sh, so it works in sh, bash and zsh scripts; running `./install.sh` again replaces an older copy. The snippet saves the status-line data (plan limits, context) for the widget. What your status line shows stays the same.
 
 <details>
@@ -346,7 +346,7 @@ If the panel keeps showing the old version, restart Plasma's shell: `systemctl -
    ./install.sh --uninstall
    ```
 
-   This removes the widget and takes the snippet out of your status-line scripts (it shows the change and keeps a backup).
+   This removes the widget and its window rule, and takes the snippet out of your status-line scripts (it shows the change and keeps a backup).
 3. Optionally delete the widget's cache: `rm -rf ~/.cache/claude-widget`.
 
 Apart from the chats you share and the accounts you add, the widget never changes Claude Code's own files, so nothing else is left behind. Accounts you added stay (they're Claude's folders now), and so do their `~/.local/bin/claude-NAME` commands: remove those on the Accounts page first if you like. Shared chats stay shared: use **Keep only on …** first if you want them back as normal chats (see [Sharing chats](#sharing-chats)).

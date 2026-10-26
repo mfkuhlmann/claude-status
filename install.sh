@@ -4,7 +4,8 @@
 #   ./install.sh              install/upgrade; add the status-line snippet and
 #                             (Plasma) the permission hook (asks first)
 #   ./install.sh --yes        same, without asking
-#   ./install.sh --uninstall  remove it, the snippet and the hook
+#   ./install.sh --uninstall  remove it, the snippet and the hook (and the
+#                             chat pane's window rule)
 #   --plasma / --gnome        which one (default: the desktop you're on)
 # The snippet goes into every script a Claude profile's settings.json runs as
 # its status line (~/.claude, ~/.claude-*; a script shared by several profiles
@@ -24,7 +25,7 @@ for arg in "$@"; do
     --uninstall) uninstall=1 ;;
     --plasma) target=plasma ;;
     --gnome) target=gnome ;;
-    -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -216,6 +217,78 @@ uninstall_gnome() {
   esac
 }
 
+# The chat pane's icon (Plasma). The pane is a window of plasmashell, so the
+# taskbar would show Plasma's icon for it; a KWin window rule gives windows
+# titled "… — Claude chat" a desktop file of their own (hidden from menus)
+# with Talpa as its icon. It shows in System Settings → Window Rules.
+pane_app="org.wzaielamri.claudestatus.chat"
+pane_desktop="${XDG_DATA_HOME:-$HOME/.local/share}/applications/$pane_app.desktop"
+pane_rule="claude-status-chat-pane"
+pane_rule_keys=(
+  "Description=Claude Status: Talpa as the chat pane's icon"
+  "title=— Claude chat" "titlematch=2"         # 2: the title has it
+  "wmclass=plasmashell" "wmclassmatch=2"       # (org.kde.plasmashell on Wayland)
+  "types=1"                                    # normal windows
+  "desktopfile=$pane_app" "desktopfilerule=2"  # 2: force
+)
+
+kwin_rules() {  # the rules in kwinrulesrc, one per line
+  kreadconfig6 --file kwinrulesrc --group General --key rules 2>/dev/null | tr ',' '\n' | sed '/^$/d'
+}
+
+set_kwin_rules() {  # $@: the rules, in order
+  local IFS=,
+  kwriteconfig6 --file kwinrulesrc --group General --key rules "$*"
+  kwriteconfig6 --file kwinrulesrc --group General --key count "$#"
+  gdbus call --session --dest org.kde.KWin --object-path /KWin --method org.kde.KWin.reconfigure >/dev/null 2>&1 || true
+}
+
+install_pane_icon() {
+  command -v kwriteconfig6 >/dev/null && command -v kreadconfig6 >/dev/null || return 0
+  mkdir -p "$(dirname "$pane_desktop")"
+  # (Exec does nothing: the pane opens from the widget)
+  cat > "$pane_desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Claude chat
+Comment=The chat pane of the Claude Status widget
+Icon=$HOME/.local/share/plasma/plasmoids/$id/contents/pets/window.svg
+Exec=true
+NoDisplay=true
+StartupNotify=false
+EOF
+  local kv rules
+  for kv in "${pane_rule_keys[@]}"; do
+    kwriteconfig6 --file kwinrulesrc --group "$pane_rule" --key "${kv%%=*}" "${kv#*=}"
+  done
+  mapfile -t rules < <(kwin_rules)
+  if printf '%s\n' "${rules[@]}" | grep -qxF "$pane_rule"; then
+    set_kwin_rules "${rules[@]}"  # (KWin reads the rule again)
+  else
+    set_kwin_rules "${rules[@]}" "$pane_rule"
+    echo "The chat pane shows Talpa in the taskbar (a window rule: System Settings → Window Rules)."
+  fi
+}
+
+uninstall_pane_icon() {
+  rm -f "$pane_desktop"
+  command -v kwriteconfig6 >/dev/null && command -v kreadconfig6 >/dev/null || return 0
+  local kv rules=() rule found=0
+  for kv in "${pane_rule_keys[@]}"; do
+    kwriteconfig6 --file kwinrulesrc --group "$pane_rule" --key "${kv%%=*}" --delete
+  done
+  while IFS= read -r rule; do
+    if [ "$rule" = "$pane_rule" ]; then
+      found=1
+    else
+      rules+=("$rule")
+    fi
+  done < <(kwin_rules)
+  if [ "$found" = 1 ]; then
+    set_kwin_rules "${rules[@]}"
+  fi
+}
+
 mapfile -t statuslines < <(find_statuslines)
 
 # The permission hook (pane.py --relay status|on|off): with it, the widget's
@@ -233,6 +306,7 @@ if [ "$uninstall" = 1 ]; then
     uninstall_gnome
   else
     kpackagetool6 -t Plasma/Applet -r "$id" || true
+    uninstall_pane_icon
   fi
   # The snippet stays while something else still reads what it saves
   others=()
@@ -263,6 +337,7 @@ else
   kpackagetool6 -t Plasma/Applet -i "$here/package"
   upgraded=0
 fi
+[ "$target" = plasma ] && install_pane_icon
 
 # 2. Status-line snippet (feeds plan limits and per-session context)
 command -v jq >/dev/null || echo "warning: jq not found; the snippet needs it" >&2
