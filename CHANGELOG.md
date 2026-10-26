@@ -12,6 +12,9 @@
   point at it for how many were new input, read from the cache, written to the
   cache and written by Claude. A row of the timeline says its tokens too when
   you point at its numbers. Vendored backend at the widget's 31760a8.
+- **A bigger icon:** the extension's icon (in the Extensions list and on the
+  Marketplace) is Talpa itself, as large as the widget's, without the navy
+  square behind it.
 
 ## 1.15.1
 
