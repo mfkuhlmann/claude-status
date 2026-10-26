@@ -1064,15 +1064,25 @@ Window {
                             id: replyBox
                             background: null
                             placeholderText: pane.permission ? i18n("It's asking you something: answer that first")
-                                                             : i18n("Reply to Claude… (Ctrl+Enter sends)")
+                                                             : i18n("Reply to Claude… (Enter sends, Shift+Enter: new line)")
                             wrapMode: TextEdit.Wrap
                             font.pointSize: pane.pt
                             enabled: !(pane.permission && pane.route === "tmux")
+                            // Enter sends, as in Claude's own prompt (Shift+Enter: a new line). For a
+                            // terminal that takes no text from outside, Enter asks how first.
                             Keys.onPressed: event => {
-                                if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && (event.modifiers & Qt.ControlModifier)) {
-                                    pane.send("auto", false)
-                                    event.accepted = true
+                                if (event.key !== Qt.Key_Return && event.key !== Qt.Key_Enter)
+                                    return
+                                if (event.modifiers & Qt.ShiftModifier) {
+                                    if (selectedText)
+                                        remove(selectionStart, selectionEnd)
+                                    insert(cursorPosition, "\n")
+                                } else if (preeditText === "") {   // (not while an input method composes)
+                                    pane.send(pane.askHow ? "background" : "auto", false)
+                                } else {
+                                    return
                                 }
+                                event.accepted = true
                             }
                         }
                     }
