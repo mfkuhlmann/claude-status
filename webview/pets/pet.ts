@@ -216,14 +216,14 @@ export class Pet {
       : "";
   }
 
-  // Where it can be: its burrow (wider than its body) stays on the stage, and
-  // the hero keeps to the right half, clear of the headline
+  // Where it can be: anywhere on the stage, its burrow (wider than its body)
+  // staying on it; the hero walks over the headline
   private get reach(): number {
     return (this.stage.box * 27) / 64 + SMALL;
   }
 
   private get minX(): number {
-    return this.lone ? Math.max(this.reach, this.stage.width * 0.5) : this.reach;
+    return this.reach;
   }
 
   private get maxX(): number {
