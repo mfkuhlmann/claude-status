@@ -397,6 +397,8 @@ const DEMO_CHATS: WeekChat[] = [
 // The Recap tab's recap of made-up days: mornings and afternoons of work, a
 // second chat at once now and then, one long wait for your answer, two
 // usage limits, the rules the permission prompts you answered ask for
+const TOKENS_PER_DOLLAR = 1_853_000; // (a made-up week's tokens, about the breakdown below)
+
 export function demoWeek(now: number, back = 0, account = "", span: WeekSpan = "week"): WeekRecap {
   if (span !== "week") {
     // a day: today's (or the one back days before) out of the made-up week;
@@ -410,10 +412,12 @@ export function demoWeek(now: number, back = 0, account = "", span: WeekSpan = "
     const row = (w: WeekRecap): WeekDay => ({
       ...w.days[0], to: w.to, you: [], work: [], wait: [], limits: [], end: w.days[w.days.length - 1].end,
       youMs: w.sum.youMs, workedMs: w.sum.workedMs, busyMs: w.sum.busyMs, waitMs: w.sum.waitMs, prompts: w.sum.prompts, cost: w.sum.cost,
+      tokenTotal: w.sum.tokenTotal,
       chats: w.chats.slice(0, 3),
     });
     const sum = { ...week.sum, youMs: week.sum.youMs + before.sum.youMs, workedMs: week.sum.workedMs + before.sum.workedMs,
-      prompts: week.sum.prompts + before.sum.prompts, cost: week.sum.cost + before.sum.cost };
+      prompts: week.sum.prompts + before.sum.prompts, cost: week.sum.cost + before.sum.cost,
+      tokenTotal: week.sum.tokenTotal + before.sum.tokenTotal };
     return { ...week, span, back: 0, backMax: 0, first: before.from, from: before.from, previous: null, trend: [],
       days: [row(week), row(before)], sum };
   }
@@ -445,14 +449,15 @@ export function demoWeek(now: number, back = 0, account = "", span: WeekSpan = "
       youMs: you.reduce((sum, [a, b]) => sum + Math.min(b, now) - a, 0) * scale, workedMs,
       busyMs: workedMs * 0.85, waitMs: wait.reduce((sum, [a, b]) => sum + b - a, 0),
       prompts: weekend ? 4 : Math.round(31 * scale), cost: Math.round((weekend ? 9 : 64) * scale * 100) / 100,
+      tokenTotal: Math.round((weekend ? 9 : 64) * scale * TOKENS_PER_DOLLAR),
       chats: work.length ? DEMO_CHATS.slice(0, weekend ? 1 : 3).map((c, k) => ({ ...c, workedMs: workedMs / (k + 2), cost: c.cost / 5 })) : [],
     });
   }
-  const total = (key: "youMs" | "workedMs" | "busyMs" | "waitMs" | "prompts" | "cost") => days.reduce((sum, d) => sum + d[key], 0);
+  const total = (key: "youMs" | "workedMs" | "busyMs" | "waitMs" | "prompts" | "cost" | "tokenTotal") => days.reduce((sum, d) => sum + d[key], 0);
   const cost = total("cost");
   const week = (k: number) => ({
     youMs: total("youMs") * k, workedMs: total("workedMs") * k, busyMs: total("busyMs") * k, waitMs: total("waitMs") * k,
-    prompts: Math.round(total("prompts") * k), cost: cost * k, start: days[0].start - 7 * 86400000 * Math.round(1 / k),
+    prompts: Math.round(total("prompts") * k), cost: cost * k, tokenTotal: total("tokenTotal") * k, start: days[0].start - 7 * 86400000 * Math.round(1 / k),
   });
   const fill = (from: number, until: number, top: number): [number, number][] =>
     Array.from({ length: 13 }, (_, k) => [from + ((Math.min(now, until) - from) * k) / 12, Math.round((top * k) / 12)] as [number, number]);
@@ -471,11 +476,12 @@ export function demoWeek(now: number, back = 0, account = "", span: WeekSpan = "
     days,
     sum: {
       youMs: total("youMs"), workedMs: total("workedMs"), busyMs: total("busyMs"), waitMs: total("waitMs"),
-      prompts: total("prompts"), cost, turns: 212, limits: 2, chats: 23, peakAtOnce: 2, busiestDay: days[3].day,
+      prompts: total("prompts"), cost, tokenTotal: total("tokenTotal"), turns: 212, limits: 2, chats: 23, peakAtOnce: 2, busiestDay: days[3].day,
       longestTurn: { workedMs: 48 * MIN, startedAt: days[3].start + 10 * HOUR, name: "Port the date parser", host: "" },
       tokens: { input: 41_200, output: 2_310_000, cacheRead: 612_000_000, cacheWrite5m: 2_100_000, cacheWrite1h: 9_800_000, webSearches: 3 },
     },
-    previous: { youMs: total("youMs") * 0.8, workedMs: total("workedMs") * 0.7, busyMs: 0, waitMs: 0, prompts: total("prompts") - 18, cost: cost * 0.75 },
+    previous: { youMs: total("youMs") * 0.8, workedMs: total("workedMs") * 0.7, busyMs: 0, waitMs: 0, prompts: total("prompts") - 18, cost: cost * 0.75,
+      tokenTotal: total("tokenTotal") * 0.75 },
     projects: [
       { name: "webapp", path: "~/projects/webapp", host: "", workedMs: total("workedMs") * 0.55, cost: cost * 0.55, prompts: 92, chats: [DEMO_CHATS[1]], chatCount: 11 },
       { name: "date-parser", path: "~/projects/date-parser", host: "", workedMs: total("workedMs") * 0.25, cost: cost * 0.27, prompts: 41, chats: [DEMO_CHATS[0]], chatCount: 6 },

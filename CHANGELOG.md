@@ -6,6 +6,12 @@
   hole along under it, shrinking within a third of a second, as if the hole
   were dragged by. Now the hole stays where Talpa was while you hold it, and
   fills in once Talpa has landed; it digs a new one where it lands, as before.
+- **Tokens in the Recap:** a **Tokens** number beside *At API prices*, for the
+  day, the 7 days or everything (**Day | Week | Overall**): all the tokens
+  your chats read and wrote, against the period before, with its trend line;
+  point at it for how many were new input, read from the cache, written to the
+  cache and written by Claude. A row of the timeline says its tokens too when
+  you point at its numbers. Vendored backend at the widget's 31760a8.
 
 ## 1.15.1
 

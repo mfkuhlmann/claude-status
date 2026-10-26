@@ -101,16 +101,21 @@ export function previousOf(recap: WeekRecap): WeekNumbers | null {
 }
 
 // The change against the 7 days before: "+4h 44m", "−$12"
-export function deltaText(now: number, before: number | null, kind: "time" | "money" | "count", cur: Currency = USD): string {
+export function deltaText(now: number, before: number | null, kind: Kind, cur: Currency = USD): string {
   if (before === null) return "";
   const d = now - before;
   const abs = Math.abs(d);
-  if (kind === "time" ? abs < 60000 : kind === "money" ? abs < 0.01 : d === 0) return "same as before";
-  return (d > 0 ? "+" : "−") + (kind === "time" ? hoursText(abs) : kind === "money" ? moneyText(abs, cur) : String(abs));
+  if (kind === "time" ? abs < 60000 : kind === "money" ? abs < 0.01 : kind === "tokens" ? abs < 50 : d === 0) return "same as before";
+  return (d > 0 ? "+" : "−") + amountText(abs, kind, cur);
 }
 
-type NumberKey = "youMs" | "workedMs" | "cost" | "prompts";
-type Kind = "time" | "money" | "count";
+type NumberKey = "youMs" | "workedMs" | "cost" | "tokenTotal" | "prompts";
+type Kind = "time" | "money" | "tokens" | "count";
+
+// A number of the tiles, in its own unit
+function amountText(v: number, kind: Kind, cur: Currency): string {
+  return kind === "time" ? hoursText(v) : kind === "money" ? moneyText(v, cur) : kind === "tokens" ? shortCount(v) : String(v);
+}
 
 export interface WeekTile {
   label: string;
@@ -129,7 +134,7 @@ export function weekTiles(recap: WeekRecap): WeekTile[] {
   const s = recap.sum;
   const p = previousOf(recap);
   const cur = currencyOf(recap);
-  const shown = (v: number, kind: Kind) => (kind === "time" ? hoursText(v) : kind === "money" ? moneyText(v, cur) : String(v));
+  const shown = (v: number, kind: Kind) => amountText(v, kind, cur);
   const day = recap.span === "day";
   const before = (v: number, kind: Kind) => (p ? `\n${day ? "The day before" : "The 7 days before"}: ${shown(v, kind)}` : "");
   const weeks = (key: NumberKey, kind: Kind) => {
@@ -169,6 +174,13 @@ export function weekTiles(recap: WeekRecap): WeekTile[] {
       trend: trendOf(recap, "cost"),
     },
     {
+      label: "Tokens",
+      value: shortCount(s.tokenTotal),
+      delta: deltaText(s.tokenTotal, p ? p.tokenTotal : null, "tokens"),
+      tip: tokensText(s.tokens) + before(p ? p.tokenTotal : 0, "tokens") + weeks("tokenTotal", "tokens"),
+      trend: trendOf(recap, "tokenTotal"),
+    },
+    {
       label: "Prompts",
       value: String(s.prompts),
       delta: deltaText(s.prompts, p ? p.prompts : null, "count"),
@@ -177,6 +189,12 @@ export function weekTiles(recap: WeekRecap): WeekTile[] {
       trend: trendOf(recap, "prompts"),
     },
   ];
+}
+
+// What the tokens were: all that Claude read and wrote, by kind
+function tokensText(t: WeekSum["tokens"]): string {
+  return `Everything Claude read and wrote: ${shortCount(t.input)} of new input, ${shortCount(t.cacheRead)} read from the cache, ` +
+    `${shortCount(t.cacheWrite5m + t.cacheWrite1h)} written to the cache and ${shortCount(t.output)} that Claude wrote.`;
 }
 
 export function factsText(s: WeekSum): string {
@@ -211,7 +229,7 @@ export function hoverText(d: WeekDay, ms: number, now: number, px: number): stri
 export function dayTip(d: WeekDay, cur: Currency = USD): string {
   return (
     `${d.to ? `${shortDay(d.day)} – ${shortDay(d.to)}` : longDay(d.day)}\nYou: ${hoursText(d.youMs)} · Claude worked ${hoursText(d.workedMs)} (on the clock ${hoursText(d.busyMs)}) · ` +
-    `it waited ${hoursText(d.waitMs)} for you\n${plural(d.prompts, "%1 prompt", "%1 prompts")} · ${moneyText(d.cost, cur)} at API prices` +
+    `it waited ${hoursText(d.waitMs)} for you\n${plural(d.prompts, "%1 prompt", "%1 prompts")} · ${shortCount(d.tokenTotal)} tokens · ${moneyText(d.cost, cur)} at API prices` +
     (d.chats?.length ? "\nClick for its chats" : "")
   );
 }

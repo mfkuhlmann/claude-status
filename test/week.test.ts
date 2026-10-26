@@ -7,7 +7,7 @@ import * as vscode from "vscode";
 import { demoPerms, demoState, demoWeek } from "../src/shared/demo";
 import type { WeekDay } from "../src/shared/types";
 import {
-  coldText, currencyOf, deltaText, factsText, fillPaths, footText, hoursText, hoverText, moneyText, periodText, promptsText, ruleMeta,
+  coldText, currencyOf, dayTip, deltaText, factsText, fillPaths, footText, hoursText, hoverText, moneyText, periodText, promptsText, ruleMeta,
   weekAsked, weekRevokeAsked, weekRuleAsked, weekTiles, windowSpan, workText, grantMeta, grantedIntro,
   dateText, periodWaiting, rowDay, shortDay,
 } from "../src/shared/week";
@@ -37,9 +37,28 @@ test("the days shown, and the week's facts", () => {
   assert.equal(periodText(demoWeek(NOW, 1)), "11 Oct – 17 Oct");
   assert.match(factsText(recap.sum), /^longest turn 48m \(Port the date parser\) · up to 2 chats at once · busiest day \w+day · usage limits stopped you 2 times$/);
   const tiles = weekTiles(recap);
-  assert.deepEqual(tiles.map((t) => t.label), ["You", "Claude worked", "At API prices", "Prompts"]);
+  assert.deepEqual(tiles.map((t) => t.label), ["You", "Claude worked", "At API prices", "Tokens", "Prompts"]);
   assert.match(tiles[1].tip, /On the clock it worked .*, and it waited 3h 18m for your answers\.\nThe 7 days before: /);
-  assert.equal(weekTiles({ ...recap, previous: { youMs: 0, workedMs: 0, busyMs: 0, waitMs: 0, prompts: 0, cost: 0 } })[0].delta, "");
+  assert.equal(weekTiles({ ...recap, previous: { youMs: 0, workedMs: 0, busyMs: 0, waitMs: 0, prompts: 0, cost: 0, tokenTotal: 0 } })[0].delta, "");
+});
+
+test("the tokens used: a tile with its change and trend, and a row's tokens", () => {
+  assert.equal(deltaText(226_300_000, 400_000_000, "tokens"), "−173.7M");
+  assert.equal(deltaText(1_500, 0, "tokens"), "+1.5k");
+  assert.equal(deltaText(1_000_020, 1_000_000, "tokens"), "same as before");
+  const recap = demoWeek(NOW);
+  const tile = weekTiles(recap)[3];
+  assert.equal(tile.label, "Tokens");
+  assert.equal(tile.value, "626.3M");
+  assert.equal(tile.delta, "+156.6M");
+  assert.match(tile.tip, /^Everything Claude read and wrote: 41\.2k of new input, 612\.0M read from the cache, 11\.9M written to the cache and 2\.3M that Claude wrote\.\nThe 7 days before: 469\.7M\nWeek by week, these 7 days last: .* · 626\.3M$/);
+  assert.equal(tile.trend[4], recap.sum.tokenTotal);
+  assert.equal(recap.days.reduce((sum, d) => sum + d.tokenTotal, 0), recap.sum.tokenTotal);
+  assert.match(dayTip(recap.days[5]), /31 prompts · 118\.6M tokens · \$64\.00 at API prices/);
+  const day = weekTiles(demoWeek(NOW, 0, "", "day"));
+  assert.match(day[3].tip, /\nThe day before: .*\nDay by day, this day last: /);
+  const all = demoWeek(NOW, 0, "", "all");
+  assert.equal(all.sum.tokenTotal, all.days[0].tokenTotal + all.days[1].tokenTotal);
 });
 
 test("pointing at a day says what went on then", () => {
@@ -47,7 +66,7 @@ test("pointing at a day says what went on then", () => {
   const at = (h: number) => start + h * HOUR;
   const day: WeekDay = {
     day: "2026-10-24", start, end: start + 24 * HOUR, you: [[at(9), at(10)]], work: [[at(9.5), at(11), 2]], wait: [[at(1), at(9)]],
-    youMs: HOUR, workedMs: 3 * HOUR, busyMs: 1.5 * HOUR, waitMs: 8 * HOUR, prompts: 3, cost: 4, limits: [at(10.5)], chats: [],
+    youMs: HOUR, workedMs: 3 * HOUR, busyMs: 1.5 * HOUR, waitMs: 8 * HOUR, prompts: 3, cost: 4, tokenTotal: 2_500_000, limits: [at(10.5)], chats: [],
   };
   const px = (24 * HOUR) / 400;
   assert.match(hoverText(day, at(10.5), NOW, px), /: a usage limit stopped a chat at .* · Claude worked /);

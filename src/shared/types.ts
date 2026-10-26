@@ -563,6 +563,7 @@ export interface WeekDay {
   waitMs: number;
   prompts: number;
   cost: number;
+  tokenTotal: number; // all tokens: input, output, cache reads and writes
   chats: WeekChat[]; // the day's chats, what Claude worked on most first
 }
 
@@ -573,6 +574,7 @@ export interface WeekNumbers {
   waitMs: number; // Claude waiting for your answers
   prompts: number;
   cost: number; // $ at API prices
+  tokenTotal: number; // all tokens: input, output, cache reads and writes
 }
 
 export interface WeekSum extends WeekNumbers {
