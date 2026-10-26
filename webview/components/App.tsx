@@ -12,6 +12,7 @@ import { Component, type ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { editorTab } from "../env";
 import { pets } from "../pets";
+import { FocusView } from "./FocusView";
 import type { HeroInput } from "../pets/api";
 import { chatRefOf, contextFullText, groupKeyOf } from "../util/chat";
 import { useStore } from "../util/store";
@@ -70,7 +71,7 @@ export function App() {
   // pets changed color: repaint the bars next to their rows
   useStore(petColorsVersion);
   const scrolled = useScrolled();
-  const tab = useStore(uiState).tab;
+  const { tab, focus } = useStore(uiState);
   const week = tab === "week";
   const perms = tab === "perms";
   // A tab slides in from the side it's on (Chats | Recap | Permissions)
@@ -137,12 +138,17 @@ export function App() {
         <main key="chats" {...tabIn}>
           <Messages state={state} />
           {!state.status && !state.errorText ? <div class="empty muted">Looking for your chats…</div> : null}
-          {local.map((g) => (
+          {focus && state.status ? (
+            <Guarded what="the focus view">
+              <FocusView groups={groups} />
+            </Guarded>
+          ) : null}
+          {(focus ? [] : local).map((g) => (
             <Guarded key={groupKeyOf(g)} what={g.name}>
               <GroupSection group={g} accounts={local.length} />
             </Guarded>
           ))}
-          {state.hosts.map((h) => (
+          {(focus ? [] : state.hosts).map((h) => (
             <Guarded key={h.name} what={h.name}>
               {/* its last answer, also when the last check failed (dimmed): allGroups leaves that one out */}
               <HostSection host={h} groups={(h.result?.groups ?? []).map((g) => ({ ...g, host: h.name }))} />

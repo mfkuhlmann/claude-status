@@ -4,7 +4,7 @@
 import "../webview/main";
 import { demoPerms, demoState, demoWeek } from "../src/shared/demo";
 import type { HostMessage } from "../src/shared/types";
-import { toggleStarred, uiState } from "../webview/util/ui";
+import { setFocus, toggleStarred, uiState } from "../webview/util/ui";
 
 const params = new URLSearchParams(location.search);
 let phase = Number(params.get("phase")) || 0;
@@ -110,6 +110,8 @@ setTimeout(() => {
   const span = params.get("span") === "day" || params.get("span") === "all" ? (params.get("span") as "day" | "all") : "week";
   if (params.get("week") === "1") send({ type: "week", back: 0, account: "", span, recap: demoWeek(Date.now(), 0, "", span), error: "" });
   if (params.get("perms") === "1") send({ type: "perms", data: demoPerms(Date.now()), error: "" });
+  // ?focus=1: the focus view
+  if (params.get("focus") === "1") setFocus(true);
   // ?scroll=N: to see the top stay put over the list
   const scroll = Number(params.get("scroll"));
   if (scroll) setTimeout(() => window.scrollTo(0, scroll), 300);

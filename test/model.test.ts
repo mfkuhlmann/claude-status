@@ -11,6 +11,8 @@ import {
   claudeCodeGroup,
   countStates,
   findChatRef,
+  focusLists,
+  FINISHED_LATELY_MS,
   duration,
   formatTokens,
   handoverTarget,
@@ -52,6 +54,29 @@ test("counts, overall state, headline and mood follow the most urgent chat", () 
   assert.equal(summaryText(counts), "1 needs input · 2 working · 1 at the usage limit · 1 done");
   assert.equal(heroMood({ status: null, errorText: "" }, "none", []), "loading");
   assert.equal(heroMood({ status: null, errorText: "broken" }, "none", []), "error");
+});
+
+test("the focus view lists what waits for you, what finished lately and what works; the rest counted", () => {
+  const s = demoState(NOW);
+  const groups = allGroups(s.status, s.hosts);
+  const lists = focusLists(groups, NOW);
+  assert.deepEqual(lists.needs.map((i) => i.session.state), ["waiting"]);
+  assert.equal(lists.working.length, 2);
+  assert.ok(lists.working.every((i, k) => k === 0 || (lists.working[k - 1].session.since ?? 0) <= (i.session.since ?? 0)));
+  assert.equal(lists.rest.limit, 1);
+  assert.equal(lists.needs.length + lists.working.length + lists.finished.length + lists.rest.idle + lists.rest.done + lists.rest.limit,
+    countStates(groups).waiting + countStates(groups).working + countStates(groups).idle + countStates(groups).done + countStates(groups).limit);
+  assert.ok(lists.usage.length >= 1);
+  // a chat that finished a minute ago is new; one from an hour ago is only counted
+  const done = groups.flatMap((g) => g.sessions).find((x) => x.state === "done")!;
+  const lately = focusLists(groups.map((g) => ({ ...g, sessions: g.sessions.map((x) => (x === done ? { ...x, since: NOW - 60_000 } : x)) })), NOW);
+  assert.equal(lately.finished.length, 1);
+  const old = focusLists(groups.map((g) => ({ ...g, sessions: g.sessions.map((x) => (x === done ? { ...x, since: NOW - FINISHED_LATELY_MS - 1 } : x)) })), NOW);
+  assert.equal(old.finished.length, 0);
+  assert.equal(old.rest.done, 1);
+  // a chat listed twice (a shared chat) counts once
+  const twice = focusLists([...groups, groups[0]], NOW);
+  assert.equal(twice.needs.length + twice.working.length, lists.needs.length + lists.working.length);
 });
 
 test("a chat moves between the accounts of its own machine: this computer's or its SSH host's", () => {

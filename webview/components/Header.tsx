@@ -3,7 +3,7 @@ import type { Counts, Group, HostState, Overall } from "../../src/shared/types";
 import { editorTab, post } from "../env";
 import { useViewVisible } from "../util/petStage";
 import { useStore } from "../util/store";
-import { setTab, uiState } from "../util/ui";
+import { setFocus, setTab, uiState } from "../util/ui";
 import { IconButton } from "./IconButton";
 import { TalpaIcon } from "./TalpaIcon";
 
@@ -20,7 +20,7 @@ export function Header(props: {
   heroShown: boolean;
 }) {
   const visible = useViewVisible();
-  const tab = useStore(uiState).tab;
+  const { tab, focus } = useStore(uiState);
   const { overall, counts, groups, hosts } = props;
   // "No sessions running" only once something answered; until then the list
   // says it's looking
@@ -51,6 +51,16 @@ export function Header(props: {
       <span class="summary" title={tooltipLines(groups, counts, hosts).join("\n")}>
         {props.heroShown && tab === "chats" ? "" : summary}
       </span>
+      {tab === "chats" ? (
+        <IconButton
+          icon="filter"
+          label={focus ? "Show everything" : "Focus"}
+          title={focus ? "Show everything: back to every account, chat, pet and usage bar."
+            : "Focus: only what needs you, the chats that finished lately, and one line for each chat at work."}
+          class={focus ? "on" : ""}
+          onClick={() => setFocus(!focus)}
+        />
+      ) : null}
       {editorTab ? (
         <div class="header-actions">
           <IconButton icon="add" label="New chat…" onClick={newChat} />

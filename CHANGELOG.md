@@ -10,6 +10,12 @@
   open burrow is drawn once and copied into each picture, which halves what
   a picture costs. A pet you pick up trails your mouse on a spring, swings
   as you move it and wobbles when you let go.
+- **Focus view:** the filter button beside the tabs shows only what needs
+  you: the chats waiting for you as full rows (their questions, Allow /
+  Deny), the chats that finished a turn in the last 15 minutes, one line
+  for each chat at work with what it does now (click to open it), how many
+  others are idle or done, and each account's 5-hour usage. **Show
+  everything** (or the button again) brings back the whole view.
 - **Motion in the list:** a chat that moves up or down the list slides to
   its new place instead of jumping, a new chat fades in, the usage and
   context bars and the usage numbers glide to a new value, a tab slides in

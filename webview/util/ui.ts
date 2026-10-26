@@ -9,6 +9,7 @@ export type Tab = "chats" | "week" | "perms";
 
 interface UiState {
   tab: Tab; // the view's tab: your chats now, your last 7 days, or the permissions you gave
+  focus: boolean; // the Chats tab shows only what needs you and what works (FocusView.tsx)
   agents: Record<string, true>;
   agentDetail: Record<string, true>; // by agentDetailKey(): row key + "|" + agent id
   peek: Record<string, true>;
@@ -28,6 +29,7 @@ function load(): UiState {
   const saved = savedState<Record<string, unknown>>()[KEY] as Partial<UiState> | undefined;
   return {
     tab: saved?.tab === "week" || saved?.tab === "perms" ? saved.tab : "chats",
+    focus: saved?.focus === true,
     agents: { ...(saved?.agents ?? {}) },
     agentDetail: { ...(saved?.agentDetail ?? {}) },
     peek: { ...(saved?.peek ?? {}) },
@@ -58,6 +60,11 @@ function persist(next: UiState): void {
 export function setTab(tab: Tab): void {
   const s = uiState.get();
   if (s.tab !== tab) persist({ ...s, tab });
+}
+
+export function setFocus(focus: boolean): void {
+  const s = uiState.get();
+  if (s.focus !== focus) persist({ ...s, focus });
 }
 
 export function toggleAgents(rowKey: string): void {

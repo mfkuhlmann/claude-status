@@ -222,6 +222,50 @@ export function stopOf(s: Pick<Session, "state" | "stopped">): Stop["kind"] | ""
   return (s.state === "idle" || s.state === "done") && s.stopped && !s.stopped.over ? s.stopped.kind : "";
 }
 
+// The focus view (webview FocusView.tsx): the chats waiting for you (the one
+// waiting longest first), the ones that finished a turn lately (newest
+// first), the ones at work (longest first), the rest counted, and each
+// account's 5-hour usage. A chat listed twice counts once, its first (most
+// urgent) row.
+export interface FocusItem {
+  key: string;
+  session: Session;
+  group: Group;
+}
+export interface FocusLists {
+  needs: FocusItem[];
+  finished: FocusItem[];
+  working: FocusItem[];
+  rest: { idle: number; done: number; limit: number };
+  usage: { name: string; pct: number }[];
+}
+export const FINISHED_LATELY_MS = 15 * 60 * 1000;
+
+export function focusLists(groups: Group[], now: number): FocusLists {
+  const out: FocusLists = { needs: [], finished: [], working: [], rest: { idle: 0, done: 0, limit: 0 }, usage: [] };
+  const seen = new Set<string>();
+  for (const g of groups) {
+    const five = g.limits?.windows.find((w) => w.key === "five_hour");
+    if (five) out.usage.push({ name: (g.host ? g.host + ": " : "") + g.title, pct: five.pct });
+    for (const s of g.sessions) {
+      const key = petKeyOf(s, g.host);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const item = { key, session: s, group: g };
+      if (s.state === "waiting") out.needs.push(item);
+      else if (s.state === "working") out.working.push(item);
+      else if (atLimit(s)) out.rest.limit += 1;
+      else if (s.reason !== "failed" && s.since && now - s.since < FINISHED_LATELY_MS && !s.stopped) out.finished.push(item);
+      else out.rest[s.state === "idle" ? "idle" : "done"] += 1;
+    }
+  }
+  const since = (i: FocusItem) => i.session.since ?? 0;
+  out.needs.sort((a, b) => since(a) - since(b));
+  out.working.sort((a, b) => since(a) - since(b));
+  out.finished.sort((a, b) => since(b) - since(a));
+  return out;
+}
+
 export function overallState(groups: Group[], counts: Counts): Overall {
   if (counts.waiting) return "waiting";
   if (counts.working) return "working";
