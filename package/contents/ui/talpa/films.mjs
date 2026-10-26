@@ -43,10 +43,14 @@ export class Films {
         this.fx = { on: false, paint: false, at: -1e9 };
     }
 
-    // New colors, theme or size: every picture is drawn again
+    // New colors, theme or size: every picture is drawn again, what shows at once
     reset() {
-        for (const s of this.sheets)
-            s.key = '~';
+        for (const s of this.sheets) {
+            if (s === this.front)
+                s.paint = true;
+            else if (!s.paint)
+                s.key = '~';
+        }
         this.liveAt = -1e9;
         this.fx.at = -1e9;
         this.shown = null;
