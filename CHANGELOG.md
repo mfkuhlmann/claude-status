@@ -3,6 +3,7 @@
 ## Unreleased
 
 - **The hole stays where it was:** pulling Talpa out of its burrow carried its hole along under it, shrinking within a third of a second, as if the hole were dragged by. Now the hole stays where Talpa was while you hold it, and fills in once Talpa has landed; it digs a new one where it lands, as before (Plasma).
+- **Plans line up:** a plan whose chat is gone had no *Send your changes* and *Continue the chat* buttons, so its time sat further right than the others' and fewer icons showed. Now every plan keeps all its buttons in the same places; those two are greyed out when the chat that made the plan isn't there any more.
 
 ## 1.15.1 (2026-10-26)
 

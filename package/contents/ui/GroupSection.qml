@@ -927,12 +927,14 @@ ColumnLayout {
                     }
                 }
                 // what you changed in it, to the chat that made it (main.qml: sendPlanFeedback)
+                // (a plan whose chat is gone keeps this button's place, greyed out, so every line's buttons and time stay in the same columns)
                 PlasmaComponents3.ToolButton {
-                    visible: !section.remoteHost && !!planLine.plan.chatId
+                    visible: !section.remoteHost
+                    enabled: !!planLine.plan.chatId
                     icon.name: "mail-send"
                     display: PlasmaComponents3.AbstractButton.IconOnly
                     text: i18n("Send your changes to Claude")
-                    opacity: planHover.hovered || planLine.plan.edited ? 1 : 0
+                    opacity: planHover.hovered || (enabled && planLine.plan.edited) ? 1 : 0
                     Layout.preferredHeight: planName.implicitHeight
                     Layout.preferredWidth: Layout.preferredHeight
                     onClicked: root.sendPlanFeedback(planLine.plan.slug, planLine.plan.profileDir, planLine.plan.chatId)
@@ -965,7 +967,7 @@ ColumnLayout {
                 }
                 PlasmaComponents3.ToolButton {
                     icon.name: "go-previous"
-                    visible: !!planLine.plan.chatId
+                    enabled: !!planLine.plan.chatId
                     display: PlasmaComponents3.AbstractButton.IconOnly
                     text: i18n("Continue the chat that made it")
                     opacity: planHover.hovered ? 1 : 0
