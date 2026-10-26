@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **The hole stays where it was:** pulling Talpa out of its burrow carried its hole along under it, shrinking within a third of a second, as if the hole were dragged by. Now the hole stays where Talpa was while you hold it, and fills in once Talpa has landed; it digs a new one where it lands, as before (Plasma).
+
 ## 1.15.1 (2026-10-26)
 
 - **Pictures in a reply:** Ctrl+V in the chat pane's box pastes a picture from the clipboard (a screenshot, say), as in the new-chat box: it's named in your reply with a thumbnail under the box (× takes it out). When the chat goes on in the background with it, it may open the picture; a chat that's running asks you first, as for any file outside its folder. For an SSH host's chat the pane asks to copy the picture there first.

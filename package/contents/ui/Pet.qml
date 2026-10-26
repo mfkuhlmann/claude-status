@@ -2,6 +2,7 @@ import QtQuick
 import org.kde.plasma.components as PlasmaComponents3
 import org.kde.plasma.core as PlasmaCore
 import org.kde.kirigami as Kirigami
+import "talpa/talpa.mjs" as T
 
 // One Talpa on the pet strip (PetStrip.qml). The creature itself (looks,
 // moods, what it does) is talpa/talpa.mjs, drawn by TalpaView.qml; this is
@@ -229,9 +230,21 @@ Item {
         landing = true
         fall.stop()   // grabbed again while falling
         stride.stop()
-        if (talpa)
-            talpa.setHeld(true)
+        if (talpa) {
+            // (its hole doesn't come along: it stays where it was, until it has landed)
+            const open = talpa.setHeld(true)
+            if (open > 0)
+                leaveHole(open)
+        }
         say(i18n("Whoa!"))
+    }
+
+    function leaveHole(open) {
+        closeHole.stop()
+        leftHole.at = px
+        leftHole.flip = view.facingLeft
+        leftHole.open = open
+        leftHole.shown = true
     }
 
     function drop() {
@@ -242,6 +255,8 @@ Item {
     // On the floor again: dizzy if it fell from high up, then it digs in where it landed
     function landed(fromHeight) {
         held = false
+        if (leftHole.shown)
+            closeHole.restart()   // (the one it left is filled in; it digs a new one where it is)
         if (!talpa) {
             landing = false
             return
@@ -356,6 +371,44 @@ Item {
     }
 
     // ------------------------------------------------------------ drawing
+
+    // The hole it was pulled out of, empty where it was while you hold it
+    // (under it, so it's drawn first)
+    Canvas {
+        id: leftHole
+        property bool shown: false
+        property real at: 0             // its horizontal centre
+        property real open: 1           // 0 closed, 1 open
+        property bool flip: false       // (the burrow isn't quite the same on both sides)
+        visible: shown && !pet.departed
+        width: view.width
+        height: view.height
+        x: at - view.boxX - pet.box / 2
+        y: pet.ground - view.floorY
+        renderStrategy: Canvas.Cooperative
+        onOpenChanged: requestPaint()
+        onVisibleChanged: if (visible) requestPaint()
+        onPaint: {
+            const ctx = getContext("2d")
+            ctx.reset()
+            ctx.translate(view.boxX, view.boxY)
+            ctx.scale(pet.box / T.BOX, pet.box / T.BOX)
+            if (flip) {
+                ctx.translate(T.BOX, 0)
+                ctx.scale(-1, 1)
+            }
+            T.drawHole(ctx, open)
+        }
+    }
+
+    NumberAnimation {
+        id: closeHole
+        target: leftHole
+        property: "open"
+        to: 0
+        duration: 350
+        onFinished: leftHole.shown = false
+    }
 
     TalpaView {
         id: view

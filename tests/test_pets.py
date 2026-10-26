@@ -115,6 +115,45 @@ console.log(JSON.stringify({ held: held, landed: landed, depth: t.st.depth, afte
         self.assertNotEqual(result["depth"], "out")
         self.assertFalse(result["after"])
 
+    def test_the_hole_stays_where_it_was_when_you_pull_it_out(self):
+        # The hole shrank (350 ms) while it followed the pet you pulled out of
+        # it, as if carried along (2026-10-26). Now the pet has none from the
+        # moment you grab it, setHeld says how much of its hole is left behind,
+        # and the widget keeps drawing that where it was until the pet landed.
+        result = run_node("""
+import { drawHole } from %s;
+const left = {};
+for (const [name, setup] of [
+    ['in its burrow', t => t.tick(1040)],
+    ['half dug in', t => { t.react('arrive'); t.tick(1040); }],
+    ['tunnelling', t => { t.onTravel = () => {}; t.react('dig'); for (let i = 0; i < 30; i++) t.tick(1040 + i * 50); }],
+    ['away', t => { t.react('leave'); for (let i = 0; i < 80; i++) t.tick(1040 + i * 50); }]]) {
+    const t = new Talpa({ brain: false });
+    t.tick(1000); setup(t);
+    const was = t.v.hole;
+    const open = t.setHeld(true);
+    left[name] = [Number(was.toFixed(2)), Number(open.toFixed(2)), t.v.hole];
+}
+const drawn = [];
+const ctx = new Proxy({}, { get: (t, k) => k === 'fill' || k === 'stroke' ? () => drawn.push(k)
+    : k in t ? t[k] : () => {}, set: (t, k, v) => { t[k] = v; return true; } });
+drawHole(ctx, 1);
+const t = new Talpa({ brain: false });
+console.log(JSON.stringify({ left: left, drawn: drawn.length, again: t.setHeld(false) }));""" % json.dumps(str(TALPA / "talpa.mjs")))
+        self.assertEqual(result["left"]["in its burrow"][1:3], [1, 0])
+        for name, (was, open, hole) in result["left"].items():
+            self.assertEqual(hole, 0, name + ": its hole stays behind")
+            self.assertEqual(open > 0, was > 0.02 and name != "tunnelling", name)
+        self.assertGreater(result["drawn"], 10)
+        self.assertEqual(result["again"], 0)
+        pet = (ROOT / "ui/Pet.qml").read_text()
+        self.assertIn("const open = talpa.setHeld(true)", pet)
+        self.assertIn("T.drawHole(ctx, open)", pet)
+        # (the one it left under the pet, filled in once it has landed)
+        self.assertLess(pet.index("id: leftHole"), pet.index("id: view"))
+        landed = pet[pet.index("function landed("):]
+        self.assertIn("closeHole.restart()", landed[:landed.index("talpa.land(")])
+
     def test_it_asks_to_be_drawn_only_as_often_as_it_changes(self):
         # Drawing every pet 30 times a second made Plasma Shell busy (four
         # desktop dashboards: 90% of a core, 2026-10-23). At rest it asks for

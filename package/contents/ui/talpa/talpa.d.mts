@@ -15,6 +15,7 @@ export const FLOOR: number;
 export const TOP: number;
 export const LILAC: TalpaColors;
 export function calmColors(tint: string): TalpaColors;
+export function drawHole(ctx: unknown, hole: number): void;   // an empty hole in the 64 × 64 box (hole: 0 to 1.1, as it opens or closes)
 
 export class Talpa {
     constructor(opts?: { colors?: TalpaColors; theme?: TalpaTheme; words?: (s: string) => string; travels?: boolean; brain?: boolean });
@@ -28,7 +29,7 @@ export class Talpa {
     setTheme(theme: TalpaTheme): void;
     setMood(mood: string): void;
     react(name: string, done?: ((ok: boolean) => void) | null): void;
-    setHeld(held: boolean): void;
+    setHeld(held: boolean): number;   // how much of its hole it leaves behind (0 to 1): draw that where it was, drawHole
     land(height: number, done?: ((ok: boolean) => void) | null): "sick" | "dizzy" | "fine";   // height in box units
     pose(step?: Record<string, unknown>): void;
     tick(now: number): void;
