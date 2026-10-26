@@ -19,6 +19,7 @@
                          [--permission-mode MODE] [--bg | --print-command]
                                                     a new chat there with a task: in the background there,
                                                     or in a terminal here (or print its command)
+    python3 -I remote.py --put-image HOST PATH      a picture pasted here (jump.py --paste-image) to HOST, for a task there
     python3 -I remote.py --plan HOST SLUG [PROFILE] [--no-open]   a plan there, as a Markdown file here
     python3 -I remote.py --share-plan HOST SLUG PROFILE [TO]      share a plan with every account there (or TO)
     python3 -I remote.py --unshare-plan HOST SLUG PROFILE         keep a shared plan only on PROFILE there
@@ -500,6 +501,60 @@ def task(host, profile, folder, text="", plan=None, plan_profile=None, backgroun
     return {"ok": ok, "message": message}
 
 
+# A picture pasted here for a task there goes to the host's pictures folder
+# (claude_status.images_dir there: its XDG_CACHE_HOME or ~/.cache), on python3's
+# stdin. Pictures older than IMAGES_KEEP_DAYS go, as here.
+PUT_IMAGE = """
+import json, os, sys, time
+from pathlib import Path
+name, stem = sys.argv[1], sys.argv[1].rsplit(".", 1)
+folder = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "claude-widget" / "images"
+folder.mkdir(parents=True, exist_ok=True)
+folder.chmod(0o700)
+for old in folder.iterdir():
+    try:
+        if old.stat().st_mtime < time.time() - %d * 86400:
+            old.unlink()
+    except OSError:
+        pass
+n = 1
+while True:
+    path = folder / (name if n == 1 else "%%s-h%%d.%%s" %% (stem[0], n, stem[1]))
+    try:
+        fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        break
+    except FileExistsError:
+        n += 1
+with os.fdopen(fd, "wb") as f:
+    f.write(sys.stdin.buffer.read())
+sys.stdout.write("\\n%s " + json.dumps({"ok": True, "message": "", "path": str(path)}) + "\\n")
+""" % (cs.IMAGES_KEEP_DAYS, cs.REMOTE_MARK)
+PICTURE_NAME = re.compile(r"^[0-9]{8}-[0-9]{6}(-[0-9]+)?\.(png|jpg|webp|gif)$")
+
+
+def put_image(host, path):
+    """Copy a picture pasted here (jump.py --paste-image) to host, for a task
+    there: {"ok", "message", "path": the copy there, "local": path}."""
+    host, picture = check_host(host), Path(path)
+    if picture.parent != cs.images_dir(Path.home()) or not PICTURE_NAME.match(picture.name) or not picture.is_file():
+        return {"ok": False, "message": "That isn't a picture pasted into a task"}
+    command = "python3 -I -c " + shlex.quote(PUT_IMAGE) + " " + shlex.quote(picture.name)
+    try:
+        r = subprocess.run(["ssh", *ssh_options(), "-T", host, posix(command)], input=picture.read_bytes(),
+                           capture_output=True, timeout=RUN_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "message": f"{host} didn't answer within {RUN_TIMEOUT} s"}
+    except OSError as exc:
+        return {"ok": False, "message": f"Can't run ssh: {exc}"}
+    r = subprocess.CompletedProcess(r.args, r.returncode, r.stdout.decode("utf-8", "replace"),
+                                    r.stderr.decode("utf-8", "replace"))
+    answer = answer_after_mark(r.stdout)
+    if answer is not None and answer.get("path"):
+        return {"ok": True, "message": "", "path": answer["path"], "local": str(picture)}
+    ok, message = outcome(host, r)
+    return {"ok": False, "message": f"{host} sent an answer the widget can't read." if ok else message}
+
+
 def continue_chat(host, profile, chat_id, folder="", text=""):
     """Go on with host's chat a usage limit stopped, in the background there
     (claude_status.continue_chat): {"ok", "message", "id"}."""
@@ -723,6 +778,8 @@ def main(argv=None):
                 else:
                     sys.exit(USAGE)
             out = task(host, profile, folder, **kw)
+        elif action == "--put-image" and len(args) == 2:
+            out = put_image(*args)
         elif action == "--login" and len(args) == 1:
             ok, message = login(args[0])
             out = {"ok": ok, "message": message}

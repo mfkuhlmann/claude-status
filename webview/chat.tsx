@@ -314,13 +314,15 @@ function ChatApp() {
           <textarea
             class="pane-reply"
             rows={3}
-            placeholder={chat?.permission ? "It's asking you something: answer that first" : "Reply to Claude… (Ctrl+Enter sends)"}
+            placeholder={chat?.permission ? "It's asking you something: answer that first" : "Reply to Claude… (Enter sends, Shift+Enter: new line)"}
             value={text}
             onInput={(e) => setText((e.target as HTMLTextAreaElement).value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+              // Enter sends, as in Claude's own prompt (Shift+Enter: a new line). For a
+              // terminal that takes no text from outside, the first Enter asks how.
+              if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
                 e.preventDefault();
-                send(terminal ? "background" : "auto", false);
+                send(askHow ? "background" : "auto", false);
               }
             }}
           />

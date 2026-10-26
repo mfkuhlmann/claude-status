@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Enter sends a reply:** in a chat's tab, Enter sends what you wrote and
+  Shift+Enter starts a new line, as in Claude's own prompt (it took
+  Ctrl+Enter). For a chat whose terminal takes no text from outside, the
+  first Enter asks how to send it.
+- **The big Talpa goes anywhere:** it was kept to the right half of its
+  banner, clear of the headline. Now you can drag it all the way across, and
+  it digs over the headline on its own too, as in the widget.
 - **A chat's tab reads like Claude's terminal:** a dot before each of
   Claude's replies and tool calls (green when a call worked, red when it
   failed, blinking while it runs), what came of a call under it (*⎿ 3

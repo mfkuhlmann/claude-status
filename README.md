@@ -218,7 +218,8 @@ call, Claude's replies rendered (headings, lists, code blocks with **Copy**,
 tables), each tool call on one line with what came of it under it
 (*● Bash(pytest) ⎿ 3 passed*, the dot green or red; click it for what it ran
 and got); **A−** / **A+** (or Ctrl+wheel) set the text size
-(`claudeStatus.chatTextScale`). Below it, a box to reply:
+(`claudeStatus.chatTextScale`). Below it, a box to reply (Enter sends,
+Shift+Enter starts a new line):
 **Send**, or **Send when this turn ends** (kept, and sent once the turn is
 over). Your message goes the way the chat can take it: typed into its
 terminal when it runs in one of this window's terminals, or into its tmux
