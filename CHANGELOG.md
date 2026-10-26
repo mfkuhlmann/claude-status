@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.15.2 (2026-10-26)
 
 - **Plasma no longer slows down the longer it runs:** each command the widget ran (its checks, the chat pane's updates, a click) cost Plasma's shell a little more than the one before, in every copy of the widget, so after a few hours the panel, the desktop and the chat pane froze for a moment now and then, and the whole computer felt slow. Now each command costs the same, however long Plasma has been running (Plasma).
 - **The hole stays where it was:** pulling Talpa out of its burrow carried its hole along under it, shrinking within a third of a second, as if the hole were dragged by. Now the hole stays where Talpa was while you hold it, and fills in once Talpa has landed; it digs a new one where it lands, as before (Plasma).
