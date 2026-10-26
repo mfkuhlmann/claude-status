@@ -18,7 +18,7 @@ its permission prompt and its review.
         that takes no text from outside asks first (how background: it goes
         on in the background; copy: the message goes to the clipboard).
         --after-turn: queued, it's sent once the chat's turn ends.
-  --answer REQUEST --decision allow|always|deny|answer [--note T] [--answers JSON]
+  --answer REQUEST --decision allow|always|deny|answer|approve|approve-edits|keep [--note T] [--answers JSON]
         answer a permission request the hook relayed (permission_hook.py);
         Claude's questions (AskUserQuestion): answer, with JSON {question:
         [chosen labels, or what you typed]}, or deny (decline, with a note)
@@ -283,6 +283,7 @@ def chat_conversation(home, extra_dirs, chat_id, profile_key=None, limit=PANE_IT
 # ---------------------------------------------------------------- permission requests the hook relays
 
 DECISIONS = ("allow", "always", "deny", "answer")
+PLAN_DECISIONS = ("approve", "approve-edits", "keep")   # a plan's (ExitPlanMode)
 
 
 def answer_text(values, multi):
@@ -326,10 +327,24 @@ def decision_of(decision, note, suggestions, inp=None, answers=None):
     return out
 
 
+def plan_decision(decision, note, inp):
+    """The hook's answer to a plan (ExitPlanMode): approve it (an allow
+    with the call's input; accept edits from then on: a setMode), or keep
+    planning with what to change (a deny: its message is the feedback)."""
+    if decision == "keep":
+        note = (note or "").strip()
+        return {"behavior": "deny", "message": f"The user wants to keep planning and said: {note}" if note
+                else "The user wants to keep planning: don't start yet, work more on the plan and present it again."}
+    out = {"behavior": "allow", "updatedInput": dict(inp)}
+    if decision == "approve-edits":
+        out["updatedPermissions"] = [{"type": "setMode", "mode": "acceptEdits", "destination": "session"}]
+    return out
+
+
 def answer_request(cache_root, request_id, decision, note="", answers=None):
     """Answer a relayed request: (ok, message). A question takes "answer"
     (answers: {question: [labels or text]}) or "deny"."""
-    if decision not in DECISIONS:
+    if decision not in DECISIONS + PLAN_DECISIONS:
         return False, f"Not an answer: {decision}"
     if not re.fullmatch(r"[0-9]+-[0-9a-f]{8}", request_id or ""):
         return False, f"Not a request: {request_id}"
@@ -338,7 +353,13 @@ def answer_request(cache_root, request_id, decision, note="", answers=None):
     if not isinstance(req, dict) or not cs.pid_alive(req.get("hookPid")):
         return False, "It isn't asking any more (answered in the chat?)"
     inp, given = None, None
-    if req.get("tool") == cs.ASK_TOOL:
+    plan = req.get("tool") == cs.PLAN_TOOL
+    if plan != (decision in PLAN_DECISIONS) and not (plan and decision == "deny"):
+        return False, "Approve the plan or keep planning" if plan else "It asks for a permission, not about a plan"
+    if plan:
+        inp = req.get("input") if isinstance(req.get("input"), dict) else {}
+        answer = plan_decision("keep" if decision == "deny" else decision, note, inp)
+    elif req.get("tool") == cs.ASK_TOOL:
         inp = req.get("input") if isinstance(req.get("input"), dict) else {}
         if decision in ("allow", "always"):
             return False, "Choose your answers first"
@@ -347,13 +368,17 @@ def answer_request(cache_root, request_id, decision, note="", answers=None):
             return False, "Choose your answers first"
     elif decision == "answer":
         return False, "It asks for a permission, not a question"
-    answer = decision_of(decision, note, req.get("suggestions") or [], inp, given)
+    if not plan:
+        answer = decision_of(decision, note, req.get("suggestions") or [], inp, given)
     cs.write_json_atomic(folder / (request_id + ".answer.json"), answer)
     deadline = time.time() + 5
     while (folder / (request_id + ".json")).exists() and time.time() < deadline:
         time.sleep(0.1)
     if (folder / (request_id + ".json")).exists():
         return False, "The chat didn't take the answer: answer it there"
+    if plan:
+        return True, {"approve": "Approved: it starts", "approve-edits": "Approved: it starts, accepting edits"}.get(
+            decision, "It keeps planning" + (" with your note" if (note or "").strip() else ""))
     if inp is not None:
         return True, "Answered" if decision == "answer" else "Declined"
     return True, {"allow": "Allowed", "always": "Allowed, and from now on", "deny": "Denied"}[decision]
