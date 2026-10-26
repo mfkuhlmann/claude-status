@@ -4,8 +4,8 @@ import QtQuick.Window
 import org.kde.plasma.plasmoid
 import org.kde.plasma.components as PlasmaComponents3
 import org.kde.plasma.core as PlasmaCore
-import org.kde.plasma.plasma5support as P5Support
 import org.kde.kirigami as Kirigami
+import "hub"
 import "markdown.mjs" as Md
 
 // A chat beside the popup (main.qml: openPane): its conversation, updating
@@ -234,8 +234,12 @@ Window {
                + (host ? " --host " + root.shellQuote(host) : "") + root.configDirArgs
     }
 
+    // (the time makes a click run its command again; the conversation, read
+    // every 1.5 s, goes without, so its name repeats while nothing changes:
+    // every executable DataSource in plasmashell keeps each name, hub/Exec.qml)
     function run(kind, args) {
-        const cmd = "python3 -I " + root.shellQuote(root.codeDir + "pane.py") + " " + args + " # " + Date.now()
+        const cmd = "python3 -I " + root.shellQuote(root.codeDir + "pane.py") + " " + args
+                    + (kind === "conversation" ? "" : " # " + Date.now())
         runs[cmd] = kind
         runner.connectSource(cmd)
     }
@@ -370,10 +374,8 @@ Window {
         load()
     }
 
-    P5Support.DataSource {
+    Exec {
         id: runner
-        engine: "executable"
-        connectedSources: []
         onNewData: (source, data) => {
             disconnectSource(source)
             const kind = pane.runs[source] || ""

@@ -3,7 +3,6 @@ import QtQuick.Layouts
 import QtQuick.Window
 import org.kde.plasma.plasmoid
 import org.kde.plasma.core as PlasmaCore
-import org.kde.plasma.plasma5support as P5Support
 import org.kde.plasma.extras as PlasmaExtras
 import org.kde.kirigami as Kirigami
 import org.kde.notification
@@ -390,10 +389,8 @@ PlasmoidItem {
                                         + " --by " + shellQuote(instanceId) + (first ? " --unless-default" : "") + " # " + Date.now())
     }
 
-    P5Support.DataSource {
+    Exec {
         id: settingsSaver
-        engine: "executable"
-        connectedSources: []
         onNewData: (source, data) => disconnectSource(source)
     }
 
@@ -510,10 +507,8 @@ PlasmoidItem {
                                   + (device ? " --device " + shellQuote(device) : "") + " # " + Date.now())
     }
 
-    P5Support.DataSource {
+    Exec {
         id: phoneSender
-        engine: "executable"
-        connectedSources: []
         onNewData: (source, data) => disconnectSource(source)   // a phone out of reach just misses it
     }
 
@@ -587,11 +582,12 @@ PlasmoidItem {
         playQueuedSound()
     }
 
-    // Is the screen locked? Asked every 10 s by the copy that notifies.
-    P5Support.DataSource {
+    // Is the screen locked? Asked every 10 s by the copy that notifies, under
+    // the same name each time (no " # <time>": the last run ended long ago,
+    // and every executable DataSource in plasmashell keeps each name it hears
+    // of, hub/Exec.qml).
+    Exec {
         id: lockWatch
-        engine: "executable"
-        connectedSources: []
         onNewData: (source, data) => {
             disconnectSource(source)
             const out = String(data["stdout"] || "")
@@ -606,14 +602,12 @@ PlasmoidItem {
         running: root.notifier && (Plasmoid.configuration.awayDigest || Plasmoid.configuration.phoneWhileAway)
         triggeredOnStart: true
         onTriggered: lockWatch.connectSource("dbus-send --session --print-reply=literal --dest=org.freedesktop.ScreenSaver"
-                                             + " /ScreenSaver org.freedesktop.ScreenSaver.GetActive # " + Date.now())
+                                             + " /ScreenSaver org.freedesktop.ScreenSaver.GetActive")
     }
 
     // Runs `jump.py --changes`: the files a chat changed, side by side in VS Code
-    P5Support.DataSource {
+    Exec {
         id: differ
-        engine: "executable"
-        connectedSources: []
         onNewData: (source, data) => {
             disconnectSource(source)
             const result = root.helperResult(data)
@@ -755,10 +749,8 @@ PlasmoidItem {
     }
 
     // Runs contents/code/jump.py, which brings a session to the front.
-    P5Support.DataSource {
+    Exec {
         id: jumper
-        engine: "executable"
-        connectedSources: []
         onNewData: (source, data) => {
             disconnectSource(source)
             const result = root.helperResult(data)
@@ -778,10 +770,8 @@ PlasmoidItem {
     // Runs `jump.py --stop`, which stops a background session (`claude stop`)
     // or a chat in a terminal or VS Code (its claude quits), or `--interrupt`
     // (Esc for a chat in tmux).
-    P5Support.DataSource {
+    Exec {
         id: stopper
-        engine: "executable"
-        connectedSources: []
         onNewData: (source, data) => {
             disconnectSource(source)
             const result = root.helperResult(data)
@@ -1037,10 +1027,8 @@ PlasmoidItem {
         pendingSoundKind = ""
     }
 
-    P5Support.DataSource {
+    Exec {
         id: soundPlayer
-        engine: "executable"
-        connectedSources: []
         onNewData: (source, data) => disconnectSource(source)
     }
 
@@ -1283,10 +1271,8 @@ PlasmoidItem {
     // A subagent's whole run as a Markdown file, opened in your app for those
     // (jump.py --agent-run; remote.py fetches it from an SSH host): Claude
     // Code itself can't open a subagent from outside.
-    P5Support.DataSource {
+    Exec {
         id: runOpener
-        engine: "executable"
-        connectedSources: []
         onNewData: (source, data) => {
             disconnectSource(source)
             const result = root.helperResult(data)
@@ -1445,10 +1431,8 @@ PlasmoidItem {
                   : i18n("VS Code's Claude doesn't run on this account.")
     }
 
-    P5Support.DataSource {
+    Exec {
         id: launcher
-        engine: "executable"
-        connectedSources: []
         onNewData: (source, data) => {
             disconnectSource(source)
             const result = root.helperResult(data)
@@ -1517,10 +1501,8 @@ PlasmoidItem {
                                   + configDirArgs + " # " + Date.now())
     }
 
-    P5Support.DataSource {
+    Exec {
         id: loginRunner
-        engine: "executable"
-        connectedSources: []
         onNewData: (source, data) => {
             disconnectSource(source)
             const result = root.helperResult(data)
@@ -1537,10 +1519,8 @@ PlasmoidItem {
     // ---------------------------------------------------------------- SSH hosts
 
     // ~/.ssh/config's hosts (loaded at start and whenever the menu opens)
-    P5Support.DataSource {
+    Exec {
         id: hostLister
-        engine: "executable"
-        connectedSources: []
         onNewData: (source, data) => {
             disconnectSource(source)
             const result = root.helperResult(data)
@@ -1790,10 +1770,8 @@ PlasmoidItem {
 
     // Actions on an SSH host: open a session in a local terminal (ssh -t),
     // stop a background session, hide a finished one
-    P5Support.DataSource {
+    Exec {
         id: remoteActions
-        engine: "executable"
-        connectedSources: []
         onNewData: (source, data) => {
             disconnectSource(source)
             const result = root.helperResult(data)
@@ -1978,10 +1956,8 @@ PlasmoidItem {
         shareAction("keeponly", c.chatId, c.profileKey, c.host)
     }
 
-    P5Support.DataSource {
+    Exec {
         id: sharer
-        engine: "executable"
-        connectedSources: []
         onNewData: (source, data) => {
             disconnectSource(source)
             const result = root.helperResult(data)
@@ -2243,10 +2219,8 @@ PlasmoidItem {
     }
 
     // Queueing a task or a chat: says when it starts, or why it can't
-    P5Support.DataSource {
+    Exec {
         id: queuer
-        engine: "executable"
-        connectedSources: []
         onNewData: (source, data) => {
             disconnectSource(source)
             const result = root.helperResult(data)
@@ -2308,10 +2282,8 @@ PlasmoidItem {
 
     property var queueRuns: ({})   // command -> the task it starts
 
-    P5Support.DataSource {
+    Exec {
         id: queueRunner
-        engine: "executable"
-        connectedSources: []
         onNewData: (source, data) => {
             disconnectSource(source)
             const t = root.queueRuns[source]
@@ -2512,10 +2484,8 @@ PlasmoidItem {
                              + " " + geometry.join(",") + " # " + Date.now())
     }
 
-    P5Support.DataSource {
+    Exec {
         id: placer
-        engine: "executable"
-        connectedSources: []
         onNewData: (source, data) => disconnectSource(source)
     }
 
@@ -2594,10 +2564,8 @@ PlasmoidItem {
         paneActions.connectSource(cmd)
     }
 
-    P5Support.DataSource {
+    Exec {
         id: paneActions
-        engine: "executable"
-        connectedSources: []
         onNewData: (source, data) => {
             disconnectSource(source)
             const draft = root.replyDrafts[source]
@@ -2728,10 +2696,8 @@ PlasmoidItem {
         searchResults = next
     }
 
-    P5Support.DataSource {
+    Exec {
         id: finder
-        engine: "executable"
-        connectedSources: []
         onNewData: (source, data) => {
             disconnectSource(source)
             const asked = root.searchAsked[source]
@@ -2783,10 +2749,8 @@ PlasmoidItem {
                                 + configDirArgs + " # " + Date.now())
     }
 
-    P5Support.DataSource {
+    Exec {
         id: defaulter
-        engine: "executable"
-        connectedSources: []
         onNewData: (source, data) => {
             disconnectSource(source)
             const result = root.helperResult(data)
@@ -2852,10 +2816,8 @@ PlasmoidItem {
         weekReader.connectSource(weekAsked)
     }
 
-    P5Support.DataSource {
+    Exec {
         id: weekReader
-        engine: "executable"
-        connectedSources: []
         onNewData: (source, data) => {
             disconnectSource(source)
             if (source !== root.weekAsked)
@@ -2911,10 +2873,8 @@ PlasmoidItem {
         permsReader.connectSource(cmd + configDirArgs + " # " + Date.now())
     }
 
-    P5Support.DataSource {
+    Exec {
         id: permsReader
-        engine: "executable"
-        connectedSources: []
         onNewData: (source, data) => {
             disconnectSource(source)
             root.permsBusy = false
@@ -2955,10 +2915,8 @@ PlasmoidItem {
                                  + (host ? " --on " + shellQuote(host) : configDirArgs) + " # " + Date.now())
     }
 
-    P5Support.DataSource {
+    Exec {
         id: ruleWriter
-        engine: "executable"
-        connectedSources: []
         onNewData: (source, data) => {
             disconnectSource(source)
             root.ruleBusy = ""
@@ -3010,10 +2968,8 @@ PlasmoidItem {
                                           : i18n("A starred chat stays listed under Recent chats → Starred, however old it is.")
     }
 
-    P5Support.DataSource {
+    Exec {
         id: starrer
-        engine: "executable"
-        connectedSources: []
         onNewData: (source, data) => {
             disconnectSource(source)
             const host = root.starRuns[source] || ""
@@ -3074,10 +3030,8 @@ PlasmoidItem {
                                      + profileArg(profileDir) + configDirArgs + " # " + Date.now())
     }
 
-    P5Support.DataSource {
+    Exec {
         id: planOpener
-        engine: "executable"
-        connectedSources: []
         onNewData: (source, data) => {
             disconnectSource(source)
             const result = root.helperResult(data)
@@ -3100,10 +3054,8 @@ PlasmoidItem {
                                      + profileArg(profileDir) + " --chat " + shellQuote(chatId) + configDirArgs + " # " + Date.now())
     }
 
-    P5Support.DataSource {
+    Exec {
         id: feedbackSender
-        engine: "executable"
-        connectedSources: []
         onNewData: (source, data) => {
             disconnectSource(source)
             const result = root.helperResult(data)
@@ -3337,10 +3289,8 @@ PlasmoidItem {
     }
 
     // A task started in the background: the popup stays, and its row comes up
-    P5Support.DataSource {
+    Exec {
         id: taskStarter
-        engine: "executable"
-        connectedSources: []
         onNewData: (source, data) => {
             disconnectSource(source)
             const result = root.helperResult(data)
@@ -3383,10 +3333,8 @@ PlasmoidItem {
         pictureCopier.connectSource("python3 -I " + shellQuote(codeDir + "remote.py") + " --put-image " + shellQuote(offer.host)
                                     + " " + shellQuote(offer.path) + " # " + Date.now())
     }
-    P5Support.DataSource {
+    Exec {
         id: imagePaster
-        engine: "executable"
-        connectedSources: []
         onNewData: (source, data) => {
             disconnectSource(source)
             const paste = root.pasteFor[source] || { host: "", target: "task" }
@@ -3404,10 +3352,8 @@ PlasmoidItem {
             }
         }
     }
-    P5Support.DataSource {
+    Exec {
         id: pictureCopier
-        engine: "executable"
-        connectedSources: []
         onNewData: (source, data) => {
             disconnectSource(source)
             const result = root.helperResult(data)

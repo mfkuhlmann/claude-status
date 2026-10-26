@@ -3,8 +3,8 @@ import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 import org.kde.kcmutils as KCM
-import org.kde.plasma.plasma5support as P5Support
 import org.kde.plasma.plasmoid
+import "hub"
 
 KCM.SimpleKCM {
     id: page
@@ -101,10 +101,8 @@ KCM.SimpleKCM {
     readonly property string codeDir: decodeURIComponent(Qt.resolvedUrl("../code/").toString().replace(/^file:\/\//, ""))
 
     // Preview a sound (plays even with Do Not Disturb on)
-    P5Support.DataSource {
+    Exec {
         id: player
-        engine: "executable"
-        connectedSources: []
         onNewData: source => disconnectSource(source)
     }
 
@@ -113,10 +111,8 @@ KCM.SimpleKCM {
     property string phoneStatus: ""
     property bool kdeConnect: true
 
-    P5Support.DataSource {
+    Exec {
         id: phoneHelper
-        engine: "executable"
-        connectedSources: []
         onNewData: (source, data) => {
             disconnectSource(source)
             let result = null
@@ -144,10 +140,8 @@ KCM.SimpleKCM {
     property string historyMessage: ""
     property bool forgetAsking: false
 
-    P5Support.DataSource {
+    Exec {
         id: historyHelper
-        engine: "executable"
-        connectedSources: []
         onNewData: (source, data) => {
             disconnectSource(source)
             let result = null
@@ -171,10 +165,8 @@ KCM.SimpleKCM {
     property var relay: null          // {on, some, settings}
     property string relayMessage: ""
 
-    P5Support.DataSource {
+    Exec {
         id: relayHelper
-        engine: "executable"
-        connectedSources: []
         onNewData: (source, data) => {
             disconnectSource(source)
             let result = null

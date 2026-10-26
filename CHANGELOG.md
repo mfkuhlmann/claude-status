@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Plasma no longer slows down the longer it runs:** each command the widget ran (its checks, the chat pane's updates, a click) cost Plasma's shell a little more than the one before, in every copy of the widget, so after a few hours the panel, the desktop and the chat pane froze for a moment now and then, and the whole computer felt slow. Now each command costs the same, however long Plasma has been running (Plasma).
+
 ## 1.15.1 (2026-10-26)
 
 - **Pictures in a reply:** Ctrl+V in the chat pane's box pastes a picture from the clipboard (a screenshot, say), as in the new-chat box: it's named in your reply with a thumbnail under the box (× takes it out). When the chat goes on in the background with it, it may open the picture; a chat that's running asks you first, as for any file outside its folder. For an SSH host's chat the pane asks to copy the picture there first.
