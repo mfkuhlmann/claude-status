@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Answer Claude's questions from the panel:** when Claude asks you a multiple-choice question (its questions with options to pick from), the chat's row and its pane show each question with its options to choose (one, or any for a question that takes several) and a field to answer in your own words, then **Send answers**, or **Decline…** (a note for Claude optional). Its notification has a button for each option when it's one question with one answer, then **Other…** (the pane, ready to type); with more, **Answer…** opens the pane. The pane keeps the conversation in sight while it asks: what it asks scrolls in the lower half. That takes the setting *Answer permission prompts from the widget*; Claude still asks in the chat too, and the first answer counts.
+
 ## 1.15.0 (2026-10-25)
 
 - **A chat's whole name:** its tags (*background*, *agents 0/1*, *auto mode*, *±4*, …) shared its line, so a long name was cut down to a few letters. Now the tags go under the name when they don't all fit beside it, as in the VS Code extension; a name is only cut short when it's too long for the line by itself. On GNOME too.

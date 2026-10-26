@@ -28,6 +28,12 @@ from test_claude_status import Fixture, iso, session, write  # noqa: E402
 from test_tasks import FAKE_CLAUDE, lines, prompt  # noqa: E402
 
 SID = "5c1d7a6e-0d4f-4a8b-9a51-1f2e3d4c5b6a"
+# An AskUserQuestion call's input (as Claude Code 2.1.310 asks), with some junk
+QUESTIONS = {"questions": [
+    {"question": "Pick a color", "header": "Color", "multiSelect": False,
+     "options": [{"label": "Red", "description": "warm"}, {"label": "Blue"}, {"description": "no label"}]},
+    {"question": "Pick toppings", "multiSelect": True, "options": [{"label": "Cheese"}, {"label": "Olives, sliced"}]},
+    "not a question", {"header": "no question"}]}
 
 
 def tool_use(tid, name, inp, ts, msg="m2", **kw):
@@ -183,6 +189,48 @@ class PermissionViewTests(PaneFixture):
         self.assertEqual(whole["diff"][-2:], ["-old", "+new"])
         self.assertEqual(whole["always"], "the folder ~/other")
 
+    def test_a_question(self):
+        view = cs.permission_view("AskUserQuestion", QUESTIONS, str(self.folder))
+        self.assertEqual(view["line"], "Pick a color")
+        self.assertEqual(view["questions"], [
+            {"question": "Pick a color", "header": "Color", "multiSelect": False,
+             "options": [{"label": "Red", "description": "warm"}, {"label": "Blue", "description": ""}]},
+            {"question": "Pick toppings", "header": "", "multiSelect": True,
+             "options": [{"label": "Cheese", "description": ""}, {"label": "Olives, sliced", "description": ""}]}])
+        self.assertEqual(cs.permission_view("Bash", {"command": "ls"}, "")["questions"], [])
+
+    def test_rows_with_a_question(self):
+        # A chat with a question waits for "input needed" (Claude Code 2.1.310), as one an MCP server asks does
+        w = self.home / ".claude-work"
+        for sid in ("asking", "mcp"):
+            write(w / f"sessions/2{len(sid)}.json", session(sid, status="waiting", waitingFor="input needed"))
+        write(w / "projects/-tmp-proj-asking/asking.jsonl",
+              lines(prompt("ask me", self.now - 5), tool_use("q", "AskUserQuestion", QUESTIONS, self.now - 4)))
+        write(w / "projects/-tmp-proj-mcp/mcp.jsonl",
+              lines(prompt("log in", self.now - 5), tool_use("m", "mcp__x__login", {}, self.now - 4)))
+        rows = self.rows()
+        asks = rows["asking"]["permission"]
+        self.assertEqual((asks["tool"], len(asks["questions"]), asks["answer"]), ("AskUserQuestion", 2, ""))
+        self.assertIsNone(rows["mcp"]["permission"])  # (an MCP server's question: not one the widget shows)
+        # relayed by the hook: answered from the widget
+        hook = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        self.addCleanup(lambda: (hook.kill(), hook.wait()))
+        for rid, sid, tool, inp in (("123-abcdef01", "asking", "AskUserQuestion", QUESTIONS),
+                                    ("124-abcdef02", "mcp", "Bash", {"command": "ls"})):
+            write(self.cache / f"permissions/{rid}.json",
+                  {"id": rid, "at": int(self.now * 1000), "hookPid": hook.pid, "sessionId": sid, "tool": tool,
+                   "input": inp, "suggestions": [], "cwd": "/tmp"})
+        rows = self.rows()
+        asks = rows["asking"]["permission"]
+        self.assertEqual((asks["questions"][1]["question"], asks["answer"], asks["request"]),
+                         ("Pick toppings", "hook", "123-abcdef01"))
+        self.assertIsNone(rows["mcp"]["permission"])
+        # in tmux too: a question's keys aren't pressed for you
+        row = {"state": "waiting", "waitingFor": "input needed", "sessionId": "x", "tmux": "s:1.%3"}
+        with mock.patch.object(cs, "pending_permission", return_value=cs.permission_view("AskUserQuestion", QUESTIONS, "")):
+            cs.note_permissions([{"sessions": [row]}], mock.Mock(profiles=[]), {})
+        self.assertEqual(row["permission"]["answer"], "")
+
     def test_rows_waiting_for_a_permission(self):
         # bgperm (Fixture) waits for a permission; what it asks comes from its transcript
         write(self.home / ".claude-work/projects/-tmp-proj-bgperm/bgperm.jsonl",
@@ -235,12 +283,25 @@ class AskNotificationTests(unittest.TestCase):
         main = (CODE.parent / "ui/main.qml").read_text()
         block = main[main.index("id: askNotificationComponent"):]
         block = block[:block.index("onClosed:")]
-        actions = re.search(r"actions: withAlways \? \[([^\]]*)\] : \[([^\]]*)\]", block)
+        actions = re.search(r"questions.length === 0 \? \(withAlways \? \[([^\]]*)\] : \[([^\]]*)\]\)", block)
         self.assertEqual([a.strip() for a in actions.group(1).split(",")],
                          ["allowAction", "alwaysAction", "denyAction", "noteAction"])
         self.assertEqual([a.strip() for a in actions.group(2).split(",")], ["allowAction", "denyAction", "noteAction"])
         # Plasma puts a reply button before all the others (its ActionContainer.qml)
         self.assertNotIn("replyAction", block)
+
+    def test_a_questions_buttons(self):
+        # one question with one answer: its options (at most 4), then Other…; else Answer… (the pane)
+        main = (CODE.parent / "ui/main.qml").read_text()
+        block = main[main.index("id: askNotificationComponent"):]
+        block = block[:block.index("onClosed:")]
+        self.assertIn("choices: questions.length === 1 && !questions[0].multiSelect ? questions[0].options.slice(0, 4) : []",
+                      block)
+        self.assertIn(": choices.length ? [choice0, choice1, choice2, choice3].slice(0, choices.length).concat([otherAction])\n"
+                      "                     : [answerAction]", block)
+        for i in range(4):
+            self.assertIn(f"label: ask.choices.length > {i} ? ask.choices[{i}].label", block)
+            self.assertIn(f"onActivated: ask.choose({i})", block)
 
 
 class KeysTests(unittest.TestCase):
@@ -284,16 +345,19 @@ class HookTests(unittest.TestCase):
         self.state = self.home / ".claude-x/sessions" / f"{os.getpid()}.json"
         write(self.state, {"pid": os.getpid(), "status": "waiting"})
 
-    def start(self):
-        env = dict(os.environ, HOME=str(self.home), XDG_CACHE_HOME=str(self.cache),
-                   CLAUDE_CONFIG_DIR=str(self.home / ".claude-x"))
+    def env(self):
+        return dict(os.environ, HOME=str(self.home), XDG_CACHE_HOME=str(self.cache),
+                    CLAUDE_CONFIG_DIR=str(self.home / ".claude-x"))
+
+    def start(self, tool="Bash", inp=None, suggestions=None):
         hook = subprocess.Popen([sys.executable, "-I", str(CODE / "permission_hook.py")], stdin=subprocess.PIPE,
-                                stdout=subprocess.PIPE, env=env)
+                                stdout=subprocess.PIPE, env=self.env())
         self.addCleanup(lambda: (hook.poll() is None and hook.kill(), hook.wait(), hook.stdout.close()))
-        hook.stdin.write(json.dumps({"session_id": SID, "tool_name": "Bash", "tool_input": {"command": "make"},
-                                     "cwd": "/tmp", "permission_suggestions": [{
-                                         "type": "addRules", "rules": [{"toolName": "Bash", "ruleContent": "make"}],
-                                         "behavior": "allow", "destination": "localSettings"}]}).encode())
+        if suggestions is None:
+            suggestions = [{"type": "addRules", "rules": [{"toolName": "Bash", "ruleContent": "make"}],
+                            "behavior": "allow", "destination": "localSettings"}]
+        hook.stdin.write(json.dumps({"session_id": SID, "tool_name": tool, "tool_input": inp or {"command": "make"},
+                                     "cwd": "/tmp", "permission_suggestions": suggestions}).encode())
         hook.stdin.close()
         deadline = time.time() + 5
         while time.time() < deadline and not cs.permission_requests(self.cache / "claude-widget"):
@@ -327,6 +391,41 @@ class HookTests(unittest.TestCase):
                          {"behavior": "deny", "message": "The user denied this and said: use make test"})
         self.assertTrue(pane.decision_of("deny", "", [])["interrupt"])
         self.assertEqual(pane.decision_of("always", "", []), {"behavior": "allow"})  # (nothing to remember)
+        # a question: not answered (with what you said instead), or the call with your answers
+        self.assertEqual(pane.decision_of("deny", "ask me later", [], QUESTIONS, {}),
+                         {"behavior": "deny", "message": "The user didn't answer and said: ask me later"})
+        self.assertEqual(pane.decision_of("deny", "", [], QUESTIONS, {}),
+                         {"behavior": "deny", "message": "The user didn't answer.", "interrupt": True})
+        self.assertEqual(pane.decision_of("answer", "", [], {"questions": []}, {"Q": "A"}),
+                         {"behavior": "allow", "updatedInput": {"questions": [], "answers": {"Q": "A"}}})
+
+    def test_answers_as_claudes_dialog_sends_them(self):
+        self.assertEqual(pane.answer_text(["Blue"], False), "Blue")
+        self.assertEqual(pane.answer_text(["  a typed answer, with a comma "], False), "a typed answer, with a comma")
+        self.assertEqual(pane.answer_text(["Cheese", "Olives, sliced", 'say "hi"', " "], True),
+                         'Cheese, "Olives, sliced", "say \\"hi\\""')
+        self.assertEqual(pane.question_answers(QUESTIONS, {"Pick a color": ["Red"], "Pick toppings": [],
+                                                           "Not asked": ["x"]}), {"Pick a color": "Red"})
+
+    def test_a_question(self):
+        hook, request = self.start("AskUserQuestion", QUESTIONS, [])
+        cache = self.cache / "claude-widget"
+        self.assertEqual(pane.answer_request(cache, request["id"], "allow"), (False, "Choose your answers first"))
+        self.assertEqual(pane.answer_request(cache, request["id"], "answer", answers={"Pick a color": [" "]}),
+                         (False, "Choose your answers first"))
+        answers = {"Pick a color": ["Blue"], "Pick toppings": ["Cheese", "Olives, sliced"]}
+        out = subprocess.run([sys.executable, "-I", str(CODE / "pane.py"), "--answer", request["id"], "--decision",
+                              "answer", "--answers", json.dumps(answers)], stdout=subprocess.PIPE, env=self.env())
+        self.assertEqual(json.loads(out.stdout), {"ok": True, "message": "Answered"})
+        decision = json.loads(hook.stdout.read())["hookSpecificOutput"]["decision"]
+        hook.wait(5)
+        self.assertEqual(decision, {"behavior": "allow", "updatedInput": dict(QUESTIONS, answers={
+            "Pick a color": "Blue", "Pick toppings": 'Cheese, "Olives, sliced"'})})
+
+    def test_a_permission_takes_no_answers(self):
+        hook, request = self.start()
+        ok, message = pane.answer_request(self.cache / "claude-widget", request["id"], "answer", answers={"x": ["y"]})
+        self.assertEqual((ok, message), (False, "It asks for a permission, not a question"))
 
 
 class SendTests(PaneFixture):

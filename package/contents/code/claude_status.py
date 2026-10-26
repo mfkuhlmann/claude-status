@@ -2075,11 +2075,18 @@ class ChatCache:
 # answered with keys (pane.py --keys). With the hook (permission_hook.py,
 # pane.py --relay on), each request is in the cache (permission_requests)
 # and the widget's answer goes back through it (pane.py --answer).
+#
+# Claude's multiple-choice questions (its AskUserQuestion tool) ask for a
+# permission the same way, and the hook gets them too: the chat waits for
+# "input needed" then, and its "questions" can be answered through the hook
+# only (an allow that carries the answers, as Claude's own dialog sends them).
 
 DIFF_LINES = 400  # of one file's diff, in the review (and of an edit a prompt asks for)
 DIFF_CHARS = 60000
 PERMISSIONS = "permissions"
 REQUEST_MAX_AGE_MS = 86400_000
+ASK_TOOL = "AskUserQuestion"
+QUESTION_CHARS = 2000  # of a question, an option's label or its description
 
 
 def read_file(path):
@@ -2113,13 +2120,35 @@ def edit_diff(name, inp, current):
     return out[:DIFF_LINES]
 
 
+def question_view(inp):
+    """The questions of an AskUserQuestion call: [{"question", "header",
+    "multiSelect", "options": [{"label", "description"}]}]."""
+    def text(value):
+        return value[:QUESTION_CHARS] if isinstance(value, str) else ""
+    out = []
+    for q in inp.get("questions") or [] if isinstance(inp, dict) else []:
+        if not isinstance(q, dict) or not text(q.get("question")):
+            continue
+        options = [{"label": text(o.get("label")), "description": text(o.get("description"))}
+                   for o in q.get("options") or [] if isinstance(o, dict) and text(o.get("label"))]
+        out.append({"question": text(q["question"]), "header": text(q.get("header")),
+                    "multiSelect": q.get("multiSelect") is True, "options": options})
+    return out
+
+
 def permission_view(tool, inp, cwd, suggestions=()):
     """What a permission prompt asks, as the pane and the row show it:
     {"tool", "line" (one line), "command" (a Bash command), "file", "diff"
-    (lines), "always" (what Always allow lets through, or "")}."""
+    (lines), "always" (what Always allow lets through, or ""), "questions"
+    (Claude's multiple-choice questions: question_view)}."""
     inp = inp if isinstance(inp, dict) else {}
     view = {"tool": tool or "", "line": describe_tool({"name": tool, "input": inp}), "command": "", "file": "",
-            "diff": [], "always": ""}
+            "diff": [], "always": "", "questions": []}
+    if tool == ASK_TOOL:
+        view["questions"] = question_view(inp)
+        if view["questions"]:
+            view["line"] = short_text(view["questions"][0]["question"], 120)
+        return view
     if tool == "Bash" and isinstance(inp.get("command"), str):
         view["command"] = inp["command"]
     path = inp.get("file_path") or inp.get("notebook_path")
@@ -2239,26 +2268,31 @@ def request_view(req):
 
 
 def note_permissions(groups, ctx, requests):
-    """A chat waiting for a permission gets "permission": what it asks
-    (request_view, or pending_permission without the hook) and "answer":
-    how the widget can answer it ("hook", "keys" in tmux, or "")."""
+    """A chat waiting for a permission (or with a question for you) gets
+    "permission": what it asks (request_view, or pending_permission without
+    the hook) and "answer": how the widget can answer it ("hook", "keys" in
+    tmux, or ""; a question: "hook" or "")."""
     for g in groups:
         for s in g["sessions"]:
             s["permission"] = None
-            if s["state"] != "waiting" or s.get("waitingFor") not in PERMISSION_WAITS:
+            wait = s.get("waitingFor")
+            if s["state"] != "waiting" or wait not in PERMISSION_WAITS:
                 continue
             req = requests.get(s["sessionId"])
             if req is not None:
-                s["permission"] = dict(request_view(req), answer="hook")
+                if wait != QUESTION_WAIT or req.get("tool") == ASK_TOOL:
+                    s["permission"] = dict(request_view(req), answer="hook")
                 continue
             profile = next((p for p in ctx.profiles if p.key == s.get("profileDir")), None)
             path = transcript_path(profile, s.get("chatId") or s["sessionId"]) if profile is not None else None
             view = pending_permission(path, s.get("cwd") or "")
-            if view is not None:
-                s["permission"] = dict(view, request=None, answer="keys" if s.get("tmux") else "")
+            if view is not None and (wait != QUESTION_WAIT or view["tool"] == ASK_TOOL):
+                question = view["tool"] == ASK_TOOL
+                s["permission"] = dict(view, request=None, answer="keys" if s.get("tmux") and not question else "")
 
 
-PERMISSION_WAITS = ("permission prompt",)
+QUESTION_WAIT = "input needed"  # (also an MCP server's question: only AskUserQuestion's count)
+PERMISSION_WAITS = ("permission prompt", QUESTION_WAIT)
 
 
 def reply_route(row):

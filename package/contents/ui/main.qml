@@ -845,6 +845,9 @@ PlasmoidItem {
     // A chat that waits for a permission the widget can answer: its buttons,
     // in Claude's own order (Yes, Yes and don't ask again, No). The note
     // goes in the pane: Plasma puts a reply button before all the others.
+    // Claude's question: one with one answer has a button per option, then
+    // Other… (the pane, its field to answer in your own words); several, or
+    // one with several answers, Answer… (the pane).
     Component {
         id: askNotificationComponent
         Notification {
@@ -858,6 +861,35 @@ PlasmoidItem {
             property var row: null
             readonly property bool withAlways: !!row && !!row.permission
                                                && (row.permission.answer === "keys" || row.permission.always !== "")
+            readonly property var questions: row && row.permission && row.permission.questions ? row.permission.questions : []
+            readonly property var choices: questions.length === 1 && !questions[0].multiSelect ? questions[0].options.slice(0, 4) : []
+            function choose(i) {
+                root.answerPermission(ask.row, ask.host, "answer", "", { [questions[0].question]: [choices[i].label] })
+            }
+            property QtObject choice0: NotificationAction {
+                label: ask.choices.length > 0 ? ask.choices[0].label : ""
+                onActivated: ask.choose(0)
+            }
+            property QtObject choice1: NotificationAction {
+                label: ask.choices.length > 1 ? ask.choices[1].label : ""
+                onActivated: ask.choose(1)
+            }
+            property QtObject choice2: NotificationAction {
+                label: ask.choices.length > 2 ? ask.choices[2].label : ""
+                onActivated: ask.choose(2)
+            }
+            property QtObject choice3: NotificationAction {
+                label: ask.choices.length > 3 ? ask.choices[3].label : ""
+                onActivated: ask.choose(3)
+            }
+            property QtObject otherAction: NotificationAction {
+                label: i18n("Other…")
+                onActivated: root.answerInPane(ask.row, ask.host)
+            }
+            property QtObject answerAction: NotificationAction {
+                label: i18n("Answer…")
+                onActivated: root.openPane(ask.row, ask.host, "chat")
+            }
             property QtObject allowAction: NotificationAction {
                 label: i18n("Allow once")
                 onActivated: root.answerPermission(ask.row, ask.host, "allow", "")
@@ -881,7 +913,9 @@ PlasmoidItem {
                 label: i18n("Open")
                 onActivated: root.openFromNotification(ask, true)
             }
-            actions: withAlways ? [allowAction, alwaysAction, denyAction, noteAction] : [allowAction, denyAction, noteAction]
+            actions: questions.length === 0 ? (withAlways ? [allowAction, alwaysAction, denyAction, noteAction] : [allowAction, denyAction, noteAction])
+                     : choices.length ? [choice0, choice1, choice2, choice3].slice(0, choices.length).concat([otherAction])
+                     : [answerAction]
             onClosed: {
                 root.forgetNotification(ask)
                 ask.destroy()
@@ -1051,10 +1085,8 @@ PlasmoidItem {
                 if (prev === "waiting" && s.state === "waiting" && told && told.kind === "waiting" && told.allowAction === undefined
                         && s.permission && (s.permission.answer === "hook" || s.permission.answer === "keys")) {
                     // (the hook's request came a check after the chat began to wait: now with its buttons)
-                    const p = s.permission
-                    notify(sid, s, "waiting", i18n("%1 asks for a permission", s.name),
-                           (p.command || (p.file ? i18n("Change %1", p.file) : p.line)) + "\n" + s.cwdShort + where,
-                           "dialog-warning", host)
+                    const asks = askText(s)
+                    notify(sid, s, "waiting", asks[0], asks[1] + "\n" + s.cwdShort + where, "dialog-warning", host)
                 }
                 if (prev === s.state)
                     continue
@@ -1068,10 +1100,8 @@ PlasmoidItem {
                         toPhone(i18n("Claude: %1 needs you", s.name + where) + (s.detail ? " (" + s.detail + ")" : "")
                                 + " · " + s.cwdShort)
                         if (Plasmoid.configuration.notifyWaiting && root.notifier && !holdingBack()) {
-                            const p = s.permission
-                            notify(sid, s, "waiting", p ? i18n("%1 asks for a permission", s.name) : i18n("%1 needs your input", s.name),
-                                   (p ? (p.command || (p.file ? i18n("Change %1", p.file) : p.line))
-                                      : (s.detail || reasonText(s.reason))) + "\n" + s.cwdShort + where, "dialog-warning", host)
+                            const asks = s.permission ? askText(s) : [i18n("%1 needs your input", s.name), s.detail || reasonText(s.reason)]
+                            notify(sid, s, "waiting", asks[0], asks[1] + "\n" + s.cwdShort + where, "dialog-warning", host)
                             queueSound("waiting")
                         }
                     }
@@ -2508,8 +2538,17 @@ PlasmoidItem {
                                                                        && (t.host || "") === (host || "")) || null
     }
 
-    // An answer to what a chat asks, from its row or a notification (pane.py --answer / --keys)
-    function answerPermission(s, host, decision, note) {
+    // What a waiting chat asks, for its notification: [title, text] (s.permission set)
+    function askText(s) {
+        const p = s.permission
+        if (p.questions && p.questions.length)
+            return [i18n("%1 asks you", s.name), p.questions.map(q => q.question).join("\n")]
+        return [i18n("%1 asks for a permission", s.name), p.command || (p.file ? i18n("Change %1", p.file) : p.line)]
+    }
+
+    // An answer to what a chat asks, from its row or a notification (pane.py
+    // --answer / --keys); a question's: decision "answer", answers {question: [labels or text]}
+    function answerPermission(s, host, decision, note, answers) {
         const p = s ? s.permission : null
         if (!p || (p.answer !== "hook" && p.answer !== "keys"))
             return
@@ -2517,9 +2556,19 @@ PlasmoidItem {
             ? "--answer " + shellQuote(p.request)
             : "--keys " + shellQuote(s.sessionId) + profileArg(s.profileDir)
         paneActions.connectSource("python3 -I " + shellQuote(codeDir + "pane.py") + " " + args + " --decision " + decision
-                                  + (note ? " --note " + shellQuote(note) : "") + (host ? " --host " + shellQuote(host) : "")
-                                  + configDirArgs + " # " + Date.now())
+                                  + (note ? " --note " + shellQuote(note) : "")
+                                  + (answers ? " --answers " + shellQuote(JSON.stringify(answers)) : "")
+                                  + (host ? " --host " + shellQuote(host) : "") + configDirArgs + " # " + Date.now())
     }
+
+    // Other…, from a question's notification: the chat's pane, the field to answer in your own words ready
+    function answerInPane(s, host) {
+        if (!s)
+            return
+        openPane(s, host, "chat")
+        paneTyping = true
+    }
+    property bool paneTyping: false   // (the pane readies its question's own-words field)
 
     // Deny with a note, from a notification: the chat's pane, its note field ready
     function denyWithNote(s, host) {
