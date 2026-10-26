@@ -10,6 +10,11 @@
   open burrow is drawn once and copied into each picture, which halves what
   a picture costs. A pet you pick up trails your mouse on a spring, swings
   as you move it and wobbles when you let go.
+- **Motion in the list:** a chat that moves up or down the list slides to
+  its new place instead of jumping, a new chat fades in, the usage and
+  context bars and the usage numbers glide to a new value, a tab slides in
+  from the side it's on, and the chat tab grows open. Nothing moves when
+  your system asks for less motion.
 - **More for Talpa to do:** it blows soap bubbles, grows a flower and
   smells it, eats a cookie, takes a selfie, hops like a bunny, boogies, and
   cheers *yay!* when a chat finishes; petting it may get heart eyes, a wink

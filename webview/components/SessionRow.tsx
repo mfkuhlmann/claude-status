@@ -108,7 +108,7 @@ export function SessionRow({ session: s, group, host, showProfile }: { session: 
   const stopped = s.stopped && !s.stopped.over ? " stopped" : s.stopped ? " freed" : "";
 
   return (
-    <div class={`session ${stateClass(s.state, s.reason)}${stopped}`}>
+    <div class={`session ${stateClass(s.state, s.reason)}${stopped}`} data-flip={s.key}>
       {/* A bar in the color of the chat's pet, to spot which pet is which */}
       <span class="pet-bar" style={{ background: petColor || "transparent" }} aria-hidden="true" />
       <span class="state-dot" aria-hidden="true" />

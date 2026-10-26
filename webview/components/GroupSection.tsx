@@ -1,3 +1,4 @@
+import { useRef } from "preact/hooks";
 import { duration, formatTokens, stateText } from "../../src/shared/model";
 import type { Group, TokenTotals, Tokens } from "../../src/shared/types";
 import { post } from "../env";
@@ -13,6 +14,7 @@ import { PlansList } from "./PlansList";
 import { QueuedTasks } from "./QueuedTasks";
 import { RecentChats } from "./RecentChats";
 import { SessionRow, stateClass } from "./SessionRow";
+import { useFlip } from "../util/motion";
 import { StatsPanel } from "./StatsPanel";
 import { Tag } from "./Tag";
 import { UsageBar } from "./UsageBar";
@@ -57,6 +59,8 @@ function TokenLine({ tokens, topModels }: { tokens: Tokens; topModels: Tokens["m
 // account is on that SSH host and its actions run there.
 // accounts: how many its machine has (with two or more, the default one is marked)
 export function GroupSection({ group: g, accounts = 1 }: { group: Group; accounts?: number }) {
+  const rowsRef = useRef<HTMLDivElement>(null);
+  useFlip(rowsRef); // (a chat that moves slides there)
   const view = useView();
   const now = view.now;
   const host = g.host;
@@ -191,7 +195,7 @@ export function GroupSection({ group: g, accounts = 1 }: { group: Group; account
       ) : null}
       {statsOpen && stats ? <StatsPanel stats={stats} /> : null}
 
-      <div class="sessions">
+      <div class="sessions" ref={rowsRef}>
         {g.sessions.map((s) => (
           <SessionRow key={s.key} session={s} group={g} host={host} showProfile={multiProfile} />
         ))}

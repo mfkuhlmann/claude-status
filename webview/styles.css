@@ -455,6 +455,7 @@ button:focus-visible {
   height: 100%;
   border-radius: inherit;
   background: var(--lvl);
+  transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1), left 0.6s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 /* Where your pace leads by the reset, and where an even pace would be by now */
@@ -3033,4 +3034,35 @@ body.vscode-light .pane {
   flex-direction: column;
   gap: 6px;
   margin-top: 8px;
+}
+
+/* ---------------------------------------------------------------------------
+   Motion: rows slide (util/motion.ts), a tab slides in from its side, the
+   chat tab grows open */
+
+.sessions {
+  position: relative;
+}
+
+.content.tab-in {
+  animation: cs-tab-in 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes cs-tab-in {
+  from {
+    transform: translateX(var(--tab-from, 0));
+    opacity: 0.35;
+  }
+}
+
+.pane-grow {
+  transform-origin: left center;
+  animation: cs-grow 320ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes cs-grow {
+  from {
+    transform: scale(0.96);
+    opacity: 0;
+  }
 }

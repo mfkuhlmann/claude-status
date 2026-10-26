@@ -261,7 +261,7 @@ function ChatApp() {
   const marked = !!chat && !chat.reviewPending && !!chat.review;
 
   return (
-    <div class="pane" style={{ "--pane-scale": String(scale) }}>
+    <div class="pane pane-grow" style={{ "--pane-scale": String(scale) }}>
       <div class="pane-head">
         <span class={`state-dot st-${chat?.state ?? "done"}`} aria-hidden="true" />
         <h2 class="pane-name">{chat?.name ?? ""}</h2>

@@ -9,7 +9,7 @@ import {
   overallState,
 } from "../../src/shared/model";
 import { Component, type ComponentChildren } from "preact";
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { editorTab } from "../env";
 import { pets } from "../pets";
 import type { HeroInput } from "../pets/api";
@@ -28,6 +28,7 @@ import { PermsView } from "./PermsView";
 import { WeekView } from "./WeekView";
 
 const appClass = "app" + (editorTab ? " tab" : "");
+const TABS = ["chats", "week", "perms"];
 
 // A shadow under the sticky top once the list scrolls under it
 function useScrolled(): boolean {
@@ -72,6 +73,14 @@ export function App() {
   const tab = useStore(uiState).tab;
   const week = tab === "week";
   const perms = tab === "perms";
+  // A tab slides in from the side it's on (Chats | Recap | Permissions)
+  const lastTab = useRef(tab);
+  const tabFrom = useRef(0);
+  if (lastTab.current !== tab) {
+    tabFrom.current = TABS.indexOf(tab) > TABS.indexOf(lastTab.current) ? 1 : -1;
+    lastTab.current = tab;
+  }
+  const tabIn = tabFrom.current ? { class: "content tab-in", style: { "--tab-from": `${tabFrom.current * 24}px` } } : { class: "content" };
 
   if (!state)
     return (
@@ -112,20 +121,20 @@ export function App() {
           {!week && !perms ? <Ticker groups={groups} /> : null}
         </div>
         {week ? (
-          <main class="content">
+          <main key="week" {...tabIn}>
             <Guarded what="the week">
               <WeekView hosts={state.hosts.filter((h) => h.ok && !!h.result).map((h) => h.name)}
                 currency={state.settings.recapCurrency ?? "USD"} />
             </Guarded>
           </main>
         ) : perms ? (
-          <main class="content">
+          <main key="perms" {...tabIn}>
             <Guarded what="the permissions">
               <PermsView rules={state.settings.recapRules !== false} />
             </Guarded>
           </main>
         ) : (
-        <main class="content">
+        <main key="chats" {...tabIn}>
           <Messages state={state} />
           {!state.status && !state.errorText ? <div class="empty muted">Looking for your chats…</div> : null}
           {local.map((g) => (

@@ -1,5 +1,6 @@
 import { forecastTitle, forecastWarning, resetAtText, resetText, usageLevel } from "../../src/shared/model";
 import type { LimitWindow } from "../../src/shared/types";
+import { useGlide } from "../util/motion";
 
 // One plan limit: label, bar, percent, when it resets. Its four cells sit in
 // the account's usage grid, so the bars of all windows line up. The bar also
@@ -12,6 +13,7 @@ export function UsageBar({ window: w, now }: { window: LimitWindow; now: number 
   const f = w.reset ? null : (w.forecast ?? null);
   const ahead = f ? Math.min(100, Math.max(pct, f.atReset)) : pct;
   const warning = forecastWarning(w, now);
+  const shownPct = useGlide(w.pct); // (the bar glides with it: a CSS transition)
   const title = [`${w.label}: ${Math.round(w.pct)}% used` + (reset ? ` · ${reset}` : ""), resetAt ? resetAt + "." : "", forecastTitle(w, now)]
     .filter(Boolean)
     .join("\n");
@@ -35,7 +37,7 @@ export function UsageBar({ window: w, now }: { window: LimitWindow; now: number 
         ) : null}
         {f ? <span class="meter-even" style={{ left: `${Math.min(100, Math.max(0, f.evenPct))}%` }} /> : null}
       </span>
-      <span class="usage-pct">{Math.round(w.pct)}%</span>
+      <span class="usage-pct">{Math.round(shownPct)}%</span>
       <span class="usage-reset" title={resetAt || reset}>
         {reset}
       </span>
