@@ -3,13 +3,15 @@ import QtQuick.Layouts
 import org.kde.plasma.components as PlasmaComponents3
 import org.kde.plasma.core as PlasmaCore
 import org.kde.kirigami as Kirigami
+import "markdown.mjs" as Md
 
 // What a chat waiting for a permission asks (claude_status.py:
 // note_permissions): the command, or the file and the change; then Allow
 // once, Always allow and Deny (with a note), where the widget can answer it
 // (answer "hook": through the hook, "keys": in its tmux pane). Claude's
 // questions: each with its options (QuestionForm.qml), then Send answers
-// and Decline (with a note).
+// and Decline (with a note). A chat leaving plan mode: its plan, then
+// Approve, Approve and accept edits, Keep planning (with what to change).
 ColumnLayout {
     id: ask
 
@@ -25,7 +27,24 @@ ColumnLayout {
     readonly property var diff: permission && permission.diff ? permission.diff : []
     readonly property var questions: permission && permission.questions ? permission.questions : []
     readonly property bool asksQuestions: questions.length > 0
+    readonly property var plan: permission && permission.plan ? permission.plan : null
+    property real planHeight: Kirigami.Units.gridUnit * 9   // (in a row: more in the pane)
+    signal wholePlan()
     spacing: Kirigami.Units.smallSpacing
+
+    function hex(c) {
+        return Qt.rgba(c.r, c.g, c.b, 1).toString()
+    }
+    function mix(c, a) {
+        return Qt.tint(Kirigami.Theme.backgroundColor, Qt.rgba(c.r, c.g, c.b, a))
+    }
+    readonly property bool dark: Kirigami.Theme.backgroundColor.hslLightness < 0.5
+    readonly property var planStyle: ({
+        pt: Kirigami.Theme.defaultFont.pointSize, mono: "monospace", text: hex(Kirigami.Theme.textColor),
+        muted: hex(mix(Kirigami.Theme.textColor, 0.62)), accent: dark ? "#d97757" : "#c15f3c", heading: dark ? "#d97757" : "#c15f3c",
+        code: dark ? "#b1b9f9" : "#5769f7", codeBg: hex(mix(Kirigami.Theme.textColor, 0.09)), blockBg: hex(mix(Kirigami.Theme.textColor, 0.05)),
+        border: hex(mix(Kirigami.Theme.textColor, 0.16)), link: hex(Kirigami.Theme.linkColor)
+    })
     onPermissionChanged: if (!permission) denying = false
 
     // Deny… (Decline… a question): its note field (optional), ready to type in
@@ -48,6 +67,7 @@ ColumnLayout {
         font.bold: true
         wrapMode: Text.Wrap
         text: !ask.permission ? ""
+              : ask.plan ? i18n("Claude has a plan, ready to start:")
               : ask.asksQuestions ? (ask.questions.length > 1 ? i18n("Claude asks you %1 questions:", ask.questions.length)
                                                               : i18n("Claude asks you:"))
               : ask.permission.command ? i18n("Claude asks to run:")
@@ -75,6 +95,41 @@ ColumnLayout {
             font.family: "monospace"
             font.pointSize: Kirigami.Theme.smallFont.pointSize
         }
+    }
+    // The plan, rendered (in a row: its start, the pane shows all of it)
+    Rectangle {
+        id: planBox
+        visible: ask.plan !== null
+        Layout.fillWidth: true
+        implicitHeight: Math.min(planText.implicitHeight, ask.planHeight) + Kirigami.Units.smallSpacing * 2
+        radius: Kirigami.Units.cornerRadius
+        color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.05)
+        border.width: 1
+        border.color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.12)
+        clip: true
+
+        TextEdit {
+            id: planText
+            x: Kirigami.Units.smallSpacing
+            y: Kirigami.Units.smallSpacing
+            width: parent.width - Kirigami.Units.smallSpacing * 2
+            text: ask.plan ? Md.toHtml(ask.plan.text, ask.planStyle) : ""
+            textFormat: TextEdit.RichText
+            readOnly: true
+            selectByMouse: true
+            wrapMode: TextEdit.Wrap
+            color: Kirigami.Theme.textColor
+            selectionColor: Kirigami.Theme.focusColor
+            onLinkActivated: link => Qt.openUrlExternally(link)
+        }
+    }
+    PlasmaComponents3.Label {
+        visible: ask.plan !== null && (planText.implicitHeight > ask.planHeight || ask.plan.cut)
+        textFormat: Text.StyledText
+        Layout.fillWidth: true
+        text: "<a href=\"#\">" + i18n("Read the whole plan") + "</a>"
+        font: Kirigami.Theme.smallFont
+        onLinkActivated: ask.wholePlan()
     }
     DiffView {
         visible: ask.diff.length > 0
@@ -114,8 +169,46 @@ ColumnLayout {
             Layout.fillWidth: true
         }
     }
+    Flow {
+        visible: ask.canAnswer && ask.plan !== null && !ask.denying
+        Layout.fillWidth: true
+        spacing: Kirigami.Units.smallSpacing
+
+        PlasmaComponents3.Button {
+            enabled: !ask.busy
+            icon.name: "dialog-ok-apply"
+            text: i18n("Approve")
+            onClicked: ask.answered("approve", "", null)
+
+            PlasmaCore.ToolTipArea {
+                textFormat: Text.PlainText
+                anchors.fill: parent
+                mainText: i18n("Approve")
+                subText: i18n("It starts on the plan and asks before each change, as \"Yes, manually approve edits\" in its dialog.")
+            }
+        }
+        PlasmaComponents3.Button {
+            enabled: !ask.busy
+            icon.name: "dialog-ok"
+            text: i18n("Approve, accept edits")
+            onClicked: ask.answered("approve-edits", "", null)
+
+            PlasmaCore.ToolTipArea {
+                textFormat: Text.PlainText
+                anchors.fill: parent
+                mainText: i18n("Approve and accept edits")
+                subText: i18n("It starts on the plan and changes files without asking for the rest of this chat (accept edits mode); commands still ask.")
+            }
+        }
+        PlasmaComponents3.Button {
+            enabled: !ask.busy
+            icon.name: "document-edit"
+            text: i18n("Keep planning…")
+            onClicked: ask.denyWithNote()
+        }
+    }
     RowLayout {
-        visible: ask.canAnswer && !ask.asksQuestions && !ask.denying
+        visible: ask.canAnswer && !ask.asksQuestions && ask.plan === null && !ask.denying
         Layout.fillWidth: true
         spacing: Kirigami.Units.smallSpacing
 
@@ -160,16 +253,16 @@ ColumnLayout {
         PlasmaComponents3.TextField {
             id: noteField
             Layout.fillWidth: true
-            placeholderText: i18n("What should Claude do instead? (optional)")
+            placeholderText: ask.plan ? i18n("What should change in the plan? (optional)") : i18n("What should Claude do instead? (optional)")
             onAccepted: denyButton.clicked()
         }
         PlasmaComponents3.Button {
             id: denyButton
             enabled: !ask.busy
-            icon.name: "dialog-cancel"
-            text: ask.asksQuestions ? i18n("Decline") : i18n("Deny")
+            icon.name: ask.plan ? "document-edit" : "dialog-cancel"
+            text: ask.plan ? i18n("Keep planning") : ask.asksQuestions ? i18n("Decline") : i18n("Deny")
             onClicked: {
-                ask.answered("deny", noteField.text.trim(), null)
+                ask.answered(ask.plan ? "keep" : "deny", noteField.text.trim(), null)
                 noteField.text = ""
                 ask.denying = false
             }
@@ -188,7 +281,9 @@ ColumnLayout {
         wrapMode: Text.Wrap
         font: Kirigami.Theme.smallFont
         opacity: 0.7
-        text: ask.asksQuestions
+        text: ask.plan
+              ? i18n("Approve it in the chat, or turn on \"Answer permission prompts from the widget\" in the settings (it takes plans too) to approve it here.")
+              : ask.asksQuestions
               ? i18n("Answer it in the chat, or turn on \"Answer permission prompts from the widget\" in the settings (it answers Claude's questions too) to answer it here.")
               : i18n("Answer it in the chat, or turn on \"Answer permission prompts from the widget\" in the settings to answer it here.")
     }

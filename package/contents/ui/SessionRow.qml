@@ -767,6 +767,7 @@ RowLayout {
             diffLines: 6
             compact: true
             onAnswered: (decision, note, answers) => root.answerPermission(row.session, row.remoteHost, decision, note, answers)
+            onWholePlan: root.openPane(row.session, row.remoteHost, "chat")
         }
 
         // Your last prompt, Claude's reply since, the chat's tasks, and what it changed

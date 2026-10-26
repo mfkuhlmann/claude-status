@@ -1065,6 +1065,7 @@ Window {
                         permission: pane.permission
                         busy: pane.answering > 0
                         diffLines: 12
+                        planHeight: Kirigami.Units.gridUnit * 1000   // (the box scrolls)
                         onAnswered: (decision, note, answers) => pane.answer(decision, note, answers)
                     }
                 }

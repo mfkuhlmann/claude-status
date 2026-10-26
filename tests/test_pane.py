@@ -453,6 +453,39 @@ class HookTests(unittest.TestCase):
         self.assertEqual(decision, {"behavior": "allow", "updatedInput": dict(QUESTIONS, answers={
             "Pick a color": "Blue", "Pick toppings": 'Cheese, "Olives, sliced"'})})
 
+    def test_a_plan_is_approved_or_planned_on(self):
+        # Verified on Claude Code 2.1.311 (ExitPlanMode through the hook): an
+        # allow must carry the call's input, a setMode makes it accept edits,
+        # a deny's message is your feedback and it plans on
+        plan = {"plan": "# Fix the parser\n1. Read it\n2. Fix it", "planFilePath": "/tmp/plan.md"}
+        cache = self.cache / "claude-widget"
+        hook, request = self.start("ExitPlanMode", plan, [])
+        self.assertEqual(pane.answer_request(cache, request["id"], "allow"), (False, "Approve the plan or keep planning"))
+        self.assertEqual(pane.answer_request(cache, request["id"], "answer", answers={}), (False, "Approve the plan or keep planning"))
+        out = subprocess.run([sys.executable, "-I", str(CODE / "pane.py"), "--answer", request["id"], "--decision", "approve-edits"],
+                             stdout=subprocess.PIPE, env=self.env())
+        self.assertEqual(json.loads(out.stdout), {"ok": True, "message": "Approved: it starts, accepting edits"})
+        decision = json.loads(hook.stdout.read())["hookSpecificOutput"]["decision"]
+        hook.wait(5)
+        self.assertEqual(decision, {"behavior": "allow", "updatedInput": plan,
+                                    "updatedPermissions": [{"type": "setMode", "mode": "acceptEdits", "destination": "session"}]})
+        self.assertEqual(pane.plan_decision("approve", "", plan), {"behavior": "allow", "updatedInput": plan})
+        self.assertEqual(pane.plan_decision("keep", " also a docstring ", plan),
+                         {"behavior": "deny", "message": "The user wants to keep planning and said: also a docstring"})
+        self.assertNotIn("interrupt", pane.plan_decision("keep", "", plan))   # (it plans on, it isn't stopped)
+        # a permission isn't a plan
+        hook, request = self.start()
+        self.assertEqual(pane.answer_request(cache, request["id"], "approve"), (False, "It asks for a permission, not about a plan"))
+
+    def test_a_plans_view(self):
+        view = cs.permission_view("ExitPlanMode", {"plan": "\n## Fix the parser\nsteps", "planFilePath": "/p.md"}, "/tmp")
+        self.assertEqual(view["plan"], {"text": "\n## Fix the parser\nsteps", "cut": False, "file": "/p.md", "title": "Fix the parser"})
+        self.assertEqual(view["line"], "Plan: Fix the parser")
+        path = self.home / "plan.md"
+        write(path, "# From the file\nmore")
+        self.assertEqual(cs.permission_view("ExitPlanMode", {"planFilePath": str(path)}, "")["plan"]["title"], "From the file")
+        self.assertIsNone(cs.permission_view("Bash", {"command": "make"}, "")["plan"])
+
     def test_a_permission_takes_no_answers(self):
         hook, request = self.start()
         ok, message = pane.answer_request(self.cache / "claude-widget", request["id"], "answer", answers={"x": ["y"]})

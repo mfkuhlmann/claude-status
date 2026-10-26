@@ -876,6 +876,7 @@ PlasmoidItem {
             readonly property bool withAlways: !!row && !!row.permission
                                                && (row.permission.answer === "keys" || row.permission.always !== "")
             readonly property var questions: row && row.permission && row.permission.questions ? row.permission.questions : []
+            readonly property bool isPlan: !!row && !!row.permission && !!row.permission.plan
             readonly property var choices: questions.length === 1 && !questions[0].multiSelect ? questions[0].options.slice(0, 4) : []
             function choose(i) {
                 root.answerPermission(ask.row, ask.host, "answer", "", { [questions[0].question]: [choices[i].label] })
@@ -920,6 +921,18 @@ PlasmoidItem {
                 label: i18n("Deny with a note…")
                 onActivated: root.denyWithNote(ask.row, ask.host)
             }
+            property QtObject approveAction: NotificationAction {
+                label: i18n("Approve")
+                onActivated: root.answerPermission(ask.row, ask.host, "approve", "")
+            }
+            property QtObject approveEditsAction: NotificationAction {
+                label: i18n("Approve, accept edits")
+                onActivated: root.answerPermission(ask.row, ask.host, "approve-edits", "")
+            }
+            property QtObject keepPlanningAction: NotificationAction {
+                label: i18n("Keep planning…")
+                onActivated: root.denyWithNote(ask.row, ask.host)
+            }
             componentName: "plasma_workspace"
             eventId: "notification"
             hints: ({ "x-kde-display-appname": "Claude Code" })
@@ -927,7 +940,7 @@ PlasmoidItem {
                 label: i18n("Open")
                 onActivated: root.openFromNotification(ask, true)
             }
-            actions: questions.length === 0 ? (withAlways ? [allowAction, alwaysAction, denyAction, noteAction] : [allowAction, denyAction, noteAction])
+            actions: isPlan ? [approveEditsAction, approveAction, keepPlanningAction] : questions.length === 0 ? (withAlways ? [allowAction, alwaysAction, denyAction, noteAction] : [allowAction, denyAction, noteAction])
                      : choices.length ? [choice0, choice1, choice2, choice3].slice(0, choices.length).concat([otherAction])
                      : [answerAction]
             onClosed: {
@@ -2704,6 +2717,8 @@ PlasmoidItem {
     // What a waiting chat asks, for its notification: [title, text] (s.permission set)
     function askText(s) {
         const p = s.permission
+        if (p.plan)
+            return [i18n("%1 has a plan ready", s.name), p.plan.title || i18n("Approve it to start, or keep planning.")]
         if (p.questions && p.questions.length)
             return [i18n("%1 asks you", s.name), p.questions.map(q => q.question).join("\n")]
         return [i18n("%1 asks for a permission", s.name), p.command || (p.file ? i18n("Change %1", p.file) : p.line)]

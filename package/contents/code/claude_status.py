@@ -2088,6 +2088,13 @@ PERMISSIONS = "permissions"
 REQUEST_MAX_AGE_MS = 86400_000
 ASK_TOOL = "AskUserQuestion"
 QUESTION_CHARS = 2000  # of a question, an option's label or its description
+# A chat leaving plan mode (its ExitPlanMode call) asks the same way, with
+# its plan: approve it (and maybe accept edits from then on) or keep
+# planning, with what to change (pane.py --decision approve|approve-edits|keep;
+# verified on Claude Code 2.1.311: an allow must carry the call's input, a
+# setMode in updatedPermissions sets the mode, a deny's message is the feedback)
+PLAN_TOOL = "ExitPlanMode"
+PLAN_CHARS = 60000  # of a plan, in the row
 
 
 def read_file(path):
@@ -2145,7 +2152,11 @@ def permission_view(tool, inp, cwd, suggestions=()):
     (Claude's multiple-choice questions: question_view)}."""
     inp = inp if isinstance(inp, dict) else {}
     view = {"tool": tool or "", "line": describe_tool({"name": tool, "input": inp}), "command": "", "file": "",
-            "diff": [], "always": "", "questions": []}
+            "diff": [], "always": "", "questions": [], "plan": None}
+    if tool == PLAN_TOOL:
+        view["plan"] = plan_view(inp)
+        view["line"] = "Plan: " + view["plan"]["title"] if view["plan"]["title"] else "A plan, ready to start"
+        return view
     if tool == ASK_TOOL:
         view["questions"] = question_view(inp)
         if view["questions"]:
@@ -2174,6 +2185,24 @@ def permission_view(tool, inp, cwd, suggestions=()):
     elif modes:
         view["always"] = f"everything in {modes[0]} mode"
     return view
+
+
+def plan_view(inp):
+    """The plan of an ExitPlanMode call: {"text" (Markdown), "cut" (longer
+    than PLAN_CHARS), "file" (its plan file), "title" (its first heading or
+    line)}; the text from the plan file when the call doesn't carry it."""
+    text = inp.get("plan") if isinstance(inp.get("plan"), str) else ""
+    path = inp.get("planFilePath") if isinstance(inp.get("planFilePath"), str) else ""
+    if not text.strip() and path:
+        data = read_file(path)
+        text = data.decode("utf-8", "replace") if data is not None else ""
+    title = ""
+    for line in text.splitlines():
+        line = line.strip().lstrip("#").strip()
+        if line:
+            title = short_text(line, 100)
+            break
+    return {"text": text[:PLAN_CHARS], "cut": len(text) > PLAN_CHARS, "file": path, "title": title}
 
 
 def pending_tool(path):
@@ -2290,7 +2319,8 @@ def note_permissions(groups, ctx, requests):
             view = pending_permission(path, s.get("cwd") or "")
             if view is not None and (wait != QUESTION_WAIT or view["tool"] == ASK_TOOL):
                 question = view["tool"] == ASK_TOOL
-                s["permission"] = dict(view, request=None, answer="keys" if s.get("tmux") and not question else "")
+                keys = s.get("tmux") and not question and view["tool"] != PLAN_TOOL   # (a plan's dialog differs by account)
+                s["permission"] = dict(view, request=None, answer="keys" if keys else "")
 
 
 QUESTION_WAIT = "input needed"  # (also an MCP server's question: only AskUserQuestion's count)
