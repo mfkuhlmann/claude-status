@@ -15,6 +15,7 @@ export interface PaneItem {
   status?: "ok" | "error" | "open"; // tool: how it went ("open": no result yet)
   input?: string; // tool: what it ran or changed
   output?: string; // tool: what came back
+  summary?: string; // tool: what came of it, in a line ("3 lines", "1 failed", …)
   error?: boolean; // note: an API error (a usage limit…)
   at: number | null;
 }
@@ -81,7 +82,8 @@ export type PaneHostMessage =
   | { type: "chat"; chat: PaneChat }
   | { type: "conversation"; answer: Conversation }
   | { type: "review"; answer: ReviewAnswer | null; error: string }
-  | { type: "result"; kind: string; ok: boolean; message: string; ask?: boolean }; // ask: its terminal takes no text: choose
+  | { type: "result"; kind: string; ok: boolean; message: string; ask?: boolean } // ask: its terminal takes no text: choose
+  | { type: "textSize"; scale: number }; // claudeStatus.chatTextScale
 
 // tab -> extension
 export type PaneMessage =
@@ -95,7 +97,15 @@ export type PaneMessage =
   | { type: "undo"; path: string } // "*": all of them
   | { type: "commit"; message: string }
   | { type: "reviewed"; on: boolean }
-  | { type: "openWindow" };
+  | { type: "openWindow" }
+  | { type: "copy"; text: string } // a code block of a reply, to the clipboard
+  | { type: "textSize"; scale: number }; // A− / A+: claudeStatus.chatTextScale
+
+// The tab's text size, times VS Code's font size (claudeStatus.chatTextScale)
+export const TEXT_SCALES = [0.9, 1, 1.15, 1.3, 1.5, 1.75, 2];
+export function textScale(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? Math.min(2, Math.max(0.8, value)) : 1.15;
+}
 
 // The key of a chat's mark in status.reviewed
 export function reviewKey(chatId: string, host?: string): string {

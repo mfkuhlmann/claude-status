@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- **A chat's tab reads like Claude's terminal:** a dot before each of
+  Claude's replies and tool calls (green when a call worked, red when it
+  failed, blinking while it runs), what came of a call under it (*⎿ 3
+  lines*, *⎿ 2 lines added, 1 removed*, the first line of what a command
+  printed, or its error), your prompts set off in your accent color, and a
+  gap before each of them, so a turn starts where you see it. Claude's
+  replies are in larger text: headings in Claude's orange and in their size,
+  lists, inline code in color, code blocks framed with their language and a
+  **Copy** button, quotes and tables. While it works, the last line says so
+  with Claude's spinner. **A−** / **A+** beside its name (or Ctrl+wheel) set
+  the text size, kept in the new setting `claudeStatus.chatTextScale`.
+
 ## 1.15.0
 
 - **Chat with any chat from the view:** a click on a chat opens it in an

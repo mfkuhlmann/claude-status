@@ -115,11 +115,46 @@ def tool_input_text(block):
     return "\n".join(parts)
 
 
+EDITS = ("Edit", "MultiEdit", "Write", "NotebookEdit")
+READ_LINE = re.compile(r"^\s*\d+[\t\u2192]")
+TOOL_ERROR = re.compile(r"</?tool_use_error>")
+
+
+def plural(n, word):
+    return f"{n} {word}" + ("" if n == 1 else "s")
+
+
+def tool_summary(name, inp, output, error):
+    """What came of a tool call, in one line, as Claude's terminal shows it
+    under the call: the error, the lines it read or changed, else the first
+    line of what came back and how many more there are."""
+    rows = [r for r in TOOL_ERROR.sub("", output or "").strip().split("\n") if r.strip()]
+    first = cs.short_text(rows[0], 120) if rows else ""
+    if error:
+        return first or "Failed"
+    if name == "Read":
+        read = sum(1 for r in rows if READ_LINE.match(r))
+        return plural(read, "line") if read else first   # (an image, a PDF: no numbered lines)
+    if name in EDITS:
+        diff = cs.edit_diff(name, inp, None, limit=None)
+        added = sum(1 for d in diff if d.startswith("+") and not d.startswith("+++"))
+        removed = sum(1 for d in diff if d.startswith("-") and not d.startswith("---"))
+        if name != "Edit" and name != "MultiEdit":
+            return plural(added, "line")
+        if added and removed:
+            return f"{plural(added, 'line')} added, {removed} removed"
+        return f"{plural(added, 'line')} added" if added else f"{plural(removed, 'line')} removed" if removed else first
+    if not rows:
+        return "(no output)" if name == "Bash" else ""
+    return first + (f" … +{plural(len(rows) - 1, 'line')}" if len(rows) > 1 else "")
+
+
 def conversation_items(lines):
     """The pane's items from transcript lines (oldest first): {"kind": "you",
     "text"} for a prompt of yours, {"kind": "claude", "text"} for Claude's
     reply (markdown), {"kind": "tool", "name", "line", "status":
-    "ok"|"error"|"open", "input", "output"} for a tool call and {"kind":
+    "ok"|"error"|"open", "input", "output", "summary" (what came of it, in a
+    line)} for a tool call and {"kind":
     "note", "text"} for an interruption, a usage limit or a compaction;
     each with "at" (ms) and "key" (the same in the next answer, as long as
     the item is listed). Entries of subagents (sidechains) aren't in it."""
@@ -145,9 +180,11 @@ def conversation_items(lines):
                 continue
             for c in blocks:
                 if c.get("type") == "tool_result" and c.get("tool_use_id") in tools:
-                    item = tools.pop(c["tool_use_id"])
+                    item, inp = tools.pop(c["tool_use_id"])
+                    output = result_text(c)
                     item["status"] = "error" if c.get("is_error") else "ok"
-                    item["output"] = clip(result_text(c))
+                    item["output"] = clip(output)
+                    item["summary"] = tool_summary(item["name"], inp, output, bool(c.get("is_error")))
             prompt = cs.human_prompt(e)
             if prompt is not None:
                 items.append({"kind": "you", "key": uid, "text": clip(prompt, TEXT_CHARS, 10 ** 6), "at": at})
@@ -174,8 +211,8 @@ def conversation_items(lines):
                                   "at": at})
             elif c.get("type") == "tool_use" and isinstance(c.get("id"), str):
                 item = {"kind": "tool", "key": c["id"], "name": c.get("name") or "tool", "line": cs.describe_tool(c),
-                        "status": "open", "input": clip(tool_input_text(c)), "output": "", "at": at}
-                tools[c["id"]] = item
+                        "status": "open", "input": clip(tool_input_text(c)), "output": "", "summary": "", "at": at}
+                tools[c["id"]] = (item, c.get("input") if isinstance(c.get("input"), dict) else {})
                 items.append(item)
     return items
 

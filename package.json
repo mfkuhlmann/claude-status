@@ -329,6 +329,14 @@
           "markdownDescription": "A click on a chat opens it in an editor tab: its conversation as it goes, a box to reply, what it asks for (Allow / Deny), and what it changed (Undo, Commit, Mark reviewed). Off: a click opens the chat itself, as `#claudeStatus.openIn#` says (the tab is then a button beside it).",
           "order": 5
         },
+        "claudeStatus.chatTextScale": {
+          "type": "number",
+          "default": 1.15,
+          "minimum": 0.8,
+          "maximum": 2,
+          "markdownDescription": "Text size in a chat's tab, times VS Code's font size. The tab's A− / A+ buttons and Ctrl+wheel change it.",
+          "order": 6
+        },
         "claudeStatus.openIn": {
           "type": "string",
           "enum": [

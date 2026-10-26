@@ -1,11 +1,12 @@
 // Claude's replies, rendered: the Markdown it writes (headings, lists, code
-// blocks, tables, quotes, bold, italics, inline code, links), made into
-// elements here, never into HTML text, so nothing in a reply can run or load
-// anything in the page. What isn't understood shows as written.
+// blocks, tables, quotes, bold, italics, strikethrough, inline code, links),
+// made into elements here, never into HTML text, so nothing in a reply can
+// run or load anything in the page. What isn't understood shows as written.
+// A code block has its language and a Copy button (onCopy).
 
 import type { ComponentChildren, JSX } from "preact";
 
-const FENCE = /^(\s*)(```|~~~)(.*)$/;
+const FENCE = /^(\s*)(```+|~~~+)\s*([^\s`]*)/;
 const HEADING = /^(#{1,6})\s+(.*?)\s*#*\s*$/;
 const BULLET = /^(\s*)([-*+])\s+(.*)$/;
 const NUMBERED = /^(\s*)(\d{1,9})[.)]\s+(.*)$/;
@@ -17,7 +18,7 @@ const SAFE_LINK = /^(https?:|mailto:)/i;
 // Inline Markdown: `code`, **bold**, *italics* / _italics_, [links](url)
 export function inline(text: string, key = "i"): ComponentChildren[] {
   const out: ComponentChildren[] = [];
-  const pattern = /`([^`]+)`|\*\*(.+?)\*\*|__(.+?)__|\*([^*\s][^*]*?)\*|(?<![\w])_([^_\s][^_]*?)_(?![\w])|\[([^\]]+)\]\(([^)\s]+)\)/g;
+  const pattern = /`([^`]+)`|\*\*(.+?)\*\*|__(.+?)__|\*([^*\s][^*]*?)\*|(?<![\w])_([^_\s][^_]*?)_(?![\w])|\[([^\]]+)\]\(([^)\s]+)\)|~~(.+?)~~/g;
   let last = 0;
   let n = 0;
   for (let m = pattern.exec(text); m; m = pattern.exec(text)) {
@@ -29,7 +30,7 @@ export function inline(text: string, key = "i"): ComponentChildren[] {
     else if (m[6] !== undefined) {
       const href = m[7];
       out.push(SAFE_LINK.test(href) ? <a key={k} href={href} title={href}>{inline(m[6], k)}</a> : <span key={k}>{inline(m[6], k)}</span>);
-    }
+    } else if (m[8] !== undefined) out.push(<s key={k}>{inline(m[8], k)}</s>);
     last = pattern.lastIndex;
   }
   if (last < text.length) out.push(text.slice(last));
@@ -41,7 +42,7 @@ function cells(line: string): string[] {
 }
 
 // Block Markdown: the reply as paragraphs, headings, lists, code blocks, …
-export function Markdown({ text }: { text: string }) {
+export function Markdown({ text, onCopy }: { text: string; onCopy?: (code: string) => void }) {
   const lines = text.replace(/\r\n?/g, "\n").split("\n");
   const blocks: JSX.Element[] = [];
   let para: string[] = [];
@@ -68,11 +69,22 @@ export function Markdown({ text }: { text: string }) {
       flushPara();
       flushList();
       const body: string[] = [];
-      for (i++; i < lines.length && !lines[i].trim().startsWith(fence[2]); i++) body.push(lines[i]);
+      for (i++; i < lines.length && !(lines[i].trim().startsWith(fence[2]) && !lines[i].trim().replace(/[`~]/g, "")); i++) body.push(lines[i]);
+      const code = body.join("\n");
       blocks.push(
-        <pre key={`c${blocks.length}`} class="md-code">
-          <code>{body.join("\n")}</code>
-        </pre>,
+        <div key={`c${blocks.length}`} class="md-codeblock">
+          <div class="md-code-head">
+            <span>{fence[3]}</span>
+            {onCopy ? (
+              <button type="button" class="md-copy" title="Copy this code" onClick={() => onCopy(code)}>
+                Copy
+              </button>
+            ) : null}
+          </div>
+          <pre class="md-code">
+            <code>{code}</code>
+          </pre>
+        </div>,
       );
       continue;
     }
@@ -87,7 +99,7 @@ export function Markdown({ text }: { text: string }) {
       flushList();
       const level = Math.min(6, heading[1].length + 2); // (smaller than the tab's own heading)
       const H = `h${level}` as "h3";
-      blocks.push(<H key={`h${blocks.length}`} class="md-heading">{inline(heading[2], `h${blocks.length}`)}</H>);
+      blocks.push(<H key={`h${blocks.length}`} class={`md-heading md-h${heading[1].length}`}>{inline(heading[2], `h${blocks.length}`)}</H>);
       continue;
     }
     if (RULE.test(line) && !para.length) {

@@ -16,7 +16,7 @@ import { openComparison } from "./changes";
 import { configDirArgs } from "./config";
 import type { Dashboard } from "./dashboard";
 import { chatRefOf, recentRef, stateText } from "./shared/model";
-import { queuedReply, reviewPending, type PaneChat, type PaneHostMessage, type PaneMessage } from "./shared/pane";
+import { queuedReply, reviewPending, textScale, type PaneChat, type PaneHostMessage, type PaneMessage } from "./shared/pane";
 import type { ChatRef, Decision, RecentChat, Session, ViewState } from "./shared/types";
 import { localAncestors, type Terminals } from "./terminals";
 
@@ -191,7 +191,14 @@ class Pane implements vscode.Disposable {
       this.panel.onDidChangeViewState(() => this.schedule()),
       this.panel.onDidDispose(() => this.dispose()),
       owner.ext.dash.onState(() => void this.pushChat()),
+      vscode.workspace.onDidChangeConfiguration((e) => {
+        if (e.affectsConfiguration("claudeStatus.chatTextScale")) this.post({ type: "textSize", scale: Pane.textScale() });
+      }),
     );
+  }
+
+  private static textScale(): number {
+    return textScale(vscode.workspace.getConfiguration("claudeStatus").get("chatTextScale"));
   }
 
   reveal(tab: "chat" | "review"): void {
@@ -346,6 +353,15 @@ class Pane implements vscode.Disposable {
       case "openWindow":
         await actions.open(this.chat);
         break;
+      case "copy":
+        if (typeof m.text !== "string") break;
+        await vscode.env.clipboard.writeText(m.text);
+        this.result("copy", { ok: true, message: "Copied" });
+        break;
+      case "textSize":
+        if (typeof m.scale === "number" && Number.isFinite(m.scale))
+          await vscode.workspace.getConfiguration("claudeStatus").update("chatTextScale", textScale(m.scale), vscode.ConfigurationTarget.Global);
+        break;
     }
   }
 
@@ -367,7 +383,7 @@ class Pane implements vscode.Disposable {
     const { uri } = this.owner.ext;
     const nonce = crypto.randomBytes(16).toString("base64");
     const asset = (...p: string[]) => webview.asWebviewUri(vscode.Uri.joinPath(uri, ...p)).toString();
-    const config = JSON.stringify({ tab, local: !this.host });
+    const config = JSON.stringify({ tab, local: !this.host, scale: Pane.textScale() });
     const csp = [
       "default-src 'none'",
       "base-uri 'none'",

@@ -213,8 +213,12 @@ Other hosts: **Claude Status: Show Claude on SSH Hosts…** lists the ones in
 password) and `python3` 3.7 or newer; nothing is installed there.
 
 **Clicking a chat opens it in an editor tab:** the conversation as it goes,
-Claude's replies rendered and each tool call folded into one line
-(*▸ Bash: pytest ✓*; click it for what it ran and got), with a box to reply:
+drawn the way Claude's terminal draws it: a dot before each reply and tool
+call, Claude's replies rendered (headings, lists, code blocks with **Copy**,
+tables), each tool call on one line with what came of it under it
+(*● Bash(pytest) ⎿ 3 passed*, the dot green or red; click it for what it ran
+and got); **A−** / **A+** (or Ctrl+wheel) set the text size
+(`claudeStatus.chatTextScale`). Below it, a box to reply:
 **Send**, or **Send when this turn ends** (kept, and sent once the turn is
 over). Your message goes the way the chat can take it: typed into its
 terminal when it runs in one of this window's terminals, or into its tmux
@@ -353,6 +357,7 @@ code --install-extension claude-status-*.vsix
 | `claudeStatus.pollInterval` | `2000` | ms between checks of this computer while the view is open (10 s when hidden) |
 | `claudeStatus.extraConfigDirs` | `[]` | More Claude Code config folders |
 | `claudeStatus.clickOpensPane` | `true` | A click on a chat opens its tab (conversation, reply, permission prompt, review); `false`: the chat itself |
+| `claudeStatus.chatTextScale` | `1.15` | Text size in a chat's tab, times VS Code's font size (the tab's **A−** / **A+** and Ctrl+wheel set it) |
 | `claudeStatus.openIn` | `vscode` | `system`: open chats in your desktop's terminal app instead |
 | `claudeStatus.reopenIn` | `terminal` | `claudeCode`: reopen recent chats in a Claude Code tab (the switch above them) |
 | `claudeStatus.notifyWaiting` / `notifyDone` | `true` | Notifications; turn them off here if the Plasma or GNOME widget notifies too |

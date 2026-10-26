@@ -10,11 +10,11 @@ import * as vscode from "vscode";
 import { ChatPanes } from "../src/chatPane";
 import { demoState } from "../src/shared/demo";
 import { chatRefOf } from "../src/shared/model";
-import { queuedReply, reviewPending, routeHint, testsText } from "../src/shared/pane";
+import { queuedReply, reviewPending, routeHint, testsText, textScale, TEXT_SCALES } from "../src/shared/pane";
 import type { ViewState } from "../src/shared/types";
 import { ViewHost } from "../src/view";
 import { clipboardWrites, overrides } from "./vscode-stub";
-import { inline } from "../webview/util/markdown";
+import { inline, Markdown } from "../webview/util/markdown";
 
 const NOW = 1_800_000_000_000;
 
@@ -174,4 +174,26 @@ test("Claude's Markdown: links only to the web or mail; the rest stays text", ()
   assert.ok(nodes.some((n) => n.type === "span")); // (the javascript: link, as text)
   assert.ok(nodes.some((n) => n.type === "code"));
   assert.ok(nodes.some((n) => n.type === "strong"));
+});
+
+test("the chat tab's text size: a number in range, else the default", () => {
+  assert.equal(textScale(1.5), 1.5);
+  assert.equal(textScale(9), 2);
+  assert.equal(textScale(0.1), 0.8);
+  assert.equal(textScale("big"), 1.15);
+  assert.equal(textScale(Number.NaN), 1.15);
+  assert.ok(TEXT_SCALES.includes(1.15));
+});
+
+test("Claude's Markdown: ~~struck~~ text, and a code block keeps its text for Copy", () => {
+  const nodes = inline("was ~~52~~ now `weeksInYear`") as { type?: unknown }[];
+  assert.ok(nodes.some((n) => n && typeof n === "object" && n.type === "s"));
+  const copied: string[] = [];
+  const tree = Markdown({ text: "```ts\nif (a < b) return 1;\n```", onCopy: (code) => copied.push(code) }) as {
+    props: { children: { props: { children: { props: { children: { props: { onClick?: () => void } }[] } }[] } }[] };
+  };
+  const block = tree.props.children[0];
+  const copy = block.props.children[0].props.children[1];
+  copy.props.onClick?.();
+  assert.deepEqual(copied, ["if (a < b) return 1;"]);
 });

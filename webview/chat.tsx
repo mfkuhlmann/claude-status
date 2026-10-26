@@ -1,17 +1,19 @@
 // The chat tab's page (src/chatPane.ts): a chat's conversation as it goes,
-// a box to reply, what it asks while it waits for a permission, and its
-// review. It shows what the extension sends and says what you clicked.
+// drawn the way Claude's terminal draws it (a dot before each reply and tool
+// call, a tool call's outcome under it, your prompts set off), a box to
+// reply, what it asks while it waits for a permission, and its review. It
+// shows what the extension sends and says what you clicked.
 
 import { render } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { routeHint, testsText, type Conversation, type PaneChat, type PaneHostMessage, type PaneItem, type PaneMessage, type ReviewAnswer } from "../src/shared/pane";
+import { routeHint, testsText, TEXT_SCALES, type Conversation, type PaneChat, type PaneHostMessage, type PaneItem, type PaneMessage, type ReviewAnswer } from "../src/shared/pane";
 import { AskBox, Diff } from "./components/AskBox";
 import { Tag } from "./components/Tag";
 import { Markdown } from "./util/markdown";
 
 declare global {
   interface Window {
-    CLAUDE_CHAT: { tab: "chat" | "review"; local: boolean };
+    CLAUDE_CHAT: { tab: "chat" | "review"; local: boolean; scale?: number };
   }
 }
 
@@ -23,14 +25,45 @@ function plural(n: number, one: string, many = one + "s"): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
-function ToolLine({ item, open, onToggle, pending }: { item: PaneItem; open: boolean; onToggle: () => void; pending: string }) {
-  const mark = item.status === "ok" ? "✓" : item.status === "error" ? "✗" : pending;
+// Claude's spinner, as in its terminal
+const SPIN = ["·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"];
+
+function Spinner() {
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setN((x) => x + 1), 120);
+    return () => clearInterval(t);
+  }, []);
+  return <span class="pane-spin" aria-hidden="true">{SPIN[n % SPIN.length]}</span>;
+}
+
+// A tool call: ● Bash(npm test) in green, red, or (still going) blinking, and
+// under it ⎿ what came of it; click for what it ran and got
+function ToolLine({ item, open, onToggle, asking, going, gap }: { item: PaneItem; open: boolean; onToggle: () => void; asking: boolean; going: boolean; gap: string }) {
+  const name = item.name ?? "";
+  const line = item.line ?? "";
+  const args = name && line.startsWith(name + ": ") ? line.slice(name.length + 2) : "";
+  const tone = item.status === "ok" ? "ok" : item.status === "error" ? "error" : asking ? "asking" : going ? "going" : "open";
+  const summary = item.summary || (asking ? "Waiting for your answer" : "");
   return (
-    <div class="pane-tool">
-      <button type="button" class="pane-tool-line" aria-expanded={open} onClick={onToggle}>
-        <span class="pane-fold">{open ? "▾" : "▸"}</span>
-        <span class="pane-tool-text">{item.line}</span>
-        <span class={`pane-tool-mark ${item.status ?? ""}`}>{mark}</span>
+    <div class={`pane-item pane-tool ${tone} ${gap}`}>
+      <button type="button" class="pane-tool-line" aria-expanded={open} title="Click for what it ran and what came back" onClick={onToggle}>
+        <span class="pane-gutter" aria-hidden="true">
+          <span class="pane-dot" />
+        </span>
+        <span class="pane-tool-body">
+          <span class="pane-tool-call">
+            <strong>{args ? name : line}</strong>
+            {args ? (
+              <span class="pane-tool-args">
+                <span class="paren">(</span>
+                {args}
+                <span class="paren">)</span>
+              </span>
+            ) : null}
+          </span>
+          {summary ? <span class="pane-tool-summary">⎿&nbsp;&nbsp;{summary}</span> : null}
+        </span>
       </button>
       {open && (item.input || item.output) ? (
         <pre class="pane-tool-detail">
@@ -41,6 +74,13 @@ function ToolLine({ item, open, onToggle, pending }: { item: PaneItem; open: boo
       ) : null}
     </div>
   );
+}
+
+// More room before your prompt (a new turn) than between the steps of a turn
+function gapOf(kind: PaneItem["kind"], prev: PaneItem["kind"] | undefined): string {
+  if (!prev) return "first";
+  if (kind === "you") return "turn";
+  return kind === "tool" && prev === "tool" ? "close" : "";
 }
 
 function ChatApp() {
@@ -63,14 +103,25 @@ function ChatApp() {
   const [commitOpen, setCommitOpen] = useState(false);
   const [commitText, setCommitText] = useState("");
   const [commitEdited, setCommitEdited] = useState(false);
+  const [scale, setScale] = useState(config.scale ?? 1.15);
   const list = useRef<HTMLDivElement>(null);
   const follow = useRef(true);
+
+  // A− / A+ and Ctrl+wheel: the text size, kept in claudeStatus.chatTextScale
+  const zoom = (step: number) => {
+    const i = TEXT_SCALES.findIndex((v) => v >= scale - 0.001);
+    const at = i < 0 ? TEXT_SCALES.length - 1 : i;
+    const next = TEXT_SCALES[Math.max(0, Math.min(TEXT_SCALES.length - 1, at + step))];
+    setScale(next);
+    post({ type: "textSize", scale: next });
+  };
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       const m = event.data as PaneHostMessage | null;
       if (!m || typeof m !== "object") return;
       if (m.type === "chat") setChat(m.chat);
+      else if (m.type === "textSize") setScale(m.scale);
       else if (m.type === "conversation") {
         const a: Conversation = m.answer;
         if (!a.ok) setLoadError(a.message || "Can't read this chat");
@@ -156,23 +207,32 @@ function ChatApp() {
 
   const terminal = chat?.route === "terminal" || askHow;
   const lastIndex = items.length - 1;
-  const pending = chat?.permission ? "?" : chat?.busy ? "…" : "–";
+  const last = items[lastIndex];
+  const activity = (chat?.activity ?? "").replace(/[….\s]+$/, "");
   const sums = (review?.files ?? []).reduce((a, f) => [a[0] + (f.added ?? 0), a[1] + (f.removed ?? 0)], [0, 0]);
   const tests = testsText(chat?.review ?? (review ? { editedAt: review.editedAt, tests: review.tests } : null));
   const marked = !!chat && !chat.reviewPending && !!chat.review;
 
   return (
-    <div class="pane">
+    <div class="pane" style={{ "--pane-scale": String(scale) }}>
       <div class="pane-head">
         <span class={`state-dot st-${chat?.state ?? "done"}`} aria-hidden="true" />
         <h2 class="pane-name">{chat?.name ?? ""}</h2>
         {chat?.host ? <Tag text={chat.host} title={`This chat runs on the SSH host ${chat.host}.`} /> : null}
-        <span class={`pane-state${chat?.state === "waiting" ? " waiting" : ""}`}>{chat?.stateText ?? ""}</span>
+        <span class={`pane-state st-${chat?.state ?? "done"}`}>{chat?.stateText ?? ""}</span>
+        <span class="pane-sizes">
+          <button type="button" class="pane-size" title="Smaller text (Ctrl+wheel)" disabled={scale <= TEXT_SCALES[0] + 0.001} onClick={() => zoom(-1)}>
+            A−
+          </button>
+          <button type="button" class="pane-size big" title="Larger text (Ctrl+wheel)" disabled={scale >= TEXT_SCALES[TEXT_SCALES.length - 1] - 0.001} onClick={() => zoom(1)}>
+            A+
+          </button>
+        </span>
         <button type="button" class="btn secondary small" title="The terminal or Claude Code tab the chat runs in; a chat that isn't open reopens." onClick={() => post({ type: "openWindow" })}>
           Open its window
         </button>
       </div>
-      <div class="pane-folder muted small">{(chat?.host ? chat.host + ":" : "") + (chat?.cwd ?? "")}</div>
+      <div class="pane-folder">{(chat?.host ? chat.host + ":" : "") + (chat?.cwd ?? "")}</div>
       <div class="pane-tabs" role="tablist">
         <button type="button" role="tab" aria-selected={tab === "chat"} class={tab === "chat" ? "on" : ""} onClick={() => setTab("chat")}>
           Chat
@@ -185,35 +245,59 @@ function ChatApp() {
 
       {tab === "chat" ? (
         <>
-          <div class="pane-list" ref={list}>
+          <div
+            class="pane-list"
+            ref={list}
+            onWheel={(e) => {
+              if (!e.ctrlKey) return;
+              e.preventDefault();
+              zoom(e.deltaY < 0 ? 1 : -1);
+            }}
+          >
             {more ? (
               <button type="button" class="btn secondary small pane-more" onClick={() => post({ type: "more" })}>
                 Show earlier
               </button>
             ) : null}
             {!loaded || loadError ? <div class={`muted center${loadError ? " bad" : ""}`}>{loadError || "Reading the chat…"}</div> : null}
-            {items.map((it, i) =>
-              it.kind === "you" ? (
-                <div key={it.key} class="pane-you">{it.text}</div>
+            {items.map((it, i) => {
+              const gap = gapOf(it.kind, items[i - 1]?.kind);
+              return it.kind === "you" ? (
+                <div key={it.key} class={`pane-item pane-you ${gap}`}>
+                  <span class="pane-gutter" aria-hidden="true">›</span>
+                  <div class="pane-you-text">{it.text}</div>
+                </div>
               ) : it.kind === "claude" ? (
-                <div key={it.key} class="pane-claude">
-                  <Markdown text={it.text ?? ""} />
+                <div key={it.key} class={`pane-item pane-claude ${gap}`}>
+                  <span class="pane-gutter" aria-hidden="true">
+                    <span class="pane-dot" />
+                  </span>
+                  <div class="pane-body">
+                    <Markdown text={it.text ?? ""} onCopy={(code) => post({ type: "copy", text: code })} />
+                  </div>
                 </div>
               ) : it.kind === "tool" ? (
                 <ToolLine
                   key={it.key}
                   item={it}
+                  gap={gap}
                   open={!!open[it.key]}
-                  pending={i === lastIndex ? pending : "–"}
+                  asking={!!chat?.permission && i === lastIndex && it.status === "open"}
+                  going={!!chat?.busy && it.status === "open"}
                   onToggle={() => setOpen({ ...open, [it.key]: !open[it.key] })}
                 />
               ) : (
-                <div key={it.key} class={`pane-note${it.error ? " bad" : ""}`}>— {it.text} —</div>
-              ),
-            )}
+                <div key={it.key} class={`pane-item pane-note${it.error ? " bad" : ""} ${gap}`}>
+                  <span>{it.text}</span>
+                </div>
+              );
+            })}
             {chat?.state === "working" ? (
-              <div class="pane-activity muted">
-                <span class="spinner" aria-hidden="true" /> {chat.activity || "working…"}
+              <div class="pane-item pane-working">
+                <span class="pane-gutter">
+                  <Spinner />
+                </span>
+                <span>{activity && !(last?.kind === "tool" && last.status === "open") ? activity : "Working"}…</span>
               </div>
             ) : null}
           </div>
@@ -224,6 +308,8 @@ function ChatApp() {
               <button type="button" class="btn secondary small" onClick={() => post({ type: "unqueue" })}>Cancel</button>
             </div>
           ) : null}
+          <div class="pane-replybox">
+          <span class="pane-prompt" aria-hidden="true">›</span>
           <textarea
             class="pane-reply"
             rows={3}
@@ -237,7 +323,8 @@ function ChatApp() {
               }
             }}
           />
-          <div class="muted small">{chat ? routeHint(chat.route, chat.state !== "done" || !!chat.busy, "", chat.host) : ""}</div>
+          </div>
+          <div class="pane-hint">{chat ? routeHint(chat.route, chat.state !== "done" || !!chat.busy, "", chat.host) : ""}</div>
           <div class="pane-buttons">
             {terminal ? (
               <button type="button" class="btn secondary" disabled={!text.trim()} onClick={() => send("copy", false)}>
