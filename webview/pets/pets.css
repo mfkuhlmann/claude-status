@@ -204,6 +204,11 @@
   pointer-events: none;
 }
 
+/* The big Talpa walks in front of the headline, not behind it */
+.cs-stage--hero .cs-stage-pets {
+  z-index: 2;
+}
+
 .cs-pet-sheets,
 .cs-pet-sheet,
 .cs-pet-tag,

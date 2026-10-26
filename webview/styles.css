@@ -1833,10 +1833,12 @@ body.vscode-high-contrast .top.scrolled {
   text-overflow: ellipsis;
 }
 
+/* One grid for a list's rows: their bars start and end at the same place,
+   however long each one's value */
 .week-bars {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
+  display: grid;
+  grid-template-columns: minmax(0, 8em) minmax(2em, 1fr) auto;
+  gap: 3px 6px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -1844,8 +1846,8 @@ body.vscode-high-contrast .top.scrolled {
 
 .week-bars li {
   display: grid;
-  grid-template-columns: minmax(0, 8em) minmax(2em, 1fr) auto;
-  gap: 6px;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   align-items: center;
 }
 
@@ -2852,6 +2854,61 @@ body.vscode-light .pane {
   background: transparent;
   line-height: 1.5;
   resize: vertical;
+}
+
+/* The pictures your reply names: small, × takes one out */
+.pane-pictures {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-left: var(--pane-gutter);
+}
+
+.pane-picture {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 3em;
+  height: 3.2em;
+  border: 1px solid var(--cs-border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.pane-picture img {
+  height: 100%;
+  max-width: 10em;
+  object-fit: contain;
+}
+
+.pane-picture-name {
+  padding: 0 6px;
+  color: var(--cs-muted);
+  font-size: 0.8em;
+}
+
+.pane-picture-x {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 1.3em;
+  height: 1.3em;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--cs-bg) 85%, transparent);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.pane-picture-x:hover {
+  color: var(--cs-failed);
+}
+
+.pane-offer img {
+  height: 2.4em;
+  border-radius: 3px;
 }
 
 .pane-hint {
