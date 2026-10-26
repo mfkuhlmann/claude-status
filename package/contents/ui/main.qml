@@ -165,8 +165,11 @@ PlasmoidItem {
     // a tick, not once for each pet; a pet draws itself only when that shows
     // something new (TalpaView.qml)
     signal petFrame(real now)
+    // 60 a second in the popup (it's open for a while), 30 on the desktop
+    // (always there: every picture is a new frame of the whole desktop)
+    readonly property real petFrameMs: onDesktop ? 33.3 : 16.7
     Timer {
-        interval: 40
+        interval: root.petFrameMs
         repeat: true
         running: root.dashboardShown && !root.coveredByWindow && Plasmoid.configuration.showPet
         onTriggered: root.petFrame(Date.now())

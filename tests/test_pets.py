@@ -32,14 +32,21 @@ def run_node(script):
         raise unittest.SkipTest("node isn't installed")
     code = (f"import {{ Talpa }} from {json.dumps(str(TALPA / 'talpa.mjs'))};\n"
             f"import {{ ACTIONS, MOODS }} from {json.dumps(str(TALPA / 'actions.mjs'))};\n"
-            f"import {{ Pictures }} from {json.dumps(str(TALPA / 'pictures.mjs'))};\n" + script)
+            f"import {{ Pictures }} from {json.dumps(str(TALPA / 'pictures.mjs'))};\n"
+            f"import {{ Films }} from {json.dumps(str(TALPA / 'films.mjs'))};\n" + script)
     out = subprocess.run(["node", "--input-type=module", "-e", code], capture_output=True, text=True, timeout=120)
     if out.returncode:
         raise AssertionError(out.stderr)
     return json.loads(out.stdout)
 
 
-# A canvas that draws nothing, for running Talpa's drawing code
+# A canvas that draws nothing, for running Talpa's drawing code (and one
+# that counts what it's asked to draw)
+CALL_COUNTER = """
+let calls = 0;
+const ctx = new Proxy({}, { get: (t, k) => k === 'createLinearGradient' || k === 'createRadialGradient' ? () => ({ addColorStop() {} })
+    : k in t ? t[k] : () => { calls++; }, set: (t, k, v) => { t[k] = v; return true; } });
+"""
 NULL_CANVAS = """
 const ctx = new Proxy({}, { get: (t, k) => k === 'createLinearGradient' ? () => ({ addColorStop() {} })
     : k in t ? t[k] : () => {}, set: (t, k, v) => { t[k] = v; return true; } });
@@ -319,7 +326,7 @@ console.log(JSON.stringify(out));""")
         self.assertGreaterEqual(result["typing"], 2)          # the hands go up and down
         self.assertLess(result["quiet"], 25)                   # 10 s asleep: a few pictures, not 250
         pet = (ROOT / "ui/Pet.qml").read_text()
-        self.assertIn("stills: !pet.lone && !pet.landing", pet)
+        self.assertIn("live: pet.landing", pet)
 
     def test_a_new_pose_mixes_in_and_never_shows_the_background(self):
         # Pictures faded half see-through one over the other let a quarter of
@@ -348,24 +355,9 @@ for (const mood of ['working', 'agents', 'needs', 'idle', 'done', 'failed', 'lim
 console.log(JSON.stringify(out));""")
         self.assertEqual(result["bad"], [])
         self.assertGreater(result["fades"], 50)
-        # the hosts add the two up (not one over the other)
-        view = (ROOT / "ui/TalpaView.qml").read_text()
-        self.assertIn('ctx.globalCompositeOperation = "lighter"', view)
+        # GNOME adds the two up (not one over the other); the widget plays films
         gnome = (ROOT.parent.parent / "gnome/extension/ui/pets.js").read_text()
         self.assertIn("cr.setOperator(Cairo.Operator.ADD)", gnome)
-
-    def test_qt_adds_the_next_pose_up_at_full_strength_pixel_for_pixel(self):
-        # Qt's "lighter" with globalAlpha under 1 adds, caps at full, then
-        # mixes with what was there: the background showed through again. So
-        # the next pose is made mix × itself first, then added at full
-        # strength. And a sheet drawn into another at the view's size (108.8
-        # px wide, the sheet 109) shifted the edges by a sliver.
-        view = (ROOT / "ui/TalpaView.qml").read_text()
-        blend = view[view.index("id: blend"):]
-        self.assertIn("next.globalAlpha = p.mix", blend)
-        self.assertIn('ctx.globalAlpha = 1\n            ctx.globalCompositeOperation = "lighter"\n'
-                      '            ctx.drawImage(fader, 0, 0)\n', blend)
-        self.assertEqual(re.findall(r"drawImage\((\w+), 0, 0, ", blend), [])
 
     def test_a_quick_move_goes_round_its_pictures_without_drawing_them_again(self):
         # Typing showed two pictures a beat apart (choppy); now four, each
@@ -432,6 +424,148 @@ console.log(JSON.stringify(out));""")
         limits = {"working": 2, "agents": 2.5, "needs": 4, "idle": 4, "done": 1.6, "failed": 3, "limit": 1.6}
         for mood, most in limits.items():
             self.assertLess(result[mood], most, mood)
+
+    # ------------------------------------------------------------ films (films.mjs)
+
+    def test_a_film_plays_a_quick_move_as_it_is_and_draws_each_picture_once(self):
+        # Four pictures a move looked like a flip book; a film has a picture
+        # every frame of the move's round (at most maxFrames), each drawn once
+        result = run_node(NULL_CANVAS + """
+const t = new Talpa({ brain: false }); let now = 1e12; t.tick(now);
+t.pose({ arms: 'wave', depth: 'high', eyes: 'happy' });
+const f = new Films(t, { frameMs: 33.3, maxFrames: 24, sheets: 26 });
+const paints = [], shown = new Set();
+for (let i = 0; i < 120; i++) {
+    now += 33.3; t.tick(now); f.tick(now);
+    for (const s of f.sheets) if (s.paint) { f.paint(s, ctx); paints.push(i); }
+    shown.add(f.front.key);
+}
+console.log(JSON.stringify({ shown: shown.size, late: paints.filter(i => i > 30).length, all: paints.length }));""")
+        self.assertGreaterEqual(result["shown"], 10)    # a wave's round (760 ms): 23 frames, mirrored
+        self.assertLessEqual(result["all"], result["shown"])
+        self.assertEqual(result["late"], 0)              # after the first round: none drawn
+
+    def test_a_new_pose_moves_there_through_pictures_in_between(self):
+        # A chat's pet faded from pose to pose; now its arms, depth and lamp
+        # move there in pictures in between, and only when something moves
+        result = run_node(NULL_CANVAS + """
+const t = new Talpa({ brain: false }); let now = 1e12; t.tick(now);
+t.pose({ depth: 'half', eyes: 'open' });
+const f = new Films(t, { frameMs: 33.3, tweenMs: 200, tweens: 4, sheets: 20 });
+const between = [], arms = [];
+const run = (ms) => { for (let i = 0; i < ms / 33.3; i++) { now += 33.3; t.tick(now); f.tick(now);
+    for (const s of f.sheets) if (s.paint) { if (s.from) { between.push(s.p); arms.push(t.posed(s.from).v.armR); } f.paint(s, ctx); } } };
+run(300);
+t.play({ steps: () => [{ depth: 'half', arms: 'up', eyes: 'happy', t: 600 }] }, null, false);
+run(500);
+const tweensBefore = between.length;
+t.play({ steps: () => [{ depth: 'half', arms: 'up', eyes: 'wide', mouth: 'o', t: 600 }] }, null, false);
+run(500);
+console.log(JSON.stringify({ between: between.slice(0, tweensBefore), eyesOnly: between.length - tweensBefore }));""")
+        self.assertEqual(len(result["between"]), 4)
+        self.assertEqual(result["between"], sorted(result["between"]))   # on its way, in order
+        self.assertTrue(all(0 < p < 1 for p in result["between"]))
+        self.assertEqual(result["eyesOnly"], 0)                           # only the eyes changed: it just shows
+
+    def test_the_big_talpa_is_drawn_live_until_a_new_pose_has_settled(self):
+        result = run_node(NULL_CANVAS + """
+const t = new Talpa({ brain: false }); let now = 1e12; t.tick(now);
+t.pose({ depth: 'half' });
+const f = new Films(t, { frameMs: 16.7, tweenMs: 0, maxFrames: 24, sheets: 26 });
+for (let i = 0; i < 30; i++) { now += 16.7; t.tick(now); f.tick(now); for (const s of f.sheets) if (s.paint) f.paint(s, ctx); }
+t.play({ steps: () => [{ depth: 'high', arms: 'up', t: 900 }] }, null, false);
+const live = [];
+for (let i = 0; i < 50; i++) { now += 16.7; t.tick(now); f.tick(now); live.push(f.front.key === '' ? 1 : 0);
+    for (const s of f.sheets) if (s.paint) f.paint(s, ctx); }
+console.log(JSON.stringify({ first: live.slice(0, 12), last: live.slice(-10) }));""")
+        self.assertEqual(result["first"], [1] * 12)   # 200 ms: still on its way, every frame drawn
+        self.assertEqual(result["last"], [0] * 10)    # settled: its picture
+
+    def test_a_move_that_happens_once_plays_out(self):
+        # A yawn's stretch, a throw, a twirl of the lamp have no pictures: a
+        # film showed them done at once (cut short); they're drawn live
+        result = run_node(NULL_CANVAS + """
+const t = new Talpa({ brain: false }); let now = 1e12; t.tick(now);
+const out = {};
+for (const step of [{ body: 'stretch' }, { arms: 'throw' }, { plume: 'twirl', it: 2 }]) {
+    t.play({ steps: () => [Object.assign({ t: 3000 }, step)] }, null, false);
+    const live = [];
+    for (let i = 0; i < 60; i++) { now += 40; t.tick(now); live.push(t.still(33, 12) === null ? 1 : 0); }
+    out[Object.values(step)[0]] = (live.indexOf(0) + 1) * 40;
+}
+console.log(JSON.stringify(out));""")
+        self.assertGreaterEqual(result["stretch"], 1300)
+        self.assertGreaterEqual(result["throw"], 550)
+        self.assertGreaterEqual(result["twirl"], 1600)
+
+    def test_what_flies_about_is_drawn_on_its_own_and_slowly_for_zs(self):
+        result = run_node(NULL_CANVAS + """
+const t = new Talpa({ brain: false }); let now = 1e12; t.tick(now);
+const f = new Films(t, { frameMs: 33.3, sheets: 20 });
+t.react('pet');
+let quick = 0, sheets = 0;
+for (let i = 0; i < 30; i++) { now += 33.3; t.tick(now); f.tick(now); if (f.fx.paint) { quick++; f.paintFx(ctx); }
+    for (const s of f.sheets) if (s.paint) { sheets++; f.paint(s, ctx); } }
+for (let i = 0; i < 100; i++) { now += 33.3; t.tick(now); f.tick(now); if (f.fx.paint) f.paintFx(ctx); }
+const off = !f.fx.on;
+t.play({ steps: () => [{ eyes: 'closed', fx: [['z', 44, 34, { dx: 6, dy: -14, dur: 2.2 }]], t: 3000 }] }, null, false);
+let zs = 0;
+for (let i = 0; i < 60; i++) { now += 33.3; t.tick(now); f.tick(now); if (f.fx.paint) { zs++; f.paintFx(ctx); } }
+console.log(JSON.stringify({ quick: quick, off: off, zs: zs }));""")
+        self.assertGreater(result["quick"], 20)    # hearts: every frame
+        self.assertTrue(result["off"])              # gone: its canvas hides
+        self.assertLessEqual(result["zs"], 11)      # z's float up: 5 a second
+
+    def test_the_open_hole_can_come_from_the_hosts_sheet(self):
+        # Half of a picture's drawing was its hole; a host draws the open hole
+        # once (drawHoleSide) and Talpa copies it in
+        result = run_node("""
+import { drawHoleSide } from %s;
+let calls = 0; const images = [];
+const ctx = new Proxy({}, { get: (t, k) => k === 'drawImage' ? (img) => { images.push(img); calls++; }
+    : k === 'createLinearGradient' || k === 'createRadialGradient' ? () => ({ addColorStop() {} })
+    : k in t ? t[k] : () => { calls++; }, set: (t, k, v) => { t[k] = v; return true; } });
+const t = new Talpa({ brain: false }); t.tick(1e12); t.pose({ depth: 'half' });
+t.draw(ctx); const drawn = calls; calls = 0;
+t.holeImage = (part, left) => part + (left ? '-left' : '-right');
+t.draw(ctx); const copied = calls; calls = 0;
+drawHoleSide(ctx, 'front', true); const side = calls;
+t.facingLeft = true; images.length = 0; t.draw(ctx);
+console.log(JSON.stringify({ drawn: drawn, copied: copied, side: side, images: images }));""" % json.dumps(str(TALPA / "talpa.mjs")))
+        self.assertLess(result["copied"], result["drawn"] * 0.6)
+        self.assertGreater(result["side"], 50)
+        self.assertEqual(result["images"], ["back-left", "front-left"])
+
+    def test_films_cost_the_desktop_about_what_pictures_did(self):
+        # Four desktop dashboards (2026-10-23): what the pets draw a second
+        # (canvas calls) mustn't grow; the big Talpa draws much less than
+        # live, and a chat's pet at most a little more than with pictures
+        result = run_node(CALL_COUNTER + """
+let seed = 7;
+Math.random = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+const out = {};
+for (const lone of [true, false]) for (const mood of ['working', 'agents', 'needs', 'idle', 'done', 'failed', 'limit']) {
+    const cost = films => {
+        seed = 7; calls = 0;
+        const t = new Talpa({ travels: lone }); t.onTravel = lone ? () => {} : null; let now = 1e12; t.tick(now); t.setMood(mood);
+        const tick = films ? 33.33 : 40;
+        let f = null, p = null;
+        if (films) { t.holeImage = () => ({});
+            f = lone ? new Films(t, { frameMs: tick, maxFrames: 24, sheets: 26, tweenMs: 0, restMs: 200 })
+                     : new Films(t, { frameMs: 50, maxFrames: 16, sheets: 20, tweenMs: 200, tweens: 4 }); }
+        else { p = new Pictures(t, lone ? 1 : 5); p.pictures = !lone; }
+        for (let i = 0; i < 120000 / tick; i++) {
+            now += tick; t.tick(now);
+            if (f) { f.tick(now); for (const s of f.sheets) if (s.paint) f.paint(s, ctx); if (f.fx.paint) f.paintFx(ctx); }
+            else { p.tick(now); for (const s of p.sheets) if (s.paint) { s.paint = false; p.paint(s, ctx); } if (p.coming) calls += 4; }
+        }
+        return calls;
+    };
+    out[(lone ? 'hero ' : 'chat ') + mood] = cost(true) / cost(false);
+}
+console.log(JSON.stringify(out));""")
+        for name, ratio in result.items():
+            self.assertLess(ratio, 0.75 if name.startswith("hero") else 1.9, name)
 
     def test_nothing_shows_under_the_burrows_lip(self):
         # Talpa and what it holds are cut along the same edge the lip is drawn

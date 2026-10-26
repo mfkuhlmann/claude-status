@@ -63,6 +63,14 @@ Item {
     // Where it is: px = horizontal centre, lift = how high you hold it
     property real px: homeX
     property real lift: 0
+    // Where it's drawn: there, but while you hold it it trails your hand on a
+    // spring and swings with how fast you move it (and wobbles back after)
+    property real shownX: px
+    Behavior on shownX {
+        enabled: pet.held
+        SpringAnimation { spring: 5; damping: 0.32; epsilon: 0.2 }
+    }
+    readonly property real swing: held ? Math.max(-30, Math.min(30, (px - shownX) * 1.8 / unit)) : 0
     property bool held: false
     property bool landing: false        // picked up, until it has landed and dug in: drawn live
     property bool arriving: false
@@ -210,7 +218,8 @@ Item {
             react("shy")
             say(i18n("Aww, stop it…"))
         } else {
-            react("pet")
+            const r = Math.random()
+            react(r < 0.2 ? "love" : r < 0.35 ? "wink" : r < 0.45 ? "blowkiss" : "pet")
             say(petLine())
         }
     }
@@ -221,7 +230,7 @@ Item {
             say(i18n("…five more minutes."))
             return
         }
-        react("dance")
+        react(Math.random() < 0.4 ? "boogie" : "dance")
         say("♪ ♫")
     }
 
@@ -290,7 +299,7 @@ Item {
     function event(kind, text) {
         if (held || leaving)
             return   // (a reaction now would stop it digging away)
-        const action = { done: "finished", failed: "failed", stopped: "shrug", limit: "battery", oops: "confused", reset: "charged" }[kind]
+        const action = { done: Math.random() < 0.4 ? "yay" : "finished", failed: "failed", stopped: "shrug", limit: "battery", oops: "confused", reset: "charged" }[kind]
         react(action || "alert")
         say(text)
     }
@@ -414,15 +423,30 @@ Item {
         id: view
         visible: !pet.departed   // (dug away: not even back up for the moment before it's removed)
         box: pet.box
-        x: pet.px - boxX - pet.box / 2
+        x: pet.shownX - boxX - pet.box / 2
         y: pet.ground - pet.lift - floorY
+        transform: Rotation {
+            origin.x: view.boxX + pet.box / 2
+            origin.y: view.boxY + pet.box * 30 / 64   // (where you hold it)
+            angle: pet.swing
+            Behavior on angle {
+                SpringAnimation { spring: 3; damping: 0.16; epsilon: 0.3 }
+            }
+        }
         playing: pet.playing
         travels: pet.lone
         tint: pet.lone ? "transparent" : pet.tint
-        // a chat's pet: pictures (only the big Talpa moves all the time), but
-        // drawn live while you hold it and until it has landed
-        sheets: pet.lone ? 1 : 5
-        stills: !pet.lone && !pet.landing
+        // Both are films (TalpaView.qml), drawn live while you hold them and
+        // until they've landed. The big Talpa: as smooth as the clock goes,
+        // live until a new pose has settled, breathing at rest. A chat's pet:
+        // smaller, so at most 20 pictures a second on the desktop (30 in the
+        // popup), pictures in between poses, still at rest.
+        live: pet.landing
+        sheets: pet.lone ? 26 : 20
+        frameMs: pet.lone ? root.petFrameMs : Math.max(root.petFrameMs, root.onDesktop ? 50 : 33.3)
+        maxFrames: pet.lone ? 24 : 16
+        tweenMs: pet.lone ? 0 : 200
+        restMs: pet.lone ? 200 : 0
         onReady: pet.start()
         onTravel: ms => {
             let to = pet.travelTo

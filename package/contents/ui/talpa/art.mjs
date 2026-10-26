@@ -108,6 +108,12 @@ function toHex(rgb) {
     return '#' + rgb.map(v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('');
 }
 
+// a color mixed with another (k of it)
+export function mix(a, b, k) {
+    const x = hex(a), y = hex(b);
+    return toHex(x.map((v, i) => v * (1 - k) + y[i] * k));
+}
+
 // Talpa's own colors, and a calm version of a chat's color for a chat's pet
 export const LILAC = { skin: '#998fbe', shade: '#6b6190' };
 export function calmColors(tint) {
@@ -339,6 +345,16 @@ export function sign(ctx) {
     ctx.restore();
 }
 
+// In the right arm's frame: a phone held up, its camera on you
+export function selfie(ctx) {
+    ctx.save();
+    about(ctx, 0, 12.6, 155);
+    rrect(ctx, -3, 8.4, 6, 9.6, 1.4, '#2b2f3a');
+    rrect(ctx, -2.2, 9.6, 4.4, 6.6, 0.6, '#7fd1ff');
+    circle(ctx, 0, 17, 0.55, '#d0d6e6');
+    ctx.restore();
+}
+
 export function headphones(ctx) {
     line(ctx, 'M13.2 40C12.4 28 21.5 23.2 32 23.2S51.6 28 50.8 40', '#343a4a', 2.4);
     rrect(ctx, 9.8, 36, 5.4, 9, 2.4, '#e05a7a');
@@ -401,6 +417,7 @@ export function propBack(ctx, name, t, fx, sip, faceY) {
 
 // Props held in front (the hands are behind them)
 export function propFront(ctx, name, t, since, opts) {
+    opts = opts || {};
     if (name === 'laptop') {
         ellipse(ctx, 32, 40, 13, 6, '#8fd3ff', [0.22, 0.28, 0.34][Math.floor(t / 433) % 3]);
         rrect(ctx, 19.6, 42.4, 24.8, 12.2, 2, '#dfe3ec', '#a3abbd', 1);
@@ -436,6 +453,16 @@ export function propFront(ctx, name, t, since, opts) {
         ctx.scale(0.42, 0.42);
         path(ctx, HEART, '#e05a7a');
         ctx.restore();
+    } else if (name === 'cookie') {
+        // bitten (opts.bite times) where the skin behind it shows, a little shaded
+        circle(ctx, 32, 47.4, 5.6, '#d9a066');
+        ctx.beginPath();
+        traceEllipse(ctx, 32, 47.4, 5.6, 5.6);
+        stroke(ctx, '#a8733e', 0.7);
+        for (const c of [[29.6, 46.2], [33.6, 45.6], [31.4, 49.4], [34.8, 48.6]])
+            circle(ctx, c[0], c[1], 0.75, '#5b3a22');
+        const behind = mix(opts.skin || LILAC.skin, '#1a1028', 0.14);
+        [[36.4, 43.6], [33, 41.9], [29.2, 42.6]].slice(0, Math.min(3, opts.bite || 0)).forEach(b => circle(ctx, b[0], b[1], 2.1, behind));
     } else if (name === 'gum') {
         const grow = Math.min(1, since / Math.max(1, opts.gum || 2000));
         ctx.save();
@@ -520,12 +547,15 @@ export function particle(ctx, kind, o, t, theme) {
             stroke(ctx, '#c4cbdc', 0.6);
         }
         break;
-    case 'bubble':
+    case 'bubble': {
+        const r = o.r || 1.6;
         ctx.beginPath();
-        traceEllipse(ctx, 0, 0, o.r || 1.6, o.r || 1.6);
-        fill(ctx, 'rgba(160,210,245,0.25)');
+        traceEllipse(ctx, 0, 0, r, r);
+        fill(ctx, 'rgba(175,220,250,0.4)');
         stroke(ctx, '#9fd0f0', 0.6);
+        circle(ctx, -r * 0.38, -r * 0.38, r * 0.28, '#ffffff', 0.85);
         break;
+    }
     case 'bulb':
         circle(ctx, 0, 0, 3.6, '#ffe27a');
         rrect(ctx, -1.6, 3, 3.2, 2.2, 0.5, '#9aa3ba');
@@ -570,6 +600,39 @@ export function particle(ctx, kind, o, t, theme) {
         circle(ctx, 0, 2, 0.8, '#ffffff');
         break;
     case 'clod': ellipse(ctx, 0, 0, o.r || 1.1, (o.r || 1.1) * 0.75, o.color || '#8a6a4f'); break;
+    case 'crumb': ellipse(ctx, 0, 0, 0.7, 0.55, '#b07a45'); break;
+    case 'flower':   // from its foot, at the spot, up
+        line(ctx, 'M0 0Q1.2-4 0-8.6', '#5f9e4a', 0.9);
+        ellipse(ctx, 1.6, -3.6, 1.6, 0.7, '#6fb35a');
+        ellipse(ctx, -1.5, -5.6, 1.4, 0.6, '#6fb35a');
+        for (let i = 0; i < 5; i++) {
+            const a = i * 2 * Math.PI / 5 - Math.PI / 2;
+            circle(ctx, Math.cos(a) * 1.9, -10 + Math.sin(a) * 1.9, 1.45, o.color || '#ff8fbf');
+        }
+        circle(ctx, 0, -10, 1.1, '#ffd84a');
+        break;
+    case 'firefly': {
+        const glow = 0.5 + 0.5 * Math.sin(t / 160);
+        circle(ctx, 0, 0, 3.2, '#fff3a0', 0.12 + 0.22 * glow);
+        circle(ctx, 0, 0, 1.6, '#fff3a0', 0.35 + 0.3 * glow);
+        circle(ctx, 0, 0, 0.8, '#ffe766');
+        break;
+    }
+    case 'shoot':
+        line(ctx, 'M-9-1.4L0 0', '#ffe9a8', 1.2, 0.5);
+        line(ctx, 'M-5-0.8L0 0', '#fff6d6', 1.4, 0.8);
+        ctx.save();
+        ctx.scale(0.8, 0.8);
+        path(ctx, STAR4, '#ffe066');
+        ctx.restore();
+        break;
+    case 'flash':
+        for (let i = 0; i < 8; i++) {
+            const a = i * Math.PI / 4;
+            line(ctx, `M${Math.cos(a) * 2.2} ${Math.sin(a) * 2.2}L${Math.cos(a) * 5} ${Math.sin(a) * 5}`, o.color || '#ffffff', 1.1);
+        }
+        circle(ctx, 0, 0, 1.6, o.color || '#ffffff', 0.9);
+        break;
     default: break;
     }
 }

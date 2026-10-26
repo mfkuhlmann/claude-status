@@ -28,6 +28,10 @@ const confetti = n => repeat(n, () => [['confetti', rnd(10, 54), rnd(0, 14), {
 const notes = () => [['note', 50, 26, { dx: 6, dy: -14, dur: 1.8 }], ['note', 12, 28, { dx: -6, dy: -12, dur: 1.8, delay: 0.6 }],
     ['note', 48, 22, { dx: 4, dy: -16, dur: 1.8, delay: 1.2 }]];
 const sparkles = n => repeat(n, i => [['sparkle', rnd(14, 50), rnd(10, 26), { dy: rnd(-12, -6), dx: rnd(-4, 4), delay: i * 0.15 }]]);
+const crumbs = () => repeat(int(2, 4), () => [['crumb', rnd(27, 37), rnd(44, 48), { dx: rnd(-5, 5), dy: rnd(8, 12), dur: rnd(0.5, 0.8),
+    s0: 1, s1: 1, ease: 'in' }]]);
+const bubbles = () => repeat(int(4, 6), i => [['bubble', rnd(33, 38), rnd(44, 46), { path: 'rise', r: rnd(1.4, 2.6), dx: rnd(-6, 16),
+    dy: rnd(-28, -18), dur: rnd(1.8, 2.6), delay: i * 0.3 }]]);
 
 // steps(w): w translates the few words it says (achoo!, boo!)
 export const ACTIONS = {
@@ -223,6 +227,68 @@ export const ACTIONS = {
         { depth: 'high', eyes: 'tiny', mouth: 'wavy', body: 'shiver', fx: [['drop', 47, 26, { dy: 6, s0: 1 }], ['drop', 17, 28, { dy: 6, s0: 1, delay: 0.4 }]], t: 1500 },
         { eyes: 'open', t: 300 }] },
 
+    // little joys
+    bubbles: { steps: () => [
+        { mouth: 'kiss', eyes: 'happy', look: [0.6, -0.6], t: 400 },
+        { mouth: 'kiss', eyes: 'closed', blush: 1, fx: bubbles(), t: rnd(1800, 2400) },
+        { mouth: 'smile', eyes: 'happy', look: [0.8, -1.6], t: 1000 }] },
+    flower: { steps: w => {
+        const color = pick(['#ff8fbf', '#ffd166', '#b8a1ff', '#ff9a76']);
+        return [
+            { depth: 'low', arms: 'type', eyes: 'squint', mouth: 'flat', look: [1.6, 1], fx: dirt(3, 6), t: 600 },
+            { depth: 'half', arms: 'rest', eyes: 'wide', mouth: 'o', look: [1.8, 0.6],
+              fx: [['flower', 64, 57.5, { path: 'grow', dur: 5.2, color: color }]], t: 1000 },
+            { depth: 'high', eyes: 'closed', mouth: 'small', blush: 1, look: [1.6, 0], body: 'inhale',
+              fx: [['text', 50, 22, { text: w('mmm…'), size: 5.5, dy: -6 }], ['heart', 52, 30, { dy: -10, delay: 0.5 }]], t: 1400 },
+            { eyes: 'happy', mouth: 'smile', blush: 1, look: [1.4, 0.4], t: 1000 }];
+    } },
+    snack: { keep: { prop: 'cookie', arms: 'both', depth: 'out' }, steps: w => [
+        { eyes: 'wide', mouth: 'o', look: [0, 1.4], t: 700 },
+        ...repeat(3, i => [{ eyes: 'closed', mouth: 'open', bite: i + 1, fx: crumbs(), t: 380 },
+            { eyes: 'happy', mouth: 'small', bite: i + 1, t: rnd(380, 560) }]),
+        { prop: '', arms: 'rest', eyes: 'happy', mouth: 'grin', blush: 1, fx: [['text', 50, 22, { text: w('yum!'), size: 6, dy: -6 }]], t: 1000 }] },
+    selfie: { steps: w => [
+        { depth: 'high', arms: 'selfie', eyes: 'open', mouth: 'smile', look: [1.2, -1.4], t: 700 },
+        { arms: 'selfie', eyes: 'wink', mouth: 'grin', blush: 1, fx: [['text', 46, 4, { text: w('cheese!'), size: 6, dy: -4 }]], t: 800 },
+        { arms: 'selfie', eyes: 'happy', mouth: 'grin', fx: [['flash', 56, 12, { path: 'pop', dur: 0.45 }], ...sparkles(2)], t: 700 },
+        { arms: 'rest', eyes: 'happy', mouth: 'smile', t: 500 }] },
+    love: { steps: () => [
+        { depth: 'high', eyes: 'heart', mouth: 'open', blush: 1, body: 'wiggle', plume: 'bob',
+          fx: repeat(int(3, 5), i => [['heart', rnd(16, 48), rnd(16, 28), { dy: rnd(-16, -10), dx: rnd(-6, 6), delay: i * 0.22, scale: rnd(0.8, 1.3) }]]),
+          t: 1400 },
+        { eyes: 'happy', mouth: 'smile', blush: 1, t: 600 }] },
+    wink: { steps: () => [
+        { depth: 'high', eyes: 'wink', mouth: 'kiss', blush: 1, plume: 'flick', fx: [['sparkle', 46, 30, { dy: -6, dur: 0.9 }]], t: 900 },
+        { eyes: 'happy', mouth: 'smile', t: 400 }] },
+    blowkiss: { steps: () => [
+        { depth: 'high', arms: 'chin', eyes: 'closed', mouth: 'kiss', t: 550 },
+        { arms: 'wave', eyes: 'happy', mouth: 'kiss', blush: 1, fx: [['heart', 42, 40, { path: 'plane', dur: 1.9, scale: 0.9 }]], t: 1300 }] },
+    bunnyhop: { steps: () => [
+        { depth: 'out', body: 'hop', it: 3, arms: 'up', eyes: 'happy', mouth: 'open', plume: 'bob', fx: sparkles(3), t: 1650 },
+        { depth: 'half', eyes: 'happy', mouth: 'smile', fx: dirt(4, 8), t: 450 }] },
+    boogie: { steps: () => [
+        { depth: 'high', arms: 'dance', body: 'wiggle', eyes: 'happy', mouth: 'grin', plume: 'bob', fx: notes(), t: rnd(1800, 2400) },
+        { arms: 'up', eyes: 'star', mouth: 'open', body: 'bounce', fx: sparkles(3), t: 700 }] },
+    yay: { steps: w => [
+        { depth: 'out', body: 'hop', it: 2, arms: 'up', eyes: 'star', mouth: 'grin', plume: 'wild',
+          fx: [...confetti(8), ['text', 32, 4, { text: w('yay!'), size: 7, dy: -6 }]], t: 1100 },
+        { depth: 'high', arms: 'waveboth', eyes: 'happy', mouth: 'open', t: 900 }] },
+    // a quiet night
+    stargaze: { steps: w => [
+        { depth: 'half', eyes: 'tired', mouth: 'small', look: [-1, -2], t: rnd(1200, 1800) },
+        { eyes: 'wide', mouth: 'o', look: [1.4, -2], fx: [['shoot', -6, 4, { path: 'shoot', dur: 1.1 }]], t: 1000 },
+        { eyes: 'star', mouth: 'smile', blush: 1, fx: [...sparkles(2), ['text', 32, 6, { text: w('a star!'), size: 5.5, dy: -4 }]], t: 1200 },
+        { eyes: 'closed', mouth: 'small', t: 600 }] },
+    firefly: { steps: () => [
+        { eyes: 'open', mouth: 'small', look: [-1.6, -1], fx: [['firefly', 8, 30, { path: 'fly', dur: 3.8, scale: 1.2 }]], t: 900 },
+        { look: [-0.4, -2], t: 700 }, { look: [1.4, -0.4], eyes: 'wide', mouth: 'o', t: 700 },
+        { look: [-0.8, -1.8], eyes: 'happy', mouth: 'smile', blush: 1, t: 1300 }] },
+    dream: { steps: () => [
+        { depth: 'low', eyes: 'closed', mouth: 'small', body: 'slump', plume: 'droop',
+          fx: [['bubble', 35.2, 44.4, { path: 'breathe', r: 2.4, dur: 4.2 }], ...zzz(44, 34)], t: 4100 },
+        { depth: 'low', eyes: 'tiny', mouth: 'o', plume: 'flick', fx: [['flash', 35.2, 44.4, { path: 'pop', dur: 0.35, scale: 0.45, color: '#9fd0f0' }]], t: 700 },
+        { depth: 'low', eyes: 'closed', mouth: 'small', body: 'slump', plume: 'droop', t: 900 }] },
+
     arrive: { steps: () => [
         { depth: 'gone', hole: 0, snap: 1, t: 300 },   // (no sinking first: it isn't there yet)
         { depth: 'gone', hole: 1, fx: dirt(8), t: 450 },
@@ -241,15 +307,16 @@ export const MOODS = {
     idle: { base: { eyes: 'open', mouth: 'smile', depth: 'half', lamp: 'idle' }, pause: [700, 2000],
         pool: { lookaround: 3, duck: 1, popup: 1.2, twirl: 1, sneeze: 0.8, hiccups: 0.6, gum: 0.8, coffee: 1, music: 1, butterfly: 1,
                 balloon: 0.7, plane: 0.8, flip: 0.7, spin: 0.8, wave: 0.7, shake: 0.6, tidy: 0.7, sprout: 0.8, peekaboo: 0.8,
-                telescope: 0.6, nap: 0.6, shiver: 0.3, dig: 2.4 } },
+                telescope: 0.6, nap: 0.6, shiver: 0.3, dig: 2.4, bubbles: 0.8, flower: 0.7, snack: 0.6, selfie: 0.5, wink: 0.5,
+                boogie: 0.5, bunnyhop: 0.5, blowkiss: 0.3, firefly: 0.3 } },
     working: { base: { eyes: 'open', mouth: 'flat', depth: 'half', lamp: 'working' }, pause: [500, 1500],
-        pool: { typing: 4, thinking: 2, idea: 1.2, debug: 1.2, tests: 1.2, read: 0.8, coffee: 0.6, telescope: 0.5, dig: 0.8 } },
+        pool: { typing: 4, thinking: 2, idea: 1.2, debug: 1.2, tests: 1.2, read: 0.8, coffee: 0.6, telescope: 0.5, dig: 0.8, snack: 0.3 } },
     agents: { base: { eyes: 'open', mouth: 'flat', depth: 'half', lamp: 'agents' }, pause: [500, 1500],
         pool: { juggle: 4, typing: 1.2, thinking: 1, idea: 0.6, dig: 0.5 } },
     needs: { base: { eyes: 'wide', mouth: 'open', depth: 'high', plume: 'up', body: 'bounce', lamp: 'needs' }, pause: [300, 900],
         pool: { alert: 2.5, sign: 2, phone: 1.5, letter: 1.2, wave: 0.8 } },
     done: { base: { eyes: 'closed', mouth: 'small', depth: 'low', plume: 'droop', lamp: 'done' }, pause: [1500, 3500],
-        pool: { sleep: 3, nap: 0.6 } },
+        pool: { sleep: 3, nap: 0.6, dream: 1.4, stargaze: 0.5, firefly: 0.4 } },
     failed: { base: { eyes: 'sad', mouth: 'frown', depth: 'low', plume: 'droop', lamp: 'failed' }, pause: [1500, 3500],
         pool: { sad: 3, duck: 0.5 } },
     limit: { base: { eyes: 'tired', mouth: 'flat', depth: 'low', plume: 'droop', prop: 'battery', lamp: 'limit' }, pause: [1500, 3500],
