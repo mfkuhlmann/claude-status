@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Tokens in the Recap:** a **Tokens** number beside *At API prices*, for the day, the 7 days or everything (**Day | Week | Overall**): all the tokens your chats read and wrote, against the period before, with its trend line; point at it for how many were new input, read from the cache, written to the cache and written by Claude. A row of the timeline says its tokens too when you point at its numbers. On the Plasma widget and in the VS Code extension.
+
 ## 1.15.1 (2026-10-26)
 
 - **Pictures in a reply:** Ctrl+V in the chat pane's box pastes a picture from the clipboard (a screenshot, say), as in the new-chat box: it's named in your reply with a thumbnail under the box (× takes it out). When the chat goes on in the background with it, it may open the picture; a chat that's running asks you first, as for any file outside its folder. For an SSH host's chat the pane asks to copy the picture there first.
