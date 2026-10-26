@@ -4,6 +4,7 @@
 
 import { useState } from "preact/hooks";
 import type { Answers, Decision, PermissionAsk, Question } from "../../src/shared/types";
+import { Markdown } from "../util/markdown";
 
 // The change a permission prompt asks for, or a file's diff: + green, - red
 export function Diff({ lines, max }: { lines: string[]; max?: number }) {
@@ -21,8 +22,9 @@ export function Diff({ lines, max }: { lines: string[]; max?: number }) {
 
 // What a waiting chat asks, with Allow once / Always allow / Deny (a note);
 // Claude's questions: each with its options, Send answers / Decline (a note)
-export function AskBox({ ask, onAnswer, busy = false, max = 12, compact = false }: {
+export function AskBox({ ask, onAnswer, onWholePlan, busy = false, max = 12, compact = false }: {
   ask: PermissionAsk;
+  onWholePlan?: () => void; // (a row: the chat's tab shows all of it)
   onAnswer: (d: Decision, note: string, answers?: Answers) => void;
   busy?: boolean;
   max?: number;
@@ -32,11 +34,12 @@ export function AskBox({ ask, onAnswer, busy = false, max = 12, compact = false 
   const [note, setNote] = useState("");
   const canAnswer = ask.answer === "hook" || ask.answer === "keys";
   const questions = ask.questions ?? [];
-  const title = questions.length
+  const plan = ask.plan ?? null;
+  const title = plan ? "Claude has a plan, ready to start:" : questions.length
     ? questions.length > 1 ? `Claude asks you ${questions.length} questions:` : "Claude asks you:"
     : ask.command ? "Claude asks to run:" : ask.file ? `Claude asks to change ${ask.file}:` : `Claude asks: ${ask.line}`;
   const deny = () => {
-    onAnswer("deny", note);
+    onAnswer(plan ? "keep" : "deny", note);
     setDenying(false);
     setNote("");
   };
@@ -44,6 +47,27 @@ export function AskBox({ ask, onAnswer, busy = false, max = 12, compact = false 
     <div class="ask-box">
       <div class="ask-title">{title}</div>
       {ask.command ? <pre class="ask-command">{ask.command}</pre> : null}
+      {plan ? (
+        <div class={"ask-plan" + (compact ? " compact" : "")}>
+          <Markdown text={plan.text} />
+        </div>
+      ) : null}
+      {plan && (compact || plan.cut) && onWholePlan ? (
+        <button type="button" class="link small" onClick={onWholePlan}>Read the whole plan</button>
+      ) : null}
+      {canAnswer && !denying && plan ? (
+        <div class="ask-buttons">
+          <button type="button" class="btn" disabled={busy} onClick={() => onAnswer("approve-edits", "")}
+            title="It starts on the plan and changes files without asking for the rest of this chat (accept edits mode); commands still ask.">
+            Approve, accept edits
+          </button>
+          <button type="button" class="btn secondary" disabled={busy} onClick={() => onAnswer("approve", "")}
+            title="It starts on the plan and asks before each change, as “Yes, manually approve edits” in its dialog.">
+            Approve
+          </button>
+          <button type="button" class="btn secondary" disabled={busy} onClick={() => setDenying(true)}>Keep planning…</button>
+        </div>
+      ) : null}
       {ask.diff.length ? <Diff lines={ask.diff} max={max} /> : null}
       {questions.length ? (
         <QuestionForm
@@ -56,7 +80,7 @@ export function AskBox({ ask, onAnswer, busy = false, max = 12, compact = false 
           onDecline={() => setDenying(true)}
         />
       ) : null}
-      {canAnswer && !denying && !questions.length ? (
+      {canAnswer && !denying && !questions.length && !plan ? (
         <div class="ask-buttons">
           <button type="button" class="btn" disabled={busy} onClick={() => onAnswer("allow", "")}>Allow once</button>
           {ask.answer === "keys" || ask.always ? (
@@ -79,20 +103,22 @@ export function AskBox({ ask, onAnswer, busy = false, max = 12, compact = false 
           <input
             type="text"
             class="ask-note"
-            placeholder="What should Claude do instead? (optional)"
+            placeholder={plan ? "What should change in the plan? (optional)" : "What should Claude do instead? (optional)"}
             value={note}
             onInput={(e) => setNote((e.target as HTMLInputElement).value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") deny();
             }}
           />
-          <button type="button" class="btn" disabled={busy} onClick={deny}>{questions.length ? "Decline" : "Deny"}</button>
+          <button type="button" class="btn" disabled={busy} onClick={deny}>{plan ? "Keep planning" : questions.length ? "Decline" : "Deny"}</button>
           <button type="button" class="btn secondary" onClick={() => setDenying(false)}>Cancel</button>
         </div>
       ) : null}
       {!canAnswer ? (
         <div class="muted small">
-          {questions.length
+          {plan
+            ? "Approve it in the chat, or run “Claude Status: Answer Permission Prompts from Claude Status…” (it takes plans too) to approve it here."
+            : questions.length
             ? "Answer it in the chat, or run “Claude Status: Answer Permission Prompts from Claude Status…” (it answers Claude's questions too) to answer them here."
             : "Answer it in the chat, or run “Claude Status: Answer Permission Prompts from Claude Status…” to answer them here."}
         </div>

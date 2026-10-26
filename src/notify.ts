@@ -98,6 +98,21 @@ export class Notifier implements vscode.Disposable {
         this.askQuestions(text, show, chat, n.session);
         continue;
       }
+      // a plan: approve it (accepting edits or not), or plan on with a note
+      if (asks && p!.plan) {
+        const planText = `${n.session.name} has a plan ready${p!.plan.title ? `: ${p!.plan.title}` : ""}`;
+        void show(planText, "Approve, accept edits", "Approve", "Keep planning…", "Open").then(async (choice) => {
+          const panes = this.panes;
+          if (!panes) return;
+          if (choice === "Approve, accept edits") await panes.answer(chat, "approve-edits");
+          else if (choice === "Approve") await panes.answer(chat, "approve");
+          else if (choice === "Keep planning…") {
+            const note = await vscode.window.showInputBox({ title: `Keep planning: ${n.session.name}`, prompt: "What should change in the plan? (optional)", ignoreFocusOut: true });
+            if (note !== undefined) await panes.answer(chat, "keep", note.trim());
+          } else if (choice === "Open") panes.open(chat, "chat");
+        });
+        continue;
+      }
       // a permission prompt: answer it here, in Claude's own order (Yes, Yes
       // and don't ask again, No); a chat that waits or finished: reply here
       const buttons = asks

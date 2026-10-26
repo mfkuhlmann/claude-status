@@ -48,6 +48,43 @@ test("a permission prompt's notification lists Allow once, Always allow, Deny, D
   notifier.dispose();
 });
 
+// A plan (ExitPlanMode): Approve, accepting edits or not, or Keep planning
+// with what to change
+test("a plan's notification: Approve, accept edits / Approve / Keep planning…", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path = await import("node:path");
+  const vscode = (await import("vscode")) as unknown as typeof import("./vscode-stub");
+  process.env.XDG_CACHE_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "claude-status-notify-"));
+  const { Notifier } = await import("../src/notify");
+  const window = vscode.window as unknown as Record<string, unknown>;
+  const shown: string[][] = [];
+  let pick = "";
+  let note: string | undefined = "";
+  window.showWarningMessage = async (_m: string, ...buttons: string[]) => (shown.push(buttons), pick);
+  window.showInputBox = async () => note;
+  const answers: [string, string][] = [];
+  const notifier = new Notifier({ sound() {} } as never, () => undefined);
+  notifier.panes = { answer: async (_c: unknown, d: string, n = "") => (answers.push([d, n]), { ok: true, message: "" }), open() {} } as never;
+  const s = {
+    ...demoState(Date.now()).status!.groups[0].sessions[0], state: "waiting", name: "parser",
+    permission: { tool: "ExitPlanMode", line: "Plan: Fix it", command: "", file: "", diff: [], always: "", request: "r2", answer: "hook",
+                  plan: { text: "# Fix it", cut: false, file: "/p.md", title: "Fix it" } },
+  } as Session;
+  const notify = async () => {
+    notifier.handle({ notices: [{ kind: "waiting", title: "parser", body: "plan", session: s, host: undefined }], finished: [], sound: "" } as never);
+    await new Promise((r) => setTimeout(r, 10));
+  };
+  for (const [choice, typed] of [["Approve, accept edits", ""], ["Approve", ""], ["Keep planning…", " add tests "]] as const) {
+    pick = choice;
+    note = typed;
+    await notify();
+  }
+  assert.deepEqual(shown[0], ["Approve, accept edits", "Approve", "Keep planning…", "Open"]);
+  assert.deepEqual(answers, [["approve-edits", ""], ["approve", ""], ["keep", "add tests"]]);
+  notifier.dispose();
+});
+
 // Claude's questions: one with one answer has its options as buttons, then
 // Other… (your own words); with more, Answer… goes through each in a picker
 test("a question's notification: its options, Other…; several questions: Answer… with pickers", async () => {

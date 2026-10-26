@@ -12,6 +12,7 @@ import { findChatRef, findMemory, findPlan, goOnAt, machineStatus, shareAccounts
 import { answersOf } from "./shared/pane";
 import { permsHost, weekAsked, weekRevokeAsked, weekRuleAsked } from "./shared/week";
 import type { ChatRef, Group, HostMessage, PlanItem, WebviewMessage } from "./shared/types";
+import { isDecision } from "./shared/types";
 
 const AGENT_ID = /^[A-Za-z0-9_-]{1,100}$/;
 const CHAT_ID = /^[A-Za-z0-9_-]{1,80}$/;
@@ -164,7 +165,7 @@ export class ViewHost implements vscode.WebviewViewProvider, vscode.Disposable {
         if (chat) void this.actions.open(chat);
         break;
       case "answerPermission":
-        if (chat && this.panes && (m.decision === "allow" || m.decision === "always" || m.decision === "deny" || m.decision === "answer"))
+        if (chat && this.panes && isDecision(m.decision))
           void this.panes.answer(chat, m.decision, typeof m.note === "string" ? m.note : "", answersOf(m.answers) ?? undefined);
         break;
       case "openInClaudeCode":

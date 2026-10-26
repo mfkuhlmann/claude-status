@@ -10,6 +10,12 @@
   open burrow is drawn once and copied into each picture, which halves what
   a picture costs. A pet you pick up trails your mouse on a spring, swings
   as you move it and wobbles when you let go.
+- **Approve a plan from VS Code:** a chat that leaves plan mode shows its
+  plan in its row (*Read the whole plan* opens its tab) and in its chat
+  tab, with **Approve, accept edits**, **Approve** and **Keep planning…**
+  (what to change: Claude works on the plan and shows it again). Its
+  notification has the same buttons. That takes *Answer Permission Prompts
+  from Claude Status*; the chat's own dialog works too.
 - **Focus view:** the filter button beside the tabs shows only what needs
   you: the chats waiting for you as full rows (their questions, Allow /
   Deny), the chats that finished a turn in the last 15 minutes, one line

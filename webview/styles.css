@@ -3164,3 +3164,20 @@ body.vscode-light .pane {
   font: inherit;
   cursor: pointer;
 }
+
+/* A plan to approve (AskBox.tsx): its start in a row, all of it in the chat tab */
+.ask-plan {
+  margin: 4px 0;
+  padding: 4px 8px;
+  border: 1px solid var(--vscode-widget-border, color-mix(in srgb, var(--cs-fg) 15%, transparent));
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--cs-fg) 4%, transparent);
+  overflow-wrap: anywhere;
+}
+
+.ask-plan.compact {
+  max-height: 11em;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, black 75%, transparent);
+  mask-image: linear-gradient(to bottom, black 75%, transparent);
+}

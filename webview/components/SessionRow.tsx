@@ -324,7 +324,8 @@ export function SessionRow({ session: s, group, host, showProfile }: { session: 
         ) : null}
 
         {s.state === "waiting" && s.permission ? (
-          <AskBox ask={s.permission} max={6} compact onAnswer={(decision, note, answers) => post({ type: "answerPermission", chat, decision, note, answers })} />
+          <AskBox ask={s.permission} max={6} compact onAnswer={(decision, note, answers) => post({ type: "answerPermission", chat, decision, note, answers })}
+            onWholePlan={() => post({ type: "openPane", chat, tab: "chat" })} />
         ) : null}
 
         {showPeek ? <PeekPanel session={s} host={host} chat={chat} /> : null}

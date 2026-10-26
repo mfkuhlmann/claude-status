@@ -269,8 +269,19 @@ export interface PermissionAsk {
   // Claude's multiple-choice questions (its AskUserQuestion tool), answered
   // with "answer"; older backends leave it out
   questions?: Question[];
+  // A chat leaving plan mode (ExitPlanMode): its plan, approved with "approve"
+  // or "approve-edits", or planned on with "keep" (a note: what to change);
+  // older backends leave it out
+  plan?: PlanAsk | null;
   request: string | null; // the hook's request, which the extension can answer
   answer: "hook" | "keys" | ""; // how it can be answered from here ("": only in the chat)
+}
+
+export interface PlanAsk {
+  text: string; // Markdown
+  cut: boolean; // longer than shown
+  file: string; // its plan file
+  title: string;
 }
 
 // One of Claude's questions (claude_status.py: question_view): pick one of
@@ -793,7 +804,12 @@ export interface ChatRef {
   plan?: { slug: string; path: string } | null; // the plan it made
 }
 
-export type Decision = "allow" | "always" | "deny" | "answer"; // "answer": Claude's questions, with Answers
+// "answer": Claude's questions, with Answers; approve / approve-edits / keep: a plan (ExitPlanMode)
+export type Decision = "allow" | "always" | "deny" | "answer" | "approve" | "approve-edits" | "keep";
+export const DECISIONS: readonly Decision[] = ["allow", "always", "deny", "answer", "approve", "approve-edits", "keep"];
+export function isDecision(d: unknown): d is Decision {
+  return typeof d === "string" && (DECISIONS as readonly string[]).includes(d);
+}
 
 // webview -> extension
 export type WebviewMessage =

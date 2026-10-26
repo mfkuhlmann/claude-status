@@ -18,6 +18,7 @@ import type { Dashboard } from "./dashboard";
 import { chatRefOf, doingText, liveOf, recentRef, stateText } from "./shared/model";
 import { answersOf, PICTURE_TYPES, queuedReply, reviewPending, textScale, type PaneChat, type PaneHostMessage, type PaneMessage } from "./shared/pane";
 import type { Answers, ChatRef, Decision, RecentChat, Session, ViewState } from "./shared/types";
+import { isDecision } from "./shared/types";
 import { localAncestors, type Terminals } from "./terminals";
 
 const TEXT_MAX = 100_000; // (as a queued task's prompt may be)
@@ -344,7 +345,7 @@ class Pane implements vscode.Disposable {
         break;
       }
       case "answer":
-        if (m.decision === "allow" || m.decision === "always" || m.decision === "deny" || m.decision === "answer")
+        if (isDecision(m.decision))
           this.result("answer", await this.owner.answer(this.chat, m.decision, typeof m.note === "string" ? m.note : "",
                                                         answersOf(m.answers) ?? undefined));
         break;
