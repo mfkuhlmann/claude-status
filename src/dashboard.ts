@@ -4,8 +4,8 @@
 // pollInterval while the view is open and a chat works (every 10 s while
 // it's hidden: the status bar and notifications still need it); with live
 // mode, whose hook hands on each step as it happens, every 6 s at most
-// often; while no chat works, every 20 s. Without the watching, as before:
-// every pollInterval (10 s hidden). Hosts every remotePollSeconds.
+// often; while no chat works, every idlePollInterval (20 s). Without the
+// watching: every pollInterval (10 s hidden). Hosts every remotePollSeconds.
 
 import * as vscode from "vscode";
 import { AwayWatch } from "./away";
@@ -24,7 +24,6 @@ import { mergeChanges, TransitionTracker, type Changes, type PetEvent } from "./
 
 const HIDDEN_POLL_MS = 10000;
 const LIVE_WORKING_MS = 6000; // watched, a chat works, live mode (or the window isn't focused)
-const LIVE_RESTING_MS = 20000; // watched, no chat works
 const VIEW_ID = "claudeStatus.view";
 const DIGEST_SHOWN_MS = 60 * 60000; // the away card stays this long, unless closed
 const DEMO_STEP_MS = 8000;
@@ -165,9 +164,11 @@ export class Dashboard implements vscode.Disposable {
   private paceMs(): number {
     const poll = settings.pollInterval();
     if (!this.watching) return this.visible ? poll : Math.max(HIDDEN_POLL_MS, poll);
-    if (!this.status || !this.status.counts.working) return Math.max(poll, LIVE_RESTING_MS);
+    // (with live mode, a working chat's steps come as they happen: pollInterval doesn't count then)
+    if (!this.status || !this.status.counts.working) return this.liveHook ? settings.idlePollInterval() : Math.max(poll, settings.idlePollInterval());
+    if (this.liveHook) return this.visible ? LIVE_WORKING_MS : HIDDEN_POLL_MS;
     if (!this.visible) return Math.max(HIDDEN_POLL_MS, poll);
-    if (this.liveHook || !vscode.window.state.focused) return Math.max(poll, LIVE_WORKING_MS);
+    if (!vscode.window.state.focused) return Math.max(poll, LIVE_WORKING_MS);
     return poll;
   }
 

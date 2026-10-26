@@ -19,6 +19,7 @@
   profile's `settings.json` that notes each event of a chat in
   `~/.cache/claude-widget/live` (Claude doesn't wait for it). Then the rest
   is checked every 6 seconds while chats work.
+- **A setting for the checks while no chat works:** `claudeStatus.idlePollInterval` (20 s by default) sets how often this computer is checked while no chat works, for what changes without a chat doing anything (plan usage, times); `claudeStatus.pollInterval` says it's for while a chat works, and has no effect with Live Mode on.
 - **What the chats do now, under the big Talpa:** one line with the step a
   working chat does right now, taking turns between the chats at work (a
   chat that did something new goes first). Click it for that chat's tab.

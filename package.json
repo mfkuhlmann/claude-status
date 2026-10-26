@@ -315,8 +315,16 @@
           "default": 2000,
           "minimum": 1000,
           "maximum": 60000,
-          "markdownDescription": "How often this computer's chats are checked while the view is open and a chat works, in milliseconds (every 10 s while it's hidden). A chat that starts, waits or finishes is checked the moment it does; while none works, every 20 s; with **Live Mode…** on, every 6 s at most often.",
+          "markdownDescription": "While a chat works, how often this computer's chats are checked while the view is open, in milliseconds: how often a working chat's line (what it's doing) is brought up to date (every 10 s while the view is hidden, 6 s at most often in a window that isn't focused). **No effect with Live Mode… on:** a working chat's steps show as they happen then, and it's checked every 6 s. A chat that starts, ends, starts working, asks for something or finishes its turn is checked the moment it does, either way.",
           "order": 4
+        },
+        "claudeStatus.idlePollInterval": {
+          "type": "integer",
+          "default": 20000,
+          "minimum": 1000,
+          "maximum": 300000,
+          "markdownDescription": "While no chat works, how often this computer's chats are checked, in milliseconds: for what changes while no chat does anything (plan usage and its forecast, a usage limit resetting, a queued task coming due, a Claude that crashed). Without Live Mode, never more often than `#claudeStatus.pollInterval#`. A chat that changes is checked at once anyway.",
+          "order": 5
         },
         "claudeStatus.extraConfigDirs": {
           "scope": "machine",

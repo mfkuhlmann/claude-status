@@ -385,7 +385,8 @@ code --install-extension claude-status-*.vsix
 | `claudeStatus.includeCurrentRemote` | `true` | Also show the Remote-SSH window's host |
 | `claudeStatus.remotePollSeconds` | `30` | How often hosts are checked |
 | `claudeStatus.sshUsage` | `once` | Plan usage on hosts' accounts: an account on this computer and a host (or two hosts) shows it once, where it's listed first, with the newest numbers; `all`: under every copy; `none`: on no host |
-| `claudeStatus.pollInterval` | `2000` | ms between checks of this computer while the view is open and a chat works (10 s when hidden, 6 s when the window isn't focused or with Live Mode on, 20 s while no chat works); a chat that starts, waits or finishes is checked at once |
+| `claudeStatus.pollInterval` | `2000` | While a chat works, ms between checks of this computer while the view is open: how often a working chat's line is brought up to date (10 s when hidden, 6 s when the window isn't focused). No effect with Live Mode on: its steps show as they happen, and a working chat is checked every 6 s |
+| `claudeStatus.idlePollInterval` | `20000` | While no chat works, ms between checks: plan usage and its forecast, a usage limit resetting, a queued task coming due, a Claude that crashed. A chat that starts, ends, starts working, asks for something or finishes its turn is checked at once either way |
 | `claudeStatus.extraConfigDirs` | `[]` | More Claude Code config folders |
 | `claudeStatus.clickOpensPane` | `true` | A click on a chat opens its tab (conversation, reply, permission prompt, review); `false`: the chat itself |
 | `claudeStatus.chatTextScale` | `1.15` | Text size in a chat's tab, times VS Code's font size (the tab's **A−** / **A+** and Ctrl+wheel set it) |
