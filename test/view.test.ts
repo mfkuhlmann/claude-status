@@ -22,6 +22,7 @@ function setup(state: ViewState = demoState(NOW)) {
   const dash = {
     onState: () => ({ dispose() {} }),
     onPetEvent: () => ({ dispose() {} }),
+    onLive: () => ({ dispose() {} }),
     state: () => state,
     shownHosts: () => state.hosts.map((h) => h.name),
     setVisible() {},

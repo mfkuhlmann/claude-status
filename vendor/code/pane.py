@@ -38,6 +38,9 @@ its permission prompt and its review.
         mark the chat reviewed (until it changes files again), or not
   --relay on|off|status
         the permission hook in each Claude profile's settings.json
+  --live on|off|status
+        live mode: the live hook (live_hook.py) in each Claude profile's
+        settings.json, so the widget shows each step of each chat as it happens
 
 --host HOST: the same on an SSH host (remote.py runs this file there, after
 claude_status.py); --remote: the JSON after a marker line, as there.
@@ -810,13 +813,31 @@ def mark_reviewed(cache_root, chat_id, host="", on=True, now_ms=None):
         cs.write_json_atomic(cache_root / cs.REVIEWED, {"since": since, "chats": chats})
 
 
-# ---------------------------------------------------------------- the hook in Claude's settings
+# ---------------------------------------------------------------- the hooks in Claude's settings
+#
+# Two hooks the widget can put in each Claude profile's settings.json, and
+# take out again: the permission hook (--relay: permission prompts and
+# Claude's questions answered from the widget) and the live hook (--live:
+# each step of each chat as it happens). Each runs from a copy in
+# ~/.local/share/claude-widget, named in the hook list of each of its events.
 
 HOOK_FILE = "permission-hook.py"
 HOOK_TIMEOUT_S = 86400
+# the events the live hook folds (live_hook.py); Claude doesn't wait for it (async)
+LIVE_EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure",
+               "PermissionRequest", "Notification", "Stop", "StopFailure", "SubagentStart", "SubagentStop",
+               "PreCompact", "SessionEnd")
+TOOL_EVENTS = ("PreToolUse", "PostToolUse", "PostToolUseFailure", "PermissionRequest")
+HOOKS = {
+    "relay": {"file": HOOK_FILE, "source": "permission_hook.py", "events": ("PermissionRequest",),
+              "python": "-I", "entry": {"timeout": HOOK_TIMEOUT_S}},
+    "live": {"file": cs.LIVE_HOOK_FILE, "source": "live_hook.py", "events": LIVE_EVENTS,
+             "python": "-I -S", "entry": {"async": True, "timeout": 10}},
+}
 
-def hook_command(path):
-    return f"python3 -I {path}"
+
+def hook_command(path, kind="relay"):
+    return f"python3 {HOOKS[kind]['python']} {path}"
 
 
 def settings_files(home, extra_dirs):
@@ -835,47 +856,55 @@ def settings_files(home, extra_dirs):
     return out
 
 
-def is_ours(hook):
-    return isinstance(hook, dict) and HOOK_FILE in str(hook.get("command") or "") and "claude-widget" in str(hook.get("command") or "")
+def is_ours(hook, kind="relay"):
+    command = str(hook.get("command") or "") if isinstance(hook, dict) else ""
+    return HOOKS[kind]["file"] in command and "claude-widget" in command
 
 
-def has_hook(settings):
-    groups = ((settings.get("hooks") or {}).get("PermissionRequest") or []) if isinstance(settings, dict) else []
-    return any(is_ours(h) for g in groups if isinstance(g, dict) for h in g.get("hooks") or [])
+def has_hook(settings, kind="relay"):
+    """Whether settings name the hook, in each of its events."""
+    hooks = settings.get("hooks") if isinstance(settings, dict) else None
+    if not isinstance(hooks, dict):
+        return False
+    return all(any(is_ours(h, kind) for g in hooks.get(event) or [] if isinstance(g, dict) for h in g.get("hooks") or [])
+               for event in HOOKS[kind]["events"])
 
 
-def set_hook(settings, command, on):
-    """settings with the widget's PermissionRequest hook in it (on) or out of it."""
+def set_hook(settings, command, on, kind="relay"):
+    """settings with the widget's hook in each of its events (on) or out of them."""
     hooks = settings.setdefault("hooks", {}) if on else settings.get("hooks") or {}
-    groups = [g for g in hooks.get("PermissionRequest") or [] if isinstance(g, dict)]
-    kept = []
-    for g in groups:
-        rest = [h for h in g.get("hooks") or [] if not is_ours(h)]
-        if rest:
-            kept.append(dict(g, hooks=rest))
-    if on:
-        kept.append({"matcher": "*", "hooks": [{"type": "command", "command": command, "timeout": HOOK_TIMEOUT_S}]})
-    if kept:
-        hooks["PermissionRequest"] = kept
-    else:
-        hooks.pop("PermissionRequest", None)
+    for event in HOOKS[kind]["events"]:
+        kept = []
+        for g in hooks.get(event) or []:
+            if not isinstance(g, dict):
+                continue
+            rest = [h for h in g.get("hooks") or [] if not is_ours(h, kind)]
+            if rest:
+                kept.append(dict(g, hooks=rest))
+        if on:
+            entry = dict({"type": "command", "command": command}, **HOOKS[kind]["entry"])
+            kept.append(dict({"matcher": "*"} if event in TOOL_EVENTS else {}, hooks=[entry]))
+        if kept:
+            hooks[event] = kept
+        else:
+            hooks.pop(event, None)
     if not hooks and "hooks" in settings:
         settings.pop("hooks")
     return settings
 
 
-def hook_path(home):
-    return Path(os.environ.get("XDG_DATA_HOME") or home / ".local" / "share") / "claude-widget" / HOOK_FILE
+def hook_path(home, kind="relay"):
+    return Path(os.environ.get("XDG_DATA_HOME") or home / ".local" / "share") / "claude-widget" / HOOKS[kind]["file"]
 
 
-def relay(home, extra_dirs, on, source=None):
-    """Put the permission hook in each profile's settings (on) or take it
-    out: (ok, message). source: the hook's code (else permission_hook.py
-    next to this file)."""
-    target = hook_path(home)
+def install_hook(home, extra_dirs, on, kind, source=None):
+    """Put the hook in each profile's settings (on) or take it out: how many
+    settings files changed (ValueError: one isn't JSON). source: the hook's
+    code (else its file next to this one)."""
+    target = hook_path(home, kind)
     if on:
         if source is None:
-            source = (Path(__file__).resolve().parent / "permission_hook.py").read_text(encoding="utf-8")
+            source = (Path(__file__).resolve().parent / HOOKS[kind]["source"]).read_text(encoding="utf-8")
         target.parent.mkdir(parents=True, exist_ok=True)
         if read_bytes(target) != source.encode():
             tmp = target.with_name(target.name + ".tmp")
@@ -889,10 +918,11 @@ def relay(home, extra_dirs, on, source=None):
                 continue
             data = {}
         if not isinstance(data, dict):
-            return False, f"{cs.short_path(str(path), home)} isn't JSON the widget can change"
-        if has_hook(data) == on:
-            continue
-        set_hook(data, hook_command(target), on)
+            raise ValueError(f"{cs.short_path(str(path), home)} isn't JSON the widget can change")
+        before = json.dumps(data, sort_keys=True)
+        set_hook(data, hook_command(target, kind), on, kind)
+        if json.dumps(data, sort_keys=True) == before:
+            continue  # (as it was: the file isn't touched)
         tmp = path.with_name(path.name + ".claude-status.tmp")
         tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         if path.exists():
@@ -904,14 +934,37 @@ def relay(home, extra_dirs, on, source=None):
             target.unlink()
         except OSError:
             pass
+    return changed
+
+
+def relay(home, extra_dirs, on, source=None):
+    """Put the permission hook in each profile's settings (on) or take it
+    out: (ok, message). source: the hook's code (else permission_hook.py
+    next to this file)."""
+    try:
+        changed = install_hook(home, extra_dirs, on, "relay", source)
+    except ValueError as exc:
+        return False, str(exc)
     if on:
         return True, "Permission prompts can be answered from the widget" + ("" if changed else " (they could already)")
     return True, "Permission prompts are answered in the chats only"
 
 
-def relay_status(home, extra_dirs):
+def live(home, extra_dirs, on, source=None):
+    """Live mode: the live hook in each profile's settings (on) or out of
+    them: (ok, message)."""
+    try:
+        changed = install_hook(home, extra_dirs, on, "live", source)
+    except ValueError as exc:
+        return False, str(exc)
+    if on:
+        return True, "Chats show each step as it happens" + ("" if changed else " (they did already)")
+    return True, "Chats show their steps at each check"
+
+
+def relay_status(home, extra_dirs, kind="relay"):
     files = settings_files(home, extra_dirs)
-    on = [has_hook(cs.read_json(p) or {}) for p in files]
+    on = [has_hook(cs.read_json(p) or {}, kind) for p in files]
     return {"ok": True, "on": bool(on) and all(on), "some": any(on), "settings": [str(p) for p in files]}
 
 
@@ -938,7 +991,7 @@ def main(argv=None):
     session, text, stamp, limit, files, config_dirs, answers = None, None, None, PANE_ITEMS, [], [], None
     after, off, remote, pretty, source = False, False, False, False, None
     actions = ("--conversation", "--send", "--answer", "--keys", "--review", "--undo", "--commit", "--reviewed",
-               "--relay")
+               "--relay", "--live")
     while args:
         arg = args.pop(0)
         if arg in actions and args and action is None:
@@ -1009,8 +1062,8 @@ def main(argv=None):
             ok, said = send_later(home, config_dirs, profile, target, text, session, how, host, name)
             return emit({"ok": ok, "message": said})
         if host:
-            if action == "--relay" and target == "on" and source is None:
-                path = Path(__file__).resolve().parent / "permission_hook.py"
+            if action in ("--relay", "--live") and target == "on" and source is None:
+                path = Path(__file__).resolve().parent / HOOKS[action[2:]]["source"]
                 rest += ["--hook-source", base64.b64encode(path.read_bytes()).decode()]
             answer = forward(host, rest)
             if action == "--review" and answer.get("ok"):
@@ -1043,11 +1096,12 @@ def main(argv=None):
         elif action == "--reviewed":
             mark_reviewed(cache_root, target, "", on=not off)
             result = {"ok": True, "message": "Marked reviewed" if not off else "Not marked reviewed"}
-        elif action == "--relay":
+        elif action in ("--relay", "--live"):
+            kind = action[2:]
             if target == "status":
-                result = relay_status(home, config_dirs)
+                result = relay_status(home, config_dirs, kind)
             elif target in ("on", "off"):
-                ok, said = relay(home, config_dirs, target == "on", source)
+                ok, said = (relay if kind == "relay" else live)(home, config_dirs, target == "on", source)
                 result = {"ok": ok, "message": said}
             else:
                 sys.exit(__doc__)

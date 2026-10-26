@@ -1,23 +1,30 @@
 // What the view and the status bar show: this computer's status and the SSH
-// hosts', polled with the widget's backend. This computer is checked every
-// pollInterval while the view is open (every 10 s while it's hidden: the
-// status bar and notifications still need it), hosts every remotePollSeconds.
+// hosts', polled with the widget's backend. This computer is checked the
+// moment a chat changes (LiveWatch: its session file), and in between every
+// pollInterval while the view is open and a chat works (every 10 s while
+// it's hidden: the status bar and notifications still need it); with live
+// mode, whose hook hands on each step as it happens, every 6 s at most
+// often; while no chat works, every 20 s. Without the watching, as before:
+// every pollInterval (10 s hidden). Hosts every remotePollSeconds.
 
 import * as vscode from "vscode";
 import { AwayWatch } from "./away";
 import type { Backend } from "./backend";
 import { claudePanelAvailable, localPanelProfileKey } from "./claudePanel";
-import { settings, statusArgs, configDirArgs, viewSettings } from "./config";
+import { cacheDir, extraConfigDirs, settings, statusArgs, configDirArgs, viewSettings } from "./config";
+import { LiveWatch } from "./live";
 import type { Notifier } from "./notify";
 import { currentRemoteHost } from "./remoteHost";
 import { demoPerms, demoState, demoWeek } from "./shared/demo";
-import { allGroups, chatsNeedingYou, keptChat, limitReset, queuedWhat, shareUsage, toLocalClock, trackKey, type ChatSpot } from "./shared/model";
+import { allGroups, chatsNeedingYou, keptChat, limitReset, liveFromRows, queuedWhat, shareUsage, toLocalClock, trackKey, withLive, type ChatSpot } from "./shared/model";
 import { chatRef } from "./notify";
-import type { ClaudeCodeInfo, DigestCard, HostState, PermsData, PetEventKind, QueuedTask, Status, ViewState, WeekRecap, WeekSpan } from "./shared/types";
+import type { ClaudeCodeInfo, DigestCard, HostState, LiveView, PermsData, PetEventKind, QueuedTask, Status, ViewState, WeekRecap, WeekSpan } from "./shared/types";
 import type { WeekRuleAsk } from "./shared/week";
 import { mergeChanges, TransitionTracker, type Changes, type PetEvent } from "./transitions";
 
 const HIDDEN_POLL_MS = 10000;
+const LIVE_WORKING_MS = 6000; // watched, a chat works, live mode (or the window isn't focused)
+const LIVE_RESTING_MS = 20000; // watched, no chat works
 const VIEW_ID = "claudeStatus.view";
 const DIGEST_SHOWN_MS = 60 * 60000; // the away card stays this long, unless closed
 const DEMO_STEP_MS = 8000;
@@ -50,8 +57,15 @@ export class Dashboard implements vscode.Disposable {
   private digest: DigestCard | null = null;
   private readonly onStateEmitter = new vscode.EventEmitter<ViewState>();
   private readonly onPetEventEmitter = new vscode.EventEmitter<PetEvent>();
+  private readonly onLiveEmitter = new vscode.EventEmitter<{ live: Record<string, LiveView>; changed: string[] }>();
   readonly onState = this.onStateEmitter.event;
   readonly onPetEvent = this.onPetEventEmitter.event;
+  // What this computer's running chats do now, between checks (live mode);
+  // changed: the session ids whose view is new
+  readonly onLive = this.onLiveEmitter.event;
+  private live: LiveWatch;
+  private liveViews: Record<string, LiveView> = {};
+  private again = false; // a chat changed while a check ran: check again once it's done
 
   constructor(
     private backend: Backend,
@@ -60,8 +74,20 @@ export class Dashboard implements vscode.Disposable {
   ) {
     this.windowHost = currentRemoteHost(vscode);
     this.away = new AwayWatch((now, lastUse) => this.cameBack(now, lastUse));
+    this.live = new LiveWatch(
+      ({ urgent, views }) => {
+        if (views.length) this.noteLive(views);
+        // (a window nobody looks at that doesn't notify: its next check is soon enough)
+        if (urgent && (this.visible || vscode.window.state.focused || this.notifier.isLeader()))
+          void this.refresh(true).then(() => this.scheduleLocal()); // (the next check counts from this one)
+      },
+      () => extraConfigDirs(),
+      cacheDir(),
+    );
     this.disposables.push(
       this.away,
+      this.live,
+      this.onLiveEmitter,
       // looking at the view: what finished is seen
       vscode.window.onDidChangeWindowState((s) => {
         if (s.focused && this.visible) this.unseen.clear();
@@ -113,8 +139,36 @@ export class Dashboard implements vscode.Disposable {
       return;
     }
     this.syncHosts();
+    this.live.start();
     this.scheduleLocal(0);
     this.scheduleHosts(0);
+  }
+
+  // Whether chats are followed as they change (their session files): the checks in between are rarer then
+  get watching(): boolean {
+    return this.live.healthy && !this.demo;
+  }
+
+  // With live mode's hook on, each step comes as it happens
+  get liveHook(): boolean {
+    return this.watching && !!this.status?.liveHook;
+  }
+
+  private noteLive(views: LiveView[]): void {
+    const next = withLive(this.liveViews, views);
+    if (!next || this.demo || this.disposed) return;
+    this.liveViews = next;
+    this.onLiveEmitter.fire({ live: next, changed: views.map((v) => v.sessionId ?? "") });
+  }
+
+  // How long until the next check of this computer (see the top)
+  private paceMs(): number {
+    const poll = settings.pollInterval();
+    if (!this.watching) return this.visible ? poll : Math.max(HIDDEN_POLL_MS, poll);
+    if (!this.status || !this.status.counts.working) return Math.max(poll, LIVE_RESTING_MS);
+    if (!this.visible) return Math.max(HIDDEN_POLL_MS, poll);
+    if (this.liveHook || !vscode.window.state.focused) return Math.max(poll, LIVE_WORKING_MS);
+    return poll;
   }
 
   dispose(): void {
@@ -182,7 +236,7 @@ export class Dashboard implements vscode.Disposable {
   private scheduleLocal(delay?: number): void {
     if (this.disposed) return;
     clearTimeout(this.localTimer);
-    const wait = delay ?? (this.visible ? settings.pollInterval() : Math.max(HIDDEN_POLL_MS, settings.pollInterval()));
+    const wait = delay ?? this.paceMs();
     this.localTimer = setTimeout(() => void this.refresh().finally(() => this.scheduleLocal()), wait);
   }
 
@@ -203,8 +257,10 @@ export class Dashboard implements vscode.Disposable {
     return [...(cap > 0 ? ["--usage-cap", String(Math.round(cap))] : []), ...(this.notifier.isLeader() ? ["--keep-going"] : [])];
   }
 
-  // Check this computer now (a check still running isn't doubled)
-  async refresh(): Promise<void> {
+  // Check this computer now (a check still running isn't doubled; changed:
+  // a chat changed, so one that's running then runs again once it's done)
+  async refresh(changed = false): Promise<void> {
+    if (this.localBusy && changed) this.again = true;
     if (this.localBusy || this.demo || this.disposed) return;
     // Claude Code starts alongside this extension and can register its commands
     // after the first check, with no event for it: look again until it's there
@@ -224,6 +280,7 @@ export class Dashboard implements vscode.Disposable {
         );
         const resets = this.tracker.resets("", status.groups);
         this.status = status;
+        this.liveViews = liveFromRows(status.groups, this.liveViews);
         this.react(changes, resets);
         this.startDueTasks(status);
       } else {
@@ -234,6 +291,10 @@ export class Dashboard implements vscode.Disposable {
       this.localBusy = false;
     }
     this.emit();
+    if (this.again) {
+      this.again = false;
+      void this.refresh();
+    }
   }
 
   refreshAll(): void {
@@ -581,6 +642,7 @@ export class Dashboard implements vscode.Disposable {
       actionInfo: this.actionInfo,
       digest: this.digest && now - this.digest.at < DIGEST_SHOWN_MS ? this.digest : null,
       now,
+      live: this.liveViews,
     };
   }
 

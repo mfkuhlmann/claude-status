@@ -48,6 +48,14 @@ As an editor tab (**Claude Status: Open in Editor Tab**):
   start of each result, messages from the chat, the report). Claude Code
   can't open a subagent from outside, so the run is rendered from its
   transcript; an SSH host's is fetched over ssh.
+- **Changes the moment they happen**: the extension watches Claude's
+  session files, so a chat that starts, ends, starts working, asks for
+  something or finishes its turn shows at once (also when you answer or
+  interrupt it in its terminal), with its pet and notification; in between
+  it checks far less often. A line under the big Talpa says what the working
+  chats do right now, taking turns between them (click it for that chat's
+  tab). **Claude Status: Live Mode…** shows each step of each chat as it
+  happens too (a hook in Claude's settings that Claude doesn't wait for).
 - **What a chat is doing, without switching to it**: a line under each chat
   says what it's on right now (*▸ Bash: npm test*), what it needs, Claude's
   recap of it (when you come back to a chat after a while, Claude Code writes
@@ -377,7 +385,7 @@ code --install-extension claude-status-*.vsix
 | `claudeStatus.includeCurrentRemote` | `true` | Also show the Remote-SSH window's host |
 | `claudeStatus.remotePollSeconds` | `30` | How often hosts are checked |
 | `claudeStatus.sshUsage` | `once` | Plan usage on hosts' accounts: an account on this computer and a host (or two hosts) shows it once, where it's listed first, with the newest numbers; `all`: under every copy; `none`: on no host |
-| `claudeStatus.pollInterval` | `2000` | ms between checks of this computer while the view is open (10 s when hidden) |
+| `claudeStatus.pollInterval` | `2000` | ms between checks of this computer while the view is open and a chat works (10 s when hidden, 6 s when the window isn't focused or with Live Mode on, 20 s while no chat works); a chat that starts, waits or finishes is checked at once |
 | `claudeStatus.extraConfigDirs` | `[]` | More Claude Code config folders |
 | `claudeStatus.clickOpensPane` | `true` | A click on a chat opens its tab (conversation, reply, permission prompt, review); `false`: the chat itself |
 | `claudeStatus.chatTextScale` | `1.15` | Text size in a chat's tab, times VS Code's font size (the tab's **A−** / **A+** and Ctrl+wheel set it) |
@@ -398,6 +406,13 @@ code --install-extension claude-status-*.vsix
 
 Nothing leaves your computer except the `ssh` connections to the hosts you
 pick. There is no telemetry, and the view loads nothing from the internet.
+
+With **Live Mode** on, a hook (`~/.local/share/claude-widget/live-hook.py`,
+named in each profile's `settings.json`) writes each chat's last steps to
+`~/.cache/claude-widget/live/<session>.json`: the tool and its file name or
+command (cut to 60 characters) and the first line of Claude's last reply. A
+file goes once its chat has said nothing for 3 days; turning Live Mode off
+takes the hook out again.
 The one download: with `claudeStatus.recapCurrency` set to a currency other
 than US dollars, the **Recap** tab fetches the European Central Bank's public
 exchange rates (`https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml`)

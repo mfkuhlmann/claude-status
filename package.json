@@ -132,6 +132,11 @@
         "category": "Claude Status"
       },
       {
+        "command": "claudeStatus.liveMode",
+        "title": "Live Mode…",
+        "category": "Claude Status"
+      },
+      {
         "command": "claudeStatus.switchAccount",
         "title": "Default Claude Account…",
         "category": "Claude Status",
@@ -310,7 +315,7 @@
           "default": 2000,
           "minimum": 1000,
           "maximum": 60000,
-          "markdownDescription": "How often this computer's chats are checked while the view is open, in milliseconds (every 10 s while it's hidden).",
+          "markdownDescription": "How often this computer's chats are checked while the view is open and a chat works, in milliseconds (every 10 s while it's hidden). A chat that starts, waits or finishes is checked the moment it does; while none works, every 20 s; with **Live Mode…** on, every 6 s at most often.",
           "order": 4
         },
         "claudeStatus.extraConfigDirs": {

@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+- **Chats change the moment they do:** this computer's chats were checked
+  every 2 seconds (every 10 while the view was hidden), so a chat that
+  started, waited for you or finished showed up late, and each check cost a
+  little, also while nothing happened. Now the extension watches Claude's
+  session files: a chat that starts, ends, starts working, asks for
+  something or finishes its turn is checked at once (also when you answer
+  or interrupt it in its terminal), with its pet, notification and sound. In
+  between it checks far less often: every 20 seconds while no chat works,
+  every 6 while the window isn't focused. Chat tabs read the conversation
+  again when their chat changes, too.
+- **Live mode:** each step of each chat as it happens: its row says what it
+  does right now (*▸ Edit: parser.py +12 −3*, *▸ Bash: pytest*), and its tab
+  reads the conversation again at each step (else every 5 seconds, not 1.5).
+  **Claude Status: Live Mode…** turns it on: it adds a hook to each Claude
+  profile's `settings.json` that notes each event of a chat in
+  `~/.cache/claude-widget/live` (Claude doesn't wait for it). Then the rest
+  is checked every 6 seconds while chats work.
+- **What the chats do now, under the big Talpa:** one line with the step a
+  working chat does right now, taking turns between the chats at work (a
+  chat that did something new goes first). Click it for that chat's tab.
+
 ## 1.15.2
 
 - **Move a chat to Claude Code:** a chat running in a terminal can go on in

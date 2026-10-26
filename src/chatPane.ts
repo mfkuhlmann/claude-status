@@ -15,7 +15,7 @@ import type { Backend } from "./backend";
 import { openComparison } from "./changes";
 import { configDirArgs } from "./config";
 import type { Dashboard } from "./dashboard";
-import { chatRefOf, recentRef, stateText } from "./shared/model";
+import { chatRefOf, doingText, liveOf, recentRef, stateText } from "./shared/model";
 import { answersOf, PICTURE_TYPES, queuedReply, reviewPending, textScale, type PaneChat, type PaneHostMessage, type PaneMessage } from "./shared/pane";
 import type { Answers, ChatRef, Decision, RecentChat, Session, ViewState } from "./shared/types";
 import { localAncestors, type Terminals } from "./terminals";
@@ -166,6 +166,8 @@ class Pane implements vscode.Disposable {
   private stamp = "";
   private limit = LIMIT;
   private loading = false;
+  private loadAgain = false;
+  private lastState: string | undefined; // (its state when the tab last heard)
   private timer: NodeJS.Timeout | undefined;
   private disposables: vscode.Disposable[] = [];
   private closed = new vscode.EventEmitter<void>();
@@ -195,6 +197,12 @@ class Pane implements vscode.Disposable {
       this.panel.onDidChangeViewState(() => this.schedule()),
       this.panel.onDidDispose(() => this.dispose()),
       owner.ext.dash.onState(() => void this.pushChat()),
+      // live mode: the chat did a step: what it does now, and the conversation at once
+      owner.ext.dash.onLive((e) => {
+        if (this.host || !this.chat.sessionId || !e.changed.includes(this.chat.sessionId)) return;
+        void this.pushChat();
+        if (this.panel.visible) void this.load();
+      }),
       vscode.workspace.onDidChangeConfiguration((e) => {
         if (e.affectsConfiguration("claudeStatus.chatTextScale")) this.post({ type: "textSize", scale: Pane.textScale() });
       }),
@@ -240,7 +248,7 @@ class Pane implements vscode.Disposable {
       stateText: session ? stateText(session, state.now) : "not running",
       route: this.terminalHere ? "vscodeTerminal" : (session?.reply ?? "background"),
       busy: session?.state === "working" || session?.state === "waiting",
-      activity: session?.peek?.activity ?? "",
+      activity: session ? doingText(session, this.host ? null : liveOf(session, state.live)) : "",
       permission: session?.state === "waiting" ? (session.permission ?? null) : null,
       changes: (session?.changes ?? recent?.changes)?.count ?? 0,
       reviewPending: item ? reviewPending(item, state.status, this.host || undefined) : false,
@@ -250,18 +258,26 @@ class Pane implements vscode.Disposable {
     };
     this.panel.title = chat.name || this.chatId.slice(0, 8);
     if (this.ready) this.post({ type: "chat", chat });
+    // its turn began or ended, it asks something: the conversation now
+    if (this.lastState !== undefined && chat.state !== this.lastState && this.panel.visible) void this.load();
+    this.lastState = chat.state;
   }
 
-  // The conversation, again while the tab shows (often for this computer's chats)
+  // The conversation, again while the tab shows (often for this computer's
+  // chats; with live mode it's read at each step, so this is a fallback)
   private schedule(): void {
     if (this.timer) clearTimeout(this.timer);
     this.timer = undefined;
     if (!this.panel.visible) return;
-    this.timer = setTimeout(() => void this.load().finally(() => this.schedule()), this.host ? 5000 : 1500);
+    const every = this.host || this.owner.ext.dash.liveHook ? 5000 : 1500;
+    this.timer = setTimeout(() => void this.load().finally(() => this.schedule()), every);
   }
 
   private async load(): Promise<void> {
-    if (this.loading) return;
+    if (this.loading) {
+      this.loadAgain = true; // (something changed while it was read: read it again then)
+      return;
+    }
     this.loading = true;
     try {
       const r = await this.owner.ext.backend.pane([
@@ -273,6 +289,10 @@ class Pane implements vscode.Disposable {
       this.post({ type: "conversation", answer: r as never });
     } finally {
       this.loading = false;
+      if (this.loadAgain) {
+        this.loadAgain = false;
+        void this.load();
+      }
     }
   }
 

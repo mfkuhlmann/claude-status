@@ -45,6 +45,39 @@ export interface Peek {
   stopped?: Stop | null; // (as read; the row's own `stopped` says when the limit resets)
 }
 
+// A step of a chat, as the live hook noted it (the widget's live_hook.py)
+export interface LiveStep {
+  id: string | null; // the tool call's id
+  tool: string;
+  text: string; // e.g. "Edit: parser.py", "Bash: pytest"
+  at: number;
+  end: number | null; // when it ended (null: it runs)
+  ok: boolean | null;
+  add?: number; // the lines an edit added and removed
+  del?: number;
+  agent?: string; // a subagent's step: its type
+  error?: string;
+}
+
+// What a running chat does now, step by step (live mode: the live hook's
+// ~/.cache/claude-widget/live/<session id>.json; a row carries it at each
+// check, and the extension follows the files in between)
+export interface LiveView {
+  sessionId?: string; // (the files have them; a row's view doesn't)
+  pid?: number | null;
+  state: "working" | "waiting" | "idle" | "ended" | string;
+  doing: string; // its step now ("" between turns)
+  asks?: "permission" | "question" | "plan" | "input" | null;
+  at: number; // its newest event
+  turnAt?: number | null;
+  steps: LiveStep[];
+  agents: { id: string; type: string; at: number; doing: string }[];
+  said?: string; // the first line of what Claude said last
+  saidAt?: number | null;
+  failed?: string; // the API error that ended the turn
+  event?: string;
+}
+
 // What stopped a chat: a usage limit (window: the plan window it hit, e.g.
 // "five_hour", when Claude named it) or an expired login
 export interface Stop {
@@ -210,6 +243,7 @@ export interface Session {
   reply?: ReplyRoute;
   review?: Review | null; // it changed files: its last edit, and tests since
   permission?: PermissionAsk | null; // what it asks while it waits for a permission
+  live?: LiveView | null; // what it does now, step by step (live mode)
 }
 
 // "tmux": typed into its pane; "vscode": its Claude Code tab's input;
@@ -471,6 +505,7 @@ export interface Status {
   // when; 0: marked not reviewed), and since when chats are to review at all
   reviewed?: Record<string, number>;
   reviewedSince?: number;
+  liveHook?: boolean; // live mode is on: rows' "live" follow each step
 }
 
 export interface Counts {
@@ -542,6 +577,7 @@ export interface ViewState {
   actionInfo: string;
   digest?: DigestCard | null;
   now: number;
+  live?: Record<string, LiveView>; // this computer's running chats by session id (live mode), newest
 }
 
 export type PetEventKind = "waiting" | "done" | "failed" | "stopped" | "limit" | "reset" | "oops";
@@ -811,6 +847,7 @@ export type HostMessage =
   | { type: "state"; state: ViewState }
   | { type: "petEvent"; kind: PetEventKind; text: string; key: string }
   | { type: "visible"; visible: boolean }
+  | { type: "live"; live: Record<string, LiveView> }
   | { type: "week"; back: number; account: string; span: WeekSpan; recap: WeekRecap | null; error: string }
   | { type: "weekRule"; id: string; host: string; ok: boolean; message: string }
   | { type: "weekRevoke"; id: string; host: string; ok: boolean; message: string }

@@ -91,6 +91,14 @@ function sendState(): void {
       ...(other ? [kept(other.chatId || other.sessionId, "Gave up after 5 tries: it didn't go on")] : []),
     ];
   }
+  // ?live=1: live mode: the first chat at work does a step (an edit, with its lines)
+  if (params.get("live") === "1") {
+    const working = groups.flatMap((g) => g.sessions).find((s) => s.state === "working" && s.pid);
+    const at = Date.now() + 60000;
+    if (working)
+      state.live = { [working.sessionId]: { sessionId: working.sessionId, pid: working.pid, state: "working", doing: "Edit: parser.py", at,
+        steps: [{ id: "t1", tool: "Edit", text: "Edit: parser.py", at, end: at, ok: true, add: 12, del: 3 }], agents: [] } };
+  }
   send({ type: "state", state });
 }
 

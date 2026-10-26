@@ -11,7 +11,7 @@ import { Actions } from "./actions";
 import { Backend } from "./backend";
 import { openChangesLink } from "./changes";
 import { ChatPanes } from "./chatPane";
-import { answerPermissionsHere } from "./relay";
+import { answerPermissionsHere, liveModeHere } from "./relay";
 import { extraConfigDirs, settings } from "./config";
 import { markdownLinkFile, openAgentRunFile } from "./agentRun";
 import { Dashboard } from "./dashboard";
@@ -127,6 +127,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand("claudeStatus.showLog", () => log.show()),
     vscode.commands.registerCommand("claudeStatus.answerPermissions", () => answerPermissionsHere(backend, dash)),
+    vscode.commands.registerCommand("claudeStatus.liveMode", () => liveModeHere(backend, dash)),
     panes,
   );
   statusBar.update(dash.state());

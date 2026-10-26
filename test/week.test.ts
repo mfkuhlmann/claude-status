@@ -165,6 +165,7 @@ function setup() {
   const dash = {
     onState: () => ({ dispose() {} }),
     onPetEvent: () => ({ dispose() {} }),
+    onLive: () => ({ dispose() {} }),
     state: () => state,
     setVisible() {},
     week: record("week"),

@@ -109,7 +109,7 @@ test("a click on a chat opens its tab, unless clicks open the chat itself; answe
   const calls: { name: string; args: unknown[] }[] = [];
   const record = (name: string) => (...args: unknown[]) => void calls.push({ name, args });
   const actions = new Proxy({}, { get: (_t, name: string) => record(name) });
-  const dash = { onState: () => ({ dispose() {} }), onPetEvent: () => ({ dispose() {} }), state: () => state, setVisible() {} };
+  const dash = { onState: () => ({ dispose() {} }), onPetEvent: () => ({ dispose() {} }), onLive: () => ({ dispose() {} }), liveHook: false, state: () => state, setVisible() {} };
   const host = new ViewHost(vscode.Uri.file("/ext") as never, dash as never, actions as never);
   host.panes = { open: record("panes.open"), answer: record("panes.answer") } as never;
   const receive = (m: unknown) => (host as unknown as { receive(w: unknown, m: unknown): void }).receive({ postMessage: async () => true }, m);
@@ -235,7 +235,7 @@ test("a picture pasted in a chat's tab is saved, an SSH host's chat gets a copy 
     saveImage: async (mime: string, data: string) => (saved.push(["save", mime, data]), { path: "/cache-here/claude-widget/images/20261026-101500.png", message: "" }),
     putImage: async (host: string, path: string) => (saved.push(["put", host, path]), host === "down" ? { message: "no route" } : { path: "/cache-there/claude-widget/images/20261026-101500.png", message: "" }),
   };
-  const dash = { state: () => demoState(NOW), refresh: async () => undefined, pollHost: async () => undefined, onState: () => ({ dispose() {} }) };
+  const dash = { state: () => demoState(NOW), refresh: async () => undefined, pollHost: async () => undefined, onState: () => ({ dispose() {} }), onLive: () => ({ dispose() {} }), liveHook: false };
   const p = new ChatPanes(vscode.Uri.file("/ext") as never, backend as never, dash as never, {} as never, { find: async () => undefined } as never, {} as never);
   let tabs = 0;
   const tab = async (host: string, m: unknown) => {

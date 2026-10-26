@@ -15,6 +15,7 @@ import {
   modeHint,
   modeText,
   overlapText,
+  liveMatch,
   peekLine,
   petKeyOf,
   plural,
@@ -32,6 +33,7 @@ import { post } from "../env";
 import { pets } from "../pets";
 import { canRemove, canShare, canStop, chatRefOf, isBackground, openHint, rowKeyOf, sharedTagTitle, shareTitle } from "../util/chat";
 import { useStore } from "../util/store";
+import { useLiveView } from "../util/stores";
 import { toggleAgents, togglePeek, uiState } from "../util/ui";
 import { AgentTree } from "./AgentTree";
 import { AskBox } from "./AskBox";
@@ -73,7 +75,7 @@ export function SessionRow({ session: s, group, host, showProfile }: { session: 
   const agents = s.agents;
   const showAgents = !!agents && !!ui.agents[rowKey];
   const tag = s.entrypoint === "claude-vscode" ? "VS Code" : isBackground(s) ? "background" : "";
-  const line = peekLine(s);
+  const line = peekLine(s, liveMatch(s, useLiveView(s.sessionId, !host && !!s.pid)));
   const canPeek = hasPeek(s);
   const showPeek = canPeek && !!ui.peek[rowKey];
   const tasks = s.tasks;

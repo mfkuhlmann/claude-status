@@ -21,6 +21,7 @@ import { ViewContext } from "./context";
 import { GroupSection } from "./GroupSection";
 import { Header } from "./Header";
 import { HeroStage } from "./HeroStage";
+import { Ticker } from "./Ticker";
 import { HostSection } from "./HostSection";
 import { Messages } from "./Messages";
 import { PermsView } from "./PermsView";
@@ -108,6 +109,7 @@ export function App() {
             heroShown={state.settings.showPet}
           />
           {state.settings.showPet && !week && !perms ? <HeroStage input={hero} /> : null}
+          {!week && !perms ? <Ticker groups={groups} /> : null}
         </div>
         {week ? (
           <main class="content">

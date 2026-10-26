@@ -1,7 +1,7 @@
 // The dashboard's derived values, shared by the extension (status bar,
 // notifications) and the webview. Ported from the widget's main.qml.
 
-import type { Agent, ChangeSummary, ChatRef, ChatStats, ClaudeCodeInfo, Counts, Group, HostState, KeptChat, Limits, LimitWindow, Memory, Overall, Overlap, PlanItem, QueuedTask, RecentChat, ReopenIn, Session, SharedPointer, SshUsage, StatsDay, Status, Stop, TaskProgress, UsageStats, ViewState } from "./types";
+import type { Agent, ChangeSummary, ChatRef, ChatStats, ClaudeCodeInfo, Counts, Group, HostState, KeptChat, Limits, LimitWindow, LiveView, Memory, Overall, Overlap, PlanItem, QueuedTask, RecentChat, ReopenIn, Session, SharedPointer, SshUsage, StatsDay, Status, Stop, TaskProgress, UsageStats, ViewState } from "./types";
 
 // This computer's accounts and the hosts', for the counts, the badge and
 // what needs you. A host whose last check failed still shows what it said
@@ -481,17 +481,151 @@ export function tooltipLines(groups: Group[], counts: Counts, hosts: HostState[]
   return lines;
 }
 
+// ---------------------------------------------------------------- live mode
+
+// A running chat's live view (this computer's; views: by session id), or null
+export function liveOf(s: Pick<Session, "pid" | "sessionId">, views: Record<string, LiveView> | undefined): LiveView | null {
+  return liveMatch(s, views ? views[s.sessionId] : undefined);
+}
+
+// v, if it's the running chat's (its process's, not over)
+export function liveMatch(s: Pick<Session, "pid">, v: LiveView | undefined): LiveView | null {
+  return s.pid && v && (!v.pid || v.pid === s.pid) && v.state !== "ended" ? v : null;
+}
+
+// The newest of each running chat's views: the rows' (a check) and those
+// the extension followed since (known); only the chats listed are kept
+export function liveFromRows(groups: Group[], known: Record<string, LiveView>): Record<string, LiveView> {
+  const out: Record<string, LiveView> = {};
+  for (const g of groups) {
+    for (const s of g.sessions) {
+      if (!s.pid) continue;
+      const mine = known[s.sessionId];
+      const row = s.live ? { ...s.live, sessionId: s.sessionId, pid: s.pid } : null;
+      const best = mine && (!row || (mine.at || 0) >= (row.at || 0)) ? mine : row;
+      if (best) out[s.sessionId] = best;
+    }
+  }
+  return out;
+}
+
+// views with the newer ones of these in (a view that ended goes); null: nothing new
+export function withLive(views: Record<string, LiveView>, more: LiveView[]): Record<string, LiveView> | null {
+  let next: Record<string, LiveView> | null = null;
+  for (const v of more) {
+    const id = v.sessionId;
+    const old = id ? views[id] : undefined;
+    if (!id || (old && (old.at || 0) >= (v.at || 0))) continue;
+    next = next ?? { ...views };
+    if (v.state === "ended") delete next[id];
+    else next[id] = v;
+  }
+  return next;
+}
+
+// What a working chat does now: its live step when that's newer than what
+// the last check read from its transcript (an edit with the lines it added
+// and removed: "Edit: parser.py +12 −3"), else that
+export function doingText(s: Pick<Session, "peek">, live: LiveView | null): string {
+  const peek = s.peek;
+  if (live && live.doing && (live.at || 0) >= (peek?.at || 0)) {
+    const main = (live.steps || []).filter((st) => !st.agent);
+    const last = main.length ? main[main.length - 1] : null;
+    const counts = last && last.text === live.doing && (last.add || last.del) ? ` +${last.add || 0} −${last.del || 0}` : "";
+    return live.doing + counts;
+  }
+  return peek?.activity || "";
+}
+
+// The ticker under the big Talpa: what each working chat does now
+export interface TickerItem {
+  key: string;
+  name: string;
+  text: string;
+  host?: string;
+  session: Session;
+}
+
+export function tickerItems(groups: Group[], views: Record<string, LiveView> | undefined): TickerItem[] {
+  const out: TickerItem[] = [];
+  for (const g of groups) {
+    for (const s of g.sessions) {
+      if (s.state !== "working") continue;
+      const text = doingText(s, g.host ? null : liveOf(s, views));
+      if (text) out.push({ key: petKeyOf(s, g.host), name: s.name, text, host: g.host, session: s });
+    }
+  }
+  return out;
+}
+
+// One item at a time: a chat's new step shows at once when it's that chat's
+// turn; another chat's waits dwellMs behind the one on show; with nothing
+// new, the chats take turns every turnMs
+export class TickerTurns {
+  shown: TickerItem | null = null;
+  shownAt = 0;
+  private queue: string[] = [];
+  private noted = new Map<string, string>();
+  private items: TickerItem[] = [];
+
+  constructor(readonly dwellMs = 1500, readonly turnMs = 4000) {}
+
+  private show(item: TickerItem, now: number): void {
+    if (!this.shown || this.shown.key !== item.key) this.shownAt = now;
+    this.shown = item;
+  }
+
+  private advance(now: number): void {
+    while (this.queue.length) {
+      const next = this.items.find((it) => it.key === this.queue[0]);
+      this.queue.shift();
+      if (next) return this.show(next, now);
+    }
+    if (!this.items.length) {
+      this.shown = null;
+      return;
+    }
+    const at = this.shown ? this.items.findIndex((it) => it.key === this.shown?.key) : -1;
+    this.show(this.items[(at + 1) % this.items.length], now);
+  }
+
+  // New items (a check, a step): what shows now
+  update(items: TickerItem[], now: number): TickerItem | null {
+    this.items = items;
+    const keys = new Set(items.map((it) => it.key));
+    this.queue = this.queue.filter((k) => keys.has(k));
+    for (const it of items) {
+      if (this.noted.get(it.key) === it.text) continue;
+      this.noted.set(it.key, it.text);
+      if (this.shown?.key !== it.key && !this.queue.includes(it.key)) this.queue.push(it.key);
+    }
+    for (const k of [...this.noted.keys()]) if (!keys.has(k)) this.noted.delete(k);
+    const mine = this.shown ? items.find((it) => it.key === this.shown?.key) : undefined;
+    if (mine) this.show(mine, now); // (its own new step: at once)
+    else this.advance(now);
+    return this.shown;
+  }
+
+  // The clock: another chat's turn when it's due
+  tick(now: number): TickerItem | null {
+    const on = now - this.shownAt;
+    if (this.items.length > 1 && ((this.queue.length && on >= this.dwellMs) || on >= this.turnMs)) this.advance(now);
+    return this.shown;
+  }
+}
+
 // ---------------------------------------------------------------- a peek at a chat
 
 // The line under a chat's folder: what it's doing (working), what it needs
 // (waiting), its result (a finished background session) or what Claude said
-// last (your turn, done)
+// last (your turn, done); live: its live view (live mode)
 export function peekLine(
   s: Pick<Session, "state" | "detail" | "reason" | "peek" | "tasks"> & { stopped?: Stop | null },
+  live: LiveView | null = null,
 ): { kind: "activity" | "needs" | "result" | "reply" | "recap" | "stopped"; text: string } | null {
   const peek = s.peek;
   if (s.state === "working") {
-    const what = peek?.activity || s.tasks?.current || "";
+    const what = doingText(s, live) || s.tasks?.current || "";
     return what ? { kind: "activity", text: `▸ ${what}` } : null;
   }
   if (s.state === "waiting") return { kind: "needs", text: s.detail || peek?.activity || reasonText(s.reason) };

@@ -43,3 +43,32 @@ export async function answerPermissionsHere(backend: Backend, dash: Dashboard): 
     );
   else void vscode.window.showInformationMessage(`Claude Status: ${String(results[0].message ?? "")}${where}.`);
 }
+
+// Live Mode…: the widget's live hook (pane.py --live on|off) in each Claude
+// profile's settings.json, here. With it, each step of each chat shows as it
+// happens (its row, its tab, the line under the big Talpa), and the checks
+// in between are rarer.
+export async function liveModeHere(backend: Backend, dash: Dashboard): Promise<void> {
+  const status = await backend.pane(["--live", "status", ...configDirArgs()], 30000);
+  const on = !!status.on;
+  const items: (vscode.QuickPickItem & { on: boolean })[] = [
+    {
+      label: `${on ? "$(check) " : ""}Show each step as it happens`,
+      description: on ? "on now" : "",
+      detail: "Adds a hook to each Claude profile's settings.json that notes each step of each chat (Claude doesn't wait for it): rows, chat tabs and the line under the big Talpa follow every tool call at once.",
+      on: true,
+    },
+    {
+      label: `${!on ? "$(check) " : ""}At each check`,
+      description: !on ? "on now" : "",
+      detail: "Takes the hook out again. A chat that starts, waits or finishes still shows at once; its steps show at each check.",
+      on: false,
+    },
+  ];
+  const pick = await vscode.window.showQuickPick(items, { title: "Live mode", placeHolder: "When do chats' steps show?" });
+  if (!pick) return;
+  const result: Record<string, any> = await backend.pane(["--live", pick.on ? "on" : "off", ...configDirArgs()], 30000);
+  if (!result.ok) void vscode.window.showErrorMessage(`Claude Status: ${String(result.message ?? "no answer")}`);
+  else void vscode.window.showInformationMessage(`Claude Status: ${String(result.message ?? "")}.`);
+  void dash.refresh();
+}

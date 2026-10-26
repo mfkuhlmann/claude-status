@@ -1,9 +1,15 @@
 // What the extension last sent, and whether anyone can see the view.
 
-import type { HostMessage, ViewState } from "../../src/shared/types";
+import type { HostMessage, LiveView, ViewState } from "../../src/shared/types";
+import { useEffect, useState } from "preact/hooks";
 import { createStore } from "./store";
 
 export const viewState = createStore<ViewState | null>(null);
+
+// What this computer's running chats do now (live mode), by session id: with
+// each state, and between states as each step comes (its own message, so a
+// step doesn't send the whole state)
+export const liveViews = createStore<Record<string, LiveView>>({});
 
 // The extension says when the view is hidden (another view in front, the
 // sidebar closed); the page's own visibility covers a minimized window.
@@ -20,3 +26,25 @@ export const weekAnswer = createStore<Extract<HostMessage, { type: "week" }> | n
 export const weekRuleAnswer = createStore<Extract<HostMessage, { type: "weekRule" }> | null>(null);
 export const weekRevokeAnswer = createStore<Extract<HostMessage, { type: "weekRevoke" }> | null>(null);
 export const permsAnswer = createStore<Extract<HostMessage, { type: "perms" }> | null>(null);
+
+// One chat's live view: a row re-renders when its own view changes, not at
+// every other chat's step
+export function useLiveView(sessionId: string, on: boolean): LiveView | undefined {
+  const pick = () => (on ? liveViews.get()[sessionId] : undefined);
+  const [, bump] = useState(0);
+  const current = pick();
+  useEffect(() => {
+    if (!on) return undefined;
+    let last = pick();
+    const check = () => {
+      const v = pick();
+      if (v !== last) {
+        last = v;
+        bump((n) => n + 1);
+      }
+    };
+    check(); // (it may have changed between this render and subscribing)
+    return liveViews.subscribe(check);
+  }, [sessionId, on]);
+  return current;
+}

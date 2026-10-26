@@ -5,7 +5,7 @@ import type { HostMessage } from "../src/shared/types";
 import { App } from "./components/App";
 import { isDark, post } from "./env";
 import { pets } from "./pets";
-import { hostVisible, pageVisible, permsAnswer, petColorsVersion, viewState, weekAnswer, weekRevokeAnswer, weekRuleAnswer } from "./util/stores";
+import { hostVisible, liveViews, pageVisible, permsAnswer, petColorsVersion, viewState, weekAnswer, weekRevokeAnswer, weekRuleAnswer } from "./util/stores";
 
 // Listen before saying "ready": the first state comes right after it
 window.addEventListener("message", (event: MessageEvent) => {
@@ -13,7 +13,11 @@ window.addEventListener("message", (event: MessageEvent) => {
   if (!msg || typeof msg !== "object") return;
   switch (msg.type) {
     case "state":
+      liveViews.set(msg.state.live ?? {});
       viewState.set(msg.state);
+      break;
+    case "live":
+      liveViews.set(msg.live ?? {});
       break;
     case "petEvent":
       pets.dispatchPetEvent(msg.kind, msg.text, msg.key);
