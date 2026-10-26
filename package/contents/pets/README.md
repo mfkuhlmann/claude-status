@@ -6,8 +6,9 @@ moods and everything it does. The same code draws it in the Plasma widget
 canvas).
 
 The SVG files here are still pictures made from that code for places that
-need a file, the notification icons (`notify-*.svg`) and the GNOME
-extension's notification source (`talpa.svg`). Make them again after changing
-how Talpa looks:
+need a file: the notification icons (`notify-*.svg`), the GNOME extension's
+notification source (`talpa.svg`) and the chat pane's icon in the taskbar
+(`window.svg`, given to the pane by install.sh's KWin window rule). Make them
+again after changing how Talpa looks:
 
     node tools/talpa_icons.mjs
