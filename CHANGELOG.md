@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **The hole stays where it was:** pulling Talpa out of its burrow carried its
+  hole along under it, shrinking within a third of a second, as if the hole
+  were dragged by. Now the hole stays where Talpa was while you hold it, and
+  fills in once Talpa has landed; it digs a new one where it lands, as before.
+
 ## 1.15.1
 
 - **Pictures in a reply:** Ctrl+V in a chat's tab pastes a picture (a

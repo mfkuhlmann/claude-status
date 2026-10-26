@@ -340,6 +340,53 @@ test("a held pet whose chat left stays in your hand and goes once it is put down
   s.stage.destroy();
 });
 
+test("the hole stays where a pet was pulled out of it, and is filled in once the pet has landed", () => {
+  // The hole shrank within 350 ms while it followed the pet you pulled out of
+  // it, as if carried along (2026-10-26)
+  const s = account();
+  s.give([chat("p/1")]);
+  s.lay();
+  s.show();
+  const pet = s.stage.petFor("p/1");
+  wait(pet, 4000); // up out of the ground, its hole open
+  assert.ok(pet.talpa.v.hole > 0.9, "no hole to leave");
+  assert.equal(pet.leftHole.hidden, true);
+  const home = pet.px;
+  pet.pickUp();
+  assert.equal(pet.leftHole.hidden, false, "its hole didn't stay");
+  assert.equal(pet.talpa.v.hole, 0, "its hole came along");
+  s.stage.render();
+  const placed = pet.leftHole.style.transform;
+  assert.ok(placed.startsWith(`translate(${Math.round(home * 10) / 10 - s.stage.canvasW / 2}px,`), `${placed}, it was at ${home}`);
+  assert.ok(pet.leftHole.drawn.length > 0, "the hole isn't drawn");
+  pet.px = home + s.stage.gu * 6; // carried off
+  pet.lift = s.stage.gu * 2;
+  wait(pet, 400);
+  s.stage.render();
+  assert.equal(pet.leftHole.style.transform, placed, "the hole went along");
+  assert.equal(pet.leftHole.hidden, false);
+  pet.drop();
+  pet.faller.step(1e15); // landed
+  assert.equal(pet.fill.active, true, "the old hole isn't filled in");
+  pet.fill.step(1e15);
+  assert.equal(pet.leftHole.hidden, true);
+  s.stage.destroy();
+});
+
+test("a pet that wasn't over a hole leaves none behind", () => {
+  const s = account();
+  s.give([chat("p/1")]);
+  s.lay();
+  s.show();
+  const pet = s.stage.petFor("p/1");
+  wait(pet, 4000);
+  pet.talpa.react("dig"); // tunnelling: no hole under it
+  wait(pet, 1200);
+  pet.pickUp();
+  assert.equal(pet.leftHole.hidden, true, "a hole from nowhere");
+  s.stage.destroy();
+});
+
 test("while you hold a pet nothing moves it", () => {
   const { stage, pet, give } = leaving();
   pet.pickUp();

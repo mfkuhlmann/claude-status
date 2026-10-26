@@ -17,7 +17,7 @@
 import type { ChatRef, Session } from "../../src/shared/types";
 import { stateText } from "../../src/shared/model";
 import { Pictures } from "../../vendor/talpa/pictures.mjs";
-import { LILAC, Talpa, calmColors } from "../../vendor/talpa/talpa.mjs";
+import { BOX, LILAC, Talpa, calmColors, drawHole } from "../../vendor/talpa/talpa.mjs";
 import type { StageChat } from "./api";
 import { PALETTE, textOn } from "./colors";
 import { Timer, Tween, ease, reducedMotion } from "./motion";
@@ -95,6 +95,14 @@ export class Pet {
   private readonly sheets: HTMLDivElement;
   private readonly view: HTMLCanvasElement;
   private readonly canvases: HTMLCanvasElement[] = [];
+  // The hole it was pulled out of: empty where it was while you hold it, under
+  // the pet (the hole doesn't come along), filled in once the pet has landed
+  private readonly leftHole: HTMLCanvasElement;
+  private leftAt = 0; // its horizontal centre
+  private leftOpen = 1; // 0 closed, 1 open
+  private leftFlip = false; // (the burrow isn't quite the same on both sides)
+  private leftDrawn = "";
+  private readonly fill: Tween;
   private readonly tag: HTMLDivElement | null;
   private readonly grab: HTMLDivElement;
   private readonly drawn: Record<string, string> = {};
@@ -133,6 +141,7 @@ export class Pet {
 
     this.stride = new Tween(stage, (v) => (this.px = v));
     this.faller = new Tween(stage, (v) => (this.lift = v));
+    this.fill = new Tween(stage, (v) => (this.leftOpen = v));
     // The hero turns towards the mouse while it hovers the stage
     this.lookTimer = new Timer(clock, 350, () => {
       const x = this.stage.cursorX();
@@ -165,6 +174,9 @@ export class Pet {
     this.view = document.createElement("canvas");
     this.view.className = "cs-pet-sheet";
     this.sheets.append(this.view);
+    this.leftHole = document.createElement("canvas");
+    this.leftHole.className = "cs-pet-hole";
+    this.leftHole.hidden = true;
     this.grab = div("cs-pet-grab");
     this.grab.style.width = `${stage.bodyWidth + LARGE}px`;
     this.grab.style.height = `${stage.bodyHeight + LARGE}px`;
@@ -175,7 +187,8 @@ export class Pet {
       this.tag.style.color = textOn(PALETTE[colorIndex]);
       this.tag.addEventListener("click", () => this.clicked());
     }
-    stage.petLayer.append(this.sheets, ...(this.tag ? [this.tag] : []), this.grab);
+    // (the hole first: under the pet)
+    stage.petLayer.append(this.leftHole, this.sheets, ...(this.tag ? [this.tag] : []), this.grab);
     this.listen();
     this.describe();
 
@@ -446,9 +459,19 @@ export class Pet {
     this.landing = true;
     this.stride.stop();
     this.faller.stop(); // grabbed again while falling
-    this.talpa.setHeld(true);
+    // (its hole doesn't come along: it stays where it was, until it has landed)
+    const open = this.talpa.setHeld(true);
+    if (open > 0) this.leaveHole(open);
     this.say("Whoa!");
     this.changed();
+  }
+
+  private leaveHole(open: number): void {
+    this.fill.stop();
+    this.leftAt = this.px;
+    this.leftFlip = this.talpa.facingLeft;
+    this.leftOpen = open;
+    this.leftHole.hidden = false;
   }
 
   private drop(): void {
@@ -460,6 +483,8 @@ export class Pet {
   // On the floor again: dizzy if it fell from high up, then it digs in where it landed
   private landed(fromHeight: number): void {
     this.held = false;
+    // (the one it left is filled in; it digs a new one where it is)
+    if (!this.leftHole.hidden) this.fill.run(this.leftOpen, 0, 350, ease.linear, () => (this.leftHole.hidden = true));
     const feel = this.talpa.land(fromHeight / (this.stage.box / 64), () => {
       this.landing = false;
       if (this.destroyed) return;
@@ -569,6 +594,10 @@ export class Pet {
       gh = s.bodyHeight + LARGE;
     this.put(this.grab, "grab", "transform", `translate(${px - gw / 2}px, ${ground - lift - gh}px)`);
     this.put(this.grab, "cursor", "cursor", this.held ? "grabbing" : this.lone ? "grab" : "pointer");
+    if (!this.leftHole.hidden) {
+      this.put(this.leftHole, "hole", "transform", `translate(${Math.round(this.leftAt * 10) / 10 - s.canvasW / 2}px, ${ground - s.floorY}px)`);
+      this.paintHole();
+    }
 
     const now = s.clock.now();
     this.talpa.tick(now);
@@ -631,6 +660,35 @@ export class Pet {
     return painted;
   }
 
+  // The empty hole it left, when it has changed (or the zoom has)
+  private paintHole(): void {
+    const s = this.stage,
+      c = this.leftHole,
+      box = s.box,
+      k = devicePixelRatio || 1,
+      w = Math.round(s.canvasW * k),
+      h = Math.round(s.canvasH * k);
+    const state = `${w}x${h},${box},${this.leftOpen},${this.leftFlip}`;
+    if (state === this.leftDrawn) return;
+    this.leftDrawn = state;
+    if (c.width !== w || c.height !== h) {
+      c.width = w;
+      c.height = h;
+      c.style.width = `${s.canvasW}px`;
+      c.style.height = `${s.canvasH}px`;
+    }
+    const ctx = c.getContext("2d");
+    if (!ctx) return;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    ctx.setTransform((k * box) / 64, 0, 0, (k * box) / 64, k * box * 0.3, k * box * 0.45);
+    if (this.leftFlip) {
+      ctx.translate(BOX, 0);
+      ctx.scale(-1, 1);
+    }
+    drawHole(ctx, this.leftOpen);
+  }
+
   // The view: the sheet in front or, while a pose fades into the next, both
   // mixed, (1 - mix) × front + mix × next, added up ("lighter"): where both
   // cover, nothing shows through
@@ -657,8 +715,8 @@ export class Pet {
 
   destroy(): void {
     this.destroyed = true;
-    for (const t of [this.stride, this.faller]) t.stop();
+    for (const t of [this.stride, this.faller, this.fill]) t.stop();
     for (const t of [this.lookTimer, this.tickleTimer, this.contextTimer, this.usageTimer]) t.stop();
-    for (const el of [this.sheets, this.tag, this.grab]) el?.remove();
+    for (const el of [this.leftHole, this.sheets, this.tag, this.grab]) el?.remove();
   }
 }

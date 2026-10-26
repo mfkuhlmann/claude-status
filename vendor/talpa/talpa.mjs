@@ -223,6 +223,26 @@ const ONE_WAY = { waveboth: 1, juggle: 1, nod: 1, phone: 1 };   // (halfway back
 const ONCE = { hop: 550, jump: 800, spin: 1100, jolt: 400, tumble: 1000, land: 400 };   // (ms; a hop or a jump × it)
 const BIG_DEPTH = 8;   // (from low to high is no big move, from half to peeking out is)
 
+// ---------------------------------------------------------------- the hole
+
+// The hole as it opens or closes (hole 0 to 1.1, a little over at the end of
+// opening), the back of it or the front: the creature is drawn between them
+function holePart(ctx, hole, part) {
+    const size = Math.min(1.1, hole);
+    ctx.save();
+    art.about(ctx, 32, 56, 0, lerp(0.05, 1, size), lerp(0.2, 1, size));
+    ctx.globalAlpha = clamp01(hole);
+    part(ctx);
+    ctx.restore();
+}
+
+// An empty hole in the 64 × 64 box (hole as above), for what a host keeps
+// where a creature you hold was pulled out of it (setHeld)
+export function drawHole(ctx, hole) {
+    holePart(ctx, hole, art.holeBack);
+    holePart(ctx, hole, art.holeFront);
+}
+
 // ---------------------------------------------------------------- the creature
 
 export class Talpa {
@@ -302,16 +322,23 @@ export class Talpa {
     }
 
     // Grabbed: out of the burrow, flailing; nothing else moves it until land()
+    // Returns how much of its hole it leaves behind (0: none, it was tunnelling
+    // or down; 1: the whole hole): the host keeps drawing that where it was
+    // (drawHole), since the hole doesn't come along
     setHeld(held) {
         if (!held)
-            return;
+            return 0;
+        const left = this.st.tunnel === '1' ? 0 : clamp01(this.v.hole);
         this.cancel();
         this.held = true;
         this.heldAt = this.now;
         this.apply({ depth: 'out', hole: 0, held: 1, arms: 'flail', eyes: 'wide', mouth: 'o', body: '', fx: dirt(8, 16) });
-        // pulled out at once (a creature half in a hole that closes would show where there's no hole)
+        // out at once, its hole gone from under it (a creature half in a hole that
+        // closes while it moves would show where there's no hole)
         const v = this.v;
         v.depth = v.depthFrom = v.depthTo = DEPTH.out;
+        v.hole = v.holeFrom = v.holeTo = 0;
+        return left > 0.02 ? left : 0;
     }
 
     // Dropped from `height` box units: lands, maybe dizzy, then digs in right there
@@ -626,13 +653,8 @@ export class Talpa {
             ctx.restore();
         }
         const tunneling = st.tunnel === '1';
-        if (!tunneling && v.hole > 0.02) {
-            ctx.save();
-            art.about(ctx, 32, 56, 0, lerp(0.05, 1, Math.min(1.1, v.hole)), lerp(0.2, 1, Math.min(1.1, v.hole)));
-            ctx.globalAlpha = clamp01(v.hole);
-            art.holeBack(ctx);
-            ctx.restore();
-        }
+        if (!tunneling && v.hole > 0.02)
+            holePart(ctx, v.hole, art.holeBack);
         // the creature, cut along the burrow (art.traceCut) while it's in it or
         // its hole is there (out for a moment, its feet would hang in the hole)
         ctx.save();
@@ -653,11 +675,7 @@ export class Talpa {
             art.tunnel(ctx);
             ctx.restore();
         } else if (v.hole > 0.02) {
-            ctx.save();
-            art.about(ctx, 32, 56, 0, lerp(0.05, 1, Math.min(1.1, v.hole)), lerp(0.2, 1, Math.min(1.1, v.hole)));
-            ctx.globalAlpha = clamp01(v.hole);
-            art.holeFront(ctx);
-            ctx.restore();
+            holePart(ctx, v.hole, art.holeFront);
         }
         ctx.restore();
         this.drawParticles(ctx, now);

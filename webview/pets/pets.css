@@ -211,6 +211,7 @@
 
 .cs-pet-sheets,
 .cs-pet-sheet,
+.cs-pet-hole,
 .cs-pet-tag,
 .cs-pet-grab {
   position: absolute;
@@ -218,8 +219,14 @@
   top: 0;
 }
 
-.cs-pet-sheets {
+.cs-pet-sheets,
+.cs-pet-hole {
   will-change: transform;
+}
+
+/* The hole a pet you hold was pulled out of stays where it was */
+.cs-pet-hole[hidden] {
+  display: none;
 }
 
 /* Name tag under its burrow, in the chat's color */
