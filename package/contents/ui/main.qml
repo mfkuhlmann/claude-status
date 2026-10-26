@@ -1048,6 +1048,52 @@ PlasmoidItem {
         return peek && peek.activity ? peek.activity : ""
     }
 
+    // The focus view (FocusView.qml): the Chats tab with only what needs you
+    // (oldest first), what finished while you looked away and one line for
+    // each chat at work; the rest counted, each account's 5-hour usage
+    readonly property bool focusView: Plasmoid.configuration.focusView
+    function setFocusView(on) {
+        Plasmoid.configuration.focusView = on
+    }
+    readonly property var focusLists: {
+        if (!focusView)
+            return { needs: [], finished: [], working: [], rest: "", usage: "" }
+        const needs = [], finished = [], working = [], seen = {}
+        const rest = { idle: 0, done: 0, limit: 0 }
+        const usage = []
+        for (const g of allGroups) {
+            const five = g.limits ? g.limits.windows.find(w => w.key === "five_hour") : null
+            if (five)
+                usage.push(i18nc("an account's 5-hour usage", "%1 %2%", (g.host ? g.host + ": " : "") + g.title, Math.round(five.pct)))
+            for (const s of g.sessions) {
+                const key = petKeyOf(s, g.host || "")
+                if (key in seen)
+                    continue   // (a chat's most urgent row came first)
+                seen[key] = true
+                const item = { key: key, session: s, host: g.host || "", account: g.title, multi: g.profiles.length > 1 }
+                if (s.state === "waiting")
+                    needs.push(item)
+                else if (s.state === "working")
+                    working.push(item)
+                else if (unseen[key] === "done")
+                    finished.push(item)
+                else
+                    rest[atLimit(s) ? "limit" : s.state === "idle" ? "idle" : "done"] += 1
+            }
+        }
+        needs.sort((a, b) => (a.session.since || 0) - (b.session.since || 0))
+        working.sort((a, b) => (a.session.since || 0) - (b.session.since || 0))
+        const parts = []
+        if (rest.idle)
+            parts.push(i18np("%1 idle", "%1 idle", rest.idle))
+        if (rest.limit)
+            parts.push(i18np("%1 at the usage limit", "%1 at the usage limit", rest.limit))
+        if (rest.done)
+            parts.push(i18np("%1 done", "%1 done", rest.done))
+        return { needs: needs, finished: finished, working: working, rest: parts.length ? i18n("Also: %1", parts.join(" · ")) : "",
+                 usage: usage.length ? i18n("5-hour usage: %1", usage.join(" · ")) : "" }
+    }
+
     // The hero's ticker (Ticker.qml): what each working chat does now
     readonly property var tickerItems: {
         const out = []

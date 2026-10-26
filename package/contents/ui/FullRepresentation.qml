@@ -79,6 +79,23 @@ PlasmaExtras.Representation {
             }
             PlasmaComponents3.ToolButton {
                 visible: root.popupTab === "chats"
+                icon.name: "view-filter"
+                checkable: true
+                checked: root.focusView
+                display: PlasmaComponents3.AbstractButton.IconOnly
+                text: i18n("Focus")
+                onClicked: root.setFocusView(!root.focusView)
+
+                PlasmaCore.ToolTipArea {
+                    textFormat: Text.PlainText
+                    anchors.fill: parent
+                    mainText: root.focusView ? i18n("Show everything") : i18n("Focus")
+                    subText: root.focusView ? i18n("Back to every account, chat, pet and usage bar.")
+                                            : i18n("Only what needs you, the chats that finished while you looked away, and one line for each chat at work.")
+                }
+            }
+            PlasmaComponents3.ToolButton {
+                visible: root.popupTab === "chats"
                 icon.name: "edit-find"
                 checkable: true
                 checked: root.searchOpen
@@ -278,12 +295,19 @@ PlasmaExtras.Representation {
                     wrapMode: Text.Wrap
                 }
 
+                // Only what needs you and what works (the header's filter button)
+                FocusView {
+                    visible: root.focusView && !(root.searchOpen && root.searchQuery.trim().length >= 2)
+                    Layout.fillWidth: true
+                }
+
                 // Indexed by position so rows survive each poll (a new array every
                 // 2 s would rebuild them and drop their state).
                 Repeater {
                     model: root.groups.length
                     delegate: GroupSection {
                         required property int index
+                        visible: !root.focusView   // (kept, with their pets and what's open, while the focus view shows)
                         Layout.fillWidth: true
                         group: root.groups[index] || root.emptyGroup
                         accounts: root.groups.length
@@ -296,6 +320,7 @@ PlasmaExtras.Representation {
                     model: root.shownHosts.length
                     delegate: HostSection {
                         required property int index
+                        visible: !root.focusView
                         Layout.fillWidth: true
                         host: root.shownHosts[index] || ""
                     }
