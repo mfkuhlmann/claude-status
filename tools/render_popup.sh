@@ -66,6 +66,7 @@ for f in kdeglobals plasmarc; do [ -f "$HOME/.config/$f" ] && cp "$HOME/.config/
 real_cache="${XDG_CACHE_HOME:-$HOME/.cache}/claude-widget"
 if [ -d "$real_cache" ]; then
   [ -d "$real_cache/statusline" ] && cp -a "$real_cache/statusline" "$work/cache/claude-widget/"
+  [ -d "$real_cache/live" ] && cp -a "$real_cache/live" "$work/cache/claude-widget/"  # (live mode's steps)
   find "$real_cache" -maxdepth 1 -name '*.json' ! -name instances.json ! -name settings.json \
     -exec cp -p {} "$work/cache/claude-widget/" \;
 fi
