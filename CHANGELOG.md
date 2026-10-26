@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.15.1
 
 - **Pictures in a reply:** Ctrl+V in a chat's tab pastes a picture (a
   screenshot, say): it's saved where the widget keeps pasted pictures, named
