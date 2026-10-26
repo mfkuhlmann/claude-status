@@ -14,7 +14,8 @@ import "markdown.mjs" as Md
 // with each tool call folded into one line; a box to reply
 // (pane.py --send: typed into tmux, put in its VS Code tab's input, or it
 // goes on in the background); what it asks while it waits for a permission,
-// with Allow once / Always allow / Deny; and its review: the files it
+// with Allow once / Always allow / Deny, or Claude's questions to answer;
+// and its review: the files it
 // changed, against how they were before the chat, with Undo, Commit and
 // Mark reviewed. One window, for the chat root.paneChat.
 Window {
@@ -200,6 +201,12 @@ Window {
             if (root.paneDenying) {
                 askColumn.denyWithNote()
                 root.paneDenying = false
+            }
+        }
+        function onPaneTypingChanged() {   // (Other…, from a question's notification)
+            if (root.paneTyping) {
+                askColumn.typeAnswer()
+                root.paneTyping = false
             }
         }
         function onPaneChatChanged() {
@@ -401,15 +408,17 @@ Window {
 
     property int answering: 0   // answers on their way
 
-    function answer(decision, note) {
+    // answers: a question's, {question: [labels or text]} (decision "answer")
+    function answer(decision, note, answers) {
         const p = permission
         if (!p || (p.answer !== "hook" && p.answer !== "keys"))
             return
         answering += 1
         if (p.answer === "hook")
             run(decision === "deny" ? "deny" : "answer", "--answer " + root.shellQuote(p.request) + " --decision " + decision
-                + (note ? " --note " + root.shellQuote(note) : "") + (host ? " --host " + root.shellQuote(host) : "")
-                + root.configDirArgs)
+                + (note ? " --note " + root.shellQuote(note) : "")
+                + (answers ? " --answers " + root.shellQuote(JSON.stringify(answers)) : "")
+                + (host ? " --host " + root.shellQuote(host) : "") + root.configDirArgs)
         else if (p.answer === "keys")
             run(decision === "deny" ? "deny" : "answer", "--keys " + root.shellQuote(sessionId) + " --decision " + decision
                 + (note ? " --note " + root.shellQuote(note) : "") + paneArgs())
@@ -972,24 +981,31 @@ Window {
                 }
             }
 
-            // What it asks while it waits: Allow once / Always allow / Deny
+            // What it asks while it waits: Allow once / Always allow / Deny, or its questions
+            // (at most half the pane, scrolling, so the conversation stays in sight)
             Rectangle {
                 visible: pane.tab === "chat" && pane.permission !== null
                 Layout.fillWidth: true
-                implicitHeight: askColumn.implicitHeight + Kirigami.Units.largeSpacing * 2
+                Layout.preferredHeight: Math.min(askColumn.implicitHeight + Kirigami.Units.largeSpacing * 2, pane.height / 2)
                 radius: Kirigami.Units.cornerRadius
                 color: Qt.rgba(Kirigami.Theme.neutralTextColor.r, Kirigami.Theme.neutralTextColor.g, Kirigami.Theme.neutralTextColor.b, 0.08)
                 border.width: 1
                 border.color: Kirigami.Theme.neutralTextColor
 
-                PermissionAsk {
-                    id: askColumn
+                PlasmaComponents3.ScrollView {
                     anchors.fill: parent
                     anchors.margins: Kirigami.Units.largeSpacing
-                    permission: pane.permission
-                    busy: pane.answering > 0
-                    diffLines: 12
-                    onAnswered: (decision, note) => pane.answer(decision, note)
+                    contentWidth: availableWidth
+                    PlasmaComponents3.ScrollBar.horizontal.policy: PlasmaComponents3.ScrollBar.AlwaysOff
+
+                    PermissionAsk {
+                        id: askColumn
+                        width: parent.width
+                        permission: pane.permission
+                        busy: pane.answering > 0
+                        diffLines: 12
+                        onAnswered: (decision, note, answers) => pane.answer(decision, note, answers)
+                    }
                 }
             }
 

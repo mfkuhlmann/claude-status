@@ -700,14 +700,15 @@ RowLayout {
             }
         }
 
-        // What it asks while it waits for a permission: Allow once, Always allow, Deny
+        // What it asks while it waits for a permission: Allow once, Always allow, Deny; or its questions
         PermissionAsk {
             visible: row.session.state === "waiting" && !!row.session.permission
             Layout.fillWidth: true
             Layout.topMargin: Kirigami.Units.smallSpacing
             permission: visible ? row.session.permission : null
             diffLines: 6
-            onAnswered: (decision, note) => root.answerPermission(row.session, row.remoteHost, decision, note)
+            compact: true
+            onAnswered: (decision, note, answers) => root.answerPermission(row.session, row.remoteHost, decision, note, answers)
         }
 
         // Your last prompt, Claude's reply since, the chat's tasks, and what it changed
