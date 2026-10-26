@@ -25,6 +25,7 @@ a new chat (used by the Claude Status widget).
     python3 -I jump.py --phone MESSAGE [--device ID]   (to your phone, with KDE Connect)
     python3 -I jump.py --phone-devices           (the phones paired with KDE Connect)
     python3 -I jump.py --paste-image             (save the clipboard's picture for a new chat's task)
+    python3 -I jump.py --save-image TYPE         (save a picture, base64 on stdin, of TYPE image/png, …)
     python3 -I jump.py --agent-run AGENT_ID --chat CHAT_ID [--profile PROFILE] [--no-open]
                                                  (a subagent's whole run, as a Markdown file)
 
@@ -55,6 +56,7 @@ D-Bus). Prints one JSON line, {"ok": bool, "message": str}.
 """
 
 import ast
+import base64
 import datetime
 import json
 import os
@@ -977,11 +979,13 @@ def choose_folder(title, start):
 
 # ---------------------------------------------------------------- pictures in a task
 #
-# Ctrl+V in a new chat's task field, with no text on the clipboard: its
-# picture is saved in the widget's cache (claude_status.images_dir, yours
-# alone) for the task to name.
+# Ctrl+V in a new chat's task field or a chat's reply, with no text on the
+# clipboard: its picture is saved in the widget's cache
+# (claude_status.images_dir, yours alone) for the task or reply to name. The
+# VS Code extension hands over what was pasted in its page (--save-image).
 
 IMAGE_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif"}  # Claude's, best first
+IMAGE_MAX = 20 * 2 ** 20
 
 
 def clipboard_tool():
@@ -1017,6 +1021,28 @@ def paste_image(home):
         return False, "Couldn't read the clipboard", {}
     if r.returncode != 0 or not r.stdout:
         return False, "Couldn't read the picture on the clipboard", {}
+    return save_picture(home, r.stdout, kind)
+
+
+def save_image(home, kind, data):
+    """Save a picture handed over as base64 (data), of type kind, in
+    cs.images_dir: (ok, message, {"path": its file})."""
+    if kind not in IMAGE_TYPES:
+        return False, "Claude takes PNG, JPEG, WebP and GIF pictures", {}
+    try:
+        picture = base64.b64decode((data or "").strip(), validate=True)
+    except ValueError:
+        picture = b""
+    if not picture:
+        return False, "That isn't a picture", {}
+    if len(picture) > IMAGE_MAX:
+        return False, f"That picture is too big (over {IMAGE_MAX // 2 ** 20} MB)", {}
+    return save_picture(home, picture, kind)
+
+
+def save_picture(home, picture, kind):
+    """picture (bytes of type kind) as a new file in cs.images_dir, yours
+    alone: (ok, message, {"path"}). Older pictures there are let go."""
     folder = cs.images_dir(home)
     folder.mkdir(parents=True, exist_ok=True)
     folder.chmod(0o700)  # (screenshots can show anything)
@@ -1036,7 +1062,7 @@ def paste_image(home):
         except FileExistsError:
             n += 1
     with os.fdopen(fd, "wb") as f:
-        f.write(r.stdout)
+        f.write(picture)
     return True, "", {"path": str(path)}
 
 
@@ -2206,6 +2232,8 @@ def main(argv=None):
             action, session_id = phone_devices, "-"
         elif arg == "--paste-image":
             action, session_id = paste_image, "-"
+        elif arg == "--save-image" and args:
+            action, image_type, session_id = save_image, args.pop(0), "-"
         elif arg == "--turn":
             turn = True
         elif arg == "--list":
@@ -2331,6 +2359,8 @@ def main(argv=None):
             ok, message, devices = phone_devices()
         elif action is paste_image:
             ok, message, extra_out = paste_image(Path.home())
+        elif action is save_image:
+            ok, message, extra_out = save_image(Path.home(), image_type, sys.stdin.read())
         elif action is show_agent_run:
             ok, message, run_file = show_agent_run(Path.home(), extra, session_id, agent_id, profile_dir, open_it)
         elif action is show_changes and listing:

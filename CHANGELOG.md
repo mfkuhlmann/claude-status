@@ -2,13 +2,24 @@
 
 ## Unreleased
 
+- **Pictures in a reply:** Ctrl+V in a chat's tab pastes a picture (a
+  screenshot, say): it's saved where the widget keeps pasted pictures, named
+  in your reply with a thumbnail under the box (× takes it out). When the
+  chat goes on in the background with it, it may open the picture; a chat
+  that's running asks you first, as for any file outside its folder. For an
+  SSH host's chat the tab asks to copy the picture there first.
+- **Plan limits that line up:** in the Recap tab, each window's chart (and
+  every other list's bars) got what room its row's text left, so the weekly
+  one came out shorter than the 5-hour one. Now a list's bars all start and
+  end at the same place.
 - **Enter sends a reply:** in a chat's tab, Enter sends what you wrote and
   Shift+Enter starts a new line, as in Claude's own prompt (it took
   Ctrl+Enter). For a chat whose terminal takes no text from outside, the
   first Enter asks how to send it.
 - **The big Talpa goes anywhere:** it was kept to the right half of its
   banner, clear of the headline. Now you can drag it all the way across, and
-  it digs over the headline on its own too, as in the widget.
+  it digs over the headline on its own too, in front of the words, as in the
+  widget.
 - **A chat's tab reads like Claude's terminal:** a dot before each of
   Claude's replies and tool calls (green when a call worked, red when it
   failed, blinking while it runs), what came of a call under it (*⎿ 3

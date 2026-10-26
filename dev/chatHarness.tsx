@@ -22,7 +22,7 @@ function send(message: PaneHostMessage): void {
 }
 
 const chat: PaneChat = {
-  host: "",
+  host: params.get("host") ?? "", // ?host=lab: an SSH host's chat
   chatId: "demo-chat",
   sessionId: "demo-chat",
   profileDir: ".claude",
@@ -91,7 +91,35 @@ window.addEventListener("harness-post", (e: Event) => {
   if (m.type === "ready") {
     send({ type: "chat", chat });
     send({ type: "conversation", answer: { ok: true, items, more: true, stamp: "1" } });
+  } else if (m.type === "picture") {
+    const id = (m as unknown as { id: string }).id;
+    setTimeout(() => send({ type: "picture", id, path: `/home/alice/.cache/claude-widget/images/20261026-1015${id.slice(-2)}.png`, error: "" }), 200);
   } else if (m.type === "review") {
     send({ type: "review", answer: review, error: "" });
   }
 });
+
+// ?paste=1: a picture pasted into the reply, as Ctrl+V gives one (a browser
+// leaves out the clipboard of a paste event a page makes: it's put on the event)
+if (params.get("paste") === "1") {
+  setTimeout(() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 320;
+    canvas.height = 200;
+    const g = canvas.getContext("2d")!;
+    g.fillStyle = "#3d6fb6";
+    g.fillRect(0, 0, 320, 200);
+    g.fillStyle = "#d97757";
+    g.fillRect(40, 40, 120, 80);
+    canvas.toBlob((blob) => {
+      const box = document.querySelector<HTMLTextAreaElement>(".pane-reply");
+      if (!blob || !box) return;
+      const data = new DataTransfer();
+      data.items.add(new File([blob], "shot.png", { type: "image/png" }));
+      box.focus();
+      const event = new Event("paste", { bubbles: true, cancelable: true });
+      Object.defineProperty(event, "clipboardData", { value: data });
+      box.dispatchEvent(event);
+    });
+  }, 100);
+}

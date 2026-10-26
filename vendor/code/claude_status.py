@@ -4901,9 +4901,12 @@ def continue_chat(home, extra_dirs, profile_key, chat_id, folder=None, text="", 
     deadline = time.time() + (END_WAIT if wait is None else wait)
     while any(e.get("sessionId") == chat_id for e, _, _ in live_entries_all(profiles)) and time.time() < deadline:
         time.sleep(0.2)
+    # (a picture your message names can be opened, unless Claude wakes a
+    # background session of it, with the options it saved)
+    pictures = [] if (profile.path / "jobs" / chat_id[:8]).exists() else picture_options(home, text)
     ok, message, job = start_background(profile, folder, (text or "").strip() or CONTINUE_PROMPT, home, claude,
                                         prefix=prefix, resume=chat_id,
-                                        options=go_on_options(profile, chat_id, peek.get("mode")))
+                                        options=go_on_options(profile, chat_id, peek.get("mode")) + pictures)
     if ok:
         message = f"Went on in the background on {profile.label}" + (f" ({job})" if job else "")
     return {"ok": ok, "message": message, "id": job}

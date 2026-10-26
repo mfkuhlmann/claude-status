@@ -242,6 +242,19 @@ export class Backend {
     return (await this.json(["pane.py", ...args], timeoutMs)) ?? { ok: false, message: "the helper gave no answer" };
   }
 
+  // A picture pasted in a chat's tab (base64 of type mime), saved where the
+  // widget keeps pasted pictures (jump.py --save-image): its file, or why not
+  async saveImage(mime: string, data: string): Promise<{ path?: string; message: string }> {
+    const r = await this.json(["jump.py", "--save-image", mime], 30000, data);
+    return r?.ok && typeof r.path === "string" ? { path: r.path, message: "" } : { message: String(r?.message ?? "the helper gave no answer") };
+  }
+
+  // That picture copied to an SSH host (remote.py --put-image): the copy's path there
+  async putImage(host: string, path: string): Promise<{ path?: string; message: string }> {
+    const r = await this.json(["remote.py", "--put-image", host, path], 120000);
+    return r?.ok && typeof r.path === "string" ? { path: r.path, message: "" } : { message: String(r?.message ?? "the helper gave no answer") };
+  }
+
   // What a chat changed (jump.py --changes --list): the files, with copies of
   // what they were before it (or before its last turn)
   async changes(chatId: string, profileDir: string, turn: boolean, extra: string[] = []): Promise<{ message: string; comparison?: Comparison }> {
@@ -259,9 +272,9 @@ export class Backend {
     void runProcess(this.python(), args, { timeoutMs: 30000 });
   }
 
-  private async json(argv: string[], timeoutMs: number): Promise<Record<string, any> | null> {
+  private async json(argv: string[], timeoutMs: number, input?: string): Promise<Record<string, any> | null> {
     const [name, ...args] = argv;
-    const r = await runProcess(this.python(), ["-I", this.script(name), ...args], { timeoutMs });
+    const r = await runProcess(this.python(), ["-I", this.script(name), ...args], { timeoutMs, input });
     if (r.spawnError || r.timedOut) return { ok: false, message: r.timedOut ? "timed out" : r.spawnError!.message };
     try {
       return JSON.parse(r.stdout.trim().split("\n").pop() || "");

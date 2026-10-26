@@ -219,7 +219,8 @@ tables), each tool call on one line with what came of it under it
 (*● Bash(pytest) ⎿ 3 passed*, the dot green or red; click it for what it ran
 and got); **A−** / **A+** (or Ctrl+wheel) set the text size
 (`claudeStatus.chatTextScale`). Below it, a box to reply (Enter sends,
-Shift+Enter starts a new line):
+Shift+Enter starts a new line, **Ctrl+V** pastes a picture, shown under the
+box):
 **Send**, or **Send when this turn ends** (kept, and sent once the turn is
 over). Your message goes the way the chat can take it: typed into its
 terminal when it runs in one of this window's terminals, or into its tmux
@@ -418,10 +419,13 @@ named in each profile's `settings.json`; it writes each request to
 answered), or the dialog's keys in tmux. **Undo** writes a chat's files back
 as they were before it (a file it made is removed), **Commit** runs
 `git add` and `git commit` on only the chat's files, and **Mark reviewed** is
-kept in `~/.cache/claude-widget/reviewed.json`. It writes only to
+kept in `~/.cache/claude-widget/reviewed.json`. A picture you paste into a
+reply is saved in `~/.cache/claude-widget/images` (yours alone, deleted after
+30 days); for an SSH host's chat it's copied to the host's only once you click
+**Copy**. It writes only to
 `~/.cache/claude-widget` (caches, the list of chats you removed, the tasks
 you queue until they start, copies of the files a comparison shows, kept for
-a day) and, if you
+a day, pictures you paste) and, if you
 ask for it, the status-line change above, the links of the chats and plans
 you share (see below) and the accounts you add or remove. A task you start a
 chat with goes to Claude, which runs it like a prompt you type (with a plan

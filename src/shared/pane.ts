@@ -83,7 +83,8 @@ export type PaneHostMessage =
   | { type: "conversation"; answer: Conversation }
   | { type: "review"; answer: ReviewAnswer | null; error: string }
   | { type: "result"; kind: string; ok: boolean; message: string; ask?: boolean } // ask: its terminal takes no text: choose
-  | { type: "textSize"; scale: number }; // claudeStatus.chatTextScale
+  | { type: "textSize"; scale: number } // claudeStatus.chatTextScale
+  | { type: "picture"; id: string; path: string; error: string }; // a pasted picture, saved (path: where the chat opens it)
 
 // tab -> extension
 export type PaneMessage =
@@ -99,7 +100,24 @@ export type PaneMessage =
   | { type: "reviewed"; on: boolean }
   | { type: "openWindow" }
   | { type: "copy"; text: string } // a code block of a reply, to the clipboard
-  | { type: "textSize"; scale: number }; // A− / A+: claudeStatus.chatTextScale
+  | { type: "textSize"; scale: number } // A− / A+: claudeStatus.chatTextScale
+  | { type: "picture"; id: string; mime: string; data: string }; // pasted in the reply (base64): saved, an SSH host's copied there
+
+// The pictures Claude takes, pasted into a reply
+export const PICTURE_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+
+// The pictures a text names ([Image: /path], pasted in), each once
+export function picturesIn(text: string): string[] {
+  const out: string[] = [];
+  for (const m of text.matchAll(/\[Image: (\/[^\]\n]+)\]/g)) if (!out.includes(m[1])) out.push(m[1]);
+  return out;
+}
+
+// text without the picture at path
+export function withoutPicture(text: string, path: string): string {
+  const token = `[Image: ${path}]`;
+  return text.split(token + " ").join("").split(token).join("");
+}
 
 // The tab's text size, times VS Code's font size (claudeStatus.chatTextScale)
 export const TEXT_SCALES = [0.9, 1, 1.15, 1.3, 1.5, 1.75, 2];

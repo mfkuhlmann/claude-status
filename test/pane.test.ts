@@ -10,10 +10,10 @@ import * as vscode from "vscode";
 import { ChatPanes } from "../src/chatPane";
 import { demoState } from "../src/shared/demo";
 import { chatRefOf } from "../src/shared/model";
-import { answersOf, oneChoice, queuedReply, reviewPending, routeHint, testsText, textScale, TEXT_SCALES } from "../src/shared/pane";
+import { answersOf, oneChoice, picturesIn, queuedReply, reviewPending, routeHint, testsText, textScale, TEXT_SCALES, withoutPicture } from "../src/shared/pane";
 import type { ViewState } from "../src/shared/types";
 import { ViewHost } from "../src/view";
-import { clipboardWrites, overrides } from "./vscode-stub";
+import { clipboardWrites, overrides, recorded } from "./vscode-stub";
 import { inline, Markdown } from "../webview/util/markdown";
 
 const NOW = 1_800_000_000_000;
@@ -226,4 +226,40 @@ test("Claude's Markdown: ~~struck~~ text, and a code block keeps its text for Co
   const copy = block.props.children[0].props.children[1];
   copy.props.onClick?.();
   assert.deepEqual(copied, ["if (a < b) return 1;"]);
+});
+
+test("a picture pasted in a chat's tab is saved, an SSH host's chat gets a copy there; nothing else is taken", async () => {
+  const saved: string[][] = [];
+  const backend = {
+    pane: async () => ({ ok: true, unchanged: true }),
+    saveImage: async (mime: string, data: string) => (saved.push(["save", mime, data]), { path: "/cache-here/claude-widget/images/20261026-101500.png", message: "" }),
+    putImage: async (host: string, path: string) => (saved.push(["put", host, path]), host === "down" ? { message: "no route" } : { path: "/cache-there/claude-widget/images/20261026-101500.png", message: "" }),
+  };
+  const dash = { state: () => demoState(NOW), refresh: async () => undefined, pollHost: async () => undefined, onState: () => ({ dispose() {} }) };
+  const p = new ChatPanes(vscode.Uri.file("/ext") as never, backend as never, dash as never, {} as never, { find: async () => undefined } as never, {} as never);
+  let tabs = 0;
+  const tab = async (host: string, m: unknown) => {
+    const chatId = `chat-${++tabs}`; // (a tab of its own)
+    p.open({ chatId, sessionId: chatId, profileDir: ".claude", name: "x", host: host || undefined } as never);
+    const panel = recorded.panels.at(-1)!;
+    panel.receive(m);
+    await new Promise((r) => setTimeout(r, 10));
+    return panel.sent.filter((x) => (x as { type: string }).type === "picture");
+  };
+  assert.deepEqual(await tab("", { type: "picture", id: "1", mime: "image/png", data: "iVBORw0K" }),
+                   [{ type: "picture", id: "1", path: "/cache-here/claude-widget/images/20261026-101500.png", error: "" }]);
+  assert.deepEqual(await tab("lab", { type: "picture", id: "2", mime: "image/png", data: "iVBORw0K" }),
+                   [{ type: "picture", id: "2", path: "/cache-there/claude-widget/images/20261026-101500.png", error: "" }]);
+  assert.deepEqual((await tab("down", { type: "picture", id: "3", mime: "image/png", data: "iVBORw0K" }))[0],
+                   { type: "picture", id: "3", path: "", error: "Couldn't copy the picture to down: no route" });
+  assert.deepEqual(await tab("", { type: "picture", id: "4", mime: "image/svg+xml", data: "PHN2Zz4=" }),
+                   [{ type: "picture", id: "4", path: "", error: "Claude takes PNG, JPEG, WebP and GIF pictures" }]);
+  assert.deepEqual(saved.map((c) => c[0] + " " + c[1]), ["save image/png", "save image/png", "put lab", "save image/png", "put down"]);
+});
+
+test("the pictures a reply names, each once, and taking one out", () => {
+  const a = "/cache-here/claude-widget/images/a.png";
+  const text = `look [Image: ${a}] and [Image: /x/b.jpg] again [Image: ${a}]`;
+  assert.deepEqual(picturesIn(text), [a, "/x/b.jpg"]);
+  assert.equal(withoutPicture(text, a), "look and [Image: /x/b.jpg] again ");
 });

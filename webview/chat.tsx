@@ -6,7 +6,7 @@
 
 import { render } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { routeHint, testsText, TEXT_SCALES, type Conversation, type PaneChat, type PaneHostMessage, type PaneItem, type PaneMessage, type ReviewAnswer } from "../src/shared/pane";
+import { picturesIn, PICTURE_TYPES, routeHint, testsText, TEXT_SCALES, withoutPicture, type Conversation, type PaneChat, type PaneHostMessage, type PaneItem, type PaneMessage, type ReviewAnswer } from "../src/shared/pane";
 import { AskBox, Diff } from "./components/AskBox";
 import type { Answers, Decision } from "../src/shared/types";
 import { Tag } from "./components/Tag";
@@ -107,6 +107,38 @@ function ChatApp() {
   const [scale, setScale] = useState(config.scale ?? 1.15);
   const list = useRef<HTMLDivElement>(null);
   const follow = useRef(true);
+  const reply = useRef<HTMLTextAreaElement>(null);
+
+  // Pictures pasted into the reply: saved by the extension (an SSH host's chat
+  // gets a copy there once you say so), then named in it as [Image: path]
+  const [thumbs, setThumbs] = useState<Record<string, string>>({}); // path -> the picture, to show
+  const [offer, setOffer] = useState<{ id: string; mime: string; data: string; url: string; at: number } | null>(null);
+  const [saving, setSaving] = useState(0);
+  const pending = useRef<Record<string, { at: number; url: string }>>({});
+  const pasted = (e: ClipboardEvent) => {
+    const items = [...(e.clipboardData?.items ?? [])];
+    const file = items.find((i) => i.kind === "file" && i.type.startsWith("image/"))?.getAsFile();
+    if (!file || e.clipboardData?.getData("text/plain")) return; // (text pastes as text)
+    e.preventDefault();
+    if (!PICTURE_TYPES.includes(file.type)) {
+      setInfo({ ok: false, message: "Claude takes PNG, JPEG, WebP and GIF pictures" });
+      return;
+    }
+    const at = reply.current?.selectionStart ?? text.length;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = String(reader.result);
+      const picture = { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, mime: file.type, data: url.slice(url.indexOf(",") + 1), url, at };
+      if (chat?.host) setOffer(picture);
+      else savePicture(picture);
+    };
+    reader.readAsDataURL(file);
+  };
+  const savePicture = (p: { id: string; mime: string; data: string; url: string; at: number }) => {
+    pending.current[p.id] = { at: p.at, url: p.url };
+    setSaving((n) => n + 1);
+    post({ type: "picture", id: p.id, mime: p.mime, data: p.data });
+  };
 
   // A− / A+ and Ctrl+wheel: the text size, kept in claudeStatus.chatTextScale
   const zoom = (step: number) => {
@@ -123,6 +155,20 @@ function ChatApp() {
       if (!m || typeof m !== "object") return;
       if (m.type === "chat") setChat(m.chat);
       else if (m.type === "textSize") setScale(m.scale);
+      else if (m.type === "picture") {
+        const p = pending.current[m.id];
+        delete pending.current[m.id];
+        setSaving((n) => Math.max(0, n - 1));
+        if (!m.path) setInfo({ ok: false, message: m.error || "Couldn't save the picture" });
+        else if (p) {
+          setThumbs((t) => ({ ...t, [m.path]: p.url }));
+          setText((t) => {
+            const at = Math.min(p.at, t.length);
+            return t.slice(0, at) + (at > 0 && t.charAt(at - 1).trim() ? " " : "") + `[Image: ${m.path}] ` + t.slice(at);
+          });
+          reply.current?.focus();
+        }
+      }
       else if (m.type === "conversation") {
         const a: Conversation = m.answer;
         if (!a.ok) setLoadError(a.message || "Can't read this chat");
@@ -314,9 +360,11 @@ function ChatApp() {
           <textarea
             class="pane-reply"
             rows={3}
-            placeholder={chat?.permission ? "It's asking you something: answer that first" : "Reply to Claude… (Enter sends, Shift+Enter: new line)"}
+            ref={reply}
+            placeholder={chat?.permission ? "It's asking you something: answer that first" : "Reply to Claude… (Enter sends, Shift+Enter: new line, Ctrl+V: a picture too)"}
             value={text}
             onInput={(e) => setText((e.target as HTMLTextAreaElement).value)}
+            onPaste={pasted}
             onKeyDown={(e) => {
               // Enter sends, as in Claude's own prompt (Shift+Enter: a new line). For a
               // terminal that takes no text from outside, the first Enter asks how.
@@ -327,6 +375,27 @@ function ChatApp() {
             }}
           />
           </div>
+          {picturesIn(text).length ? (
+            <div class="pane-pictures">
+              {picturesIn(text).map((path) => (
+                <span key={path} class="pane-picture" title={`A picture for Claude\n${chat?.host ? `${path}, on ${chat.host}` : path}`}>
+                  {thumbs[path] ? <img src={thumbs[path]} alt="" /> : <span class="pane-picture-name">{path.split("/").pop()}</span>}
+                  <button type="button" class="pane-picture-x" title="Take it out of your reply" onClick={() => setText((t) => withoutPicture(t, path))}>
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : null}
+          {offer ? (
+            <div class="confirm pane-offer">
+              <img src={offer.url} alt="" />
+              <span>Copy this picture to {chat?.host}? Claude there can only open it there.</span>
+              <button type="button" class="btn small" onClick={() => { savePicture(offer); setOffer(null); }}>Copy</button>
+              <button type="button" class="btn secondary small" onClick={() => setOffer(null)}>Cancel</button>
+            </div>
+          ) : null}
+          {saving ? <div class="pane-hint">{chat?.host ? `Copying the picture to ${chat.host}…` : "Saving the picture…"}</div> : null}
           <div class="pane-hint">{chat ? routeHint(chat.route, chat.state !== "done" || !!chat.busy, "", chat.host) : ""}</div>
           <div class="pane-buttons">
             {terminal ? (

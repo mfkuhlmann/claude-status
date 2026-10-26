@@ -10,6 +10,7 @@ export const recorded = {
   uriHandlers: [] as unknown[],
   statusBarItems: [] as { text: string; tooltip: unknown; backgroundColor: unknown; show(): void; dispose(): void }[],
   messages: [] as string[],
+  panels: [] as { sent: unknown[]; receive(m: unknown): void }[],
 };
 
 // settings a test sets (key -> value); the rest read as their defaults
@@ -55,6 +56,32 @@ export const window = {
     recorded.uriHandlers.push(handler);
     return disposable();
   },
+  // an editor tab with a page: what the page is sent, and a way to send it
+  // what a page would (panel.receive)
+  createWebviewPanel: () => {
+    const sent: unknown[] = [];
+    let onMessage: (m: unknown) => void = () => undefined;
+    const panel = {
+      title: "",
+      iconPath: undefined as unknown,
+      visible: false,
+      sent,
+      receive: (m: unknown) => onMessage(m),
+      webview: {
+        html: "",
+        cspSource: "vscode-webview:",
+        asWebviewUri: (u: unknown) => u,
+        postMessage: async (m: unknown) => (sent.push(m), true),
+        onDidReceiveMessage: (l: (m: unknown) => void) => ((onMessage = l), disposable()),
+      },
+      onDidChangeViewState: disposable,
+      onDidDispose: disposable,
+      reveal() {},
+      dispose() {},
+    };
+    recorded.panels.push(panel);
+    return panel;
+  },
   showTextDocument: async () => undefined,
   showInformationMessage: async (m: string) => void recorded.messages.push(m),
   showWarningMessage: async (m: string) => void recorded.messages.push(m),
@@ -87,6 +114,10 @@ export const env = {
   openExternal: async () => true,
   clipboard: { writeText: async (text: string) => void clipboardWrites.push(text), readText: async () => clipboardWrites.at(-1) ?? "" },
 };
+
+export enum ViewColumn {
+  Active = -1,
+}
 
 export enum ConfigurationTarget {
   Global = 1,

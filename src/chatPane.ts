@@ -16,7 +16,7 @@ import { openComparison } from "./changes";
 import { configDirArgs } from "./config";
 import type { Dashboard } from "./dashboard";
 import { chatRefOf, recentRef, stateText } from "./shared/model";
-import { answersOf, queuedReply, reviewPending, textScale, type PaneChat, type PaneHostMessage, type PaneMessage } from "./shared/pane";
+import { answersOf, PICTURE_TYPES, queuedReply, reviewPending, textScale, type PaneChat, type PaneHostMessage, type PaneMessage } from "./shared/pane";
 import type { Answers, ChatRef, Decision, RecentChat, Session, ViewState } from "./shared/types";
 import { localAncestors, type Terminals } from "./terminals";
 
@@ -363,6 +363,19 @@ class Pane implements vscode.Disposable {
         await vscode.env.clipboard.writeText(m.text);
         this.result("copy", { ok: true, message: "Copied" });
         break;
+      case "picture": {
+        // saved where the widget keeps pasted pictures; an SSH host's chat gets a copy there
+        // (the tab asked you first)
+        if (typeof m.id !== "string" || typeof m.data !== "string" || !PICTURE_TYPES.includes(m.mime)) {
+          this.post({ type: "picture", id: String(m.id ?? ""), path: "", error: "Claude takes PNG, JPEG, WebP and GIF pictures" });
+          break;
+        }
+        const saved = await backend.saveImage(m.mime, m.data);
+        const there = saved.path && this.host ? await backend.putImage(this.host, saved.path) : saved;
+        this.post({ type: "picture", id: m.id, path: there.path ?? "",
+                    error: there.path ? "" : this.host && saved.path ? `Couldn't copy the picture to ${this.host}: ${there.message}` : there.message });
+        break;
+      }
       case "textSize":
         if (typeof m.scale === "number" && Number.isFinite(m.scale))
           await vscode.workspace.getConfiguration("claudeStatus").update("chatTextScale", textScale(m.scale), vscode.ConfigurationTarget.Global);
