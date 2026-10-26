@@ -91,7 +91,7 @@ def lines_changed(name, inp, response):
 
 def first_line(text, limit=SAID):
     for line in (text or "").splitlines():
-        line = line.replace("**", "").strip().lstrip("#*>-| ").strip()
+        line = line.replace("**", "").replace("`", "").strip().lstrip("#*>-| ").strip()
         if line:
             return short(line, limit)
     return ""
@@ -109,12 +109,17 @@ def fold(view, event, now):
     agents = [a for a in view.get("agents") or [] if isinstance(a, dict)]
 
     def step_of(create):
+        text = describe(tool, inp)
         for s in steps:
             if tid and s.get("id") == tid:
                 return s
+        if not tid:  # (a permission request names no tool call: the newest open one of that tool and input)
+            for s in reversed(steps):
+                if s.get("end") is None and s.get("tool") == tool and s.get("text") == text and not s.get("agent"):
+                    return s
         if not create:
             return None
-        s = {"id": tid, "tool": tool, "text": describe(tool, inp), "at": now, "end": None, "ok": None}
+        s = {"id": tid, "tool": tool, "text": text, "at": now, "end": None, "ok": None}
         if agent:
             s["agent"] = next((a.get("type") for a in agents if a.get("id") == agent), None) or "agent"
         steps.append(s)

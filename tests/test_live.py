@@ -78,17 +78,19 @@ class LiveHookTests(HookFixture):
         self.assertTrue(v["steps"][0]["ok"])
         self.assertIsNotNone(v["steps"][0]["end"])
         self.assertNotIn("add", v["steps"][0])  # (not an edit)
-        v = self.hook(event("PreToolUse", **EDIT), event("PermissionRequest", permission_suggestions=[], **EDIT))
+        # (a permission request names no tool call, as Claude Code 2.1.310 sends it)
+        asked = {k: val for k, val in EDIT.items() if k != "tool_use_id"}
+        v = self.hook(event("PreToolUse", **EDIT), event("PermissionRequest", permission_suggestions=[], **asked))
         self.assertEqual((v["state"], v["asks"], v["doing"]), ("waiting", "permission", "Edit: parser.py"))
-        self.assertEqual(len(v["steps"]), 2)  # (the request is the same step)
+        self.assertEqual([s["id"] for s in v["steps"]], ["toolu_b", "toolu_e"])  # (the request is the same step)
         v = self.hook(event("Notification", message="Claude needs your permission", notification_type="permission_prompt"))
         self.assertEqual((v["state"], v["asks"]), ("waiting", "permission"))
         v = self.hook(event("PostToolUse", tool_response=EDITED, **EDIT))
         self.assertEqual((v["state"], v["asks"]), ("working", None))  # (allowed: it ran)
         self.assertEqual((v["steps"][1]["text"], v["steps"][1]["add"], v["steps"][1]["del"]), ("Edit: parser.py", 2, 1))
-        v = self.hook(event("Stop", stop_hook_active=False, last_assistant_message="**Done.** The parser\nworks now.",
+        v = self.hook(event("Stop", stop_hook_active=False, last_assistant_message="**Done.** `parse` in\nworks now.",
                             background_tasks=[], session_crons=[]))
-        self.assertEqual((v["state"], v["doing"], v["said"]), ("idle", "", "Done. The parser"))
+        self.assertEqual((v["state"], v["doing"], v["said"]), ("idle", "", "Done. parse in"))
         v = self.hook(event("SessionEnd", reason="prompt_input_exit"))
         self.assertEqual((v["state"], v["pid"]), ("ended", os.getpid()))  # (Claude is gone by then: its pid stays)
 
