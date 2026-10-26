@@ -245,20 +245,36 @@ Window {
     }
     property var runs: ({})
     property bool loading: false
+    property bool loadAgain: false   // (something changed while it was read: read it again then)
 
     function load() {
-        if (loading || !chatId)
+        if (!chatId)
             return
+        if (loading) {
+            loadAgain = true
+            return
+        }
         loading = true
         run("conversation", "--conversation " + root.shellQuote(chatId) + " --limit " + limit
             + (stamp ? " --if-changed " + root.shellQuote(stamp) : "") + paneArgs())
     }
 
+    // Live (hub/Hub.qml): with the live hook, the conversation is read the
+    // moment the chat does a step or changes state, and the timer is only
+    // there for what comes without one (a long reply being written)
+    readonly property bool followsLive: !host && root.watching && root.liveHook
     Timer {
-        interval: pane.host ? 5000 : 1500
+        interval: pane.host || pane.followsLive ? 5000 : 1500
         running: pane.visible && pane.chatId !== ""
         repeat: true
         onTriggered: pane.load()
+    }
+    Connections {
+        target: Hub
+        function onLive(views) {
+            if (pane.visible && !pane.host && pane.sessionId && views.some(v => v.sessionId === pane.sessionId))
+                pane.load()
+        }
     }
 
     // The items in place (by key): rows keep their state, the list its position
@@ -314,11 +330,20 @@ Window {
         settle.left = 10
         settle.restart()
     }
-    onChatStateChanged: if (loaded && nearEnd()) keepEnd()   // (the working line comes or goes)
+    onChatStateChanged: {
+        if (visible)
+            load()   // (its turn began or ended, it asks something: the conversation now)
+        if (loaded && nearEnd())
+            keepEnd()   // (the working line comes or goes)
+    }
 
     function handle(kind, result) {
         if (kind === "conversation") {
             loading = false
+            if (loadAgain) {
+                loadAgain = false
+                Qt.callLater(load)
+            }
             if (!result.ok) {
                 loadError = result.message || i18n("Can't read this chat")
                 return
@@ -729,7 +754,7 @@ Window {
                                 Layout.fillWidth: true
                                 // (what it's doing, unless that's the tool call just above)
                                 readonly property bool toolAbove: items.count > 0 && items.get(items.count - 1).status === "open"
-                                readonly property string activity: pane.row && pane.row.peek && pane.row.peek.activity ? pane.row.peek.activity.replace(/[….\s]+$/, "") : ""
+                                readonly property string activity: pane.row ? root.doingText(pane.row, pane.host).replace(/[….\s]+$/, "") : ""
                                 text: (activity && !toolAbove ? activity : i18n("Working")) + "…"
                                 elide: Text.ElideRight
                                 color: pane.claudeColor

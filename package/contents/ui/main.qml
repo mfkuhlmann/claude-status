@@ -42,7 +42,7 @@ PlasmoidItem {
                                            detail: "", since: null, startedAt: null, context: null, model: null,
                                            costUsd: null, agents: null, shared: null, effort: null, tmux: false,
                                            peek: null, changes: null, tasks: null, stats: null, plan: null, stopped: null,
-                                           overlaps: null })
+                                           overlaps: null, live: null })
     readonly property var emptyFound: ({ key: "", sessionId: "", name: "", cwd: "", cwdShort: "", lastActive: 0, profile: "",
                                          profileDir: "", groupId: "", account: "", shared: false, match: "", openCommand: "" })
     readonly property var emptyPlan: ({ key: "", slug: "", title: "", path: "", profileDir: "", profile: "", updatedAt: 0,
@@ -920,13 +920,123 @@ PlasmoidItem {
     // does the same (logic.js).
     readonly property bool quiet: status !== null && overall === "none" && !root.dashboardShown
     readonly property int pollMs: Math.max(1000, Plasmoid.configuration.pollInterval)
-    readonly property int checkInterval: quiet ? Math.max(pollMs, Plasmoid.configuration.idlePollInterval) : pollMs
+    // Live (hub/Hub.qml runs live.py --wait): a chat that starts, ends,
+    // waits or finishes its turn is checked the moment its session file
+    // changes, so the checks in between can be rarer. While a chat works:
+    // every pollInterval, as its steps come from the checks; with the live
+    // hook (live mode) they come as they happen, so every liveWorkingMs.
+    // Else every liveRestingMs.
+    readonly property bool watching: Hub.liveHealthy
+    readonly property bool liveHook: status !== null && status.liveHook === true
+    readonly property int liveWorkingMs: 6000
+    readonly property int liveRestingMs: 20000
+    readonly property int checkInterval: quiet ? Math.max(pollMs, Plasmoid.configuration.idlePollInterval, watching ? liveRestingMs : 0)
+                                         : !watching ? pollMs
+                                         : status !== null && status.counts.working > 0 ? (liveHook ? Math.max(pollMs, liveWorkingMs) : pollMs)
+                                         : Math.max(pollMs, liveRestingMs)
 
     // The checks come from hub/Hub.qml, as often as the most eager copy
     // wants them (an open popup: pollInterval)
     onCommandChanged: Hub.want(instanceId, "status", command, checkInterval, true)
     onCheckIntervalChanged: Hub.want(instanceId, "status", command, checkInterval, true)
+    onLiveCommandChanged: Hub.wantLive(instanceId, liveCommand)
     Component.onDestruction: Hub.drop(instanceId)
+    readonly property string liveCommand: "python3 -I " + shellQuote(codeDir + "live.py") + " --wait" + configDirArgs
+
+    // Between checks the clock goes on (the times shown), as it did with a check every pollInterval
+    Timer {
+        interval: root.pollMs
+        repeat: true
+        running: root.watching && root.dashboardShown && root.checkInterval > root.pollMs
+        onTriggered: root.now = Date.now()
+    }
+
+    // ---------------------------------------------------------------- live mode
+    // What each running chat of this computer does now, step by step, from
+    // the live hook (live_hook.py): its row's "live" at each check, and in
+    // between what live.py hands on (Hub.live). sessionId -> the newest view.
+    property var liveViews: ({})
+
+    Connections {
+        target: Hub
+        function onLive(views) {
+            root.noteLive(views)
+        }
+    }
+
+    function noteLive(views) {
+        let next = null
+        for (const v of views) {
+            const old = liveViews[v.sessionId]
+            if (!v.sessionId || (old && (old.at || 0) >= (v.at || 0)))
+                continue
+            next = next || Object.assign({}, liveViews)
+            if (v.state === "ended")
+                delete next[v.sessionId]
+            else
+                next[v.sessionId] = v
+        }
+        if (next)
+            liveViews = next
+    }
+
+    // At each check: the rows' views (kept only for the chats listed)
+    function liveFromRows(groupList) {
+        const next = {}
+        let changed = false
+        for (const g of groupList) {
+            for (const s of g.sessions) {
+                if (!s.pid)
+                    continue
+                const mine = liveViews[s.sessionId]
+                const row = s.live ? Object.assign({ sessionId: s.sessionId, pid: s.pid }, s.live) : null
+                const best = mine && (!row || (mine.at || 0) >= (row.at || 0)) ? mine : row
+                if (best) {
+                    next[s.sessionId] = best
+                    changed = changed || best !== mine
+                }
+            }
+        }
+        if (changed || Object.keys(next).length !== Object.keys(liveViews).length)
+            liveViews = next
+    }
+
+    // A running chat's live view (of this computer), or null
+    function liveOf(s) {
+        const v = s && s.pid ? liveViews[s.sessionId] : null
+        return v && (!v.pid || v.pid === s.pid) ? v : null
+    }
+
+    // What a working chat does now: its live step when that's newer than
+    // what the last check read from its transcript (an edit with the lines
+    // it added and removed: "Edit: parser.py +12 −3")
+    function doingText(s, host) {
+        const v = host ? null : liveOf(s)
+        const peek = s.peek || null
+        if (v && v.doing && (v.at || 0) >= ((peek && peek.at) || 0)) {
+            const steps = (v.steps || []).filter(st => !st.agent)
+            const last = steps.length ? steps[steps.length - 1] : null
+            const counts = last && last.text === v.doing && (last.add || last.del)
+                         ? " +" + (last.add || 0) + " −" + (last.del || 0) : ""
+            return v.doing + counts
+        }
+        return peek && peek.activity ? peek.activity : ""
+    }
+
+    // The hero's ticker (Ticker.qml): what each working chat does now
+    readonly property var tickerItems: {
+        const out = []
+        for (const g of allGroups) {
+            for (const s of g.sessions) {
+                if (s.state !== "working")
+                    continue
+                const text = doingText(s, g.host || "")
+                if (text)
+                    out.push({ key: petKeyOf(s, g.host || ""), name: s.name, text: text, host: g.host || "", session: s })
+            }
+        }
+        return out
+    }
 
     function refresh() {
         Hub.refresh(command)
@@ -965,6 +1075,7 @@ PlasmoidItem {
         lastOutputKey = key
         lastFullUpdate = Date.now()
         now = parsed.generatedAt
+        liveFromRows(parsed.groups)
         status = parsed   // first: whether this copy notifies
         trackTransitions("", parsed.groups, parsed.generatedAt, "")
         trackLimitStops("", parsed.groups, "")
@@ -1536,6 +1647,7 @@ PlasmoidItem {
     Component.onCompleted: {
         loadHosts()
         Hub.want(instanceId, "status", command, checkInterval, true)
+        Hub.wantLive(instanceId, liveCommand)
         wantHosts()
     }
 

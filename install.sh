@@ -293,13 +293,16 @@ mapfile -t statuslines < <(find_statuslines)
 
 # The permission hook (pane.py --relay status|on|off): with it, the widget's
 # rows, chat pane and notifications can answer Claude's permission prompts.
-# Prints what happened; "status" prints True or False.
-relay() {
-  python3 -I "$here/package/contents/code/pane.py" --relay "$1" 2>/dev/null \
+# The live hook (pane.py --live status|on|off): live mode, each step of each
+# chat as it happens. Prints what happened; "status" prints True or False.
+hook() {
+  python3 -I "$here/package/contents/code/pane.py" "--$1" "$2" 2>/dev/null \
     | python3 -I -c 'import json, sys
 a = json.load(sys.stdin)
 print(a["on"] if "on" in a else a.get("message") or "")' 2>/dev/null || true
 }
+relay() { hook relay "$1"; }
+live() { hook live "$1"; }
 
 if [ "$uninstall" = 1 ]; then
   if [ "$target" = gnome ]; then
@@ -319,8 +322,10 @@ if [ "$uninstall" = 1 ]; then
     for statusline in "${statuslines[@]}"; do
       [ -f "$statusline" ] && grep -qF "$marker_start" "$statusline" && apply_statusline remove
     done
-    # (the permission hook too: nothing would answer what it hands on)
+    # (the permission hook too: nothing would answer what it hands on; and
+    # the live hook: nothing would read what it notes)
     relay off
+    live off
   fi
   echo "Uninstalled. Cached data is in ${XDG_CACHE_HOME:-$HOME/.cache}/claude-widget (safe to delete)."
   exit 0
@@ -362,6 +367,18 @@ if [ "$target" = plasma ]; then
     relay on
   else
     echo "Skipped the permission hook: the widget's settings can turn it on (Answer permission prompts from the widget)."
+  fi
+fi
+
+# 4. Live mode (opt-in): each step of each chat as it happens
+if [ "$target" = plasma ]; then
+  if [ "$(live status)" = True ]; then
+    live on >/dev/null  # (its copy brought up to date)
+    echo "Live mode is on: chats show each step as it happens (the hook is up to date)."
+  elif confirm "Show each step of your chats as it happens (live mode)? (adds a hook to each Claude profile's settings.json that Claude doesn't wait for; the widget's settings turn it off)"; then
+    live on
+  else
+    echo "Skipped live mode: the widget's settings can turn it on (Live mode: show each step as it happens)."
   fi
 fi
 

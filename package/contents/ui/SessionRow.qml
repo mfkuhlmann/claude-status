@@ -71,8 +71,9 @@ RowLayout {
     readonly property bool resting: session.state === "idle" || (session.state === "done" && !session.detail)
     readonly property bool showsRecap: resting && !stopped && summary !== null
     readonly property bool showsReply: resting && !stopped && !showsRecap && !!peek && peek.replyLine !== ""
+    readonly property string doing: session.state === "working" ? root.doingText(session, remoteHost) : ""
     readonly property string stepText: session.state === "working"
-                                       ? (peek && peek.activity ? peek.activity : tasks && tasks.current ? tasks.current : "")
+                                       ? (doing ? doing : tasks && tasks.current ? tasks.current : "")
                                        : session.state === "waiting" ? (session.detail || (peek ? peek.activity : ""))
                                        : stopped ? root.stopText(stopped)
                                        : session.state === "done" && session.detail ? session.detail

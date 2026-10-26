@@ -24,17 +24,22 @@ QtObject {
     property var running: ({})       // full command line -> command
     property var lastStart: ({})     // command -> ms
     property var lastOutput: ({})    // command -> {stdout, stderr}
+    property var again: ({})         // command -> true: run it again once it's done (something changed meanwhile)
 
     signal output(string command, string stdout, string stderr)
     signal started(string command)   // (an SSH host shows "connecting…" meanwhile)
+    // What the chats do right now, between checks (live.py's answer: the live hook's files that changed)
+    signal live(var views)
 
     // named: the status check, which says which copy asks (--instance)
     function want(id, key, command, interval, named) {
         const copy = copies[id] || (copies[id] = { since: Date.now(), wants: {} })
         const known = copy.wants[key]
         copy.wants[key] = { command: command, interval: interval, named: !!named }
-        if (!instanceName)
+        if (!instanceName) {
             instanceName = id
+            runLive()
+        }
         update()
         if (known && known.command === command)
             return
@@ -57,11 +62,100 @@ QtObject {
         if (!(id in copies))
             return
         delete copies[id]
+        delete liveWanted[id]
         update()
+        pickLive()
     }
 
     function refresh(command) {
         run(command)
+    }
+
+    // ---------------------------------------------------------------- live
+    // One watcher for all copies (live.py --wait): it answers the moment a
+    // chat starts, ends, works, waits or finishes its turn (its session file
+    // changes: the status is checked at once) or does a step (the live
+    // hook's files), then runs again. While it answers, the copies check the
+    // status less often (liveHealthy). Its command line stays the same from
+    // run to run (--as: what it told the last run is kept in the live folder).
+    property var liveWanted: ({})     // copy id -> its live.py command
+    property string liveCommand: ""   // the one that runs: the longest-running copy's
+    property bool liveRunning: false
+    property bool liveHealthy: false
+    property int liveFailures: 0
+
+    function wantLive(id, command) {
+        if (liveWanted[id] === command)
+            return
+        liveWanted[id] = command
+        pickLive()
+    }
+
+    function pickLive() {
+        let best = "", since = 0
+        for (const id in liveWanted) {
+            const c = copies[id]
+            const at = c ? c.since : Date.now()
+            if (!best || at < since) {
+                best = liveWanted[id]
+                since = at
+            }
+        }
+        liveCommand = best
+        if (!best)
+            liveHealthy = false
+        runLive()
+    }
+
+    function runLive() {
+        if (!liveCommand || liveRunning || liveRetry.running || !instanceName)
+            return
+        liveRunning = true
+        liveRunner.connectSource(liveCommand + " --as " + shellQuote(instanceName))
+    }
+
+    // Each status check of the copies now; one that runs is run again when it's done
+    function checkNow() {
+        const done = {}
+        for (const id in copies) {
+            const w = copies[id].wants["status"]
+            if (w && !done[w.command]) {
+                done[w.command] = true
+                run(w.command, true)
+            }
+        }
+    }
+
+    property Exec liveRunner: Exec {
+        onNewData: (source, data) => {
+            disconnectSource(source)
+            hub.liveRunning = false
+            let answer = null
+            try {
+                answer = JSON.parse(data["stdout"])
+            } catch (e) {
+            }
+            if (!answer || !answer.ok) {
+                // (three in a row: the copies go back to checking as often as before; it tries again in a minute)
+                hub.liveFailures += 1
+                if (hub.liveFailures >= 3)
+                    hub.liveHealthy = false
+                liveRetry.interval = hub.liveFailures >= 3 ? 60000 : 5000
+                liveRetry.restart()
+                return
+            }
+            hub.liveFailures = 0
+            hub.liveHealthy = true
+            if (answer.sessions || answer.urgent)
+                hub.checkNow()
+            if (answer.live && answer.live.length)
+                hub.live(answer.live)
+            Qt.callLater(hub.runLive)
+        }
+    }
+
+    property Timer liveRetry: Timer {
+        onTriggered: hub.runLive()
     }
 
     function wantsOf(command) {
@@ -110,10 +204,16 @@ QtObject {
         return "'" + String(s).replace(/'/g, "'\\''") + "'"
     }
 
-    function run(command) {
-        for (const line in running)
-            if (running[line] === command)
+    // urgent: a chat changed meanwhile: a check that's running now may have
+    // read it as it was, so it runs again once it's done
+    function run(command, urgent) {
+        for (const line in running) {
+            if (running[line] === command) {
+                if (urgent)
+                    again[command] = true
                 return   // a still-running check: don't stack another
+            }
+        }
         const named = wantsOf(command).some(w => w.named)
         const line = named ? command + " --instance " + shellQuote(instanceName) + " --interval-ms " + (intervalFor(command) || 2000)
                            : command
@@ -148,6 +248,11 @@ QtObject {
             if (hub.intervalFor(command))   // still wanted
                 hub.lastOutput[command] = answer
             hub.output(command, answer.stdout, answer.stderr)
+            if (hub.again[command]) {
+                delete hub.again[command]
+                if (hub.intervalFor(command))
+                    hub.run(command)
+            }
         }
     }
 }

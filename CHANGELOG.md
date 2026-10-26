@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **Chats change the moment they do:** the widget looked at your chats every 2 seconds, so a chat that started, waited for you or finished showed up to 2 seconds late, and each look cost a little, also while nothing happened. Now it watches Claude's session files: a chat that starts, ends, starts working, asks for something or finishes its turn is checked at once (also when you answer or interrupt it in its terminal), with its pet, notification and sound. In between it looks far less often: every 20 seconds while no chat works, so idle chats on an open dashboard cost much less. On the Plasma widget and in the VS Code extension.
+- **Live mode:** each step of each chat as it happens: its row says what it does right now (*Edit: parser.py +12 −3*, *Bash: pytest*), and its pane reads the conversation again at each step. Turn it on in the settings (*Live mode: show each step as it happens*) or when `install.sh` asks: it adds a hook to each Claude profile's `settings.json` that notes each event of a chat in `~/.cache/claude-widget/live` (Claude doesn't wait for it). Then the widget checks the rest every 6 seconds while chats work. On the Plasma widget and in the VS Code extension.
+- **What the chats do now, under the big Talpa:** one line with the step a working chat does right now, taking turns between the chats at work (a chat that did something new goes first). Click it for that chat's pane. On the Plasma widget and in the VS Code extension.
+
 ## 1.15.2 (2026-10-26)
 
 - **Plasma no longer slows down the longer it runs:** each command the widget ran (its checks, the chat pane's updates, a click) cost Plasma's shell a little more than the one before, in every copy of the widget, so after a few hours the panel, the desktop and the chat pane froze for a moment now and then, and the whole computer felt slow. Now each command costs the same, however long Plasma has been running (Plasma).

@@ -529,6 +529,7 @@ def make_session(profile, home, *, sid, pid, name, cwd, kind, entrypoint, state,
         "reply": "background",  # how it takes a message from the chat pane (reply_route)
         "review": None,  # a chat that changed files: {"editedAt", "tests"} (TestsCache.review)
         "permission": None,  # what it asks while it waits for a permission (note_permissions)
+        "live": None,  # what it does now, step by step, from the live hook (note_live)
     }
 
 
@@ -2294,6 +2295,43 @@ def note_permissions(groups, ctx, requests):
 
 QUESTION_WAIT = "input needed"  # (also an MCP server's question: only AskUserQuestion's count)
 PERMISSION_WAITS = ("permission prompt", QUESTION_WAIT)
+
+
+# ---------------------------------------------------------------- live mode
+#
+# The live hook (live_hook.py, which pane.py --live on puts in Claude's
+# settings) folds each chat's events into its live file,
+# ~/.cache/claude-widget/live/<session id>.json, as they happen: what the
+# chat does now, its last steps, its running subagents, what it said last.
+# A running chat's row carries it ("live"), and the widget follows the files
+# between two checks (live.py --wait; the VS Code extension: fs.watch).
+
+LIVE = "live"
+LIVE_HOOK_FILE = "live-hook.py"
+LIVE_FIELDS = ("state", "doing", "asks", "at", "turnAt", "steps", "agents", "said", "saidAt", "failed")
+
+
+def live_hook_on(home):
+    """Whether the live hook is on (pane.py --live on keeps its copy here)."""
+    data = Path(os.environ.get("XDG_DATA_HOME") or home / ".local" / "share")
+    return (data / "claude-widget" / LIVE_HOOK_FILE).is_file()
+
+
+def live_view(cache_root, sid, pid):
+    """A running chat's live file as its row carries it, or None (none, or
+    another process's: the chat went on in another one)."""
+    if not valid_id(sid or "") or not pid:
+        return None
+    view = read_json(cache_root / LIVE / (sid + ".json"))
+    if not isinstance(view, dict) or view.get("state") == "ended" or view.get("pid") not in (None, pid):
+        return None
+    return {k: view.get(k) for k in LIVE_FIELDS}
+
+
+def note_live(groups, cache_root):
+    for g in groups:
+        for s in g["sessions"]:
+            s["live"] = live_view(cache_root, s["sessionId"], s["pid"])
 
 
 def reply_route(row):
@@ -6181,6 +6219,10 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
     except Exception as exc:
         errors.append(f"permission prompts: {exc}")
     try:
+        note_live(groups, cache_root)
+    except Exception as exc:
+        errors.append(f"live mode: {exc}")
+    try:
         if starred is None:
             starred = starred_of(load_stars(cache_root))
     except Exception as exc:
@@ -6253,6 +6295,7 @@ def collect(home, cache_root, extra_dirs=(), with_tokens=True, now=None, keep_do
         "canShare": True,  # jump.py shares chats between this computer's profiles (sharing.py)
         "reviewed": load_reviewed(cache_root),  # {review_key: when}: chats marked reviewed (pane.py --reviewed)
         "reviewedSince": reviewed_since(cache_root, now_ms),  # (what chats changed before isn't to review)
+        "liveHook": live_hook_on(home),  # rows' "live" follow each step (the widget then checks less often)
         "errors": errors,
     }
 

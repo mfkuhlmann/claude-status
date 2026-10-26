@@ -198,6 +198,36 @@ KCM.SimpleKCM {
             runRelay([on ? "on" : "off", "--host", host])
     }
 
+    // Live mode (pane.py --live status|on|off): the live hook in Claude's
+    // own settings, so it changes at once (not with Apply)
+    property var liveHook: null       // {on, some, settings}
+    property string liveMessage: ""
+
+    Exec {
+        id: liveHelper
+        onNewData: (source, data) => {
+            disconnectSource(source)
+            let result = null
+            try {
+                result = JSON.parse(data["stdout"])
+            } catch (e) {
+                page.liveMessage = i18n("Couldn't ask about live mode")
+                return
+            }
+            if (result.on !== undefined) {
+                page.liveHook = result
+            } else {
+                page.liveMessage = result.message || ""
+                page.runLive(["status"])
+            }
+        }
+    }
+
+    function runLive(args) {
+        const q = s => "'" + String(s).replace(/'/g, "'\\''") + "'"
+        liveHelper.connectSource("python3 -I " + q(codeDir + "pane.py") + " --live " + args.map(q).join(" ") + " # " + Date.now())
+    }
+
     function runHistory(args) {
         const q = s => "'" + String(s).replace(/'/g, "'\\''") + "'"
         historyHelper.connectSource("python3 -I " + q(codeDir + "week.py") + " " + args.map(q).join(" ") + " # " + Date.now())
@@ -212,6 +242,7 @@ KCM.SimpleKCM {
         phoneHelper.connectSource(jumpCommand(["--phone-devices"]))
         runHistory(["--history-status"])
         runRelay(["status"])
+        runLive(["status"])
     }
 
     function play(sound) {
@@ -288,6 +319,23 @@ KCM.SimpleKCM {
             opacity: 0.7
             text: (page.relayMessage ? page.relayMessage + "\n" : "")
                   + i18n("Adds a hook to each Claude profile's settings.json (and on the SSH hosts shown): a chat that asks for a permission shows Allow once, Always allow and Deny in its row, its pane and its notification, and Claude's questions show their choices there to answer. Claude still asks in the chat too; the first answer counts. Permission prompts of chats in tmux can be answered without it. Applies at once.")
+        }
+
+        QQC2.CheckBox {
+            id: liveBox
+            text: i18n("Live mode: show each step as it happens")
+            checked: page.liveHook !== null && page.liveHook.on
+            enabled: page.liveHook !== null
+            onToggled: page.runLive([checked ? "on" : "off"])
+        }
+
+        QQC2.Label {
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 20
+            wrapMode: Text.Wrap
+            font: Kirigami.Theme.smallFont
+            opacity: 0.7
+            text: (page.liveMessage ? page.liveMessage + "\n" : "")
+                  + i18n("Adds a hook to each Claude profile's settings.json that notes each step of each chat as it happens (Claude doesn't wait for it): rows, the chat pane and the line under the big Talpa follow every tool call at once, and the widget checks the rest less often. Without it, a chat that starts, waits or finishes still shows at once; its steps show at each check. Applies at once.")
         }
 
         QQC2.CheckBox {
