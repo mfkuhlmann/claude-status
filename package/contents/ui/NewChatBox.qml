@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
+import QtQuick.Templates as T
 import org.kde.plasma.components as PlasmaComponents3
 import org.kde.plasma.core as PlasmaCore
 import org.kde.plasma.plasmoid
@@ -63,6 +64,24 @@ Rectangle {
             if (box.visible && taskField.text !== root.taskText)
                 taskField.text = root.taskText
         }
+        function onImagePasted(path) {
+            if (!box.visible)
+                return
+            const at = taskField.cursorPosition
+            taskField.insert(at, (at > 0 && taskField.text.charAt(at - 1).trim() !== "" ? " " : "") + "[Image: " + path + "] ")
+            taskField.forceActiveFocus()
+        }
+    }
+
+    // The pictures the task names ([Image: /path], pasted in)
+    readonly property var pictures: {
+        const out = [], named = /\[Image: (\/[^\]\n]+)\]/g
+        let m
+        while ((m = named.exec(root.taskText)) !== null) {
+            if (out.indexOf(m[1]) < 0)
+                out.push(m[1])
+        }
+        return out
     }
 
     ColumnLayout {
@@ -84,38 +103,126 @@ Rectangle {
             elide: Text.ElideRight
         }
 
-        // What Claude should do (Ctrl+Enter starts it in the first folder)
-        PlasmaComponents3.TextArea {
-            id: taskField
+        // What Claude should do (Ctrl+Enter starts it in the first folder).
+        // It grows with what you write, then scrolls.
+        PlasmaComponents3.ScrollView {
+            id: taskScroll
             Layout.fillWidth: true
             Layout.leftMargin: Kirigami.Units.smallSpacing
-            Layout.maximumHeight: Kirigami.Units.gridUnit * 6
-            wrapMode: TextEdit.Wrap
-            textFormat: TextEdit.PlainText
-            placeholderText: box.plan ? i18n("Anything to add? (optional)")
-                                      : i18n("What should Claude do? (optional)")
-            onTextChanged: root.taskText = text
-            Keys.onPressed: event => {
-                if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && (event.modifiers & Qt.ControlModifier)) {
-                    event.accepted = true
-                    const first = box.folders.find(f => box.usable(f))
-                    if (first)
-                        root.startChat(box.group, box.remoteHost, first, box.inVscode, box.plan)
-                } else if (event.key === Qt.Key_Escape) {
-                    event.accepted = true
-                    root.newChatGroup = ""
-                    root.planComposer = ""
+            Layout.maximumHeight: Kirigami.Units.gridUnit * 15
+            // (its scroll bar has room in the field: making room as it comes
+            // would wrap the text anew, and that can take it away again)
+            leftPadding: 0
+            rightPadding: 0
+
+            PlasmaComponents3.TextArea {
+                id: taskField
+                rightPadding: padding + taskScroll.T.ScrollBar.vertical.width
+                wrapMode: TextEdit.Wrap
+                textFormat: TextEdit.PlainText
+                placeholderText: box.plan ? i18n("Anything to add? (optional)")
+                                          : i18n("What should Claude do? (optional)")
+                onTextChanged: root.taskText = text
+                Keys.onPressed: event => {
+                    if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && (event.modifiers & Qt.ControlModifier)) {
+                        event.accepted = true
+                        const first = box.folders.find(f => box.usable(f))
+                        if (first)
+                            root.startChat(box.group, box.remoteHost, first, box.inVscode, box.plan)
+                    } else if (event.key === Qt.Key_Escape) {
+                        event.accepted = true
+                        root.newChatGroup = ""
+                        root.planComposer = ""
+                    } else if (event.matches(StandardKey.Paste) && !taskField.canPaste) {
+                        // no text on the clipboard: a picture, maybe (only for chats on this computer)
+                        event.accepted = true
+                        if (box.remoteHost) {
+                            root.actionError = i18n("Pictures go only to chats on this computer, not on %1", box.remoteHost)
+                            actionErrorTimer.restart()
+                        } else {
+                            root.pasteImage()
+                        }
+                    }
+                }
+
+                PlasmaCore.ToolTipArea {
+                    textFormat: Text.PlainText
+                    anchors.fill: parent
+                    active: !taskField.activeFocus
+                    mainText: box.plan ? i18n("Carry out a plan") : i18n("Start with a task")
+                    subText: (box.plan ? i18n("The chat starts with the plan as its first message, and what you add here.")
+                                       : i18n("With a task, the chat starts with it as its first message. Without one, it opens empty."))
+                             + " " + i18n("Then click the folder it's for (Ctrl+Enter: the first one).")
+                             + (box.remoteHost ? "" : "\n\n" + i18n("Ctrl+V pastes a picture too: Claude gets it with the task."))
                 }
             }
+        }
 
-            PlasmaCore.ToolTipArea {
-                textFormat: Text.PlainText
-                anchors.fill: parent
-                active: !taskField.activeFocus
-                mainText: box.plan ? i18n("Carry out a plan") : i18n("Start with a task")
-                subText: (box.plan ? i18n("The chat starts with the plan as its first message, and what you add here.")
-                                   : i18n("With a task, the chat starts with it as its first message. Without one, it opens empty."))
-                         + " " + i18n("Then click the folder it's for (Ctrl+Enter: the first one).")
+        // The pictures it names, small: a click shows one, × takes it out
+        Flow {
+            Layout.fillWidth: true
+            Layout.leftMargin: Kirigami.Units.smallSpacing
+            visible: box.pictures.length > 0
+            spacing: Kirigami.Units.smallSpacing
+
+            Repeater {
+                model: box.pictures
+                delegate: Item {
+                    id: picture
+                    required property string modelData
+                    height: Kirigami.Units.gridUnit * 3
+                    width: thumb.implicitHeight > 0 ? Math.min(Kirigami.Units.gridUnit * 8, height * thumb.implicitWidth / thumb.implicitHeight)
+                                                    : height
+
+                    Image {
+                        id: thumb
+                        anchors.fill: parent
+                        source: "file://" + encodeURI(picture.modelData)
+                        sourceSize.height: parent.height * Screen.devicePixelRatio
+                        fillMode: Image.PreserveAspectFit
+                        horizontalAlignment: Image.AlignLeft
+                        asynchronous: true
+                    }
+                    PlasmaComponents3.Label {
+                        anchors.centerIn: parent
+                        visible: thumb.status === Image.Error
+                        textFormat: Text.PlainText
+                        text: i18n("Not there")
+                        font: Kirigami.Theme.smallFont
+                        opacity: 0.7
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: Qt.openUrlExternally(thumb.source)
+                    }
+                    PlasmaCore.ToolTipArea {
+                        textFormat: Text.PlainText
+                        anchors.fill: parent
+                        mainText: i18n("A picture for Claude")
+                        subText: picture.modelData
+                    }
+                    Rectangle {   // (the × shows on any picture)
+                        anchors.fill: remove
+                        radius: width / 2
+                        color: Kirigami.Theme.backgroundColor
+                        opacity: 0.85
+                    }
+                    PlasmaComponents3.ToolButton {
+                        id: remove
+                        anchors.top: parent.top
+                        anchors.right: parent.right
+                        icon.name: "edit-delete-remove"
+                        display: PlasmaComponents3.AbstractButton.IconOnly
+                        text: i18n("Take it out of the task")
+                        implicitWidth: Kirigami.Units.iconSizes.small + Kirigami.Units.smallSpacing * 2
+                        implicitHeight: implicitWidth
+                        onClicked: {
+                            const token = "[Image: " + picture.modelData + "]"
+                            taskField.text = taskField.text.split(token + " ").join("").split(token).join("")
+                        }
+                    }
+                }
             }
         }
 

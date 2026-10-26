@@ -24,6 +24,7 @@ a new chat (used by the Claude Status widget).
                                                  (compare the files a chat changed in VS Code)
     python3 -I jump.py --phone MESSAGE [--device ID]   (to your phone, with KDE Connect)
     python3 -I jump.py --phone-devices           (the phones paired with KDE Connect)
+    python3 -I jump.py --paste-image             (save the clipboard's picture for a new chat's task)
     python3 -I jump.py --agent-run AGENT_ID --chat CHAT_ID [--profile PROFILE] [--no-open]
                                                  (a subagent's whole run, as a Markdown file)
 
@@ -901,9 +902,13 @@ class Task:
     def __bool__(self):
         return bool(self.text.strip() or self.plan)
 
-    def options(self):
-        """claude's options for its model, effort and permission mode; ValueError for a wrong one."""
-        return cs.chat_options(self.model, self.effort, self.mode)
+    def options(self, home=None):
+        """claude's options for its model, effort and permission mode; ValueError for a wrong one.
+        A task naming a picture pasted into it (with home) gets the pictures' folder."""
+        words = cs.chat_options(self.model, self.effort, self.mode)
+        if home is not None and names_a_picture(home, self.text):
+            words.append(f"--add-dir={images_dir(home)}")  # (one word: --add-dir FOLDER would take the prompt too)
+        return words
 
     def prompt(self, home, profiles):
         """Its first prompt; ValueError if its plan is gone."""
@@ -930,7 +935,7 @@ def new_chat(home, extra_dirs, dirname, folder=None, task=NO_TASK):
         return False, NO_CLAUDE
     folder = folder if folder and os.path.isdir(folder) else str(home)
     prompt = task.prompt(home, profiles) if task else ""
-    options = task.options()
+    options = task.options(home)
     command = (cs.task_command(profile, prompt, home, claude, options) if prompt
                else cs.new_chat_command(profile, home, claude, options))
     if not open_terminal(folder, command):
@@ -953,7 +958,7 @@ def new_chat_background(home, extra_dirs, dirname, folder=None, task=NO_TASK):
     # in a systemd scope of its own: Claude's background service may start
     # with it, and must outlive a restart of the desktop shell (start_app)
     ok, message, _job = cs.start_background(profile, folder, task.prompt(home, profiles), home, claude,
-                                            prefix=scope_prefix("claude"), options=task.options())
+                                            prefix=scope_prefix("claude"), options=task.options(home))
     return ok, message
 
 
@@ -971,6 +976,84 @@ def choose_folder(title, start):
     if r.returncode != 0 or not folder:
         return None, ""
     return folder, ""
+
+
+# ---------------------------------------------------------------- pictures in a task
+#
+# A picture pasted into a new chat's task is saved in the widget's cache
+# (images/, yours alone), and the task names it: [Image: /…/images/NAME.png].
+# Claude opens it from there. A chat outside that folder would ask first, so
+# one whose task names a picture starts with it as a folder of its own
+# (claude --add-dir). Pictures go after IMAGES_KEEP_DAYS, by when their chats
+# have long read them (a task waits a week at most).
+
+IMAGE_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif"}  # Claude's, best first
+IMAGES_KEEP_DAYS = 30
+
+
+def images_dir(home):
+    return cs.cache_dir(home) / "images"
+
+
+def names_a_picture(home, text):
+    """Does the task's text name a picture pasted into it?"""
+    return str(images_dir(home)) + os.sep in text
+
+
+def clipboard_tool():
+    """How to read the clipboard: (list its types, read one type) as argument
+    lists to finish with the type, or None and what to install."""
+    if os.environ.get("WAYLAND_DISPLAY"):
+        if shutil.which("wl-paste"):
+            return (["wl-paste", "--list-types"], ["wl-paste", "--no-newline", "--type"]), ""
+        return None, "To paste pictures, install wl-clipboard (it has wl-paste)"
+    if shutil.which("xclip"):
+        clip = ["xclip", "-selection", "clipboard", "-o", "-t"]
+        return (clip + ["TARGETS"], clip), ""
+    return None, "To paste pictures, install xclip"
+
+
+def paste_image(home):
+    """Save the picture on the clipboard in images_dir: (ok, message,
+    {"path": its file}). Older pictures there are let go."""
+    tool, missing = clipboard_tool()
+    if tool is None:
+        return False, missing, {}
+    list_types, read_type = tool
+    try:
+        r = subprocess.run(list_types, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                           timeout=5)
+        offered = r.stdout.decode("utf-8", "replace").split()
+        kind = next((t for t in IMAGE_TYPES if t in offered), None)
+        if kind is None:
+            return False, "There's no picture on the clipboard", {}
+        r = subprocess.run(read_type + [kind], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                           stderr=subprocess.DEVNULL, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return False, "Couldn't read the clipboard", {}
+    if r.returncode != 0 or not r.stdout:
+        return False, "Couldn't read the picture on the clipboard", {}
+    folder = images_dir(home)
+    folder.mkdir(parents=True, exist_ok=True)
+    folder.chmod(0o700)  # (screenshots can show anything)
+    cutoff = time.time() - IMAGES_KEEP_DAYS * 86400
+    for old in folder.iterdir():
+        try:
+            if old.stat().st_mtime < cutoff:
+                old.unlink()
+        except OSError:
+            pass
+    stamp, n = time.strftime("%Y%m%d-%H%M%S"), 1
+    while True:
+        path = folder / (stamp + (f"-{n}" if n > 1 else "") + IMAGE_TYPES[kind])
+        try:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            break
+        except FileExistsError:
+            n += 1
+    with os.fdopen(fd, "wb") as f:
+        f.write(r.stdout)
+    return True, "", {"path": str(path)}
 
 
 # ---------------------------------------------------------------- tasks waiting for a usage limit
@@ -2024,6 +2107,7 @@ USAGE = ("usage: jump.py [--stop [--busy] | --interrupt] SESSION_ID [--profile P
          "       jump.py --changes CHAT_ID [--profile PROFILE] [--turn] [--list]\n"
          "       jump.py --phone MESSAGE [--device ID]\n"
          "       jump.py --phone-devices\n"
+         "       jump.py --paste-image\n"
          "       jump.py --agent-run AGENT_ID --chat CHAT_ID [--profile PROFILE] [--no-open]")
 
 
@@ -2136,6 +2220,8 @@ def main(argv=None):
             open_it = False
         elif arg == "--phone-devices":
             action, session_id = phone_devices, "-"
+        elif arg == "--paste-image":
+            action, session_id = paste_image, "-"
         elif arg == "--turn":
             turn = True
         elif arg == "--list":
@@ -2259,6 +2345,8 @@ def main(argv=None):
             ok, message = send_to_phone(session_id, device)
         elif action is phone_devices:
             ok, message, devices = phone_devices()
+        elif action is paste_image:
+            ok, message, extra_out = paste_image(Path.home())
         elif action is show_agent_run:
             ok, message, run_file = show_agent_run(Path.home(), extra, session_id, agent_id, profile_dir, open_it)
         elif action is show_changes and listing:

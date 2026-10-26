@@ -9,6 +9,7 @@ import shlex
 import stat
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import unittest
@@ -815,6 +816,109 @@ class QueueTests(TaskFixture):
         # an SSH host's task: checked there when it starts
         self.assertTrue(self.queue("--queue", ".claude", "--cwd", "/srv/app", "--at", at, "--prompt", "x", "--host", "lab")["ok"])
         self.assertEqual(cs.load_queue(self.cache_root())[0]["host"], "lab")
+
+
+FAKE_CLIPBOARD = """#!{python}
+import sys
+offered, picture = {offered!r}, {picture!r}
+args = sys.argv[1:]
+if args in (["--list-types"], ["-selection", "clipboard", "-o", "-t", "TARGETS"]):
+    print("\\n".join(offered))
+elif args[-1] in offered and args[-1].startswith("image/"):
+    sys.stdout.buffer.write(picture)
+else:
+    sys.exit(1)
+"""
+
+
+class PictureTests(TaskFixture):
+    """A picture pasted into a new chat's task (jump.py --paste-image)."""
+
+    PNG = b"\x89PNG\r\n\x1a\n a picture"
+
+    def clipboard(self, tool, offered, picture=PNG, wayland=True):
+        """The clipboard holds what offered names, read with tool (wl-paste or xclip)."""
+        tools = Path(tempfile.mkdtemp(dir=self.home))
+        if tool:
+            write(tools / tool, FAKE_CLIPBOARD.format(python=sys.executable, offered=offered, picture=picture))
+            (tools / tool).chmod(0o755)
+        env = mock.patch.dict(os.environ, {"PATH": str(tools), "WAYLAND_DISPLAY": "wayland-0"})
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("XDG_CACHE_HOME", None)
+        if not wayland:
+            del os.environ["WAYLAND_DISPLAY"]
+
+    def paste(self):
+        out = io.StringIO()
+        with mock.patch.object(jump.Path, "home", return_value=self.home), contextlib.redirect_stdout(out):
+            jump.main(["--paste-image"])
+        return json.loads(out.getvalue())
+
+    def test_the_clipboards_picture_is_saved_for_the_task(self):
+        self.clipboard("wl-paste", ["text/html", "image/bmp", "image/png"])
+        first, second = self.paste(), self.paste()
+        self.assertTrue(first["ok"], first)
+        folder = jump.images_dir(self.home)
+        self.assertEqual(Path(first["path"]).parent, folder)
+        self.assertRegex(Path(first["path"]).name, r"^\d{8}-\d{6}\.png$")
+        self.assertEqual(Path(first["path"]).read_bytes(), self.PNG)
+        # yours alone; a second one in the same second doesn't take its place
+        self.assertEqual((stat.S_IMODE(folder.stat().st_mode), stat.S_IMODE(Path(first["path"]).stat().st_mode)),
+                         (0o700, 0o600))
+        self.assertNotEqual(second["path"], first["path"])
+        self.assertEqual(Path(second["path"]).read_bytes(), self.PNG)
+
+    def test_old_pictures_go(self):
+        self.clipboard("wl-paste", ["image/jpeg"])
+        old = jump.images_dir(self.home) / "20260101-120000.png"
+        write(old, "old")
+        then = time.time() - (jump.IMAGES_KEEP_DAYS + 1) * 86400
+        os.utime(old, (then, then))
+        answer = self.paste()
+        self.assertTrue(answer["path"].endswith(".jpg"), answer)
+        self.assertEqual(list(jump.images_dir(self.home).iterdir()), [Path(answer["path"])])
+
+    def test_on_x11_with_xclip(self):
+        self.clipboard("xclip", ["TARGETS", "image/png"], wayland=False)
+        self.assertEqual(Path(self.paste()["path"]).read_bytes(), self.PNG)
+
+    def test_no_picture_or_no_tool_says_so(self):
+        self.clipboard("wl-paste", ["text/plain", "image/bmp"])
+        self.assertEqual(self.paste(), {"ok": False, "message": "There's no picture on the clipboard"})
+        self.clipboard("wl-paste", ["image/png"], picture=b"")
+        self.assertEqual(self.paste(), {"ok": False, "message": "Couldn't read the picture on the clipboard"})
+        self.clipboard(None, [])
+        self.assertEqual(self.paste()["message"], "To paste pictures, install wl-clipboard (it has wl-paste)")
+        self.clipboard(None, [], wayland=False)
+        self.assertEqual(self.paste()["message"], "To paste pictures, install xclip")
+        self.assertFalse(jump.images_dir(self.home).exists())
+
+    def test_a_chat_whose_task_names_a_picture_can_open_it(self):
+        # it's outside the chat's folder: Claude would ask first (claude --add-dir)
+        self.clipboard("wl-paste", ["image/png"])
+        picture = self.paste()["path"]
+        task = f"What's wrong here? [Image: {picture}] Fix it."
+        opened = []
+        out = io.StringIO()
+        with mock.patch.object(jump, "open_terminal", lambda cwd, command: opened.append(command) or True), \
+                mock.patch.object(jump, "scope_prefix", lambda name: []), \
+                mock.patch.object(jump, "claude_in_terminal", return_value="claude"), \
+                mock.patch.object(jump, "claude_path", return_value=str(self.bin / "claude")), \
+                mock.patch.object(jump.Path, "home", return_value=self.home), contextlib.redirect_stdout(out):
+            jump.main(["--new-chat", ".claude-work", "--cwd", str(self.folder), "--prompt", task, "--model", "opus"])
+            jump.main(["--new-chat", ".claude-work", "--cwd", str(self.folder), "--prompt", task, "--bg"])
+            jump.main(["--new-chat", ".claude-work", "--cwd", str(self.folder), "--prompt", "no picture", "--bg"])
+            at = str(int(time.time() * 1000))
+            jump.main(["--queue", ".claude-work", "--cwd", str(self.folder), "--at", at, "--prompt", task, "--scheduled"])
+            (queued,) = cs.load_queue(cs.cache_dir(self.home))
+            jump.main(["--start-queued", queued["id"]])
+        self.assertTrue(all(json.loads(l)["ok"] for l in out.getvalue().splitlines()), out.getvalue())
+        add_dir = f"--add-dir={jump.images_dir(self.home)}"
+        terminal, = opened
+        self.assertEqual(shlex.split(terminal)[-4:], ["--model", "opus", add_dir, task])
+        background, plain, later = (c["argv"] for c in self.calls())
+        self.assertEqual((background, plain, later), (["--bg", add_dir, task], ["--bg", "no picture"], ["--bg", add_dir, task]))
 
 
 class ContinueAfterResetTests(TaskFixture):

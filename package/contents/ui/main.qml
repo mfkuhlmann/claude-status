@@ -3308,6 +3308,28 @@ PlasmoidItem {
         }
     }
 
+    // A picture pasted into the task (jump.py --paste-image saves the
+    // clipboard's): the open box puts it in where you are typing
+    signal imagePasted(string path)
+    function pasteImage() {
+        imagePaster.connectSource("python3 -I " + shellQuote(codeDir + "jump.py") + " --paste-image # " + Date.now())
+    }
+    P5Support.DataSource {
+        id: imagePaster
+        engine: "executable"
+        connectedSources: []
+        onNewData: (source, data) => {
+            disconnectSource(source)
+            const result = root.helperResult(data)
+            if (result.ok && result.path) {
+                root.imagePasted(result.path)
+            } else {
+                root.actionError = result.message
+                actionErrorTimer.restart()
+            }
+        }
+    }
+
     function reasonText(reason) {
         switch (reason) {
         case "permission": return i18n("Asks for permission")
