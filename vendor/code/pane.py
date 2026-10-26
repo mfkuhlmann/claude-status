@@ -315,7 +315,7 @@ def answer_request(cache_root, request_id, decision, note="", answers=None):
     if (folder / (request_id + ".json")).exists():
         return False, "The chat didn't take the answer: answer it there"
     if inp is not None:
-        return True, "Answered" if decision == "answer" else "Not answered"
+        return True, "Answered" if decision == "answer" else "Declined"
     return True, {"allow": "Allowed", "always": "Allowed, and from now on", "deny": "Denied"}[decision]
 
 
