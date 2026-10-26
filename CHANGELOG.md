@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.15.2
 
 - **Move a chat to Claude Code:** a chat running in a terminal can go on in
   a Claude Code tab: **Move to Claude Code** in its tab, or the → button of
