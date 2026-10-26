@@ -6,14 +6,14 @@
   <kcfgfile name=""/>
   <group name="General">
     <entry name="pollInterval" type="Int">
-      <label>Milliseconds between status checks</label>
+      <label>Milliseconds between status checks while a chat works (its line; with live mode every 6 s at most often)</label>
       <default>2000</default>
       <min>1000</min>
       <max>60000</max>
     </entry>
     <entry name="idlePollInterval" type="Int">
-      <label>Milliseconds between status checks while nothing runs and the popup is closed (never more often than pollInterval)</label>
-      <default>10000</default>
+      <label>Milliseconds between status checks while no chat works (a chat that changes is checked at once anyway; never more often than pollInterval)</label>
+      <default>20000</default>
       <min>1000</min>
       <max>300000</max>
     </entry>

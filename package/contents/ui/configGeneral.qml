@@ -254,20 +254,30 @@ KCM.SimpleKCM {
     Kirigami.FormLayout {
         QQC2.SpinBox {
             id: pollInterval
-            Kirigami.FormData.label: i18n("Check every (ms):")
+            Kirigami.FormData.label: i18n("While a chat works, check every (ms):")
             from: 1000
             to: 60000
             stepSize: 500
+            QQC2.ToolTip.visible: hovered
+            QQC2.ToolTip.text: i18n("How often a working chat's line (what it's doing) is brought up to date. With live mode its steps show as they happen, and the widget checks every 6 s at most often.")
         }
 
         QQC2.SpinBox {
             id: idlePollInterval
-            Kirigami.FormData.label: i18n("…while nothing runs (ms):")
+            Kirigami.FormData.label: i18n("While no chat works, check every (ms):")
             from: 1000
             to: 300000
             stepSize: 1000
             QQC2.ToolTip.visible: hovered
-            QQC2.ToolTip.text: i18n("While no chat runs and the popup is closed. Never more often than above; opening the popup checks at once.")
+            QQC2.ToolTip.text: i18n("For what changes without a chat doing anything: plan usage, times. Never more often than above.")
+        }
+
+        QQC2.Label {
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 20
+            wrapMode: Text.Wrap
+            font: Kirigami.Theme.smallFont
+            opacity: 0.7
+            text: i18n("A chat that starts, ends, starts working, asks for something or finishes its turn shows at once either way: the widget watches Claude's session files.")
         }
 
         QQC2.TextField {
