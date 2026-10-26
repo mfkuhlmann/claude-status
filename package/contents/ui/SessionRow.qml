@@ -40,6 +40,63 @@ RowLayout {
         : i18n("Asks first. The conversation is kept; claude attach resumes it.")
     // Kept in root by row key: rows are refreshed with new data every poll.
     readonly property string rowKey: (remoteHost ? remoteHost + "|" : "") + session.key
+
+    // Motion: the row is the same delegate whichever chat it shows, so when a
+    // chat moves in the list (or what's above it grows) it slides from where
+    // it was drawn last (root.rowSpots) to where it is; a chat new to the list
+    // fades in. Placed once a layout has settled (Qt.callLater).
+    // (a new row isn't where it goes until the layout has placed it: its first
+    // move, or a moment after it's made, at the top)
+    transform: Translate { id: slide }
+    property bool laidOut: false
+    onRowKeyChanged: Qt.callLater(row.placed)
+    onYChanged: {
+        laidOut = true
+        Qt.callLater(row.placed)
+    }
+    onHeightChanged: Qt.callLater(row.placed)
+    Timer {
+        interval: 60
+        running: true
+        onTriggered: {
+            row.laidOut = true
+            row.placed()
+        }
+    }
+    function placed() {
+        if (!root.rowSpace || row.session.key === "" || !row.visible || !row.laidOut)
+            return
+        const y = row.mapToItem(root.rowSpace, 0, 0).y
+        const was = root.rowSpots[row.rowKey]
+        root.rowSpots[row.rowKey] = y
+        if (!root.animateRows)
+            return
+        if (was === undefined) {
+            if (root.rowsPlaced) {
+                slideIn.stop()
+                appear.restart()
+            }
+            return
+        }
+        if (Math.abs(was - y) < 1)
+            return
+        appear.complete()
+        slide.y = was - y
+        slideIn.restart()
+    }
+    NumberAnimation {
+        id: slideIn
+        target: slide
+        property: "y"
+        to: 0
+        duration: Kirigami.Units.longDuration * 1.5
+        easing.type: Easing.OutCubic
+    }
+    ParallelAnimation {
+        id: appear
+        NumberAnimation { target: row; property: "opacity"; from: 0; to: 1; duration: Kirigami.Units.longDuration * 2; easing.type: Easing.OutQuad }
+        NumberAnimation { target: slide; property: "x"; from: -Kirigami.Units.gridUnit; to: 0; duration: Kirigami.Units.longDuration * 2; easing.type: Easing.OutCubic }
+    }
     readonly property bool confirmingStop: session.key !== "" && root.stopConfirmSession === rowKey
     // A finished chat can be shared, continued on another account or kept on
     // one (jump.py; on an SSH host, between its accounts: remote.py); not

@@ -129,7 +129,28 @@ PlasmaExtras.Representation {
     }
 
     contentItem: ColumnLayout {
+        id: tabContent
         spacing: Kirigami.Units.smallSpacing
+        // A tab slides in from the side it's on (Chats | Recap | Permissions)
+        transform: Translate { id: tabSlide }
+        property int tabIndex: ["chats", "week", "perms"].indexOf(root.popupTab)
+        onTabIndexChanged: {
+            if (!root.animateRows)
+                return
+            const from = tabIndex > shownTab ? 1 : -1
+            shownTab = tabIndex
+            tabSlideIn.stop()
+            tabSlide.x = from * Kirigami.Units.gridUnit * 2.5
+            tabContent.opacity = 0.35
+            tabSlideIn.start()
+        }
+        property int shownTab: tabIndex
+        ParallelAnimation {
+            id: tabSlideIn
+            NumberAnimation { target: tabSlide; property: "x"; to: 0; duration: Kirigami.Units.longDuration; easing.type: Easing.OutCubic }
+            NumberAnimation { target: tabContent; property: "opacity"; to: 1; duration: Kirigami.Units.longDuration; easing.type: Easing.OutQuad }
+            onStopped: { tabSlide.x = 0; tabContent.opacity = 1 }
+        }
 
         // The big Talpa: the whole dashboard at a glance (stays put while the list scrolls)
         PetStrip {
@@ -202,6 +223,7 @@ PlasmaExtras.Representation {
                 id: content
                 width: scroll.availableWidth
                 spacing: Kirigami.Units.largeSpacing
+                Component.onCompleted: root.rowSpace = content
 
                 PlasmaComponents3.Label {
                     textFormat: Text.PlainText

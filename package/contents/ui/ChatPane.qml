@@ -229,6 +229,18 @@ Window {
         }
     }
 
+    function grow(fromLeft, fromY) {
+        growBox.origin.x = fromLeft ? 0 : surface.width
+        growBox.origin.y = Math.max(0, Math.min(surface.height, fromY))
+        growing.restart()
+    }
+    // (shown at once if the popup never says where it is)
+    Timer {
+        interval: 1500
+        running: true
+        onTriggered: if (surface.opacity === 0 && !growing.running) surface.opacity = 1
+    }
+
     function paneArgs() {
         return (profileDir ? " --profile " + root.shellQuote(profileDir) : "")
                + (host ? " --host " + root.shellQuote(host) : "") + root.configDirArgs
@@ -505,6 +517,16 @@ Window {
         color: Kirigami.Theme.backgroundColor
         Kirigami.Theme.colorSet: Kirigami.Theme.Window
         Kirigami.Theme.inherit: false
+        // It grows out of the chat's row in the popup (main.qml: placePane):
+        // from the popup's side, at the row's height
+        opacity: 0
+        transform: Scale { id: growBox; xScale: 1; yScale: 1 }
+        ParallelAnimation {
+            id: growing
+            NumberAnimation { target: growBox; properties: "xScale,yScale"; from: 0.88; to: 1; duration: Kirigami.Units.longDuration * 1.6; easing.type: Easing.OutCubic }
+            NumberAnimation { target: surface; property: "opacity"; from: 0; to: 1; duration: Kirigami.Units.longDuration * 1.2; easing.type: Easing.OutQuad }
+            onStopped: { growBox.xScale = 1; growBox.yScale = 1; surface.opacity = 1 }
+        }
 
         ColumnLayout {
             anchors.fill: parent

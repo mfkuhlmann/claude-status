@@ -174,6 +174,27 @@ PlasmoidItem {
         running: root.dashboardShown && !root.coveredByWindow && Plasmoid.configuration.showPet
         onTriggered: root.petFrame(Date.now())
     }
+    // Motion in the list: where each chat's row was drawn last (SessionRow.qml
+    // slides a row from there when its chat moves up or down, and fades in one
+    // that's new). A plain object (no bindings wake up), forgotten whenever the
+    // popup hides; rowSpace is the list's content (FullRepresentation.qml).
+    // Plasma's animation speed set to instant turns it off.
+    property var rowSpots: ({})
+    property Item rowSpace: null
+    property bool rowsPlaced: false   // laid out once since the popup showed: what's new from now on fades in
+    readonly property bool animateRows: Kirigami.Units.longDuration > 0 && dashboardShown && !coveredByWindow
+    onDashboardShownChanged: {
+        rowSpots = ({})
+        rowsPlaced = false
+        if (dashboardShown)
+            rowsPlacedTimer.restart()
+    }
+    Timer {
+        id: rowsPlacedTimer
+        interval: 1500
+        onTriggered: root.rowsPlaced = true
+    }
+
     // Each chat pet's color by pet key, for the bar next to its chat in the
     // list (every pet stage publishes its own: setPetColors)
     property var petColorsByStage: ({})
@@ -2536,7 +2557,7 @@ PlasmoidItem {
     // s: a session row or a recent chat (sessionId is its chat then); tab: "chat" or "review"
     function openPane(s, host, tab) {
         paneChat = { chatId: s.chatId || s.sessionId, sessionId: s.sessionId || "", profileDir: s.profileDir || "",
-                     host: host || "", name: s.name || "", cwd: s.cwd || "", tab: tab || "chat", at: Date.now() }
+                     host: host || "", name: s.name || "", cwd: s.cwd || "", tab: tab || "chat", at: Date.now(), key: s.key || "" }
     }
 
     function closePane() {
@@ -2582,11 +2603,16 @@ PlasmoidItem {
         onTriggered: root.placePane()
     }
 
+    // (then it grows out of its chat's row: from the side the popup is on, at
+    // the height of the row, else of the popup's middle)
     function placePane() {
         const win = paneLoader.item
         const item = root.fullRepresentationItem
-        if (!win || !item || !root.expanded || !item.visible || !item.Window.window)
+        if (!win || !item || !root.expanded || !item.visible || !item.Window.window) {
+            if (win)
+                win.grow(true, win.height / 2)
             return
+        }
         const p = item.mapToGlobal(0, 0)
         const sx = item.Screen.virtualX, sy = item.Screen.virtualY, sw = item.Screen.width, sh = item.Screen.height
         const gap = Kirigami.Units.smallSpacing
@@ -2598,6 +2624,11 @@ PlasmoidItem {
         const geometry = [Math.round(x), Math.round(Math.max(sy, Math.min(y, sy + sh - height))), width, height]
         placer.connectSource("python3 -I " + shellQuote(codeDir + "jump.py") + " --place-window " + shellQuote(win.title)
                              + " " + geometry.join(",") + " # " + Date.now())
+        const chat = root.paneChat || {}
+        const spot = root.rowSpots[(chat.host ? chat.host + "|" : "") + (chat.key || "")]
+        const fromY = spot !== undefined && root.rowSpace ? root.rowSpace.mapToGlobal(0, spot).y + Kirigami.Units.gridUnit
+                                                          : p.y + item.height / 2
+        win.grow(x > p.x, fromY - geometry[1])
     }
 
     Exec {

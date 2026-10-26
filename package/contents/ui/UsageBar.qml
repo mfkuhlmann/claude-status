@@ -19,6 +19,15 @@ ColumnLayout {
 
     readonly property real atReset: forecast ? Math.min(100, Math.max(pct, forecast.atReset)) : pct
     readonly property bool runsOut: !!forecast && !!forecast.fullAt
+    // What's drawn glides to a new value (Plasma's animation speed: instant, it jumps)
+    property real shownPct: pct
+    property real shownAtReset: atReset
+    Behavior on shownPct {
+        NumberAnimation { duration: Kirigami.Units.veryLongDuration; easing.type: Easing.OutCubic }
+    }
+    Behavior on shownAtReset {
+        NumberAnimation { duration: Kirigami.Units.veryLongDuration; easing.type: Easing.OutCubic }
+    }
 
     spacing: 0
 
@@ -43,14 +52,14 @@ ColumnLayout {
             // Where it would be when the window resets, at this pace
             Rectangle {
                 visible: bar.forecast !== null && bar.atReset > bar.pct
-                width: parent.width * bar.atReset / 100
+                width: parent.width * bar.shownAtReset / 100
                 height: parent.height
                 radius: parent.radius
                 color: root.usageColor(bar.atReset)
                 opacity: 0.35
             }
             Rectangle {
-                width: parent.width * Math.min(100, Math.max(0, bar.pct)) / 100
+                width: parent.width * Math.min(100, Math.max(0, bar.shownPct)) / 100
                 height: parent.height
                 radius: parent.radius
                 color: root.usageColor(bar.pct)
@@ -79,7 +88,7 @@ ColumnLayout {
 
         PlasmaComponents3.Label {
             textFormat: Text.PlainText
-            text: Math.round(bar.pct) + "%"
+            text: Math.round(bar.shownPct) + "%"
             Layout.preferredWidth: Kirigami.Units.gridUnit * 2.2
             horizontalAlignment: Text.AlignRight
         }
