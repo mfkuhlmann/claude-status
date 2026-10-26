@@ -919,20 +919,21 @@ PlasmoidItem {
     // is checked the moment its session file changes, so the checks in
     // between only catch the rest. While a chat works: every pollInterval,
     // as its steps come from the checks; with the live hook (live mode) they
-    // come as they happen, so every liveWorkingMs. While none works: every
-    // idlePollInterval (never more often than pollInterval).
+    // come as they happen, so every liveWorkingMs (pollInterval is greyed
+    // out then). While none works: every idlePollInterval (never more often
+    // than pollInterval, without live mode).
     // Without the watching (live.py failing): every pollInterval while a
     // chat runs or the popup is open, else every idlePollInterval; a chat
     // that starts still shows soon (opening the popup checks at once). The
     // GNOME extension does that (logic.js).
     readonly property bool quiet: status !== null && overall === "none" && !root.dashboardShown
     readonly property int pollMs: Math.max(1000, Plasmoid.configuration.pollInterval)
-    readonly property int restingMs: Math.max(pollMs, Plasmoid.configuration.idlePollInterval)
     readonly property bool watching: Hub.liveHealthy
     readonly property bool liveHook: status !== null && status.liveHook === true
     readonly property int liveWorkingMs: 6000
+    readonly property int restingMs: Math.max(watching && liveHook ? 1000 : pollMs, Plasmoid.configuration.idlePollInterval)
     readonly property int checkInterval: !watching ? (quiet ? restingMs : pollMs)
-                                         : status !== null && status.counts.working > 0 ? (liveHook ? Math.max(pollMs, liveWorkingMs) : pollMs)
+                                         : status !== null && status.counts.working > 0 ? (liveHook ? liveWorkingMs : pollMs)
                                          : restingMs
 
     // The checks come from hub/Hub.qml, as often as the most eager copy

@@ -284,8 +284,8 @@ Right-click the widget → **Configure Claude Status…**
 
 | Setting | Default | |
 |---|---|---|
-| While a chat works, check every | 2000 ms | How often a working chat's line (what it's doing) is brought up to date; with live mode its steps show as they happen, and the widget checks every 6 s at most often |
-| While no chat works, check every | 20000 ms | For what changes without a chat doing anything (plan usage, times); never more often than above. A chat that starts, ends, starts working, asks for something or finishes its turn shows at once either way |
+| While a chat works, check every | 2000 ms | How often a working chat's line (what it's doing) is brought up to date; greyed out with live mode on, whose steps show as they happen (a working chat is checked every 6 s then) |
+| While no chat works, check every | 20000 ms | For what changes while no chat does anything: plan usage and its forecast, a usage limit resetting, a queued task coming due, a Claude that crashed. A chat that starts, ends, starts working, asks for something or finishes its turn shows at once either way |
 | Extra config dirs | – | Claude config folders besides `~/.claude` and `~/.claude-*` |
 | Chats | click opens the pane | A click on a chat opens it beside the popup (off: in its terminal or VS Code tab) |
 | Answer permission prompts from the widget | off | The hook that lets rows, the pane and notifications answer permission prompts and Claude's questions (see above); changes Claude's settings at once |

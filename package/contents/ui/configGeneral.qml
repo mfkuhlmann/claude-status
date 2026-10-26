@@ -201,6 +201,7 @@ KCM.SimpleKCM {
     // Live mode (pane.py --live status|on|off): the live hook in Claude's
     // own settings, so it changes at once (not with Apply)
     property var liveHook: null       // {on, some, settings}
+    readonly property bool liveOn: liveHook !== null && liveHook.on === true
     property string liveMessage: ""
 
     Exec {
@@ -258,8 +259,11 @@ KCM.SimpleKCM {
             from: 1000
             to: 60000
             stepSize: 500
+            // (with live mode its steps come as they happen: then this only counts
+            // if the watching fails, which the widget then falls back to)
+            enabled: !page.liveOn
             QQC2.ToolTip.visible: hovered
-            QQC2.ToolTip.text: i18n("How often a working chat's line (what it's doing) is brought up to date. With live mode its steps show as they happen, and the widget checks every 6 s at most often.")
+            QQC2.ToolTip.text: i18n("How often a working chat's line (what it's doing) is brought up to date.")
         }
 
         QQC2.SpinBox {
@@ -269,7 +273,7 @@ KCM.SimpleKCM {
             to: 300000
             stepSize: 1000
             QQC2.ToolTip.visible: hovered
-            QQC2.ToolTip.text: i18n("For what changes without a chat doing anything: plan usage, times. Never more often than above.")
+            QQC2.ToolTip.text: i18n("For what changes while no chat does anything: plan usage and its forecast, a usage limit resetting, a queued task coming due, a Claude that crashed. Never more often than above.")
         }
 
         QQC2.Label {
@@ -277,7 +281,8 @@ KCM.SimpleKCM {
             wrapMode: Text.Wrap
             font: Kirigami.Theme.smallFont
             opacity: 0.7
-            text: i18n("A chat that starts, ends, starts working, asks for something or finishes its turn shows at once either way: the widget watches Claude's session files.")
+            text: (page.liveOn ? i18n("Live mode is on: a working chat's steps show as they happen, and it's checked every 6 s, so the first one doesn't apply. ") : "")
+                  + i18n("A chat that starts, ends, starts working, asks for something or finishes its turn shows at once either way: the widget watches Claude's session files.")
         }
 
         QQC2.TextField {
