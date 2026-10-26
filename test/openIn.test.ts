@@ -1,6 +1,6 @@
-// Stopping idle chats, and where recent chats reopen: a terminal or a Claude
-// Code tab, whichever is there (no claude command, Claude Code missing or on
-// another account).
+// Stopping idle chats, where chats reopen: a terminal or a Claude Code tab,
+// whichever is there (no claude command, Claude Code missing or on another
+// account), and moving a running chat from its terminal to a Claude Code tab.
 
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
@@ -9,6 +9,7 @@ import * as path from "node:path";
 import { test } from "node:test";
 import {
   canEndChat,
+  canMoveToClaudeCode,
   claudeCodeHere,
   hasTurn,
   claudeCodeReopenHint,
@@ -154,5 +155,115 @@ test("a recent chat reopens in this window when it has the chat's project open",
     else process.env.CLAUDE_CONFIG_DIR = saved.env;
     stub.env.openExternal = saved.openExternal;
     (stub.workspace as { workspaceFolders: unknown }).workspaceFolders = saved.folders;
+  }
+});
+
+test("a chat running in a terminal can move to a Claude Code tab, when Claude Code is on its account", () => {
+  assert.equal(canMoveToClaudeCode(chat, true), true);
+  assert.equal(canMoveToClaudeCode({ ...chat, state: "working" }, true), true, "it asks to stop it first");
+  assert.equal(canMoveToClaudeCode(chat, false), false, "Claude Code isn't on its account");
+  assert.equal(canMoveToClaudeCode({ ...chat, entrypoint: "claude-vscode" }, true), false, "it's in one already");
+  assert.equal(canMoveToClaudeCode({ ...chat, kind: "bg" }, true), false, "a background session attaches");
+  assert.equal(canMoveToClaudeCode({ kind: "chat", pid: null }, true), false, "not running: it reopens");
+});
+
+// Actions for this computer's chats on the work account (Claude Code's), with
+// what they ran: helpers (jump.py, without the --config-dir of the machine
+// the tests run on), terminals, and what failed
+function actionsHere(answers: { ok: boolean; message: string }[] = []) {
+  const work = { id: "w", title: "work", profileKeys: ["work"], sessions: [] } as unknown as Group;
+  const helpers: string[][] = [];
+  const runs: string[] = [];
+  const failures: string[] = [];
+  const dash = {
+    demo: false,
+    currentHost: undefined,
+    state: () => ({ status: { groups: [work], cli: { installed: true } }, hosts: [] }),
+    claudeCodeInfo: () => ({ available: true, profileKey: "work" }),
+    setActionError: (m: string) => void failures.push(m),
+    setActionInfo: () => undefined,
+    isVisible: () => true,
+    refresh: async () => undefined,
+  };
+  const actions = new Actions(
+    {
+      action: async (_script: string, args: string[]) => (
+        helpers.push(args.filter((a, i) => a !== "--config-dir" && args[i - 1] !== "--config-dir")), answers.shift() ?? { ok: true, message: "" }
+      ),
+    } as unknown as Backend,
+    dash as unknown as Dashboard,
+    { run: async (_key: string, _name: string, command: string) => void runs.push(command), find: async () => undefined } as unknown as Terminals,
+    { warn: () => undefined } as unknown as vscode.LogOutputChannel,
+    {} as AccountSwitch,
+  );
+  return { actions, helpers, runs, failures };
+}
+
+test("a chat that isn't running reopens where the switch says, from its tab or its row too", async () => {
+  const { overrides } = await import("./vscode-stub");
+  const finished = { key: "k", sessionId: "c1", chatId: "c1", profileDir: "work", name: "c1", cwd: "/proj", kind: "chat", pid: null, openCommand: "cd /proj 2>/dev/null; claude --resume c1" };
+  try {
+    let t = actionsHere();
+    await t.actions.open(finished);
+    assert.deepEqual(t.runs, [finished.openCommand], "in a terminal by default");
+    assert.deepEqual(t.helpers, []);
+
+    overrides.set("reopenIn", "claudeCode");
+    t = actionsHere();
+    await t.actions.open(finished);
+    assert.deepEqual(t.runs, [], "not in a terminal");
+    assert.deepEqual(t.helpers, [["--resume", "c1", "--profile", "work", "--vscode"]], "in a Claude Code tab");
+
+    t = actionsHere();
+    await t.actions.open({ ...finished, profileDir: "personal" });
+    assert.deepEqual(t.runs, [finished.openCommand], "Claude Code isn't on that account: a terminal");
+
+    t = actionsHere();
+    await t.actions.open({ ...finished, kind: "interactive", pid: 42, openCommand: null, state: "idle" });
+    assert.deepEqual(t.helpers.filter((a) => a.includes("--vscode")), [], "a running chat opens where it runs");
+  } finally {
+    overrides.clear();
+  }
+});
+
+test("moving a chat to a Claude Code tab stops it first, a working one only once you say so", async () => {
+  const stub = vscode as unknown as typeof import("./vscode-stub");
+  const ask = stub.window.showWarningMessage;
+  const asked: { title: string; buttons: string[] }[] = [];
+  let pick: (buttons: string[]) => string | undefined = (buttons) => buttons[0];
+  (stub.window as { showWarningMessage: unknown }).showWarningMessage = async (title: string, _opts: unknown, ...buttons: string[]) =>
+    (asked.push({ title, buttons }), pick(buttons));
+  const running = { key: "k", sessionId: "s1", chatId: "c1", profileDir: "work", name: "Fix it", cwd: "/proj", kind: "interactive", entrypoint: "cli", pid: 42, state: "idle" as const };
+  try {
+    let t = actionsHere();
+    await t.actions.moveToClaudeCode(running);
+    assert.deepEqual(asked.pop()?.buttons, ["Move"]);
+    assert.deepEqual(t.helpers, [["--stop", "s1", "--profile", "work"], ["--resume", "c1", "--profile", "work", "--vscode"]], "an idle one: only while it's idle");
+
+    t = actionsHere();
+    await t.actions.moveToClaudeCode({ ...running, state: "working" });
+    assert.deepEqual(asked.pop()?.buttons, ["Stop and Move"]);
+    assert.deepEqual(t.helpers[0], ["--stop", "s1", "--profile", "work", "--busy"]);
+    assert.equal(t.helpers.length, 2);
+
+    pick = () => undefined; // Cancel
+    t = actionsHere();
+    await t.actions.moveToClaudeCode({ ...running, state: "waiting" });
+    assert.deepEqual(t.helpers, [], "nothing stopped");
+
+    pick = (buttons) => buttons[0];
+    t = actionsHere([{ ok: false, message: "It's working again, so it wasn't stopped" }]);
+    await t.actions.moveToClaudeCode(running);
+    assert.equal(t.helpers.length, 1, "not reopened while it still runs");
+    assert.match(t.failures[0], /working again/);
+
+    asked.length = 0;
+    t = actionsHere();
+    await t.actions.moveToClaudeCode({ ...running, entrypoint: "claude-vscode" });
+    await t.actions.moveToClaudeCode({ ...running, profileDir: "personal" });
+    assert.deepEqual(asked, [], "in a Claude Code tab already, or Claude Code isn't on its account: not asked");
+    assert.deepEqual(t.helpers, []);
+  } finally {
+    (stub.window as { showWarningMessage: unknown }).showWarningMessage = ask;
   }
 });

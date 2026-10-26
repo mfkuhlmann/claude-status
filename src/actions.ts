@@ -26,6 +26,7 @@ import {
   laterDays,
   limitReset,
   canEndChat,
+  canMoveToClaudeCode,
   chatRefOf,
   claudeCodeHere,
   cliInstalled,
@@ -143,6 +144,10 @@ export class Actions {
 
   async open(chat: ChatRef): Promise<void> {
     if (this.demoOnly()) return;
+    // A chat no Claude has open: where the switch of Recent chats says (from
+    // its row, its tab, the search alike)
+    if (chat.kind === "chat" && !chat.pid && reopensInClaudeCode(settings.reopenIn(), this.cliOn(chat.host), this.claudeCodeFor(chat)))
+      return this.openInClaudeCode(chat);
     if (settings.openIn() === "system") return this.openSystem(chat);
     const host = chat.host;
     const onWindowHost = !!host && host === this.dash.currentHost;
@@ -228,6 +233,44 @@ export class Actions {
       ? await this.backend.action("jump.py", ["--remote-resume-vscode", host, id, ...(chat.cwd ? ["--cwd", chat.cwd] : [])])
       : await this.backend.action("jump.py", ["--resume", id, "--profile", chat.profileDir, "--vscode", ...configDirArgs()]);
     this.report(answer, "Couldn't open the chat in Claude Code");
+  }
+
+  // Claude Code can open a chat: it's on the chat's account (an SSH host's:
+  // in a window connected to the host)
+  private claudeCodeFor(chat: ChatRef): boolean {
+    const group = machineStatus(this.dash.state(), chat.host)?.groups.find((g) => (g.profileKeys ?? []).includes(chat.profileDir));
+    return !!group && claudeCodeHere({ ...group, host: chat.host }, this.dash.claudeCodeInfo());
+  }
+
+  canMoveToClaudeCode(chat: ChatRef): boolean {
+    return canMoveToClaudeCode(chat, this.claudeCodeFor(chat));
+  }
+
+  // A chat running in a terminal, moved to a Claude Code tab: Claude quits
+  // there as when you stop it (its terminal stays open), then the chat
+  // reopens in a Claude Code tab (openInClaudeCode). Asks first; a chat
+  // that's working or waiting for you is stopped only once you say so, and
+  // an idle one that got back to work since you asked isn't touched.
+  async moveToClaudeCode(chat: ChatRef): Promise<void> {
+    if (this.demoOnly()) return;
+    if (!this.canMoveToClaudeCode(chat)) return this.fail(`${chat.name} can't move to a Claude Code tab from here.`);
+    const busy = hasTurn(chat);
+    const detail =
+      chat.state === "working"
+        ? "It's working right now, so it's stopped first: the current step is cut off and anything it was running stops. Then the chat reopens in a Claude Code tab, where you go on with it. Its terminal stays open."
+        : chat.state === "waiting"
+          ? "It's waiting for you, so it's stopped first, without your answer. Then the chat reopens in a Claude Code tab, where you go on with it. Its terminal stays open."
+          : "Claude quits in its terminal (the terminal stays open) and the chat reopens in a Claude Code tab.";
+    const go = busy ? "Stop and Move" : "Move";
+    const choice = await vscode.window.showWarningMessage(`Move “${chat.name}” to a Claude Code tab?`, { modal: true, detail }, go);
+    if (choice !== go) return;
+    const flags = busy ? ["--busy"] : [];
+    const answer = chat.host
+      ? await this.backend.action("remote.py", ["--end", chat.host, chat.sessionId, ...(chat.profileDir ? [chat.profileDir] : []), ...flags])
+      : await this.backend.action("jump.py", ["--stop", chat.sessionId, ...(chat.profileDir ? ["--profile", chat.profileDir] : []), ...flags, ...configDirArgs()]);
+    this.refresh(chat.host);
+    if (!this.report(answer, "Couldn't stop it to move it")) return;
+    await this.openInClaudeCode({ ...chat, pid: null, kind: "chat", state: "done" });
   }
 
   // This window is on the machine of a chat (here, or the host it's connected

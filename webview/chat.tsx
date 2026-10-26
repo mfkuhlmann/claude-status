@@ -275,7 +275,22 @@ function ChatApp() {
             A+
           </button>
         </span>
-        <button type="button" class="btn secondary small" title="The terminal or Claude Code tab the chat runs in; a chat that isn't open reopens." onClick={() => post({ type: "openWindow" })}>
+        {chat?.canMove ? (
+          <button
+            type="button"
+            class="btn secondary small"
+            title="Go on with it in a Claude Code tab: Claude quits in its terminal (the terminal stays open) and the chat reopens in a Claude Code tab. Asks first; a chat that's working or waiting for you is stopped only once you say so."
+            onClick={() => post({ type: "moveToClaudeCode" })}
+          >
+            Move to Claude Code
+          </button>
+        ) : null}
+        <button
+          type="button"
+          class="btn secondary small"
+          title="The terminal or Claude Code tab the chat runs in; a chat that isn't open reopens, in a terminal or a Claude Code tab as the switch of Recent chats says."
+          onClick={() => post({ type: "openWindow" })}
+        >
           Open its window
         </button>
       </div>

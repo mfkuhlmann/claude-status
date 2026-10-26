@@ -193,7 +193,7 @@ export function GroupSection({ group: g, accounts = 1 }: { group: Group; account
 
       <div class="sessions">
         {g.sessions.map((s) => (
-          <SessionRow key={s.key} session={s} host={host} showProfile={multiProfile} />
+          <SessionRow key={s.key} session={s} group={g} host={host} showProfile={multiProfile} />
         ))}
         {g.sessions.length === 0 ? <div class="no-sessions muted">No running chats</div> : null}
       </div>

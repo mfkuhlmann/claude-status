@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Move a chat to Claude Code:** a chat running in a terminal can go on in
+  a Claude Code tab: **Move to Claude Code** in its tab, or the → button of
+  its row (when Claude Code is on the chat's account). It asks first: Claude
+  quits in its terminal, which stays open, and the chat reopens in a Claude
+  Code tab. A chat that's working or waiting for you is stopped only once you
+  say so (**Stop and Move**), and an idle one that got back to work
+  meanwhile isn't touched.
+- **Reopened where the switch says, from anywhere:** the **Terminal | Claude
+  Code tab** switch above Recent chats said where they reopen, but **Open its
+  window** in a chat's tab, its row and Find a Chat still reopened a chat
+  that isn't running in a terminal. Now they all reopen it where the switch
+  says.
 - **The hole stays where it was:** pulling Talpa out of its burrow carried its
   hole along under it, shrinking within a third of a second, as if the hole
   were dragged by. Now the hole stays where Talpa was while you hold it, and

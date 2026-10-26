@@ -1,6 +1,9 @@
 import {
   canEndChat,
+  canMoveToClaudeCode,
   changesTitle,
+  claudeCodeHere,
+  cliInstalled,
   clockText,
   goOnAt,
   handoverTarget,
@@ -16,6 +19,7 @@ import {
   petKeyOf,
   plural,
   queuedChat,
+  reopensInClaudeCode,
   resetAtText,
   shareAccounts,
   stateText,
@@ -23,7 +27,7 @@ import {
   usageLevel,
 } from "../../src/shared/model";
 import { reviewPending, testsText } from "../../src/shared/pane";
-import type { Session } from "../../src/shared/types";
+import type { Group, Session } from "../../src/shared/types";
 import { post } from "../env";
 import { pets } from "../pets";
 import { canRemove, canShare, canStop, chatRefOf, isBackground, openHint, rowKeyOf, sharedTagTitle, shareTitle } from "../util/chat";
@@ -59,7 +63,7 @@ function lineTitle(kind: string): string {
 // One chat: state, name (click to open), tags, folder, model, context fill,
 // what it's doing or needs or said last (click it for more), and its
 // subagents. With `host`, the chat is on that SSH host.
-export function SessionRow({ session: s, host, showProfile }: { session: Session; host?: string; showProfile: boolean }) {
+export function SessionRow({ session: s, group, host, showProfile }: { session: Session; group: Group; host?: string; showProfile: boolean }) {
   const view = useView();
   const ui = useStore(uiState);
   const now = view.now;
@@ -78,6 +82,9 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
   const share = canShare(s, machineStatus(view, host));
   const remove = canRemove(s);
   const stop = canStop(s, host);
+  const codeHere = claudeCodeHere({ ...group, host }, view.claudeCode);
+  const move = canMoveToClaudeCode(s, codeHere);
+  const reopenInCode = s.kind === "chat" && reopensInClaudeCode(view.settings.reopenIn, cliInstalled(machineStatus(view, host)), codeHere);
   const mode = modeText(s.peek?.mode);
   // A usage limit stopped it: it can go on on another account with room left
   const handover = handoverTarget(s, shareAccounts(machineStatus(view, host)));
@@ -108,7 +115,7 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
           <button
             type="button"
             class="link session-name"
-            title={paneFirst ? "Open this chat in a tab: its conversation as it goes, a box to reply, and what it changed" : openHint(s, host)}
+            title={paneFirst ? "Open this chat in a tab: its conversation as it goes, a box to reply, and what it changed" : openHint(s, host, reopenInCode)}
             onClick={() => post({ type: "open", chat })}
           >
             {s.name}
@@ -329,9 +336,17 @@ export function SessionRow({ session: s, host, showProfile }: { session: Session
           <IconButton
             icon={paneFirst ? "external" : "chat"}
             label={paneFirst ? "Open its window" : "Open in a tab"}
-            title={paneFirst ? openHint(s, host) : "Open this chat in a tab: its conversation as it goes, a box to reply, and what it changed."}
+            title={paneFirst ? openHint(s, host, reopenInCode) : "Open this chat in a tab: its conversation as it goes, a box to reply, and what it changed."}
             onClick={() => post(paneFirst ? { type: "openWindow", chat } : { type: "openPane", chat })}
           />
+          {move ? (
+            <IconButton
+              icon="move"
+              label="Move to a Claude Code tab…"
+              title="Go on with this chat in a Claude Code tab: Claude quits in its terminal (the terminal stays open) and the chat reopens in a Claude Code tab. Asks first; a chat that's working or waiting for you is stopped only once you say so."
+              onClick={() => post({ type: "moveToClaudeCode", chat })}
+            />
+          ) : null}
           {s.starred ? null : (
             <IconButton
               icon="star"

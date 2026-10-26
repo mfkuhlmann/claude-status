@@ -177,6 +177,13 @@ export function reopensInClaudeCode(prefer: ReopenIn, cliHere: boolean, codeHere
   return codeHere && (prefer === "claudeCode" || !cliHere);
 }
 
+// A chat running in a terminal (VS Code's or another, here or on an SSH
+// host) can move to a Claude Code tab when Claude Code is on its account
+// (codeHere): Claude quits in the terminal and the chat reopens in the tab
+export function canMoveToClaudeCode(s: { kind?: string; pid?: number | null; state?: string; entrypoint?: string }, codeHere: boolean): boolean {
+  return codeHere && canEndChat(s) && s.entrypoint !== "claude-vscode";
+}
+
 // The recent chats' switch: what each half does, or why it's greyed out
 export function terminalReopenHint(host: string | undefined, cliHere: boolean): string {
   if (!cliHere)

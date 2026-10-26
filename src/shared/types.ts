@@ -767,6 +767,7 @@ export type WebviewMessage =
   | { type: "openWindow"; chat: ChatRef } // its own terminal or Claude Code tab, whatever a click does
   | { type: "answerPermission"; chat: ChatRef; decision: Decision; note?: string; answers?: Answers } // what a waiting chat asks
   | { type: "openInClaudeCode"; chat: ChatRef }
+  | { type: "moveToClaudeCode"; chat: ChatRef } // a chat in a terminal: Claude quits there, the chat reopens in a Claude Code tab
   | { type: "setReopenIn"; where: ReopenIn }
   | { type: "stop"; chat: ChatRef }
   | { type: "dismiss"; chat: ChatRef }

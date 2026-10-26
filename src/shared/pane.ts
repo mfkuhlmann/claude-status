@@ -75,6 +75,7 @@ export interface PaneChat {
   reviewPending: boolean;
   review: Review | null;
   queued: { id: string; prompt: string; error: string } | null; // a reply waiting for its turn to end
+  canMove: boolean; // runs in a terminal, on the account Claude Code is on: it can move to a Claude Code tab
 }
 
 // extension -> tab
@@ -99,6 +100,7 @@ export type PaneMessage =
   | { type: "commit"; message: string }
   | { type: "reviewed"; on: boolean }
   | { type: "openWindow" }
+  | { type: "moveToClaudeCode" } // Claude quits in its terminal, the chat reopens in a Claude Code tab (asks first)
   | { type: "copy"; text: string } // a code block of a reply, to the clipboard
   | { type: "textSize"; scale: number } // A− / A+: claudeStatus.chatTextScale
   | { type: "picture"; id: string; mime: string; data: string }; // pasted in the reply (base64): saved, an SSH host's copied there

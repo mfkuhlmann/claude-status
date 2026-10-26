@@ -286,11 +286,22 @@ the chat tab.
 
 **Recent chats** reopen in a terminal (`claude --resume`) or in a Claude Code
 tab: the **Terminal | Claude Code tab** switch above them picks which (kept in
-`claudeStatus.reopenIn`). A Claude Code tab opens in the window that has the
-chat's folder: this one, another, or a new one (an SSH host's chat: connected
-to it). A half is greyed out where it can't work, and its tooltip says why: no
-`claude` command on the chat's machine (the chats then reopen in Claude Code),
-or Claude Code not installed or on another account.
+`claudeStatus.reopenIn`), and so does every other way to reopen a chat that
+isn't running (**Open its window** in its tab, its row, **Find a Chat**). A
+Claude Code tab opens in the window that has the chat's folder: this one,
+another, or a new one (an SSH host's chat: connected to it). A half is greyed
+out where it can't work, and its tooltip says why: no `claude` command on the
+chat's machine (the chats then reopen in Claude Code), or Claude Code not
+installed or on another account.
+
+A running chat opens where it runs: its terminal, or its Claude Code tab. One
+in a terminal can **move to a Claude Code tab** (**Move to Claude Code** in its
+tab, or the → button of its row, when Claude Code is on the chat's account):
+it asks first, then Claude quits in the terminal, which stays open, and the
+chat reopens in a Claude Code tab (two Claudes on one chat would both write
+to it). A chat that's working or waiting for you is stopped only once you say
+so (**Stop and Move**: the current step is cut off), and an idle one that got
+back to work since you asked isn't touched.
 
 **Stopping and interrupting** (■, asks first, saying what will happen): a
 background session is stopped with `claude stop`. Any other running chat can
@@ -371,7 +382,7 @@ code --install-extension claude-status-*.vsix
 | `claudeStatus.clickOpensPane` | `true` | A click on a chat opens its tab (conversation, reply, permission prompt, review); `false`: the chat itself |
 | `claudeStatus.chatTextScale` | `1.15` | Text size in a chat's tab, times VS Code's font size (the tab's **A−** / **A+** and Ctrl+wheel set it) |
 | `claudeStatus.openIn` | `vscode` | `system`: open chats in your desktop's terminal app instead |
-| `claudeStatus.reopenIn` | `terminal` | `claudeCode`: reopen recent chats in a Claude Code tab (the switch above them) |
+| `claudeStatus.reopenIn` | `terminal` | `claudeCode`: reopen chats that aren't running in a Claude Code tab (the switch above Recent chats) |
 | `claudeStatus.notifyWaiting` / `notifyDone` | `true` | Notifications; turn them off here if the Plasma or GNOME widget notifies too |
 | `claudeStatus.notifyDoneMinSeconds` | `30` | Shortest turn that gets a "finished" notification |
 | `claudeStatus.awayDigest` / `awayMinutes` | `true` / `5` | The "while you were away" summary, after this many minutes without using VS Code (with notifications off, only its card in the view) |

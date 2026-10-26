@@ -31,6 +31,7 @@ const chat: PaneChat = {
   state: ask ? "waiting" : "working",
   stateText: ask ? "Needs input · 1m" : "Working · 6m",
   route: params.get("route") === "terminal" ? "terminal" : "tmux",
+  canMove: params.get("route") === "terminal",
   busy: true,
   activity: "Bash: npm test -- parser",
   permission: ask === "question"

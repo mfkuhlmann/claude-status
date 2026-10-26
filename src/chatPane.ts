@@ -246,6 +246,7 @@ class Pane implements vscode.Disposable {
       reviewPending: item ? reviewPending(item, state.status, this.host || undefined) : false,
       review: session?.review ?? recent?.review ?? null,
       queued: queued ? { id: queued.id, prompt: queued.prompt, error: queued.error } : null,
+      canMove: !!session && this.owner.ext.actions.canMoveToClaudeCode(this.chat),
     };
     this.panel.title = chat.name || this.chatId.slice(0, 8);
     if (this.ready) this.post({ type: "chat", chat });
@@ -357,6 +358,9 @@ class Pane implements vscode.Disposable {
       }
       case "openWindow":
         await actions.open(this.chat);
+        break;
+      case "moveToClaudeCode":
+        await actions.moveToClaudeCode(this.chat);
         break;
       case "copy":
         if (typeof m.text !== "string") break;

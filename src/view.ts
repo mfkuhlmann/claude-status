@@ -168,6 +168,9 @@ export class ViewHost implements vscode.WebviewViewProvider, vscode.Disposable {
       case "openInClaudeCode":
         if (chat) void this.actions.openInClaudeCode(chat);
         break;
+      case "moveToClaudeCode":
+        if (chat) void this.actions.moveToClaudeCode(chat);
+        break;
       case "setReopenIn":
         if (m.where === "terminal" || m.where === "claudeCode") void setReopenIn(m.where);
         break;

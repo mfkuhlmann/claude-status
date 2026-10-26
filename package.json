@@ -358,11 +358,11 @@
             "claudeCode"
           ],
           "enumDescriptions": [
-            "Reopen recent chats in a terminal (claude --resume), as `#claudeStatus.openIn#` says.",
-            "Reopen recent chats in a Claude Code tab, in the VS Code window that has the chat's folder (on an SSH host's chats: connected to it)."
+            "Reopen chats that aren't running in a terminal (claude --resume), as `#claudeStatus.openIn#` says.",
+            "Reopen chats that aren't running in a Claude Code tab, in the VS Code window that has the chat's folder (on an SSH host's chats: connected to it)."
           ],
           "default": "terminal",
-          "markdownDescription": "Where recent chats reopen: the **Terminal | Claude Code tab** switch above them. Without a `claude` command they reopen in Claude Code.",
+          "markdownDescription": "Where chats that aren't running reopen: the **Terminal | Claude Code tab** switch above Recent chats. It holds for those, a chat's tab (**Open its window**), its row and Find a Chat. Without a `claude` command they reopen in Claude Code.",
           "order": 7
         },
         "claudeStatus.notifyWaiting": {
