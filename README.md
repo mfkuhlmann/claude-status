@@ -122,8 +122,8 @@ As an editor tab (**Claude Status: Open in Editor Tab**):
   filled up; a trend line of the last five weeks under each number; the
   projects (click one for its chats) and chats it worked on most (click one
   to bring it up); what Claude did (tool calls, commands, edits with their
-  files and lines, subagents, web searches, compactions); what the same work
-  would cost at Claude's API prices, by model, with what the cache saved, the
+  files and lines, subagents, web searches, compactions); how many tokens it
+  used and what the same work would cost at Claude's API prices, by model, with what the cache saved, the
   turns that cost most and what coming back to chats after their cache had
   expired cost; and what would use less of your plan: the tips of Claude
   Code's own `/usage` (*Start fresh when you switch tasks*, *Save max effort

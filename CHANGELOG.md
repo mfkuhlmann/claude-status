@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **Tokens in the Recap:** a **Tokens** number beside *At API prices*, for the
+  day, the 7 days or everything (**Day | Week | Overall**): all the tokens
+  your chats read and wrote, against the period before, with its trend line;
+  point at it for how many were new input, read from the cache, written to the
+  cache and written by Claude. A row of the timeline says its tokens too when
+  you point at its numbers. Vendored backend at the widget's 31760a8.
+
 ## 1.15.1
 
 - **Pictures in a reply:** Ctrl+V in a chat's tab pastes a picture (a
