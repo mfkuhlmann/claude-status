@@ -678,6 +678,35 @@ class HostTaskTests(TwoAccountHost):
         # (one word: with a space in front, so it isn't one of claude's commands)
         self.assertTrue(json.loads(out.getvalue())["command"].endswith(" ' go'"))
 
+    def test_a_picture_goes_there_for_a_task_that_opens_it(self):
+        here = cs.images_dir(Path.home()) / "20261026-101500.png"
+        here.parent.mkdir(parents=True)
+        here.write_bytes(b"\x89PNG\r\n\x1a\n\x00\xff a picture")
+        answer = remote.put_image("lab", str(here))
+        there = self.fake_home / ".cache/claude-widget/images"
+        self.assertEqual(answer, {"ok": True, "message": "", "path": str(there / here.name), "local": str(here)})
+        self.assertEqual((there / here.name).read_bytes(), here.read_bytes())
+        self.assertEqual((oct(there.stat().st_mode & 0o777), oct((there / here.name).stat().st_mode & 0o777)),
+                         ("0o700", "0o600"))
+        # another one of that name there (from another computer) stays
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            remote.main(["--put-image", "lab", str(here)])
+        self.assertEqual(json.loads(out.getvalue())["path"], str(there / "20261026-101500-h2.png"))
+        # only pictures pasted into a task
+        for other in (self.plan, here.parent / "notes.txt"):
+            self.assertEqual(remote.put_image("lab", str(other)),
+                             {"ok": False, "message": "That isn't a picture pasted into a task"})
+        self.mode("denied")
+        self.assertFalse(remote.put_image("lab", str(here))["ok"])
+        self.mode("")
+        # the task naming it there: Claude there may open that folder
+        answer = remote.task("lab", ".claude", str(self.folder), f"What's wrong? [Image: {there / here.name}]",
+                             background=True)
+        self.assertTrue(answer["ok"], answer)
+        args = (self.fake_home / "claude-args").read_text().splitlines()
+        self.assertEqual(args[:2], ["--bg", f"--add-dir={there}"])
+
     def test_a_plan_comes_here_and_is_shared_there(self):
         import jump
         opened, old = [], jump.open_markdown

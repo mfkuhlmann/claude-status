@@ -4612,6 +4612,27 @@ def chat_options(model=None, effort=None, mode=None):
     return words
 
 
+# A picture pasted into a new chat's task is saved in the cache's images/
+# (jump.py --paste-image; an SSH host's chat gets a copy in the host's,
+# remote.py --put-image), and the task names it: [Image: /…/images/NAME.png].
+# Outside the chat's folder, Claude would ask before it opens it: a chat whose
+# task names one starts with that folder added. Pictures go after
+# IMAGES_KEEP_DAYS, by when their chats have long read them (a task waits a
+# week at most).
+IMAGES_KEEP_DAYS = 30
+
+
+def images_dir(home):
+    return cache_dir(home) / "images"
+
+
+def picture_options(home, text):
+    """claude's options for a chat whose task names a pasted picture: its
+    folder (one word: --add-dir FOLDER would take the prompt as a second folder)."""
+    folder = str(images_dir(home))
+    return [f"--add-dir={folder}"] if folder + os.sep in (text or "") else []
+
+
 def new_chat_command(profile, home=None, claude="claude", options=()):
     """Shell command starting a new chat on this profile (options: claude's,
     e.g. chat_options'). With background sessions around, plain `claude` opens
@@ -4776,7 +4797,7 @@ def run_task(home, extra_dirs, background, folder, profile_key, text, plan_slug=
     profile = next((p for p in profiles if matches_profile(p, profile_key)), None)
     if profile is None:
         return {"ok": False, "message": f"No Claude profile called {profile_key}"}
-    options = chat_options(model, effort, mode)
+    options = chat_options(model, effort, mode) + picture_options(home, text)
     plan = None
     if plan_slug:
         plan = find_plan(profiles, plan_slug, plan_profile)

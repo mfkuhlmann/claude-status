@@ -905,10 +905,7 @@ class Task:
     def options(self, home=None):
         """claude's options for its model, effort and permission mode; ValueError for a wrong one.
         A task naming a picture pasted into it (with home) gets the pictures' folder."""
-        words = cs.chat_options(self.model, self.effort, self.mode)
-        if home is not None and names_a_picture(home, self.text):
-            words.append(f"--add-dir={images_dir(home)}")  # (one word: --add-dir FOLDER would take the prompt too)
-        return words
+        return cs.chat_options(self.model, self.effort, self.mode) + (cs.picture_options(home, self.text) if home else [])
 
     def prompt(self, home, profiles):
         """Its first prompt; ValueError if its plan is gone."""
@@ -980,24 +977,11 @@ def choose_folder(title, start):
 
 # ---------------------------------------------------------------- pictures in a task
 #
-# A picture pasted into a new chat's task is saved in the widget's cache
-# (images/, yours alone), and the task names it: [Image: /…/images/NAME.png].
-# Claude opens it from there. A chat outside that folder would ask first, so
-# one whose task names a picture starts with it as a folder of its own
-# (claude --add-dir). Pictures go after IMAGES_KEEP_DAYS, by when their chats
-# have long read them (a task waits a week at most).
+# Ctrl+V in a new chat's task field, with no text on the clipboard: its
+# picture is saved in the widget's cache (claude_status.images_dir, yours
+# alone) for the task to name.
 
 IMAGE_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif"}  # Claude's, best first
-IMAGES_KEEP_DAYS = 30
-
-
-def images_dir(home):
-    return cs.cache_dir(home) / "images"
-
-
-def names_a_picture(home, text):
-    """Does the task's text name a picture pasted into it?"""
-    return str(images_dir(home)) + os.sep in text
 
 
 def clipboard_tool():
@@ -1014,7 +998,7 @@ def clipboard_tool():
 
 
 def paste_image(home):
-    """Save the picture on the clipboard in images_dir: (ok, message,
+    """Save the picture on the clipboard in cs.images_dir: (ok, message,
     {"path": its file}). Older pictures there are let go."""
     tool, missing = clipboard_tool()
     if tool is None:
@@ -1033,10 +1017,10 @@ def paste_image(home):
         return False, "Couldn't read the clipboard", {}
     if r.returncode != 0 or not r.stdout:
         return False, "Couldn't read the picture on the clipboard", {}
-    folder = images_dir(home)
+    folder = cs.images_dir(home)
     folder.mkdir(parents=True, exist_ok=True)
     folder.chmod(0o700)  # (screenshots can show anything)
-    cutoff = time.time() - IMAGES_KEEP_DAYS * 86400
+    cutoff = time.time() - cs.IMAGES_KEEP_DAYS * 86400
     for old in folder.iterdir():
         try:
             if old.stat().st_mtime < cutoff:

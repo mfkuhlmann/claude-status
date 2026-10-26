@@ -134,14 +134,9 @@ Rectangle {
                         root.newChatGroup = ""
                         root.planComposer = ""
                     } else if (event.matches(StandardKey.Paste) && !taskField.canPaste) {
-                        // no text on the clipboard: a picture, maybe (only for chats on this computer)
+                        // no text on the clipboard: a picture, maybe (an SSH host's chat: asks to copy it there)
                         event.accepted = true
-                        if (box.remoteHost) {
-                            root.actionError = i18n("Pictures go only to chats on this computer, not on %1", box.remoteHost)
-                            actionErrorTimer.restart()
-                        } else {
-                            root.pasteImage()
-                        }
+                        root.pasteImage(box.remoteHost)
                     }
                 }
 
@@ -153,7 +148,8 @@ Rectangle {
                     subText: (box.plan ? i18n("The chat starts with the plan as its first message, and what you add here.")
                                        : i18n("With a task, the chat starts with it as its first message. Without one, it opens empty."))
                              + " " + i18n("Then click the folder it's for (Ctrl+Enter: the first one).")
-                             + (box.remoteHost ? "" : "\n\n" + i18n("Ctrl+V pastes a picture too: Claude gets it with the task."))
+                             + "\n\n" + (box.remoteHost ? i18n("Ctrl+V pastes a picture too: Claude gets it with the task, once you let the widget copy it to %1.", box.remoteHost)
+                                                         : i18n("Ctrl+V pastes a picture too: Claude gets it with the task."))
                 }
             }
         }
@@ -177,7 +173,7 @@ Rectangle {
                     Image {
                         id: thumb
                         anchors.fill: parent
-                        source: "file://" + encodeURI(picture.modelData)
+                        source: "file://" + encodeURI(root.pictureCopies[picture.modelData] || picture.modelData)   // (a host's: its copy here)
                         sourceSize.height: parent.height * Screen.devicePixelRatio
                         fillMode: Image.PreserveAspectFit
                         horizontalAlignment: Image.AlignLeft
@@ -200,7 +196,7 @@ Rectangle {
                         textFormat: Text.PlainText
                         anchors.fill: parent
                         mainText: i18n("A picture for Claude")
-                        subText: picture.modelData
+                        subText: box.remoteHost ? i18n("%1, on %2", picture.modelData, box.remoteHost) : picture.modelData
                     }
                     Rectangle {   // (the × shows on any picture)
                         anchors.fill: remove
@@ -224,6 +220,37 @@ Rectangle {
                     }
                 }
             }
+        }
+
+        // A picture for an SSH host's chat: copied there once you say so
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.leftMargin: Kirigami.Units.smallSpacing
+            visible: !!box.remoteHost && !!root.pictureOffer && root.pictureOffer.host === box.remoteHost
+            spacing: Kirigami.Units.smallSpacing
+
+            Image {
+                source: root.pictureOffer ? "file://" + encodeURI(root.pictureOffer.path) : ""
+                Layout.preferredHeight: Kirigami.Units.gridUnit * 2
+                Layout.preferredWidth: Kirigami.Units.gridUnit * 3
+                sourceSize.height: Kirigami.Units.gridUnit * 2 * Screen.devicePixelRatio
+                fillMode: Image.PreserveAspectFit
+                asynchronous: true
+            }
+            ConfirmLine {
+                Layout.fillWidth: true
+                text: i18n("Copy this picture to %1? Claude there can only open it there.", box.remoteHost)
+                confirmText: i18n("Copy")
+                onConfirmed: root.copyPicture()
+                onCancelled: root.pictureOffer = null
+            }
+        }
+        PlasmaComponents3.Label {
+            Layout.leftMargin: Kirigami.Units.smallSpacing
+            visible: !!box.remoteHost && root.pictureCopyingTo === box.remoteHost
+            textFormat: Text.PlainText
+            text: i18n("Copying the picture to %1…", box.remoteHost)
+            opacity: 0.7
         }
 
         // The model and reasoning effort it runs with (kept for the next chat).

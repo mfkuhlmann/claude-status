@@ -3243,6 +3243,7 @@ PlasmoidItem {
         taskBackground = false
         taskQueued = false
         taskLater = false
+        pictureOffer = null
         if (reset || later) {
             // to start a minute after the limit resets, or at the time picked
             if (!folder.path && !host)
@@ -3309,10 +3310,25 @@ PlasmoidItem {
     }
 
     // A picture pasted into the task (jump.py --paste-image saves the
-    // clipboard's): the open box puts it in where you are typing
+    // clipboard's): the open box puts it in where you are typing. For an SSH
+    // host's chat it's copied there first, once you say so (remote.py
+    // --put-image): pictureOffer is the one the box asks about.
     signal imagePasted(string path)
-    function pasteImage() {
-        imagePaster.connectSource("python3 -I " + shellQuote(codeDir + "jump.py") + " --paste-image # " + Date.now())
+    property var pasteHosts: ({})   // a paste's command: the SSH host it's for ("": here)
+    property var pictureOffer: null   // { host, path }
+    property string pictureCopyingTo: ""
+    property var pictureCopies: ({})   // a copy's path on its host: the picture here (for its thumbnail)
+    function pasteImage(host) {
+        const cmd = "python3 -I " + shellQuote(codeDir + "jump.py") + " --paste-image # " + Date.now()
+        pasteHosts[cmd] = host || ""
+        imagePaster.connectSource(cmd)
+    }
+    function copyPicture() {
+        const offer = pictureOffer
+        pictureOffer = null
+        pictureCopyingTo = offer.host
+        pictureCopier.connectSource("python3 -I " + shellQuote(codeDir + "remote.py") + " --put-image " + shellQuote(offer.host)
+                                    + " " + shellQuote(offer.path) + " # " + Date.now())
     }
     P5Support.DataSource {
         id: imagePaster
@@ -3320,13 +3336,34 @@ PlasmoidItem {
         connectedSources: []
         onNewData: (source, data) => {
             disconnectSource(source)
+            const host = root.pasteHosts[source] || ""
+            delete root.pasteHosts[source]
             const result = root.helperResult(data)
-            if (result.ok && result.path) {
-                root.imagePasted(result.path)
-            } else {
+            if (!result.ok || !result.path) {
                 root.actionError = result.message
                 actionErrorTimer.restart()
+            } else if (host) {
+                root.pictureOffer = { host: host, path: result.path }
+            } else {
+                root.imagePasted(result.path)
             }
+        }
+    }
+    P5Support.DataSource {
+        id: pictureCopier
+        engine: "executable"
+        connectedSources: []
+        onNewData: (source, data) => {
+            disconnectSource(source)
+            const result = root.helperResult(data)
+            if (result.ok && result.path) {
+                root.pictureCopies = Object.assign({}, root.pictureCopies, { [result.path]: result.local })
+                root.imagePasted(result.path)
+            } else {
+                root.actionError = i18n("Couldn't copy the picture to %1: %2", root.pictureCopyingTo, result.message)
+                actionErrorTimer.restart()
+            }
+            root.pictureCopyingTo = ""
         }
     }
 

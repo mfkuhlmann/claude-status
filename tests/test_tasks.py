@@ -859,7 +859,7 @@ class PictureTests(TaskFixture):
         self.clipboard("wl-paste", ["text/html", "image/bmp", "image/png"])
         first, second = self.paste(), self.paste()
         self.assertTrue(first["ok"], first)
-        folder = jump.images_dir(self.home)
+        folder = cs.images_dir(self.home)
         self.assertEqual(Path(first["path"]).parent, folder)
         self.assertRegex(Path(first["path"]).name, r"^\d{8}-\d{6}\.png$")
         self.assertEqual(Path(first["path"]).read_bytes(), self.PNG)
@@ -871,13 +871,13 @@ class PictureTests(TaskFixture):
 
     def test_old_pictures_go(self):
         self.clipboard("wl-paste", ["image/jpeg"])
-        old = jump.images_dir(self.home) / "20260101-120000.png"
+        old = cs.images_dir(self.home) / "20260101-120000.png"
         write(old, "old")
-        then = time.time() - (jump.IMAGES_KEEP_DAYS + 1) * 86400
+        then = time.time() - (cs.IMAGES_KEEP_DAYS + 1) * 86400
         os.utime(old, (then, then))
         answer = self.paste()
         self.assertTrue(answer["path"].endswith(".jpg"), answer)
-        self.assertEqual(list(jump.images_dir(self.home).iterdir()), [Path(answer["path"])])
+        self.assertEqual(list(cs.images_dir(self.home).iterdir()), [Path(answer["path"])])
 
     def test_on_x11_with_xclip(self):
         self.clipboard("xclip", ["TARGETS", "image/png"], wayland=False)
@@ -892,7 +892,7 @@ class PictureTests(TaskFixture):
         self.assertEqual(self.paste()["message"], "To paste pictures, install wl-clipboard (it has wl-paste)")
         self.clipboard(None, [], wayland=False)
         self.assertEqual(self.paste()["message"], "To paste pictures, install xclip")
-        self.assertFalse(jump.images_dir(self.home).exists())
+        self.assertFalse(cs.images_dir(self.home).exists())
 
     def test_a_chat_whose_task_names_a_picture_can_open_it(self):
         # it's outside the chat's folder: Claude would ask first (claude --add-dir)
@@ -914,7 +914,7 @@ class PictureTests(TaskFixture):
             (queued,) = cs.load_queue(cs.cache_dir(self.home))
             jump.main(["--start-queued", queued["id"]])
         self.assertTrue(all(json.loads(l)["ok"] for l in out.getvalue().splitlines()), out.getvalue())
-        add_dir = f"--add-dir={jump.images_dir(self.home)}"
+        add_dir = f"--add-dir={cs.images_dir(self.home)}"
         terminal, = opened
         self.assertEqual(shlex.split(terminal)[-4:], ["--model", "opus", add_dir, task])
         background, plain, later = (c["argv"] for c in self.calls())
