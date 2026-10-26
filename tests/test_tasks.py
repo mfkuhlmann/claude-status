@@ -1,5 +1,6 @@
 """Recaps, permission modes, usage limits that stopped chats, plans, finding
 chats and starting tasks (claude_status.py, jump.py, sharing.py, remote.py)."""
+import base64
 import contextlib
 import importlib.util
 import io
@@ -894,6 +895,27 @@ class PictureTests(TaskFixture):
         self.assertEqual(self.paste()["message"], "To paste pictures, install xclip")
         self.assertFalse(cs.images_dir(self.home).exists())
 
+    def save(self, kind, data):
+        out = io.StringIO()
+        with mock.patch.object(jump.Path, "home", return_value=self.home), contextlib.redirect_stdout(out), \
+                mock.patch.object(sys, "stdin", io.StringIO(data)):
+            jump.main(["--save-image", kind])
+        return json.loads(out.getvalue())
+
+    def test_a_picture_handed_over_is_saved_like_a_pasted_one(self):
+        # (the VS Code extension's: pasted in its page, as base64)
+        os.environ.pop("XDG_CACHE_HOME", None)
+        answer = self.save("image/png", base64.b64encode(self.PNG).decode() + "\n")
+        self.assertTrue(answer["ok"], answer)
+        path = Path(answer["path"])
+        self.assertEqual((path.parent, path.read_bytes(), stat.S_IMODE(path.stat().st_mode)),
+                         (cs.images_dir(self.home), self.PNG, 0o600))
+        self.assertRegex(path.name, r"^\d{8}-\d{6}\.png$")
+        self.assertEqual(self.save("image/bmp", "AAAA")["message"], "Claude takes PNG, JPEG, WebP and GIF pictures")
+        self.assertEqual(self.save("image/png", "not base64!")["message"], "That isn't a picture")
+        self.assertEqual(self.save("image/png", "")["message"], "That isn't a picture")
+        self.assertEqual(len(list(cs.images_dir(self.home).iterdir())), 1)
+
     def test_a_chat_whose_task_names_a_picture_can_open_it(self):
         # it's outside the chat's folder: Claude would ask first (claude --add-dir)
         self.clipboard("wl-paste", ["image/png"])
@@ -974,6 +996,19 @@ class ContinueAfterResetTests(TaskFixture):
               {"sessionId": self.SID, "respawnFlags": ["--permission-mode", "auto"]})
         self.assertTrue(go_on()["ok"])
         self.assertEqual(self.calls()[-1]["argv"], ["--bg", "--resume", self.SID, cs.CONTINUE_PROMPT])
+
+    def test_a_message_naming_a_picture_can_open_it(self):
+        # (a reply from the chat pane with a pasted picture, going on in the background)
+        self.stopped_chat()
+        picture = cs.images_dir(self.home) / "20261026-101500.png"
+        text = f"And this? [Image: {picture}]"
+        go_on = lambda: cs.continue_chat(self.home, [], ".claude-work", self.SID, None, text, str(self.bin / "claude"), force=True)
+        self.assertTrue(go_on()["ok"])
+        self.assertEqual(self.calls()[-1]["argv"], ["--bg", "--resume", self.SID, f"--add-dir={picture.parent}", text])
+        # a background session of it wakes with the options it saved (any here would start a copy)
+        write(self.home / f".claude-work/jobs/{self.SID[:8]}/state.json", {"sessionId": self.SID})
+        self.assertTrue(go_on()["ok"])
+        self.assertEqual(self.calls()[-1]["argv"], ["--bg", "--resume", self.SID, text])
 
     def test_never_bypassing_permissions_by_itself(self):
         t = self.now - 120

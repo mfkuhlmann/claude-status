@@ -197,6 +197,18 @@ Window {
                 root.paneDraft = ""
             }
         }
+        function onImagePasted(path, target) {   // (Ctrl+V: a picture, saved; an SSH host's copied there)
+            if (target !== "pane")
+                return
+            const at = replyBox.cursorPosition
+            replyBox.insert(at, (at > 0 && replyBox.text.charAt(at - 1).trim() !== "" ? " " : "") + "[Image: " + path + "] ")
+            replyBox.forceActiveFocus()
+        }
+        function onPaneNote(message) {
+            pane.info = message
+            pane.infoBad = true
+            infoTimer.restart()
+        }
         function onPaneDenyingChanged() {   // (Deny with a note, from a notification)
             if (root.paneDenying) {
                 askColumn.denyWithNote()
@@ -1064,13 +1076,20 @@ Window {
                             id: replyBox
                             background: null
                             placeholderText: pane.permission ? i18n("It's asking you something: answer that first")
-                                                             : i18n("Reply to Claude… (Enter sends, Shift+Enter: new line)")
+                                                             : i18n("Reply to Claude… (Enter sends, Shift+Enter: new line, Ctrl+V: a picture too)")
                             wrapMode: TextEdit.Wrap
                             font.pointSize: pane.pt
                             enabled: !(pane.permission && pane.route === "tmux")
                             // Enter sends, as in Claude's own prompt (Shift+Enter: a new line). For a
                             // terminal that takes no text from outside, Enter asks how first.
+                            // Ctrl+V with no text on the clipboard: its picture (an SSH host's
+                            // chat asks to copy it there).
                             Keys.onPressed: event => {
+                                if (event.matches(StandardKey.Paste) && !canPaste) {
+                                    event.accepted = true
+                                    root.pasteImage(pane.host, "pane")
+                                    return
+                                }
                                 if (event.key !== Qt.Key_Return && event.key !== Qt.Key_Enter)
                                     return
                                 if (event.modifiers & Qt.ShiftModifier) {
@@ -1086,6 +1105,45 @@ Window {
                             }
                         }
                     }
+                }
+                // The pictures your reply names, small (× takes one out)
+                PictureStrip {
+                    id: replyPictures
+                    Layout.fillWidth: true
+                    Layout.leftMargin: pane.gutter
+                    pictures: named(replyBox.text)
+                    host: pane.host
+                    removeText: i18n("Take it out of your reply")
+                    onRemoveRequested: path => replyBox.text = without(replyBox.text, path)
+                }
+                // A picture for an SSH host's chat: copied there once you say so
+                RowLayout {
+                    Layout.fillWidth: true
+                    visible: !!pane.host && !!root.pictureOffer && root.pictureOffer.host === pane.host
+                             && root.pictureOffer.target === "pane"
+                    spacing: Kirigami.Units.smallSpacing
+
+                    Image {
+                        source: root.pictureOffer ? "file://" + encodeURI(root.pictureOffer.path) : ""
+                        Layout.preferredHeight: Kirigami.Units.gridUnit * 2
+                        Layout.preferredWidth: Kirigami.Units.gridUnit * 3
+                        sourceSize.height: Kirigami.Units.gridUnit * 2 * Screen.devicePixelRatio
+                        fillMode: Image.PreserveAspectFit
+                        asynchronous: true
+                    }
+                    ConfirmLine {
+                        Layout.fillWidth: true
+                        text: i18n("Copy this picture to %1? Claude there can only open it there.", pane.host)
+                        confirmText: i18n("Copy")
+                        onConfirmed: root.copyPicture()
+                        onCancelled: root.pictureOffer = null
+                    }
+                }
+                PlasmaComponents3.Label {
+                    visible: !!pane.host && root.pictureCopyingTo === pane.host && root.pictureCopyTarget === "pane"
+                    textFormat: Text.PlainText
+                    text: i18n("Copying the picture to %1…", pane.host)
+                    color: pane.mutedColor
                 }
                 PlasmaComponents3.Label {
                     textFormat: Text.PlainText

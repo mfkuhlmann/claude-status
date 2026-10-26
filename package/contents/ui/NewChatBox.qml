@@ -64,8 +64,8 @@ Rectangle {
             if (box.visible && taskField.text !== root.taskText)
                 taskField.text = root.taskText
         }
-        function onImagePasted(path) {
-            if (!box.visible)
+        function onImagePasted(path, target) {
+            if (!box.visible || target !== "task")
                 return
             const at = taskField.cursorPosition
             taskField.insert(at, (at > 0 && taskField.text.charAt(at - 1).trim() !== "" ? " " : "") + "[Image: " + path + "] ")
@@ -74,15 +74,7 @@ Rectangle {
     }
 
     // The pictures the task names ([Image: /path], pasted in)
-    readonly property var pictures: {
-        const out = [], named = /\[Image: (\/[^\]\n]+)\]/g
-        let m
-        while ((m = named.exec(root.taskText)) !== null) {
-            if (out.indexOf(m[1]) < 0)
-                out.push(m[1])
-        }
-        return out
-    }
+    readonly property var pictures: pictureStrip.named(root.taskText)
 
     ColumnLayout {
         id: column
@@ -136,7 +128,7 @@ Rectangle {
                     } else if (event.matches(StandardKey.Paste) && !taskField.canPaste) {
                         // no text on the clipboard: a picture, maybe (an SSH host's chat: asks to copy it there)
                         event.accepted = true
-                        root.pasteImage(box.remoteHost)
+                        root.pasteImage(box.remoteHost, "task")
                     }
                 }
 
@@ -155,71 +147,14 @@ Rectangle {
         }
 
         // The pictures it names, small: a click shows one, × takes it out
-        Flow {
+        PictureStrip {
+            id: pictureStrip
             Layout.fillWidth: true
             Layout.leftMargin: Kirigami.Units.smallSpacing
-            visible: box.pictures.length > 0
-            spacing: Kirigami.Units.smallSpacing
-
-            Repeater {
-                model: box.pictures
-                delegate: Item {
-                    id: picture
-                    required property string modelData
-                    height: Kirigami.Units.gridUnit * 3
-                    width: thumb.implicitHeight > 0 ? Math.min(Kirigami.Units.gridUnit * 8, height * thumb.implicitWidth / thumb.implicitHeight)
-                                                    : height
-
-                    Image {
-                        id: thumb
-                        anchors.fill: parent
-                        source: "file://" + encodeURI(root.pictureCopies[picture.modelData] || picture.modelData)   // (a host's: its copy here)
-                        sourceSize.height: parent.height * Screen.devicePixelRatio
-                        fillMode: Image.PreserveAspectFit
-                        horizontalAlignment: Image.AlignLeft
-                        asynchronous: true
-                    }
-                    PlasmaComponents3.Label {
-                        anchors.centerIn: parent
-                        visible: thumb.status === Image.Error
-                        textFormat: Text.PlainText
-                        text: i18n("Not there")
-                        font: Kirigami.Theme.smallFont
-                        opacity: 0.7
-                    }
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: Qt.openUrlExternally(thumb.source)
-                    }
-                    PlasmaCore.ToolTipArea {
-                        textFormat: Text.PlainText
-                        anchors.fill: parent
-                        mainText: i18n("A picture for Claude")
-                        subText: box.remoteHost ? i18n("%1, on %2", picture.modelData, box.remoteHost) : picture.modelData
-                    }
-                    Rectangle {   // (the × shows on any picture)
-                        anchors.fill: remove
-                        radius: width / 2
-                        color: Kirigami.Theme.backgroundColor
-                        opacity: 0.85
-                    }
-                    PlasmaComponents3.ToolButton {
-                        id: remove
-                        anchors.top: parent.top
-                        anchors.right: parent.right
-                        icon.name: "edit-delete-remove"
-                        display: PlasmaComponents3.AbstractButton.IconOnly
-                        text: i18n("Take it out of the task")
-                        implicitWidth: Kirigami.Units.iconSizes.small + Kirigami.Units.smallSpacing * 2
-                        implicitHeight: implicitWidth
-                        onClicked: {
-                            const token = "[Image: " + picture.modelData + "]"
-                            taskField.text = taskField.text.split(token + " ").join("").split(token).join("")
-                        }
-                    }
-                }
-            }
+            pictures: box.pictures
+            host: box.remoteHost
+            removeText: i18n("Take it out of the task")
+            onRemoveRequested: path => taskField.text = without(taskField.text, path)
         }
 
         // A picture for an SSH host's chat: copied there once you say so
@@ -227,6 +162,7 @@ Rectangle {
             Layout.fillWidth: true
             Layout.leftMargin: Kirigami.Units.smallSpacing
             visible: !!box.remoteHost && !!root.pictureOffer && root.pictureOffer.host === box.remoteHost
+                     && root.pictureOffer.target === "task"
             spacing: Kirigami.Units.smallSpacing
 
             Image {
@@ -247,7 +183,7 @@ Rectangle {
         }
         PlasmaComponents3.Label {
             Layout.leftMargin: Kirigami.Units.smallSpacing
-            visible: !!box.remoteHost && root.pictureCopyingTo === box.remoteHost
+            visible: !!box.remoteHost && root.pictureCopyingTo === box.remoteHost && root.pictureCopyTarget === "task"
             textFormat: Text.PlainText
             text: i18n("Copying the picture to %1…", box.remoteHost)
             opacity: 0.7

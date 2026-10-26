@@ -3358,24 +3358,28 @@ PlasmoidItem {
         }
     }
 
-    // A picture pasted into the task (jump.py --paste-image saves the
-    // clipboard's): the open box puts it in where you are typing. For an SSH
-    // host's chat it's copied there first, once you say so (remote.py
-    // --put-image): pictureOffer is the one the box asks about.
-    signal imagePasted(string path)
-    property var pasteHosts: ({})   // a paste's command: the SSH host it's for ("": here)
-    property var pictureOffer: null   // { host, path }
+    // A picture pasted into the task or into a reply in the chat pane
+    // (jump.py --paste-image saves the clipboard's): the box it's for (target
+    // "task" or "pane") puts it in where you are typing. For an SSH host's
+    // chat it's copied there first, once you say so (remote.py --put-image):
+    // pictureOffer is the one that box asks about.
+    signal imagePasted(string path, string target)
+    signal paneNote(string message)   // (why a picture didn't come, said in the pane: the popup may be closed)
+    property var pasteFor: ({})   // a paste's command: { host ("": here), target }
+    property var pictureOffer: null   // { host, path, target }
     property string pictureCopyingTo: ""
+    property string pictureCopyTarget: ""
     property var pictureCopies: ({})   // a copy's path on its host: the picture here (for its thumbnail)
-    function pasteImage(host) {
+    function pasteImage(host, target) {
         const cmd = "python3 -I " + shellQuote(codeDir + "jump.py") + " --paste-image # " + Date.now()
-        pasteHosts[cmd] = host || ""
+        pasteFor[cmd] = { host: host || "", target: target || "task" }
         imagePaster.connectSource(cmd)
     }
     function copyPicture() {
         const offer = pictureOffer
         pictureOffer = null
         pictureCopyingTo = offer.host
+        pictureCopyTarget = offer.target
         pictureCopier.connectSource("python3 -I " + shellQuote(codeDir + "remote.py") + " --put-image " + shellQuote(offer.host)
                                     + " " + shellQuote(offer.path) + " # " + Date.now())
     }
@@ -3385,16 +3389,18 @@ PlasmoidItem {
         connectedSources: []
         onNewData: (source, data) => {
             disconnectSource(source)
-            const host = root.pasteHosts[source] || ""
-            delete root.pasteHosts[source]
+            const paste = root.pasteFor[source] || { host: "", target: "task" }
+            delete root.pasteFor[source]
             const result = root.helperResult(data)
             if (!result.ok || !result.path) {
                 root.actionError = result.message
                 actionErrorTimer.restart()
-            } else if (host) {
-                root.pictureOffer = { host: host, path: result.path }
+                if (paste.target === "pane")
+                    root.paneNote(result.message)
+            } else if (paste.host) {
+                root.pictureOffer = { host: paste.host, path: result.path, target: paste.target }
             } else {
-                root.imagePasted(result.path)
+                root.imagePasted(result.path, paste.target)
             }
         }
     }
@@ -3407,10 +3413,12 @@ PlasmoidItem {
             const result = root.helperResult(data)
             if (result.ok && result.path) {
                 root.pictureCopies = Object.assign({}, root.pictureCopies, { [result.path]: result.local })
-                root.imagePasted(result.path)
+                root.imagePasted(result.path, root.pictureCopyTarget)
             } else {
                 root.actionError = i18n("Couldn't copy the picture to %1: %2", root.pictureCopyingTo, result.message)
                 actionErrorTimer.restart()
+                if (root.pictureCopyTarget === "pane")
+                    root.paneNote(root.actionError)
             }
             root.pictureCopyingTo = ""
         }
