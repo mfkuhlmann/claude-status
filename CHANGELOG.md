@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **A bigger icon:** the extension's icon (in the Extensions list and on the
+  Marketplace) is Talpa itself, as large as the widget's, without the navy
+  square behind it.
+
 ## 1.15.1
 
 - **Pictures in a reply:** Ctrl+V in a chat's tab pastes a picture (a
