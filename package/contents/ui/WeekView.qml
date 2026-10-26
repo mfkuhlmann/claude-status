@@ -107,6 +107,16 @@ PlasmaComponents3.ScrollView {
         return Number(n || 0).toLocaleString(Qt.locale(), "f", 0)
     }
 
+    // 412.3M, 8.1k
+    function tokens(n) {
+        return root.formatTokens(n || 0)
+    }
+
+    // A number of the tiles, in its own unit
+    function shown(value, kind) {
+        return kind === "time" ? hours(value) : kind === "money" ? money(value) : kind === "tokens" ? tokens(value) : String(value)
+    }
+
     // Wed 14:05
     function whenText(ms) {
         return Qt.locale().toString(new Date(ms), "ddd") + " " + root.clockText(ms)
@@ -136,8 +146,8 @@ PlasmaComponents3.ScrollView {
         if (!previous)
             return ""
         const d = now - before
-        const amount = kind === "time" ? hours(Math.abs(d)) : kind === "money" ? money(Math.abs(d)) : String(Math.abs(d))
-        if (kind === "time" ? Math.abs(d) < 60000 : kind === "money" ? Math.abs(d) < 0.01 : d === 0)
+        const amount = shown(Math.abs(d), kind)
+        if (kind === "time" ? Math.abs(d) < 60000 : kind === "money" ? Math.abs(d) < 0.01 : kind === "tokens" ? Math.abs(d) < 50 : d === 0)
             return i18nc("no change against the 7 days before", "same as before")
         return (d > 0 ? "+" : "−") + amount
     }
@@ -145,7 +155,7 @@ PlasmaComponents3.ScrollView {
     function beforeText(before, kind) {
         if (!previous)
             return ""
-        const value = kind === "time" ? hours(before) : kind === "money" ? money(before) : String(before)
+        const value = shown(before, kind)
         return "\n" + (span === "day" ? i18n("The day before: %1", value) : i18n("The 7 days before: %1", value))
     }
 
@@ -154,10 +164,9 @@ PlasmaComponents3.ScrollView {
     function trendText(key, kind) {
         if (trend.length < 2)
             return ""
-        const shown = trend.map(w => !w ? "?" : kind === "time" ? hours(w[key]) : kind === "money" ? money(w[key])
-                                                                                                  : String(w[key]))
-        return "\n" + (span === "day" ? i18n("Day by day, this day last: %1", shown.join(" · "))
-                                      : i18n("Week by week, these 7 days last: %1", shown.join(" · ")))
+        const values = trend.map(w => !w ? "?" : shown(w[key], kind))
+        return "\n" + (span === "day" ? i18n("Day by day, this day last: %1", values.join(" · "))
+                                      : i18n("Week by week, these 7 days last: %1", values.join(" · ")))
     }
 
     readonly property var tiles: !sum ? [] : [
@@ -175,11 +184,21 @@ PlasmaComponents3.ScrollView {
           tip: i18n("What the same tokens would cost on Claude's API, at its list prices of %1. Your plan isn't billed this way: this is the value of what you used.",
                     recap.prices ? Qt.locale().toString(date(recap.prices.asOf), "d MMMM yyyy") : "")
                + beforeText(previous ? previous.cost : 0, "money") + trendText("cost", "money") },
+        { label: i18n("Tokens"), key: "tokenTotal", value: tokens(sum.tokenTotal),
+          delta: deltaText(sum.tokenTotal, previous ? previous.tokenTotal : 0, "tokens"),
+          tip: tokenText() + beforeText(previous ? previous.tokenTotal : 0, "tokens") + trendText("tokenTotal", "tokens") },
         { label: i18n("Prompts"), key: "prompts", value: String(sum.prompts),
           delta: deltaText(sum.prompts, previous ? previous.prompts : 0, "count"),
           tip: i18np("In %1 chat", "In %1 chats", sum.chats) + " · " + i18np("%1 turn of Claude's", "%1 turns of Claude's", sum.turns)
                + beforeText(previous ? previous.prompts : 0, "count") + trendText("prompts", "count") }
     ]
+
+    // What the tokens were: all that Claude read and wrote, by kind
+    function tokenText() {
+        const t = sum.tokens
+        return i18n("Everything Claude read and wrote: %1 of new input, %2 read from the cache, %3 written to the cache and %4 that Claude wrote.",
+                    tokens(t.input), tokens(t.cacheRead), tokens(t.cacheWrite5m + t.cacheWrite1h), tokens(t.output))
+    }
 
     function factsText() {
         if (!sum)
@@ -428,7 +447,7 @@ PlasmaComponents3.ScrollView {
         GridLayout {
             Layout.fillWidth: true
             visible: view.hasData
-            columns: width > view.gu * 22 ? 4 : 2
+            columns: width > view.gu * 25 ? view.tiles.length : width > view.gu * 16 ? 3 : 2
             columnSpacing: Kirigami.Units.largeSpacing
             rowSpacing: Kirigami.Units.largeSpacing
 
@@ -799,6 +818,7 @@ PlasmaComponents3.ScrollView {
                                               view.hours(dayRow.day.youMs), view.hours(dayRow.day.workedMs),
                                               view.hours(dayRow.day.busyMs), view.hours(dayRow.day.waitMs))
                                          + "\n" + i18np("%1 prompt", "%1 prompts", dayRow.day.prompts)
+                                         + " · " + i18n("%1 tokens", view.tokens(dayRow.day.tokenTotal))
                                          + " · " + i18n("%1 at API prices", view.money(dayRow.day.cost))
                             }
                         }

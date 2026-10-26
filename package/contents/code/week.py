@@ -149,6 +149,7 @@ W_ALL, W_SUB, N_SUB, W_MISS, W_LONG, W_MAX, W_FLOW, W_ON, W_BIG, N_ALL, N_MISS, 
 W_SIZE = 12
 F_SUB, F_MISS, F_LONG, F_MAX, F_FLOW = 1, 2, 4, 8, 16
 USAGE_KEYS = ("input", "output", "cacheRead", "cacheWrite5m", "cacheWrite1h", "webSearches")
+TOKEN_KINDS = 5  # (the first of them are tokens: input, output, cache reads and writes)
 
 
 # ---------------------------------------------------------------- prices
@@ -1213,7 +1214,8 @@ def recap(sources, back, account, now_ms, home, usage=None, added=(), span="week
                             tokens[name] += t[i]
         out = {"youMs": int(covered(yours)), "workedMs": int(sum(worked.values())),
                "busyMs": int(covered([s[:2] for s in clipped(stretches, lo, hi)])),
-               "waitMs": int(covered(clipped(waits, lo, hi))), "prompts": own_prompts, "cost": round(cost, 4)}
+               "waitMs": int(covered(clipped(waits, lo, hi))), "prompts": own_prompts, "cost": round(cost, 4),
+               "tokenTotal": sum(tokens[name] for name in USAGE_KEYS[:TOKEN_KINDS])}
         if not full:
             return out
         out.update(turns=turns, limits=limit_episodes(limits), tokens=tokens, longestTurn=longest,
@@ -1233,7 +1235,7 @@ def recap(sources, back, account, now_ms, home, usage=None, added=(), span="week
         for k in range(TREND_WEEKS - 1, 0, -1):
             lo, hi = midnight(first_day - timedelta(days=step * k)), midnight(first_day - timedelta(days=step * (k - 1)))
             trend.append(dict(period(lo, hi, False), start=lo) if first_ms is not None and hi > first_ms else None)
-        trend.append({key: total[key] for key in ("youMs", "workedMs", "busyMs", "waitMs", "prompts", "cost")})
+        trend.append({key: total[key] for key in ("youMs", "workedMs", "busyMs", "waitMs", "prompts", "cost", "tokenTotal")})
         trend[-1]["start"] = w0
 
     # The timeline, a day per row, with each day's chats (to unfold) and the
@@ -1266,8 +1268,9 @@ def recap(sources, back, account, now_ms, home, usage=None, added=(), span="week
         row["workedMs"] = int(sum(w * max(0, min(b, de) - max(a, ds)) for a, b, _, w in parts["stretches"]))
         row["waitMs"] = int(covered(clipped(parts["waits"], ds, de)))
         row["prompts"] = sum(1 for c in chats for p in c["prompts"] if ds <= p < de)
-        row["cost"] = round(sum(request_cost(k, t) for c in chats for h, a in c["hours"].items()
-                                if ds <= int(h) * HOUR_MS < de for k, t in a["t"].items()), 4)
+        used = [(k, t) for c in chats for h, a in c["hours"].items() if ds <= int(h) * HOUR_MS < de for k, t in a["t"].items()]
+        row["cost"] = round(sum(request_cost(k, t) for k, t in used), 4)
+        row["tokenTotal"] = sum(sum(t[:TOKEN_KINDS]) for _, t in used)
         row["chats"] = chats_of(chats, parts["stretches"], ds, de, home)
         if span == "all":  # (a row's numbers and chats: no 24 hours to draw)
             row.update(to=(date.fromisoformat(day) + timedelta(days=6)).isoformat(), you=[], work=[], wait=[])

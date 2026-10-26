@@ -435,6 +435,28 @@ class RecapTests(Home):
                          [("2026-10-18", "2026-10-24", 90_000), ("2026-10-11", "2026-10-17", 0), ("2026-10-04", "2026-10-10", 20_000)])
         self.assertEqual(sum(r["workedMs"] for r in everything["days"]), everything["sum"]["workedMs"])
 
+    def test_the_tokens_of_a_day_a_week_and_everything(self):
+        t0 = self.t0
+        once = 5 + 100 + 1000  # (a reply: input, output, cache reads)
+        self.write(Transcript().prompt(t0).reply(t0 + 1000, "a").reply(t0 + 2000, "a2", write=40, hour_writes=True)
+                   .duration(t0 + 60_000, 60_000), "chat-a")
+        yesterday = t0 - week.DAY_MS
+        self.write(Transcript().prompt(yesterday).reply(yesterday + 1000, "b").duration(yesterday + 30_000, 30_000), "chat-b")
+        old = t0 - 9 * week.DAY_MS
+        self.write(Transcript().prompt(old).reply(old + 1000, "c", output=900).duration(old + 20_000, 20_000), "chat-c")
+        r = self.recap(days=40)
+        self.assertEqual(r["sum"]["tokenTotal"], 2 * once + 40 + once)  # (cache writes count, searches don't)
+        self.assertEqual(r["sum"]["tokenTotal"], sum(r["sum"]["tokens"][k] for k in list(week.USAGE_KEYS)[:5]))
+        self.assertEqual([d["tokenTotal"] for d in r["days"]], [0, 0, 0, 0, 0, once, 2 * once + 40])
+        self.assertEqual(r["previous"]["tokenTotal"], once + 800)
+        self.assertEqual(r["trend"][-1]["tokenTotal"], r["sum"]["tokenTotal"])
+        self.assertEqual(r["trend"][-2]["tokenTotal"], r["previous"]["tokenTotal"])
+        day = self.recap(span="day", days=40)
+        self.assertEqual((day["sum"]["tokenTotal"], day["previous"]["tokenTotal"]), (2 * once + 40, once))
+        everything = self.recap(span="all", days=40)
+        self.assertEqual(everything["sum"]["tokenTotal"], 4 * once + 40 + 800)
+        self.assertEqual(sum(d["tokenTotal"] for d in everything["days"]), everything["sum"]["tokenTotal"])
+
 
 class HistoryTests(Home):
     """What the cache read stays after Claude deletes a transcript, unless
