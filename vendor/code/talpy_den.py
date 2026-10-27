@@ -3055,8 +3055,13 @@ def place_chats(groups, ctx):
     for chat, entries in rows.items():
         shared = next((s["shared"] for _, s in entries if s["shared"] and not s["shared"].get("forkOf")), None)
         active = [(g, s) for g, s in entries if not is_record(s)]
+        if shared is not None and any(s["pid"] is not None or s["state"] == "working" for _, s in active):
+            # A shared chat that runs in a session on one account isn't also
+            # listed for a background job on another that has stopped (at its
+            # usage limit, say) and has no process now: that's the chat's old copy
+            active = [(g, s) for g, s in active if s["pid"] is not None or s["kind"] != "bg" or s["state"] == "working"]
         if active:
-            stale = [(g, s) for g, s in entries if is_record(s)]
+            stale = [(g, s) for g, s in entries if not any(s is t for _, t in active)]
             drop(stale)
             note_stopped(active, stale)
             continue
@@ -5462,6 +5467,9 @@ def prune_snapshots(snapshot_root, now):
             continue
 
 
+ENDED_WINDOWS_LOOKBACK = 12  # readings looked through for a window the newest one lacks
+
+
 def limit_window(key, pct, resets_at, now_ms):
     """A plan window as the widget shows it; one past its reset is at 0%."""
     resets = to_ms(resets_at)
@@ -5499,14 +5507,34 @@ def cached_usage_limits(profiles, now_ms):
     return best
 
 
+def with_ended_windows(limits, older, now_ms):
+    """Claude Code reports a weekly window only once there's usage in it, so
+    the first replies after a reset come without it. A window the newest
+    reading leaves out, that an older one had and that has ended since (within
+    its own length), is shown as reset: at 0%, not gone."""
+    have = {w["key"] for w in limits["windows"]}
+    extra = []
+    for windows in older:
+        for w in windows:
+            hours = window_hours(w["key"])
+            if w["reset"] and w["key"] not in have and hours and now_ms - w["endedAt"] < hours * 3600_000:
+                have.add(w["key"])
+                extra.append(w)
+    if not extra:
+        return limits
+    return {**limits, "windows": in_window_order(limits["windows"] + extra)}
+
+
 def plan_limits(snapshot_root, profiles, now_ms):
     """Rate-limit windows of the group: from its newest status-line snapshot,
     or from Claude Code's own usage cache when that's newer. (An account used
     only in VS Code's panel, which runs no status line, had numbers from the
     last time a terminal chat ran on it.)"""
     cached = cached_usage_limits(profiles, now_ms)
+    found = None
+    older = []  # the windows of the readings after it, newest first
     for mtime, path in snapshot_files(snapshot_root, profiles):
-        if cached is not None and cached["updatedAt"] >= int(mtime * 1000):
+        if found is None and cached is not None and cached["updatedAt"] >= int(mtime * 1000):
             break  # (newest first: the others are older still)
         snap = read_json(path)
         limits = snap.get("rate_limits") if isinstance(snap, dict) else None
@@ -5517,8 +5545,17 @@ def plan_limits(snapshot_root, profiles, now_ms):
                    if isinstance(w, dict) and number(w.get("used_percentage")) is not None]
         if not windows:
             continue
-        return {"updatedAt": int(mtime * 1000), "windows": in_window_order(windows)}
-    return cached
+        if found is None:
+            found = {"updatedAt": int(mtime * 1000), "windows": in_window_order(windows)}
+        else:
+            older.append(windows)
+            if len(older) >= ENDED_WINDOWS_LOOKBACK:
+                break
+    if found is None:
+        return cached
+    if cached is not None and cached["updatedAt"] < found["updatedAt"]:
+        older.append(cached["windows"])
+    return with_ended_windows(found, older, now_ms)
 
 
 # ---------------------------------------------------------------- usage forecast

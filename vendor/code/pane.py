@@ -91,7 +91,7 @@ PANE_TAIL_MAX = 64 << 20
 TEXT_CHARS = 20000  # of one prompt or reply
 DETAIL_CHARS = 1200  # of a tool call's input or output, unfolded
 DETAIL_LINES = 24
-PANE_LINE = re.compile(rb'"type":\s*"(?:user|assistant|system)"')
+PANE_LINE = re.compile(rb'"type":\s*"(?:user|assistant|system|queue-operation|queued_command)"')
 INTERRUPTED = "[Request interrupted"
 
 
@@ -207,9 +207,22 @@ def tool_summary(name, inp, output, error):
     return first + (f" … +{plural(len(rows) - 1, 'line')}" if len(rows) > 1 else "")
 
 
+def typed_text(content):
+    """What a message you sent while Claude worked says (a string, or the
+    text blocks of one with pictures), "" for one that isn't yours to read
+    (a task notification, a subagent's report)."""
+    text = cs.message_text({"content": content}).strip()
+    return "" if text.startswith("<") else text
+
+
+def same_text(a, b):
+    return " ".join(a.split()) == " ".join(b.split())
+
+
 def conversation_items(lines):
     """The pane's items from transcript lines (oldest first): {"kind": "you",
-    "text"} for a prompt of yours, {"kind": "claude", "text"} for Claude's
+    "text"} for a prompt of yours (one sent while Claude works shows when you
+    send it, not once Claude takes it in), {"kind": "claude", "text"} for Claude's
     reply (markdown), {"kind": "tool", "name", "line", "status":
     "ok"|"error"|"open", "input", "output", "summary" (what came of it, in a
     line), "diff" (an edit's: edit_lines)} for a tool call and {"kind":
@@ -217,6 +230,22 @@ def conversation_items(lines):
     each with "at" (ms) and "key" (the same in the next answer, as long as
     the item is listed). Entries of subagents (sidechains) aren't in it."""
     items, tools = [], {}
+    # Messages sent while Claude works: the transcript has each one when it's
+    # sent (queue-operation enqueue) and again once Claude takes it in, after
+    # its next tool result (an attachment, queued_command), which can be long
+    # after. waiting: the items shown for those not taken in yet; taken: the
+    # ids of those that were; due: the one made the chat's own prompt (dequeue)
+    waiting, taken, due = [], set(), None
+
+    def find_waiting(text):
+        return next((w for w in waiting if same_text(w["text"], text)), None)
+
+    def forget(item):
+        for n, other in enumerate(items):
+            if other is item:
+                del items[n]
+                break
+
     for line in lines:
         if not PANE_LINE.search(line):
             continue
@@ -228,6 +257,37 @@ def conversation_items(lines):
             continue
         kind, at = e.get("type"), cs.to_ms(e.get("timestamp"))
         uid = e["uuid"] if isinstance(e.get("uuid"), str) else f"{kind}-{at}-{len(items)}"
+        if kind == "queue-operation":
+            op, text = e.get("operation"), typed_text(e.get("content"))
+            if op == "enqueue" and text:
+                item = {"kind": "you", "key": f"queued-{at}", "text": clip(text, TEXT_CHARS, 10 ** 6), "at": at}
+                items.append(item)
+                waiting.append(item)
+            elif op == "remove" and text:
+                item = find_waiting(text)
+                if item is not None:
+                    waiting.remove(item)
+                    taken.add(e.get("commandUuid"))
+            elif op == "popAll":  # (back in your input box: not sent)
+                for item in [w for w in waiting if not text or same_text(w["text"], text)]:
+                    waiting.remove(item)
+                    forget(item)
+            elif op == "dequeue" and waiting:
+                due = waiting.pop(0)  # (the prompt that follows is this one)
+            continue
+        if kind == "attachment":
+            a = e.get("attachment")
+            origin = a.get("origin") if isinstance(a, dict) else None
+            if not isinstance(a, dict) or a.get("type") != "queued_command" or a.get("commandMode") != "prompt" \
+                    or (isinstance(origin, dict) and origin.get("kind") != "human"):
+                continue
+            text = typed_text(a.get("prompt"))
+            item = find_waiting(text) if text else None
+            if item is not None:
+                waiting.remove(item)
+            elif text and a.get("source_uuid") not in taken:
+                items.append({"kind": "you", "key": uid, "text": clip(text, TEXT_CHARS, 10 ** 6), "at": at})
+            continue
         if kind == "system":
             if e.get("subtype") == "compact_boundary":
                 items.append({"kind": "note", "key": uid, "text": "The conversation was compacted", "at": at})
@@ -253,6 +313,11 @@ def conversation_items(lines):
                             item["summary"] = change_summary(item["name"], full, item["summary"])
             prompt = cs.human_prompt(e)
             if prompt is not None:
+                if due is not None:
+                    shown, due = due, None
+                    if same_text(shown["text"], prompt):
+                        continue
+                    forget(shown)  # (not what was sent: it was put together with others)
                 items.append({"kind": "you", "key": uid, "text": clip(prompt, TEXT_CHARS, 10 ** 6), "at": at})
                 continue
             text = cs.message_text(msg).strip()

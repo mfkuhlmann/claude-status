@@ -12,6 +12,17 @@
   recognizes what the old extension added (its snippet, its status-line
   wrapper) and brings it up to date. In the view the app's name is the first
   tab (your chats), where the title *Claude Code* and a *Chats* tab were.
+- **Replies you send while Claude works show in a chat's tab:** a message
+  sent in the middle of a turn never showed there (only prompts that started
+  a turn did). It now shows the moment you send it, where you sent it, and
+  only once; one you take back into your input box goes away again.
+- **The weekly bar after a reset:** right after a week's limit reset, the
+  weekly bar vanished until your first reply of the new week (Claude Code
+  leaves that window out until it has usage). It now shows as *reset* at 0%.
+- **A chat you continued on another account is listed once:** a background
+  chat that waited at one account's usage limit and that you went on with on
+  another account was listed on both. It's now listed where it runs, and the
+  other account says where that is.
 - **The Output tab looks like the terminal:** a background session's screen
   shows in Claude's own colors on a terminal's dark ground (tool calls,
   diffs, the spinner, the prompt box, your status line), stays at the end as

@@ -644,7 +644,7 @@ function ChatApp() {
           {saving ? <div class="pane-hint">{chat?.host ? `Copying the picture to ${chat.host}…` : "Adding it to your reply…"}</div> : null}
           {offerSetup ? (
             <div class="pane-hint ask-buttons">
-              <span>Set up dictation? It installs faster-whisper, speech to text that runs on this computer, and its base speech model: about {offerSetup} MB from pypi.org and huggingface.co into ~/.local/share/claude-widget/whisper, no sudo needed; a few minutes. What you say never leaves the computer. Other models: Claude Status: Dictation Models.</span>
+              <span>Set up dictation? It installs faster-whisper, speech to text that runs on this computer, and its base speech model: about {offerSetup} MB from pypi.org and huggingface.co into ~/.local/share/talpy-den/whisper, no sudo needed; a few minutes. What you say never leaves the computer. Other models: Talpy Den: Dictation Models.</span>
               <button type="button" class="btn" onClick={() => { setOfferSetup(0); post({ type: "dictate", action: "setup" }); }}>Set up</button>
               <button type="button" class="btn secondary" onClick={() => setOfferSetup(0)}>Not now</button>
             </div>
@@ -660,7 +660,7 @@ function ChatApp() {
           <div class="pane-buttons">
             <button type="button" class={"btn secondary pane-mic" + (dictating === "recording" ? " on" : "")}
               disabled={dictating === "writing" || dictating === "model" || dictating === "setup"}
-              title="Dictate: say your reply, click again to stop, and it's written down where you're typing. On this computer only (whisper): what you say doesn't leave it. The speech model: Claude Status: Dictation Models."
+              title="Dictate: say your reply, click again to stop, and it's written down where you're typing. On this computer only (whisper): what you say doesn't leave it. The speech model: Talpy Den: Dictation Models."
               onClick={() => post({ type: "dictate", action: "toggle" })}>
               {dictating === "recording" ? `■ Stop: write it down · ${Math.max(1, Math.round((Date.now() - recordedAt) / 1000))}s`
                 : dictating === "writing" ? "Writing it down…" : dictating === "model" ? "Downloading the speech model…"

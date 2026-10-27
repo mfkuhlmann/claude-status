@@ -1,6 +1,6 @@
 // Dictation Models…: what writes dictated replies down (dictate.py --status),
 // dictation set up from here (faster-whisper in its own Python environment in
-// ~/.local/share/claude-widget/whisper, no sudo), and the speech models to
+// ~/.local/share/talpy-den/whisper, no sudo), and the speech models to
 // download, delete or use: one choice for the extension and the Plasma widget.
 
 import * as vscode from "vscode";
@@ -16,7 +16,7 @@ export async function dictationModels(backend: Backend): Promise<void> {
   }
   const st = await backend.dictate(["--status"]);
   if (!Array.isArray(st.models)) {
-    void vscode.window.showErrorMessage(`Claude Status: dictation can't be asked now (${String(st.message ?? "no answer")})`);
+    void vscode.window.showErrorMessage(`Talpy Den: dictation can't be asked now (${String(st.message ?? "no answer")})`);
     return;
   }
   const missing = (Array.isArray(st.missing) ? st.missing : []).join(" and ");
@@ -31,7 +31,7 @@ export async function dictationModels(backend: Backend): Promise<void> {
     items.push({
       label: "$(cloud-download) Set up dictation",
       description: `about ${Number(st.setupMb) || 612} MB`,
-      detail: "Installs faster-whisper, speech to text that runs on this computer, from pypi.org into its own Python environment, and downloads the base speech model from huggingface.co, all in ~/.local/share/claude-widget/whisper; no sudo needed. What you say never leaves the computer.",
+      detail: "Installs faster-whisper, speech to text that runs on this computer, from pypi.org into its own Python environment, and downloads the base speech model from huggingface.co, all in ~/.local/share/talpy-den/whisper; no sudo needed. What you say never leaves the computer.",
       run: ["--setup"],
       busy: "Setting up dictation (a few minutes)…",
     });
@@ -67,7 +67,7 @@ export async function dictationModels(backend: Backend): Promise<void> {
     : await backend.dictate(action.run);
   const message = String(r.message ?? "");
   if (r.ok) void vscode.window.showInformationMessage(message);
-  else void vscode.window.showErrorMessage(message || "Claude Status: that didn't work");
+  else void vscode.window.showErrorMessage(message || "Talpy Den: that didn't work");
 }
 
 // What to do with one model: download it (and use it), use it, delete it
