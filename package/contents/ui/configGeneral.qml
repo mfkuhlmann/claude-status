@@ -226,6 +226,36 @@ KCM.SimpleKCM {
         }
     }
 
+    // Keyboard answers (pane.py --shortcuts status|on|off): global shortcuts
+    // for the oldest prompt, registered with Plasma at once (not with Apply)
+    property var keysState: null      // {on}
+    property string keysMessage: ""
+
+    Exec {
+        id: keysHelper
+        onNewData: (source, data) => {
+            disconnectSource(source)
+            let result = null
+            try {
+                result = JSON.parse(data["stdout"])
+            } catch (e) {
+                page.keysMessage = i18n("Couldn't ask about keyboard answers")
+                return
+            }
+            if (result.on !== undefined) {
+                page.keysState = result
+            } else {
+                page.keysMessage = result.message || ""
+                page.runKeys(["status"])
+            }
+        }
+    }
+
+    function runKeys(args) {
+        const q = s => "'" + String(s).replace(/'/g, "'\\''") + "'"
+        keysHelper.connectSource("python3 -I " + q(codeDir + "pane.py") + " --shortcuts " + args.map(q).join(" ") + " # " + Date.now())
+    }
+
     function runLive(args) {
         const q = s => "'" + String(s).replace(/'/g, "'\\''") + "'"
         liveHelper.connectSource("python3 -I " + q(codeDir + "pane.py") + " --live " + args.map(q).join(" ") + " # " + Date.now())
@@ -246,6 +276,7 @@ KCM.SimpleKCM {
         runHistory(["--history-status"])
         runRelay(["status"])
         runLive(["status"])
+        runKeys(["status"])
     }
 
     function play(sound) {
@@ -353,6 +384,23 @@ KCM.SimpleKCM {
             opacity: 0.7
             text: (page.liveMessage ? page.liveMessage + "\n" : "")
                   + i18n("Adds a hook to each Claude profile's settings.json that notes each step of each chat as it happens (Claude doesn't wait for it): rows, the chat pane and the line under the big Talpa follow every tool call at once, and the widget checks the rest less often. Without it, a chat that starts, waits or finishes still shows at once; its steps show at each check. Applies at once.")
+        }
+
+        QQC2.CheckBox {
+            id: keysBox
+            text: i18n("Keyboard answers: Meta+Alt+Y allows the oldest prompt, Meta+Alt+N denies it")
+            checked: page.keysState !== null && page.keysState.on
+            enabled: page.keysState !== null
+            onToggled: page.runKeys([checked ? "on" : "off"])
+        }
+
+        QQC2.Label {
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 20
+            wrapMode: Text.Wrap
+            font: Kirigami.Theme.smallFont
+            opacity: 0.7
+            text: (page.keysMessage ? page.keysMessage + "\n" : "")
+                  + i18n("Two global shortcuts answer the chat that has waited longest for a permission, from anywhere: Allow once (a plan: Approve) or Deny (a plan: Keep planning); a note on screen says what was answered. They take \"Answer permission prompts from the widget\"; Claude's questions are answered in the panel. Pick other keys in System Settings → Shortcuts → Claude Status. Applies at once.")
         }
 
         QQC2.CheckBox {

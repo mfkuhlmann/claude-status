@@ -486,6 +486,67 @@ class HookTests(unittest.TestCase):
         self.assertEqual(cs.permission_view("ExitPlanMode", {"planFilePath": str(path)}, "")["plan"]["title"], "From the file")
         self.assertIsNone(cs.permission_view("Bash", {"command": "make"}, "")["plan"])
 
+    def hook_for(self, sid, tool="Bash", inp=None):
+        hook = subprocess.Popen([sys.executable, "-I", str(CODE / "permission_hook.py")], stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE, env=self.env())
+        self.addCleanup(lambda: (hook.poll() is None and hook.kill(), hook.wait(), hook.stdout.close()))
+        hook.stdin.write(json.dumps({"session_id": sid, "tool_name": tool, "tool_input": inp or {"command": "make"},
+                                     "cwd": "/tmp", "permission_suggestions": []}).encode())
+        hook.stdin.close()
+        deadline = time.time() + 5
+        while time.time() < deadline and sid not in cs.permission_requests(self.cache / "claude-widget"):
+            time.sleep(0.05)
+        time.sleep(0.01)   # (the next one is younger)
+        return hook
+
+    def test_keyboard_answers_take_the_oldest_prompt(self):
+        cache = self.cache / "claude-widget"
+        self.assertEqual(pane.answer_oldest(cache, "allow"), (False, "No chat waits for a permission"))
+        question = self.hook_for("q" * 8, "AskUserQuestion", QUESTIONS)
+        self.assertEqual(pane.answer_oldest(cache, "allow"), (False, "A question waits: answer it in the panel"))
+        first = self.hook_for("a" * 8, "Bash", {"command": "make first"})
+        second = self.hook_for("b" * 8, "Bash", {"command": "make second"})
+        ok, said = pane.answer_oldest(cache, "deny")
+        self.assertTrue(ok, said)
+        self.assertIn("Denied · Bash: make first", said)
+        self.assertEqual(json.loads(first.stdout.read())["hookSpecificOutput"]["decision"]["behavior"], "deny")
+        self.assertIsNone(second.poll())   # (still waiting: it's the next one)
+        plan = self.hook_for("c" * 8, "ExitPlanMode", {"plan": "# Do it"})
+        pane.answer_oldest(cache, "allow")   # (the Bash one)
+        ok, said = pane.answer_oldest(cache, "allow")
+        self.assertIn("Approved: it starts", said)
+        self.assertEqual(json.loads(plan.stdout.read())["hookSpecificOutput"]["decision"]["updatedInput"], {"plan": "# Do it"})
+        self.assertEqual(pane.answer_oldest(cache, "always"), (False, "Not an answer: always"))
+        question.kill()
+
+    def test_keyboard_shortcuts_go_where_they_are_free(self):
+        # A stand-in gdbus: Meta+Alt+N belongs to KWin here; every call logged
+        bin_dir = self.home / "bin"
+        log = self.home / "gdbus.log"
+        write(bin_dir / "gdbus", "#!/bin/sh\n"
+              f"echo \"$*\" >> {log}\n"
+              "case \"$*\" in *'getGlobalShortcutsByKey 402653262'*) echo \"([('kwin', 'Walk Through Windows', '', '', '', '', [], [])],)\";;\n"
+              "*getGlobalShortcutsByKey*) echo '(@a(ssssssaiai) [],)';; *) echo '()';; esac\n")
+        (bin_dir / "gdbus").chmod(0o755)
+        with mock.patch.dict(os.environ, {"PATH": f"{bin_dir}:{os.environ['PATH']}", "XDG_DATA_HOME": str(self.home / "data")}):
+            ok, said = pane.shortcuts(self.home, True)
+            path = pane.shortcuts_file(self.home)
+            text = path.read_text()
+            self.assertIn("Meta+Alt+N is another shortcut's", said)
+            self.assertIn("X-KDE-Shortcuts=Meta+Alt+Y\n", text)
+            self.assertIn("[Desktop Action deny]", text)
+            self.assertIn("X-KDE-Shortcuts=\n", text)   # (none for deny)
+            self.assertIn(f"Exec=python3 -I {CODE / 'pane.py'} --oldest allow --osd", text)
+            calls = log.read_text()
+            self.assertIn("doRegister [\"org.wzaielamri.claudestatus.answers.desktop\", \"allow\"", calls)
+            self.assertIn("setShortcutKeys [\"org.wzaielamri.claudestatus.answers.desktop\", \"allow\", \"Claude Status\", "
+                          "\"Allow the oldest prompt\"] [([402653273],)] 6", calls)
+            self.assertIn("\"deny\", \"Claude Status\", \"Deny the oldest prompt\"] @a(ai) [] 6", calls)
+            self.assertEqual(pane.shortcuts(self.home, None), (True, "on"))
+            self.assertEqual(pane.shortcuts(self.home, False), (True, "Keyboard answers are off"))
+            self.assertFalse(path.exists())
+            self.assertIn("unregister \"org.wzaielamri.claudestatus.answers.desktop\" \"deny\"", log.read_text())
+
     def test_a_permission_takes_no_answers(self):
         hook, request = self.start()
         ok, message = pane.answer_request(self.cache / "claude-widget", request["id"], "answer", answers={"x": ["y"]})
