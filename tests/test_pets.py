@@ -101,7 +101,9 @@ console.log(JSON.stringify(out));""")
         # It was petted, then grabbed while the petting went on: the action
         # ending gave the brain its turn, and it dug a burrow in mid-air
         # (seen on the design page, 2026-10-23). Held, it waits; dropped, it
-        # lands and digs in where it landed.
+        # lands and digs in where it landed. (Its depth is taken as the landing
+        # ends: a while later its brain may well have taken it out again, at
+        # random.)
         result = run_node(NULL_CANVAS + """
 const t = new Talpy({ travels: true });
 t.onTravel = () => {};
@@ -113,10 +115,10 @@ t.setHeld(true);
 t.setMood('working');
 const held = [];
 for (let i = 0; i < 120; i++) { now += 50; t.tick(now); t.draw(ctx); held.push([t.st.depth, t.st.held, !!t.run]); }
-let landed = null;
-t.land(50, ok => { landed = ok; });
+let landed = null, depth = null;
+t.land(50, ok => { landed = ok; depth = t.st.depth; });
 for (let i = 0; i < 120; i++) { now += 50; t.tick(now); }
-console.log(JSON.stringify({ held: held, landed: landed, depth: t.st.depth, after: t.held }));""")
+console.log(JSON.stringify({ held: held, landed: landed, depth: depth, after: t.held }));""")
         self.assertEqual({tuple(h) for h in result["held"]}, {("out", "1", False)})
         self.assertTrue(result["landed"])
         self.assertNotEqual(result["depth"], "out")
