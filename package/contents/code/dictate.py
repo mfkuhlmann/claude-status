@@ -89,7 +89,7 @@ def status():
     rec = recorder("x.wav")
     missing = []
     if tool is None:
-        missing.append("whisper.cpp (Fedora: sudo dnf install whisper-cpp; elsewhere: build it from github.com/ggml-org/whisper.cpp)")
+        missing.append("whisper.cpp's whisper-cli command (build it from github.com/ggml-org/whisper.cpp into ~/.local/bin; Fedora's whisper-cpp package has the libraries only, no command)")
     if rec is None:
         missing.append("a recorder (pw-record, from PipeWire)")
     return {"ok": tool is not None and model is not None and rec is not None, "tool": tool, "model": model,

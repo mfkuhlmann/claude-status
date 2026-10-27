@@ -90,7 +90,8 @@ class DictateTests(unittest.TestCase):
         self.assertFalse(got["ok"])
         self.assertIsNone(got["tool"])
         self.assertIsNone(got["model"])
-        self.assertIn("sudo dnf install whisper-cpp", got["missing"][0])
+        self.assertIn("whisper-cli", got["missing"][0])
+        self.assertNotIn("sudo dnf install", got["missing"][0])
         self.assertEqual([m["name"] for m in got["models"]], ["base", "small", "base.en"])
         # a model downloaded before is found where the widget keeps them
         folder = self.home / "data/claude-widget/whisper"
