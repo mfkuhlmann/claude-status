@@ -9,16 +9,18 @@
 #   --plasma / --gnome        which one (default: the desktop you're on)
 # The snippet goes into every script a Claude profile's settings.json runs as
 # its status line (~/.claude, ~/.claude-*; a script shared by several profiles
-# is patched once). CLAUDE_WIDGET_STATUSLINE=/path/script.sh overrides that.
+# is patched once). TALPY_DEN_STATUSLINE=/path/script.sh overrides that.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 id="org.wzaielamri.talpyden"
 uuid="talpy-den@wzaielamri.github.io"
 marker_start="# >>> talpy-den >>>"
+gsettings_path="/org/gnome/shell/extensions/talpy-den"
 # What earlier versions installed under their first name, replaced on upgrade
 legacy_id="org.wzaielamri.claudestatus"
 legacy_uuid="claude-status@wzaielamri.github.io"
+legacy_gsettings_path="/org/gnome/shell/extensions/claude-status"
 legacy_marker_start="# >>> claude-widget >>>"
 legacy_pane_app="org.wzaielamri.claudestatus.chat"
 legacy_pane_rule="claude-status-chat-pane"
@@ -73,8 +75,9 @@ confirm() {
 
 # Status-line scripts in use, one per line (links resolved, duplicates dropped).
 find_statuslines() {
-  if [ -n "${CLAUDE_WIDGET_STATUSLINE:-}" ]; then
-    printf '%s\n' "$CLAUDE_WIDGET_STATUSLINE"
+  local given="${TALPY_DEN_STATUSLINE:-${CLAUDE_WIDGET_STATUSLINE:-}}"  # (its first name too)
+  if [ -n "$given" ]; then
+    printf '%s\n' "$given"
     return
   fi
   python3 -I - "$HOME" <<'EOF'
@@ -299,12 +302,64 @@ uninstall_pane_icon() {
   fi
 }
 
+# The copies of the widget of the first name (in the panel, on the desktop,
+# in the system tray) become Talpy Den where they are, with their settings:
+# Plasma's layout file names the widget each copy is, so the old id changes
+# to the new one there. plasmashell writes that file as it quits, so it's
+# changed while plasmashell is stopped (the panel and desktop restart).
+moved=0
+move_legacy_applets() {
+  local rc="${XDG_CONFIG_HOME:-$HOME/.config}/plasma-org.kde.plasma.desktop-appletsrc" n how="" backup
+  [ -f "$rc" ] || return 0
+  n="$(grep -cxF "plugin=$legacy_id" "$rc" || true)"
+  [ "${n:-0}" -gt 0 ] || return 0
+  confirm "Turn your $n Claude Status widget(s) into Talpy Den where they are, with their settings? (Plasma's panel and desktop restart for it)" || return 0
+  if systemctl --user is-active --quiet plasma-plasmashell.service 2>/dev/null; then
+    how=systemd
+    systemctl --user stop plasma-plasmashell.service
+  elif pgrep -xu "$UID" plasmashell >/dev/null 2>&1; then
+    how=plain
+    kquitapp6 plasmashell >/dev/null 2>&1 || true
+    local tries=0
+    while pgrep -xu "$UID" plasmashell >/dev/null 2>&1 && [ "$tries" -lt 50 ]; do
+      sleep 0.2
+      tries=$((tries + 1))
+    done
+  fi
+  backup="$rc.bak.$(date +%Y%m%d%H%M%S)"
+  cp -p "$rc" "$backup"
+  python3 -I - "$rc" "$legacy_id" "$id" <<'EOF'
+import sys
+path, old, new = sys.argv[1:4]
+lines = open(path, encoding="utf-8").read().split("\n")
+for n, line in enumerate(lines):
+    key, eq, value = line.partition("=")
+    if eq and key == "plugin" and value == old:
+        lines[n] = "plugin=" + new
+    elif eq and key in ("extraItems", "knownItems", "hiddenItems", "shownItems"):  # (the system tray's lists)
+        items = [new if item == old else item for item in value.split(",")]
+        lines[n] = key + "=" + ",".join(item for k, item in enumerate(items) if item not in items[:k])
+open(path, "w", encoding="utf-8").write("\n".join(lines))
+EOF
+  case "$how" in
+    systemd) systemctl --user start plasma-plasmashell.service ;;
+    plain) (command -v kstart >/dev/null && kstart plasmashell || setsid -f plasmashell) >/dev/null 2>&1 || true ;;
+  esac
+  moved="$n"
+  echo "Your $n Claude Status widget(s) are now Talpy Den, where they were and with their settings (Plasma's layout before: $backup)."
+}
+
 # The widget/extension an earlier version installed under its first name:
-# taken out, with the chat pane's window rule and desktop file. (Its settings
-# and place in the panel don't carry over: add the new one again.)
+# taken out, with the chat pane's window rule and desktop file. (A widget's
+# places and settings carry over with move_legacy_applets, an extension's
+# settings here.)
 remove_legacy() {
   if [ "$target" = gnome ]; then
     [ -d "$HOME/.local/share/gnome-shell/extensions/$legacy_uuid" ] || return 0
+    # (its settings, unless the new one has some already)
+    if command -v dconf >/dev/null && [ -z "$(dconf dump "$gsettings_path/" 2>/dev/null)" ]; then
+      dconf dump "$legacy_gsettings_path/" 2>/dev/null | dconf load "$gsettings_path/" 2>/dev/null || true
+    fi
     gnome-extensions disable "$legacy_uuid" 2>/dev/null || true
     gnome-extensions uninstall "$legacy_uuid" 2>/dev/null || rm -rf "$HOME/.local/share/gnome-shell/extensions/$legacy_uuid"
     local list
@@ -332,7 +387,9 @@ remove_legacy() {
   fi
   [ -d "$HOME/.local/share/plasma/plasmoids/$legacy_id" ] || return 0
   kpackagetool6 -t Plasma/Applet -r "$legacy_id" || true
-  echo "Replaced the old Claude Status widget: add Talpy Den to your panel (right-click the panel → Add Widgets…)."
+  if [ "$moved" = 0 ] && [ "$uninstall" = 0 ]; then
+    echo "Replaced the old Claude Status widget: add Talpy Den to your panel (right-click the panel → Add Widgets…)."
+  fi
 }
 
 mapfile -t statuslines < <(find_statuslines)
@@ -380,17 +437,21 @@ fi
 
 # 1. Widget (without Python bytecode caches a test run may have left in it)
 find "$here/package" -name __pycache__ -type d -prune -exec rm -rf {} +
-remove_legacy
 if [ "$target" = gnome ]; then
+  remove_legacy
   install_gnome
-elif [ -d "$HOME/.local/share/plasma/plasmoids/$id" ]; then
-  kpackagetool6 -t Plasma/Applet -u "$here/package"
-  upgraded=1
 else
-  kpackagetool6 -t Plasma/Applet -i "$here/package"
-  upgraded=0
+  if [ -d "$HOME/.local/share/plasma/plasmoids/$id" ]; then
+    kpackagetool6 -t Plasma/Applet -u "$here/package"
+    upgraded=1
+  else
+    kpackagetool6 -t Plasma/Applet -i "$here/package"
+    upgraded=0
+  fi
+  move_legacy_applets  # (with the new widget installed, so plasmashell finds it as it starts)
+  remove_legacy
+  install_pane_icon
 fi
-[ "$target" = plasma ] && install_pane_icon
 
 # 2. Status-line snippet (feeds plan limits and per-session context)
 command -v jq >/dev/null || echo "warning: jq not found; the snippet needs it" >&2
@@ -441,6 +502,8 @@ if [ "$target" = gnome ]; then
   else
     echo "Extension installed. Log out and back in: the ✳ then shows in the top bar."
   fi
+elif [ "$moved" != 0 ]; then
+  echo "Widget installed in place of Claude Status."
 elif [ "$upgraded" = 1 ]; then
   echo "Widget upgraded. If the panel still shows the old version: systemctl --user restart plasma-plasmashell"
 else

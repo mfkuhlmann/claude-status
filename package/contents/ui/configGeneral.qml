@@ -259,7 +259,7 @@ KCM.SimpleKCM {
 
     // Dictation (dictate.py --status, --setup, --get-model, --use-model,
     // --delete-model, --remove-setup): faster-whisper and the speech models
-    // in ~/.local/share/claude-widget/whisper, one choice for every copy of the
+    // in ~/.local/share/talpy-den/whisper, one choice for every copy of the
     // widget and the VS Code extension, so it changes at once (not with Apply)
     property var dictation: null      // its --status
     property string dictationBusy: "" // what runs: "setup", "get", "delete", "use", "remove"
@@ -480,7 +480,7 @@ KCM.SimpleKCM {
                     return d.canSetup ? i18n("Not set up. Dictating needs faster-whisper, speech to text that runs on this computer; set up here, no sudo needed.")
                                       : i18n("To dictate, install %1.", d.missing.join(i18n(" and ")))
                 let line = d.engine === "whisper.cpp" ? i18n("Written down by whisper.cpp (%1).", d.tool)
-                                                      : i18n("Written down by faster-whisper, set up in ~/.local/share/claude-widget/whisper.")
+                                                      : i18n("Written down by faster-whisper, set up in ~/.local/share/talpy-den/whisper.")
                 line += " " + (!d.modelName ? i18n("No speech model yet: download one below.")
                                : d.chosen === "auto" ? i18n("It uses the %1 model (the best one downloaded).", d.modelName)
                                : i18n("It uses the %1 model.", d.modelName))
@@ -497,7 +497,7 @@ KCM.SimpleKCM {
             text: i18n("Set Up Dictation (about %1 MB)", page.dictation ? page.dictation.setupMb : 0)
             onClicked: page.runDictate(["--setup"])
             QQC2.ToolTip.visible: hovered
-            QQC2.ToolTip.text: i18n("Installs faster-whisper from pypi.org into its own Python environment and downloads the base speech model from huggingface.co, all in ~/.local/share/claude-widget/whisper. What you say never leaves the computer.")
+            QQC2.ToolTip.text: i18n("Installs faster-whisper from pypi.org into its own Python environment and downloads the base speech model from huggingface.co, all in ~/.local/share/talpy-den/whisper. What you say never leaves the computer.")
         }
 
         // The speech models: pick the one used, download or delete them

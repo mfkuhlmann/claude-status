@@ -36,7 +36,7 @@ QtObject {
                 return   // still running: not run twice (as with a DataSource)
             if (old.source) {
                 old.source.destroy()
-                console.warn("Claude Status: no answer to a command in " + staleMs + " ms, running it again")
+                console.warn("Talpy Den: no answer to a command in " + staleMs + " ms, running it again")
             }
         }
         const source = runner.createObject(exec)

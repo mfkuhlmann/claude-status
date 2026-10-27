@@ -236,7 +236,7 @@ QtObject {
             poller.connectSource(line)
         } catch (e) {
             delete running[line]   // (it never started: not a check to wait for)
-            console.warn("Claude Status: a check didn't start: " + e)
+            console.warn("Talpy Den: a check didn't start: " + e)
         }
     }
 

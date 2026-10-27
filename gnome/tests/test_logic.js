@@ -351,7 +351,7 @@ test('account stats', () => {
     const stats = {
         days: [day('2026-10-13', 0, 0, 0, 0), day('2026-10-14', 11212072, 124703, 6, 73),
             day('2026-10-15', 446759436, 1711830, 6, 73), day('2026-10-16', 0, 0, 0, 2)],
-        projects: [{name: 'claude_widget', path: '~/repos/claude_widget', total: 669761283, output: 2067056, prompts: 146},
+        projects: [{name: 'talpy-den', path: '~/repos/talpy-den', total: 669761283, output: 2067056, prompts: 146},
             {name: '~', path: '~', total: 0, output: 0, prompts: 1}],
         models: [{model: 'Opus 5.5', total: 997186118}, {model: 'Sonnet 5.5', total: 149621}],
         sum: {total: 997417549, output: 3218060, chats: 15, prompts: 253, activeDays: 1},

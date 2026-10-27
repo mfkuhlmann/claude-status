@@ -141,6 +141,55 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(rules.read_text(), mine)
         self.assertFalse(desktop.exists())
 
+    def test_widgets_of_the_first_name_stay_where_they_are_with_their_settings(self):
+        rc = self.home / ".config/plasma-org.kde.plasma.desktop-appletsrc"
+        rc.parent.mkdir(parents=True)
+        layout = ("[Containments][2][Applets][7]\nimmutability=1\nplugin=org.wzaielamri.claudestatus\n\n"
+                  "[Containments][2][Applets][7][Configuration][General]\nrecentChats=3\n\n"
+                  "[Containments][2][Applets][8]\nplugin=org.kde.plasma.systemtray\n\n"
+                  "[Containments][9][General]\nextraItems=org.kde.plasma.battery,org.wzaielamri.claudestatus\n"
+                  "knownItems=org.wzaielamri.claudestatus,org.wzaielamri.talpyden\n\n"
+                  "[Containments][9][Applets][10]\nplugin=org.wzaielamri.claudestatus\n"
+                  "[Containments][9][Applets][11]\nplugin=org.wzaielamri.claudestatus.other\n")
+        rc.write_text(layout)
+        (self.home / ".local/share/plasma/plasmoids/org.wzaielamri.claudestatus").mkdir(parents=True)
+        # plasmashell runs under systemd: stopped while its layout changes
+        self.stub("systemctl", STUB + 'case "$*" in *stop*|*start*) grep -c claudestatus "$RC" >> "$STUB_LOG";; esac\n')
+        out = self.install("--plasma", env={"RC": str(rc)})
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("Your 2 Claude Status widget(s) are now Talpy Den", out.stdout)
+        self.assertIn("Widget installed in place of Claude Status.", out.stdout)
+        self.assertNotIn("add Talpy Den to your panel", out.stdout)
+        self.assertEqual(rc.read_text(), layout.replace("plugin=org.wzaielamri.claudestatus\n", "plugin=org.wzaielamri.talpyden\n")
+                         .replace("battery,org.wzaielamri.claudestatus", "battery,org.wzaielamri.talpyden")
+                         .replace("knownItems=org.wzaielamri.claudestatus,org.wzaielamri.talpyden", "knownItems=org.wzaielamri.talpyden"))
+        (backup,) = rc.parent.glob(rc.name + ".bak.*")
+        self.assertEqual(backup.read_text(), layout)
+        calls = [line for line in self.log.read_text().splitlines()
+                 if line.startswith(("kpackagetool6", "systemctl --user st")) or line.isdigit()]
+        self.assertEqual(calls, ["kpackagetool6 -t Plasma/Applet -i %s/package" % ROOT,
+                                 "systemctl --user stop plasma-plasmashell.service", "5",
+                                 "systemctl --user start plasma-plasmashell.service", "1",  # (.claudestatus.other)
+                                 "kpackagetool6 -t Plasma/Applet -r org.wzaielamri.claudestatus"])
+        # (what kpackagetool6 did) nothing of the first name left: nothing to move again
+        (self.home / ".local/share/plasma/plasmoids/org.wzaielamri.claudestatus").rmdir()
+        self.assertNotIn("Claude Status widget", self.install("--plasma", env={"RC": str(rc)}).stdout)
+        self.assertEqual(len(list(rc.parent.glob(rc.name + ".bak.*"))), 1)
+
+    def test_the_gnome_extension_of_the_first_name_leaves_its_settings(self):
+        (self.home / ".local/share/gnome-shell/extensions/claude-status@wzaielamri.github.io").mkdir(parents=True)
+        (self.home / "dconf").mkdir()
+        (self.home / "dconf/claude-status").write_text("[/]\nshow-pet=false\n")
+        self.stub("dconf", '#!/bin/sh\nf="$HOME/dconf/$(basename "$2")"\n'
+                           'case "$1" in dump) cat "$f" 2>/dev/null;; load) cat > "$f";; esac\n')
+        self.stub("gnome-shell", "#!/bin/sh\necho 'GNOME Shell 49.1'\n")
+        self.stub("glib-compile-schemas", STUB)
+        out = self.install("--gnome")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("Replaced the old Claude Status extension.", out.stdout)
+        self.assertEqual((self.home / "dconf/talpy-den").read_text(), "[/]\nshow-pet=false\n")
+        self.assertIn("gnome-extensions uninstall claude-status@wzaielamri.github.io", self.log.read_text())
+
     def test_gnome_45_to_48_refused(self):
         self.stub("gnome-shell", "#!/bin/sh\necho 'GNOME Shell 46.0'\n")
         out = self.install("--gnome")
