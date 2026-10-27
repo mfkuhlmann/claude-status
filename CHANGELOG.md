@@ -10,6 +10,13 @@
   open burrow is drawn once and copied into each picture, which halves what
   a picture costs. A pet you pick up trails your mouse on a spring, swings
   as you move it and wobbles when you let go.
+- **Dictate a reply:** **Dictate** in a chat's tab records what you say;
+  click it again and whisper.cpp writes it down where you're typing (×
+  drops it). It runs on this computer only (not in a Remote window): what
+  you say never leaves it, and the recording is deleted once written down.
+  It needs whisper.cpp (Fedora: `sudo dnf install whisper-cpp`) and a
+  speech model, which the tab offers to download once (142 MB, from
+  huggingface.co); `claudeStatus.dictateLanguage` (auto by default).
 - **A reply box that helps:** in a chat's tab, `/` at the start offers
   Claude's commands, your own and the project's commands and skills (with
   what each does); `@` offers the project's files; ↑ and ↓ go through what

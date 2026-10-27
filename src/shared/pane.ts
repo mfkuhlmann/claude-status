@@ -87,7 +87,10 @@ export type PaneHostMessage =
   | { type: "textSize"; scale: number } // claudeStatus.chatTextScale
   | { type: "picture"; id: string; path: string; error: string } // a pasted picture, saved (path: where the chat opens it)
   | { type: "file"; id: string; path: string } // a file dropped on the tab: named in the reply (@path)
-  | { type: "offers"; offers: Offers }; // what the reply box offers as you type (pane.py --complete)
+  | { type: "offers"; offers: Offers } // what the reply box offers as you type (pane.py --complete)
+  // dictating: "recording", "writing", "model" (downloading one), "" (done: text written down, or
+  // why not); offerModel: whisper.cpp is there but no speech model (the tab asks before one comes)
+  | { type: "dictation"; state: "" | "recording" | "writing" | "model"; text?: string; message?: string; offerModel?: boolean };
 
 // tab -> extension
 export type PaneMessage =
@@ -108,7 +111,8 @@ export type PaneMessage =
   | { type: "picture"; id: string; mime: string; data: string } // pasted in the reply (base64): saved, an SSH host's copied there
   | { type: "attach"; id: string; path: string } // a file dropped from VS Code's Explorer: a picture saved as one, a file named
   | { type: "screenshot"; id: string } // a region of the screen you pick, as a picture
-  | { type: "complete" }; // what the reply box offers (answered with "offers")
+  | { type: "complete" } // what the reply box offers (answered with "offers")
+  | { type: "dictate"; action: "toggle" | "cancel" | "getModel" }; // the microphone (answered with "dictation")
 
 // What the reply box offers as you type (pane.py --complete): / at the start
 // Claude's commands, yours and the project's, and skills; @ the project's

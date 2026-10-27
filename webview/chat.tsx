@@ -174,6 +174,17 @@ function ChatApp() {
     return true;
   };
 
+  // The microphone: record, then whisper.cpp writes it down on this computer
+  const [dictating, setDictating] = useState<"" | "recording" | "writing" | "model">("");
+  const [recordedAt, setRecordedAt] = useState(0);
+  const [offerModel, setOfferModel] = useState(false);
+  const [, tickRecording] = useState(0);
+  useEffect(() => {
+    if (dictating !== "recording") return undefined;
+    const t = setInterval(() => tickRecording((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [dictating]);
+
   // Dropped on the tab: files from VS Code's Explorer (held Shift) by their
   // paths (a picture goes in as one, a file is named), pictures from
   // elsewhere as pasted ones; the screenshot button: a region you pick
@@ -254,6 +265,22 @@ function ChatApp() {
         }
       }
       else if (m.type === "offers") setOffers(m.offers);
+      else if (m.type === "dictation") {
+        setDictating(m.state);
+        if (m.state === "recording") setRecordedAt(Date.now());
+        if (m.offerModel) setOfferModel(true);
+        if (m.text) {
+          const said = m.text;
+          const box = reply.current;
+          const at = box ? box.selectionStart : Number.MAX_SAFE_INTEGER;
+          setText((t) => {
+            const i = Math.min(at, t.length);
+            return t.slice(0, i) + (i > 0 && t.charAt(i - 1).trim() ? " " : "") + said + " " + t.slice(i);
+          });
+          box?.focus();
+        }
+        if (m.message) setInfo({ ok: false, message: m.message });
+      }
       else if (m.type === "file") {
         const p = pending.current[m.id];
         delete pending.current[m.id];
@@ -556,8 +583,25 @@ function ChatApp() {
             </div>
           ) : null}
           {saving ? <div class="pane-hint">{chat?.host ? `Copying the picture to ${chat.host}…` : "Adding it to your reply…"}</div> : null}
+          {offerModel ? (
+            <div class="pane-hint ask-buttons">
+              <span>To dictate, whisper.cpp needs a speech model: download its base model (142 MB) from huggingface.co? It's kept in ~/.local/share/claude-widget/whisper; what you say never leaves the computer.</span>
+              <button type="button" class="btn" onClick={() => { setOfferModel(false); post({ type: "dictate", action: "getModel" }); }}>Download</button>
+              <button type="button" class="btn secondary" onClick={() => setOfferModel(false)}>Not now</button>
+            </div>
+          ) : null}
           <div class="pane-hint">{chat ? routeHint(chat.route, chat.state !== "done" || !!chat.busy, "", chat.host) : ""}</div>
           <div class="pane-buttons">
+            <button type="button" class={"btn secondary pane-mic" + (dictating === "recording" ? " on" : "")}
+              disabled={dictating === "writing" || dictating === "model"}
+              title="Dictate: say your reply, click again to stop, and it's written down where you're typing. On this computer only (whisper.cpp): what you say doesn't leave it."
+              onClick={() => post({ type: "dictate", action: "toggle" })}>
+              {dictating === "recording" ? `■ Stop: write it down · ${Math.max(1, Math.round((Date.now() - recordedAt) / 1000))}s`
+                : dictating === "writing" ? "Writing it down…" : dictating === "model" ? "Downloading the speech model…" : "Dictate"}
+            </button>
+            {dictating === "recording" ? (
+              <button type="button" class="btn secondary" title="Stop, don't write it down" onClick={() => post({ type: "dictate", action: "cancel" })}>×</button>
+            ) : null}
             <button type="button" class="btn secondary pane-shot" title="Screenshot: pick a region of the screen, its picture goes in your reply"
               onClick={screenshot}>
               Screenshot…

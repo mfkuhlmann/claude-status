@@ -3192,6 +3192,11 @@ body.vscode-light .pane {
   margin-right: auto;
 }
 
+.pane-mic.on {
+  color: var(--vscode-errorForeground, #f85149);
+  border-color: var(--vscode-errorForeground, #f85149);
+}
+
 /* What the reply box offers as you type (chat.tsx): / commands, @ files */
 .pane-offers {
   margin: 0 0 4px;

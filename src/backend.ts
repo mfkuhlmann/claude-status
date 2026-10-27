@@ -256,6 +256,11 @@ export class Backend {
     return r?.ok && typeof r.path === "string" ? { path: r.path, message: "" } : { message: String(r?.message ?? "the helper gave no answer") };
   }
 
+  // Dictation (dictate.py): --status, --start ID, --stop ID [--language L], --cancel ID, --get-model NAME
+  async dictate(args: string[], timeoutMs = 30000): Promise<Record<string, any>> {
+    return (await this.json(["dictate.py", ...args], timeoutMs)) ?? { ok: false, message: "the helper gave no answer" };
+  }
+
   async attach(path: string): Promise<{ path?: string; picture?: boolean; message: string }> {
     const r = await this.json(["jump.py", "--attach", path], 30000);
     return r?.ok && typeof r.path === "string" ? { path: r.path, picture: r.picture === true, message: "" }

@@ -422,6 +422,9 @@ class Pane implements vscode.Disposable {
                     error: there.path ? "" : `Couldn't copy the picture to ${this.host}: ${there.message}` });
         break;
       }
+      case "dictate":
+        await this.dictate(m.action);
+        break;
       case "complete": {
         const r = await backend.pane(["--complete", this.chatId, ...(this.chat.profileDir ? ["--profile", this.chat.profileDir] : []),
           ...(this.host ? ["--host", this.host] : configDirArgs())], this.host ? 60000 : 20000);
@@ -433,6 +436,49 @@ class Pane implements vscode.Disposable {
         if (typeof m.scale === "number" && Number.isFinite(m.scale))
           await vscode.workspace.getConfiguration("claudeStatus").update("chatTextScale", textScale(m.scale), vscode.ConfigurationTarget.Global);
         break;
+    }
+  }
+
+  // The microphone: record, then whisper.cpp writes it down on this computer
+  // (dictate.py); only when this window runs here (else the microphone would be the remote's)
+  private recording = "";
+  private async dictate(action: "toggle" | "cancel" | "getModel"): Promise<void> {
+    const { backend } = this.owner.ext;
+    const tell = (m: Omit<Extract<import("./shared/pane").PaneHostMessage, { type: "dictation" }>, "type">) => this.post({ type: "dictation", ...m });
+    if (vscode.env.remoteName) {
+      tell({ state: "", message: "Dictating works in a window that runs on this computer (not over Remote)" });
+      return;
+    }
+    if (action === "cancel") {
+      if (this.recording) await backend.dictate(["--cancel", this.recording]);
+      this.recording = "";
+      tell({ state: "" });
+    } else if (action === "getModel") {
+      tell({ state: "model" });
+      const r = await backend.dictate(["--get-model", "base"], 900000);
+      tell({ state: "", message: String(r.message ?? "") });
+    } else if (this.recording) {
+      const id = this.recording;
+      this.recording = "";
+      tell({ state: "writing" });
+      const language = vscode.workspace.getConfiguration("claudeStatus").get<string>("dictateLanguage") || "auto";
+      const r = await backend.dictate(["--stop", id, "--language", language], 600000);
+      tell({ state: "", text: r.ok ? String(r.text ?? "") : "", message: r.ok ? "" : String(r.message ?? "") });
+    } else {
+      const st = await backend.dictate(["--status"]);
+      if (!st.ok) {
+        if (st.tool && !st.model) tell({ state: "", offerModel: true });
+        else tell({ state: "", message: `To dictate, install ${(Array.isArray(st.missing) ? st.missing : []).join(" and ")}.` });
+        return;
+      }
+      const id = `r${Date.now()}`;
+      const r = await backend.dictate(["--start", id]);
+      if (!r.ok) {
+        tell({ state: "", message: String(r.message ?? "") });
+        return;
+      }
+      this.recording = id;
+      tell({ state: "recording" });
     }
   }
 
@@ -485,6 +531,8 @@ class Pane implements vscode.Disposable {
   dispose(): void {
     if (this.disposed) return; // (closing the panel calls this again)
     this.disposed = true;
+    if (this.recording) void this.owner.ext.backend.dictate(["--cancel", this.recording]); // (the tab closed while it listened)
+    this.recording = "";
     if (this.timer) clearTimeout(this.timer);
     this.timer = undefined;
     for (const d of this.disposables) d.dispose();

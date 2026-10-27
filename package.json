@@ -370,6 +370,12 @@
           "markdownDescription": "Text size in a chat's tab, times VS Code's font size. The tab's A− / A+ buttons and Ctrl+wheel change it.",
           "order": 6
         },
+        "claudeStatus.dictateLanguage": {
+          "type": "string",
+          "default": "auto",
+          "markdownDescription": "The language you dictate replies in, as a code (`en`, `de`, `fr`…), or `auto` to let whisper.cpp tell. Dictating (the microphone in a chat's tab) needs [whisper.cpp](https://github.com/ggml-org/whisper.cpp) on this computer; what you say never leaves it.",
+          "order": 7
+        },
         "claudeStatus.openIn": {
           "type": "string",
           "enum": [

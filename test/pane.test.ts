@@ -293,3 +293,31 @@ test("the reply box offers commands at the start and files after @, best first",
   assert.deepEqual(suggestFor("look at @comp", offers, "@comp").items, []); // (Esc closed it for that word)
   assert.deepEqual(suggestFor("/comp", null).items, []);
 });
+
+test("the microphone: recorded, then written down; a missing model is offered; Remote windows can't", async () => {
+  const calls: string[][] = [];
+  let status: Record<string, unknown> = { ok: true, tool: "/usr/bin/whisper-cli", model: "/m.bin" };
+  const backend = {
+    pane: async () => ({ ok: true, unchanged: true }),
+    dictate: async (args: string[]) => (calls.push(args), args[0] === "--status" ? status
+      : args[0] === "--stop" ? { ok: true, text: "Fix the parser" } : { ok: true, message: "" }),
+  };
+  const dash = { state: () => demoState(NOW), refresh: async () => undefined, pollHost: async () => undefined, onState: () => ({ dispose() {} }), onLive: () => ({ dispose() {} }), liveHook: false };
+  const p = new ChatPanes(vscode.Uri.file("/ext") as never, backend as never, dash as never, {} as never, { find: async () => undefined } as never, {} as never);
+  p.open({ chatId: "mic-1", sessionId: "mic-1", profileDir: ".claude", name: "x" } as never);
+  const panel = recorded.panels.at(-1)!;
+  const say = async (action: string) => {
+    panel.receive({ type: "dictate", action });
+    await new Promise((r) => setTimeout(r, 10));
+    return panel.sent.filter((x) => (x as { type: string }).type === "dictation").slice(-1)[0];
+  };
+  assert.deepEqual(await say("toggle"), { type: "dictation", state: "recording" });
+  assert.deepEqual(await say("toggle"), { type: "dictation", state: "", text: "Fix the parser", message: "" });
+  assert.deepEqual(calls.map((c) => c[0]), ["--status", "--start", "--stop"]);
+  assert.equal(calls[1][1], calls[2][1]); // (the same recording)
+  assert.ok(calls[2].includes("--language"));
+  status = { ok: false, tool: "/usr/bin/whisper-cli", model: null };
+  assert.deepEqual(await say("toggle"), { type: "dictation", state: "", offerModel: true });
+  status = { ok: false, tool: null, model: null, missing: ["whisper.cpp"] };
+  assert.equal((await say("toggle")).message, "To dictate, install whisper.cpp.");
+});
