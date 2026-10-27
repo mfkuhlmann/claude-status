@@ -989,3 +989,18 @@ class OutputTests(Home):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MondayRecapTests(unittest.TestCase):
+    """The Monday recap (week.py --monday-recap): once a week, Monday from 9
+    o'clock or the first check after, for whichever copy asks first."""
+
+    def test_once_a_week_from_monday_morning(self):
+        cache = Path(tempfile.mkdtemp())
+        monday = time.mktime((2026, 10, 26, 10, 0, 0, 0, 0, -1))
+        self.assertIsNone(week.monday_due(cache, monday))                     # (installed now: from next week on)
+        self.assertEqual(week.monday_due(cache, monday + 7 * 86400), "2026-W45")
+        self.assertIsNone(week.monday_due(cache, monday + 7 * 86400 + 60))     # (another copy asks: once)
+        self.assertIsNone(week.monday_due(cache, monday + 14 * 86400 - 3 * 3600))   # (Monday 7:00)
+        self.assertEqual(week.monday_due(cache, monday + 16 * 86400), "2026-W46")   # (off on Monday: Wednesday)
+        self.assertEqual(json.loads((cache / week.MONDAY_FILE).read_text())["week"], "2026-W46")

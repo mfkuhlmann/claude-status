@@ -856,6 +856,61 @@ PlasmoidItem {
         }
     }
 
+    // The Monday recap: once a week the last 7 days in a few words (week.py
+    // --monday-recap: whichever copy of the widget or the VS Code extension
+    // asks first that week gets it), and a click opens the Recap
+    Component {
+        id: recapNotificationComponent
+        Notification {
+            id: recapNote
+            componentName: "plasma_workspace"
+            eventId: "notification"
+            hints: ({ "x-kde-display-appname": "Claude Code" })
+            iconName: "view-calendar-week"
+            defaultAction: NotificationAction {
+                label: i18n("Open the Recap")
+                onActivated: root.openRecap()
+            }
+            actions: [
+                NotificationAction {
+                    label: i18n("Open the Recap")
+                    onActivated: root.openRecap()
+                }
+            ]
+            onClosed: recapNote.destroy()
+        }
+    }
+    function openRecap() {
+        popupTab = "week"
+        expanded = true
+    }
+    Timer {
+        interval: 30 * 60000
+        repeat: true
+        triggeredOnStart: true
+        running: root.notifier && Plasmoid.configuration.mondayRecap
+        onTriggered: mondayAsk.connectSource("python3 -I " + root.shellQuote(root.codeDir + "week.py") + " --monday-recap"
+                                             + root.configDirArgs)
+    }
+    Exec {
+        id: mondayAsk
+        onNewData: (source, data) => {
+            disconnectSource(source)
+            const r = root.helperResult(data)
+            if (!r.ok || !r.due)
+                return
+            const h = ms => Math.round(ms / 3600000)
+            const lines = [i18n("Claude worked %1 h over %2 chats; you, %3 h and %4 prompts.", h(r.workedMs), r.chats, h(r.youMs), r.prompts)]
+            if (r.project)
+                lines.push(i18n("Most of it in %1.", r.project))
+            if (r.workedBefore > 0) {
+                const change = Math.round((r.workedMs - r.workedBefore) / r.workedBefore * 100)
+                lines.push(change >= 0 ? i18n("%1% more than the week before.", change) : i18n("%1% less than the week before.", -change))
+            }
+            recapNotificationComponent.createObject(root, { title: i18n("Your week with Claude"), text: lines.join("\n") }).sendEvent()
+        }
+    }
+
     // A chat that waits for a permission the widget can answer: its buttons,
     // in Claude's own order (Yes, Yes and don't ask again, No). The note
     // goes in the pane: Plasma puts a reply button before all the others.

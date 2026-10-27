@@ -28,6 +28,7 @@ KCM.SimpleKCM {
     property alias cfg_notifyDoneMinSeconds: notifyDoneMinSeconds.value
     property alias cfg_clickOpensPane: clickOpensPane.checked
     property alias cfg_dictateLanguage: dictateLanguage.text
+    property alias cfg_mondayRecap: mondayRecap.checked
     property alias cfg_awayDigest: awayDigest.checked
     property alias cfg_awayMinutes: awayMinutes.value
     property alias cfg_shortcutGoesToChat: shortcutGoesToChat.checked
@@ -70,6 +71,7 @@ KCM.SimpleKCM {
     property int cfg_notifyDoneMinSecondsDefault
     property bool cfg_clickOpensPaneDefault
     property string cfg_dictateLanguageDefault
+    property bool cfg_mondayRecapDefault
     property bool cfg_awayDigestDefault
     property int cfg_awayMinutesDefault
     property bool cfg_shortcutGoesToChatDefault
@@ -411,6 +413,12 @@ KCM.SimpleKCM {
             placeholderText: "auto"
             QQC2.ToolTip.visible: hovered
             QQC2.ToolTip.text: i18n("The language you dictate replies in, as a code (en, de, fr…), or auto to let whisper.cpp tell. Dictating needs whisper.cpp; it runs on this computer only.")
+        }
+
+        QQC2.CheckBox {
+            id: mondayRecap
+            Kirigami.FormData.label: i18n("Every week:")
+            text: i18n("On Mondays, sum up the last 7 days in a notification (it opens the Recap)")
         }
 
         QQC2.CheckBox {

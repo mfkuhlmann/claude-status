@@ -49,6 +49,7 @@ another starts with a copy of its entries: those count once.
 """
 
 import difflib
+import datetime
 import json
 import os
 import re
@@ -2247,10 +2248,53 @@ def host_chats(host, back, span="week"):
     return {"host": host, "ok": True, "chats": chats, "accounts": answer.get("accounts") or []}
 
 
+# ---------------------------------------------------------------- the Monday recap
+#
+# Once a week (Monday from 9 o'clock, or the first check after it that week)
+# a notification sums up the last 7 days and opens the Recap. Every copy of
+# the widget and the VS Code extension asks; the first to ask in a week gets
+# it (the week is marked under a lock), so it comes once.
+
+MONDAY_FILE = "recap-monday.json"
+MONDAY_HOUR = 9
+
+
+def monday_due(cache_root, now_s):
+    """Whether the Monday recap is due now, marking the week (once a week, for
+    every copy that asks): the week's name, or None."""
+    t = time.localtime(now_s)
+    if t.tm_wday == 0 and t.tm_hour < MONDAY_HOUR:
+        return None
+    year, week, _ = datetime.date(t.tm_year, t.tm_mon, t.tm_mday).isocalendar()
+    name = "%d-W%02d" % (year, week)
+    cs.private_dir(cache_root)
+    import fcntl
+    with open(cache_root / (MONDAY_FILE + ".lock"), "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        mark = cs.read_json(cache_root / MONDAY_FILE)
+        if isinstance(mark, dict) and mark.get("week") == name:
+            return None
+        first = not isinstance(mark, dict)
+        cs.write_json_atomic(cache_root / MONDAY_FILE, {"week": name, "at": int(now_s * 1000)})
+    return None if first else name   # (the first time: from next week on, not the moment you install it)
+
+
+def monday_recap(sources, now_ms, home):
+    """The last 7 days, for the Monday recap's few words."""
+    r = recap(sources, 0, "", now_ms, home, span="week")
+    total = r.get("sum") or {}
+    previous = r.get("previous") or {}
+    top = (r.get("projects") or [{}])[0] if r.get("projects") else {}
+    return {"workedMs": total.get("workedMs") or 0, "youMs": total.get("youMs") or 0, "prompts": total.get("prompts") or 0,
+            "chats": total.get("chats") or 0, "tokenTotal": total.get("tokenTotal") or 0, "cost": total.get("cost") or 0,
+            "busiestDay": total.get("busiestDay") or "", "project": top.get("name") or "",
+            "promptsBefore": previous.get("prompts") or 0, "workedBefore": previous.get("workedMs") or 0}
+
+
 def main(argv=None):
     args = sys.argv[1:] if argv is None else list(argv)
     back, account, hosts, config_dirs, currency, span = 0, "", [], [], "USD", "week"
-    pretty = remote = data = perms = status = forget = False
+    pretty = remote = data = perms = status = forget = monday = False
     allow = undo = revoke = history = on = None
     while args:
         arg = args.pop(0)
@@ -2288,6 +2332,8 @@ def main(argv=None):
             data = True
         elif arg == "--permissions":
             perms = True
+        elif arg == "--monday-recap":
+            monday = True
         else:
             sys.exit(__doc__)
     os.umask(0o077)  # cache files are private to the user
@@ -2322,6 +2368,21 @@ def main(argv=None):
                 result = {"ok": ok, "message": message}
         except Exception as exc:
             result = {"ok": False, "message": "{}: {}".format(type(exc).__name__, exc)}
+        return emit(result)
+    if monday:   # (cheap unless it's due: then the last 7 days)
+        try:
+            week = monday_due(cache_root, now_ms / 1000)
+            if week is None:
+                return emit({"ok": True, "due": False})
+            profiles = cs.discover_profiles(home, config_dirs)
+            cache = updated_cache(cache_root, profiles, now_ms)
+            first_ms = first_activity(cache)
+            days = span_days("week", 0, now_ms, first_ms)
+            chats = chats_between(cache, profiles, span_since("week", 0, now_ms, first_ms), days[-1][2], home)
+            _, accounts = account_ids(profiles)
+            result = dict(monday_recap([{"host": "", "chats": chats, "accounts": accounts}], now_ms, home), ok=True, due=True, week=week)
+        except Exception as exc:
+            result = {"ok": False, "due": False, "error": "{}: {}".format(type(exc).__name__, exc)}
         return emit(result)
     try:
         profiles = cs.discover_profiles(home, config_dirs)

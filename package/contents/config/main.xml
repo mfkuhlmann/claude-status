@@ -95,6 +95,10 @@
       <label>Blink the icon while a chat needs you (until you open the popup), pulse it when one finishes</label>
       <default>true</default>
     </entry>
+    <entry name="mondayRecap" type="Bool">
+      <label>On Mondays, a notification with the last 7 days that opens the Recap</label>
+      <default>true</default>
+    </entry>
     <entry name="dictateLanguage" type="String">
       <label>The language you dictate replies in (whisper.cpp's code, e.g. en or de), or auto</label>
       <default>auto</default>
