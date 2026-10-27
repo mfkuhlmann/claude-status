@@ -25,10 +25,10 @@ Rectangle {
     property color base: Qt.tint(Kirigami.Theme.backgroundColor, Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g,
                                                                          Kirigami.Theme.textColor.b, 0.04))
     readonly property bool dark: Kirigami.Theme.backgroundColor.hslLightness < 0.5
-    // (about 80 characters a side, else one after the other)
+    // (about 48 characters a side, else one after the other)
     // (only lines added, or only removed: nothing to set side by side)
     readonly property bool sideBySide: canSplit && Plasmoid.configuration.diffSideBySide && now.length === 0
-                                       && width > pt * 1.333 * 0.88 * 0.6 * 2 * 62
+                                       && width > pt * 1.333 * 0.88 * 0.6 * 2 * 48
                                        && lines.some(l => l.charAt(0) === "-") && lines.some(l => l.charAt(0) === "+")
     function hex(c) {
         return Qt.rgba(c.r, c.g, c.b, 1).toString()
