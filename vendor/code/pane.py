@@ -41,6 +41,13 @@ its permission prompt and its review.
   --live on|off|status
         live mode: the live hook (live_hook.py) in each Claude profile's
         settings.json, so the widget shows each step of each chat as it happens
+  --oldest allow|deny [--osd]
+        answer the oldest prompt a chat waits on (one the hook relayed; a plan:
+        approve it, or keep planning), for a keyboard shortcut; --osd: say on
+        screen what was answered
+  --shortcuts on|off|status
+        keyboard answers: the shortcuts for --oldest (Plasma's global
+        shortcuts: Meta+Alt+Y allows, Meta+Alt+N denies, where they're free)
 
 --host HOST: the same on an SSH host (remote.py runs this file there, after
 claude_status.py); --remote: the JSON after a marker line, as there.
@@ -382,6 +389,160 @@ def answer_request(cache_root, request_id, decision, note="", answers=None):
     if inp is not None:
         return True, "Answered" if decision == "answer" else "Declined"
     return True, {"allow": "Allowed", "always": "Allowed, and from now on", "deny": "Denied"}[decision]
+
+
+# ---------------------------------------------------------------- keyboard answers
+#
+# Two global shortcuts answer the oldest prompt a chat waits on (relayed by
+# the hook): Allow once (a plan: Approve) and Deny (a plan: Keep planning),
+# then a note on screen says what was answered (Plasma's on-screen display,
+# else a notification). --shortcuts on puts a desktop file with the two
+# actions in ~/.local/share/kglobalaccel (Plasma loads those at login, and
+# runs an action's command when its keys are pressed) and registers them
+# with kglobalaccel right away over D-Bus, with Meta+Alt+Y and Meta+Alt+N
+# where no other shortcut has them (else none: you pick them in System
+# Settings → Shortcuts → Claude Status). --shortcuts off takes them out.
+
+SHORTCUTS_COMPONENT = "org.wzaielamri.claudestatus.answers.desktop"
+SHORTCUT_ACTIONS = (  # (action, its name, default keys, the same as Qt's key code)
+    ("allow", "Allow the oldest prompt", "Meta+Alt+Y", 0x10000000 | 0x08000000 | 0x59),
+    ("deny", "Deny the oldest prompt", "Meta+Alt+N", 0x10000000 | 0x08000000 | 0x4E),
+)
+KGLOBALACCEL = ("--dest", "org.kde.kglobalaccel", "--object-path", "/kglobalaccel")
+
+
+def oldest_request(cache_root):
+    """The oldest relayed request a key can answer (not a question: those
+    take answers), and whether a question waits too."""
+    requests = list(cs.permission_requests(cache_root).values())
+    usable = [r for r in requests if r.get("tool") != cs.ASK_TOOL]
+    oldest = min(usable, key=lambda r: r.get("at") or 0) if usable else None
+    return oldest, len(usable) < len(requests)
+
+
+def chat_name(req):
+    path = req.get("transcript")
+    try:
+        name, _, _ = cs.read_chat_info(Path(path), Path(path).stat().st_size) if isinstance(path, str) else ("", "", "")
+    except (OSError, ValueError, TypeError):
+        name = ""
+    return name or "A chat"
+
+
+def answer_oldest(cache_root, decision):
+    """Allow (a plan: approve) or deny (a plan: keep planning) the oldest
+    prompt: (ok, what to say)."""
+    if decision not in ("allow", "deny"):
+        return False, f"Not an answer: {decision}"
+    req, question = oldest_request(cache_root)
+    if req is None:
+        return False, "A question waits: answer it in the panel" if question else "No chat waits for a permission"
+    plan = req.get("tool") == cs.PLAN_TOOL
+    ok, said = answer_request(cache_root, req["id"], ("approve" if decision == "allow" else "keep") if plan else decision)
+    if not ok:
+        return False, said
+    return True, f"{chat_name(req)}: {said} · {cs.request_view(req)['line']}"
+
+
+def show_note(text, ok):
+    """A note on screen: Plasma's on-screen display, else a notification."""
+    icon = "dialog-ok-apply" if ok else "dialog-information"
+    gdbus = shutil.which("gdbus")
+    tries = [[gdbus, "call", "--session", "--dest", "org.kde.plasmashell", "--object-path", "/org/kde/osdService",
+              "--method", "org.kde.osdService.showText", icon, text]] if gdbus else []
+    if shutil.which("notify-send"):
+        tries.append(["notify-send", "--app-name=Claude Status", f"--icon={icon}", "--expire-time=4000", "Claude Status", text])
+    for cmd in tries:
+        try:
+            if subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5).returncode == 0:
+                return True
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+    return False
+
+
+def shortcuts_file(home):
+    data = Path(os.environ.get("XDG_DATA_HOME") or home / ".local" / "share")
+    return data / "kglobalaccel" / SHORTCUTS_COMPONENT
+
+
+def desktop_quote(arg):
+    """An argument of a desktop file's Exec (its quoting rules)."""
+    if re.fullmatch(r"[\w@%+=:,./-]+", arg):
+        return arg
+    return '"' + re.sub(r'(["`$\\])', r"\\\1", arg) + '"'
+
+
+def shortcuts_desktop(script, free=None):
+    """The desktop file with the two actions (script: this pane.py); keys
+    only for the actions in free (None: all)."""
+    run = lambda action: " ".join(desktop_quote(a) for a in ("python3", "-I", str(script), "--oldest", action, "--osd"))
+    lines = ["[Desktop Entry]", "Type=Application", "Name=Claude Status",
+             "Comment=Answer the oldest permission prompt of your Claude chats", "Icon=dialog-question", "NoDisplay=true",
+             "Exec=true", "Actions=" + "".join(a + ";" for a, _, _, _ in SHORTCUT_ACTIONS), ""]
+    for action, name, keys, _ in SHORTCUT_ACTIONS:
+        given = keys if free is None or action in free else ""
+        lines += [f"[Desktop Action {action}]", f"Name={name}", f"Exec={run(action)}", f"X-KDE-Shortcuts={given}", ""]
+    return "\n".join(lines)
+
+
+def kglobalaccel(method, *args):
+    """Call kglobalaccel over D-Bus: (ok, its answer)."""
+    gdbus = shutil.which("gdbus")
+    if gdbus is None:
+        return False, "gdbus isn't installed"
+    try:
+        r = subprocess.run([gdbus, "call", "--session", *KGLOBALACCEL, "--method", "org.kde.KGlobalAccel." + method, *args],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, str(exc)
+    return r.returncode == 0, (r.stdout if r.returncode == 0 else r.stderr).decode(errors="replace").strip()
+
+
+def gv_strings(items):
+    return "[" + ", ".join(json.dumps(i) for i in items) + "]"
+
+
+def key_owners(code):
+    """The components that have key code (Qt's) as a global shortcut, or None
+    (kglobalaccel didn't answer)."""
+    ok, out = kglobalaccel("getGlobalShortcutsByKey", str(code))
+    return re.findall(r"\('([^']*)'", out) if ok else None
+
+
+def shortcuts(home, on, script=None):
+    """Keyboard answers on or off (or, on None, whether they're on): (ok, message)."""
+    path = shortcuts_file(home)
+    if on is None:
+        return True, "on" if path.is_file() else "off"
+    if not on:
+        for action, _, _, _ in SHORTCUT_ACTIONS:
+            kglobalaccel("unregister", json.dumps(SHORTCUTS_COMPONENT), json.dumps(action))
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        return True, "Keyboard answers are off"
+    # (a key another shortcut has stays its: that action gets none)
+    owners = {action: key_owners(code) for action, _, _, code in SHORTCUT_ACTIONS}
+    free = {a for a, o in owners.items() if not o or set(o) <= {SHORTCUTS_COMPONENT}}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(shortcuts_desktop(script or Path(__file__).resolve(), free), encoding="utf-8")
+    os.replace(tmp, path)
+    for action, name, keys, code in SHORTCUT_ACTIONS:
+        ids = gv_strings([SHORTCUTS_COMPONENT, action, "Claude Status", name])
+        ok, out = kglobalaccel("doRegister", ids)
+        if not ok:
+            return True, "Keyboard answers are set up for your next login (Plasma's shortcuts didn't answer: " + out + ")"
+        keys_now = f"[([{code}],)]" if action in free else "@a(ai) []"
+        kglobalaccel("setShortcutKeys", ids, keys_now, "1")   # (its default)
+        kglobalaccel("setShortcutKeys", ids, keys_now, "6")   # (and now: SetPresent, NoAutoloading)
+    taken = [keys for action, _, keys, _ in SHORTCUT_ACTIONS if action not in free]
+    if taken:
+        return True, ("Keyboard answers are on; " + " and ".join(taken) + (" is" if len(taken) == 1 else " are")
+                      + " another shortcut's: pick yours in System Settings → Shortcuts → Claude Status")
+    return True, "Keyboard answers are on: Meta+Alt+Y allows the oldest prompt, Meta+Alt+N denies it"
 
 
 # ---------------------------------------------------------------- answering in tmux with keys
@@ -1016,7 +1177,8 @@ def main(argv=None):
     session, text, stamp, limit, files, config_dirs, answers = None, None, None, PANE_ITEMS, [], [], None
     after, off, remote, pretty, source = False, False, False, False, None
     actions = ("--conversation", "--send", "--answer", "--keys", "--review", "--undo", "--commit", "--reviewed",
-               "--relay", "--live")
+               "--relay", "--live", "--oldest", "--shortcuts")
+    osd = False
     while args:
         arg = args.pop(0)
         if arg in actions and args and action is None:
@@ -1056,6 +1218,8 @@ def main(argv=None):
             source = base64.b64decode(args.pop(0)).decode("utf-8")
         elif arg == "--after-turn":
             after = True
+        elif arg == "--osd":
+            osd = True
         elif arg == "--off":
             off = True
         elif arg == "--remote":
@@ -1105,6 +1269,14 @@ def main(argv=None):
         elif action == "--answer":
             ok, said = answer_request(cache_root, target, decision, note, answers)
             result = {"ok": ok, "message": said}
+        elif action == "--oldest":
+            ok, said = answer_oldest(cache_root, target)
+            if osd:
+                show_note(said, ok)
+            result = {"ok": ok, "message": said}
+        elif action == "--shortcuts":
+            ok, said = shortcuts(home, {"on": True, "off": False}.get(target))
+            result = {"ok": ok, "message": said} if target != "status" else {"ok": ok, "on": said == "on"}
         elif action == "--keys":
             entry = cs.find_chat_entry(home, config_dirs, target, profile)
             ok, said = answer_with_keys(entry, decision, note) if entry else (False, "That chat isn't running any more")

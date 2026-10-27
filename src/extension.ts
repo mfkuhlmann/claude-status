@@ -33,6 +33,13 @@ export function activate(context: vscode.ExtensionContext): void {
   const dash = new Dashboard(backend, notifier, log);
   const statusBar = new StatusBar(); // (first: the main status bar item)
   const account = new AccountSwitch(dash, backend);
+  const answerOldest = async (decision: "allow" | "deny"): Promise<void> => {
+    const r = await backend.pane(["--oldest", decision], 20000);
+    const message = String(r.message ?? "");
+    if (r.ok) void vscode.window.setStatusBarMessage(`$(check) ${message}`, 5000);
+    else void vscode.window.showInformationMessage(`Claude Status: ${message || "Couldn't answer"}`);
+    dash.refreshAll();
+  };
   actions = new Actions(backend, dash, terminals, log, account);
   const accounts = new Accounts(backend, dash, terminals, account, log);
   const view = new ViewHost(context.extensionUri, dash, actions);
@@ -87,6 +94,10 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("claudeStatus.accounts", () => accounts.manage()),
     vscode.commands.registerCommand("claudeStatus.addAccount", () => accounts.add()),
     vscode.commands.registerCommand("claudeStatus.nextChat", () => a.nextChat()),
+    // Keyboard answers: the chat that has waited longest for a permission (a
+    // plan: approve it, or keep planning), through the hook (pane.py --oldest)
+    vscode.commands.registerCommand("claudeStatus.allowOldest", () => answerOldest("allow")),
+    vscode.commands.registerCommand("claudeStatus.denyOldest", () => answerOldest("deny")),
     // the Plasma and GNOME widgets hand over what a chat changed (changes.ts)
     // and which terminal a chat runs in (terminals.ts)
     vscode.window.registerUriHandler({

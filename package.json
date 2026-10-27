@@ -173,6 +173,16 @@
         "command": "claudeStatus.planComment.delete",
         "title": "Delete Comment",
         "icon": "$(trash)"
+      },
+      {
+        "command": "claudeStatus.allowOldest",
+        "title": "Allow the Oldest Prompt",
+        "category": "Claude Status"
+      },
+      {
+        "command": "claudeStatus.denyOldest",
+        "title": "Deny the Oldest Prompt",
+        "category": "Claude Status"
       }
     ],
     "keybindings": [
@@ -180,6 +190,16 @@
         "command": "claudeStatus.nextChat",
         "key": "ctrl+alt+shift+c",
         "mac": "cmd+alt+shift+c"
+      },
+      {
+        "command": "claudeStatus.allowOldest",
+        "key": "ctrl+alt+shift+y",
+        "mac": "cmd+alt+shift+y"
+      },
+      {
+        "command": "claudeStatus.denyOldest",
+        "key": "ctrl+alt+shift+n",
+        "mac": "cmd+alt+shift+n"
       }
     ],
     "menus": {

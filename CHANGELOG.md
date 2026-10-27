@@ -10,6 +10,11 @@
   open burrow is drawn once and copied into each picture, which halves what
   a picture costs. A pet you pick up trails your mouse on a spring, swings
   as you move it and wobbles when you let go.
+- **Keyboard answers:** *Allow the Oldest Prompt* (Ctrl+Alt+Shift+Y) and
+  *Deny the Oldest Prompt* (Ctrl+Alt+Shift+N) answer the chat that has
+  waited longest for a permission (a plan: approve it, or keep planning);
+  the status bar says what was answered. They take *Answer Permission
+  Prompts from Claude Status*.
 - **Approve a plan from VS Code:** a chat that leaves plan mode shows its
   plan in its row (*Read the whole plan* opens its tab) and in its chat
   tab, with **Approve, accept edits**, **Approve** and **Keep planning…**
