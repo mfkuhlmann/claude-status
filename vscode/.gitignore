@@ -1,6 +1,7 @@
-# Dependencies and build output
+# Dependencies and build output (vendor/: copied from the widget by esbuild.mjs)
 node_modules/
 dist/
+vendor/
 out/
 *.vsix
 .vscode-test/

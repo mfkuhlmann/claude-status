@@ -1,12 +1,20 @@
 name: release
 
-# Push a tag like v1.3 (matching the versions in package/metadata.json,
-# gnome/extension/metadata.json and CHANGELOG.md) and this builds the Plasma
-# widget (.plasmoid) and the GNOME extension (.zip) and publishes them as a
-# GitHub release, with that version's CHANGELOG entry as its notes.
+# Push a tag like v1.16.0 (the version in package/metadata.json,
+# gnome/extension/metadata.json, vscode/package.json, CHANGELOG.md and
+# vscode/CHANGELOG.md) and this builds the Plasma widget (.plasmoid), the GNOME
+# extension (.zip) and the VS Code extension (.vsix) and publishes them as one
+# GitHub release, with that version's CHANGELOG entries as its notes. For a tag
+# that has no release yet, run it by hand (Actions → release → Run workflow)
+# with that tag.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release, e.g. v1.16.0 (it must exist already)"
+        required: true
 
 permissions:
   contents: write
@@ -14,44 +22,84 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      # The tag: the one pushed, or the one typed in (passed through env, never
+      # into the script itself)
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
     steps:
+      - name: A version tag
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Not a version tag: $TAG"; exit 1; }
+          echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
       - uses: actions/checkout@v5
+        with:
+          ref: refs/tags/${{ env.TAG }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: vscode/package-lock.json
       - name: The tag matches the versions
         run: |
-          v="${GITHUB_REF_NAME#v}"
-          [[ "$v" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || { echo "Not a version tag: $GITHUB_REF_NAME"; exit 1; }
+          v="$VERSION"
           # fixed strings: in a pattern, the dots of 1.10 would match any character
           grep -qF "\"Version\": \"$v\"" package/metadata.json || { echo "package/metadata.json isn't $v"; exit 1; }
           grep -qF "\"version-name\": \"$v\"" gnome/extension/metadata.json || { echo "gnome/extension/metadata.json isn't $v"; exit 1; }
-          awk -v head="## $v" '$0 == head || index($0, head " ") == 1 { found = 1 } END { exit !found }' CHANGELOG.md \
-            || { echo "CHANGELOG.md has no $v entry"; exit 1; }
+          [ "$(node -p "require('./vscode/package.json').version")" = "$v" ] || { echo "vscode/package.json isn't $v"; exit 1; }
+          for log in CHANGELOG.md vscode/CHANGELOG.md; do
+            awk -v head="## $v" '$0 == head || index($0, head " ") == 1 { found = 1 } END { exit !found }' "$log" \
+              || { echo "$log has no $v entry"; exit 1; }
+          done
+      - name: Nothing private in the repository
+        run: python3 tools/check_public.py --all --history
       - name: Tests
         run: python3 -m unittest discover -s tests
+      - name: The VS Code extension's checks and tests
+        working-directory: vscode
+        run: |
+          npm ci
+          npm run check
+          npm test
       - name: Build
         run: |
-          v="${GITHUB_REF_NAME#v}"
           mkdir dist
-          (cd package && python3 -m zipfile -c "../dist/talpy-den-$v.plasmoid" metadata.json contents)
+          (cd package && python3 -m zipfile -c "../dist/talpy-den-$VERSION.plasmoid" metadata.json contents)
           gnome/build.sh
           cp gnome/build/talpy-den@wzaielamri.github.io.shell-extension.zip dist/
+          (cd vscode && npm run package)
+          mv "vscode/talpy-den-$VERSION.vsix" dist/
+          mkdir vsix
+          unzip -q "dist/talpy-den-$VERSION.vsix" -d vsix
+          python3 tools/check_public.py vsix
+          (cd dist && sha256sum -- * > SHA256SUMS)
       - name: Notes
         run: |
-          v="${GITHUB_REF_NAME#v}"
-          awk -v head="## $v" '($0 == head || index($0, head " ") == 1) && !on { on = 1; next } /^## / && on { exit } on' CHANGELOG.md > notes.md
-          # (only this text is indented for the workflow file: the CHANGELOG's own indents stay)
+          # A CHANGELOG's entry for this version: the lines under its "## <version>" heading
+          entry() { awk -v head="## $VERSION" '($0 == head || index($0, head " ") == 1) && !on { on = 1; next } /^## / && on { exit } on' "$1"; }
+          {
+            echo "## KDE Plasma and GNOME"
+            entry CHANGELOG.md
+            echo
+            echo "## VS Code"
+            entry vscode/CHANGELOG.md
+          } > notes.md
+          # (only this text is indented for the workflow file: the CHANGELOGs' own indents stay)
           sed 's/^          //' >> notes.md <<NOTES
 
           ## Install
 
-          **Easiest:** download the source code below, unpack it and run \`./install.sh\`. It installs the Plasma widget or, in a GNOME session, the GNOME extension, and adds the status-line snippet that plan usage needs. On GNOME, log out and back in afterwards.
+          **KDE Plasma or GNOME, easiest:** download the source code below, unpack it and run \`./install.sh\`. It installs the Plasma widget or, in a GNOME session, the GNOME extension, and adds the status-line snippet that plan usage needs. On GNOME, log out and back in afterwards.
 
           **Only the widget:**
-          - KDE Plasma 6: \`kpackagetool6 -t Plasma/Applet -i talpy-den-$v.plasmoid\` (\`-u\` to update), then add *Talpy Den* to your panel.
+          - KDE Plasma 6: \`kpackagetool6 -t Plasma/Applet -i talpy-den-$VERSION.plasmoid\` (\`-u\` to update), then add *Talpy Den* to your panel.
           - GNOME Shell 49 or 50: \`gnome-extensions install --force talpy-den@wzaielamri.github.io.shell-extension.zip\`, log out and back in, then \`gnome-extensions enable talpy-den@wzaielamri.github.io\`.
 
           This way plan usage stays empty until you add \`statusline-snippet.sh\` to your status line (see the README).
+
+          **VS Code:** download \`talpy-den-$VERSION.vsix\` below, then in VS Code open the Extensions view, **⋯** → **Install from VSIX…** (or run \`code --install-extension talpy-den-$VERSION.vsix\`). It needs Python 3.7+; [its README](https://github.com/wzaielamri/talpy-den/blob/$TAG/vscode/README.md) explains SSH hosts and the plan usage bars.
           NOTES
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --title "Talpy Den ${GITHUB_REF_NAME#v}" --notes-file notes.md --verify-tag
+        run: gh release create "$TAG" dist/* --title "Talpy Den $VERSION" --notes-file notes.md --verify-tag

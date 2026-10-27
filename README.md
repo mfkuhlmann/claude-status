@@ -7,7 +7,7 @@
 Which chats are working, which need you and how much of your plan is left,
 across all your accounts and SSH hosts, one click away on your panel.
 On GNOME (Ubuntu 26.04 and newer) it lives in the top bar: see [On GNOME](#on-gnome).
-In VS Code, [Talpy Den for VS Code](https://github.com/wzaielamri/talpy-den-vscode) shows the same in a view of its own.
+In VS Code, [Talpy Den for VS Code](vscode/) shows the same in a view of its own.
 
 [![Tests](https://github.com/wzaielamri/talpy-den/actions/workflows/tests.yml/badge.svg)](https://github.com/wzaielamri/talpy-den/actions/workflows/tests.yml)
 [![KDE Plasma 6](https://img.shields.io/badge/KDE_Plasma-6-1d99f3?logo=kde&logoColor=white)](https://kde.org/plasma-desktop/)
@@ -25,7 +25,7 @@ In VS Code, [Talpy Den for VS Code](https://github.com/wzaielamri/talpy-den-vsco
 - **Why:** one click takes you to the chat that needs you (its Konsole tab, tmux pane, VS Code tab or background job), notifications tell you when one needs you or finishes, and the usage bars show where your pace leads before you hit a limit.
 - **Also:** start chats (with a task, in the background, or once a limit resets), find any chat, read and edit plans and memories, move a chat to another account, and a pet that acts out each chat.
 - **Install:** `git clone https://github.com/wzaielamri/talpy-den.git && cd talpy-den && ./install.sh`, then add **Talpy Den** to your panel. Needs KDE Plasma 6 (or GNOME Shell 49+), Claude Code, python3 and jq.
-- **In VS Code:** [Talpy Den for VS Code](https://github.com/wzaielamri/talpy-den-vscode).
+- **In VS Code:** [Talpy Den for VS Code](vscode/).
 
 > [!NOTE]
 > An independent project: not affiliated with or endorsed by Anthropic, and written with AI assistance. See [About this project](#about-this-project).
@@ -109,7 +109,7 @@ In VS Code, [Talpy Den for VS Code](https://github.com/wzaielamri/talpy-den-vsco
   - A **chat in VS Code's Claude tab** is stopped the way the tab's own stop button does it: the tab says *Interrupted*, keeps the chat and goes on with your next message (which starts Claude again, a second or two). Claude gets SIGINT there, its clean exit; SIGTERM would put an error in the tab.
   - A **working chat in tmux** can be **interrupted** instead: Ctrl+C in its pane, as if you pressed it. Like the stop button in VS Code, that stops the turn and its subagents, background ones too, and keeps the chat open (a draft you typed stays). Esc would leave background subagents running. Other terminals take no keys from outside, so their chats can only be stopped.
   - The confirmation says which of these happens. The widget looks again before stopping: an idle chat that got back to work since you asked isn't touched. Stopping ends every subagent of the chat, since they run inside its Claude; commands it leaves behind are ended too, and a Claude that hasn't quit after 10 seconds is killed.
-- **What a chat changed:** Claude backs up a file before a chat first changes it (in `file-history/`, the backups its undo uses). The comparison puts each file as it was then next to the file now; with the [Talpy Den extension for VS Code](https://github.com/wzaielamri/talpy-den-vscode) 1.8 or newer, all of them open in one view, else each in a tab of its own (at most 25). *Last turn* compares with the files as they were when you sent your last prompt. A file the chat edited with no backup on record (e.g. in a subagent) is compared with git's last commit. Changes made through shell commands (`sed`, scripts) aren't counted, since Claude doesn't back those up.
+- **What a chat changed:** Claude backs up a file before a chat first changes it (in `file-history/`, the backups its undo uses). The comparison puts each file as it was then next to the file now; with the [Talpy Den extension for VS Code](vscode/) 1.8 or newer, all of them open in one view, else each in a tab of its own (at most 25). *Last turn* compares with the files as they were when you sent your last prompt. A file the chat edited with no backup on record (e.g. in a subagent) is compared with git's last commit. Changes made through shell commands (`sed`, scripts) aren't counted, since Claude doesn't back those up.
 - **The Recap tab, in detail:** *You* is the time between your prompts (and your answers to Claude's questions and permission prompts) and Claude's replies, where that gap is under 15 minutes, plus a minute for each prompt you write: time away doesn't count. *Claude worked* adds up Claude Code's own count of each turn (its *Worked for …*), which leaves out the time a turn waited for you; a stretch of half an hour with nothing written in a turn (the computer asleep, a usage limit) doesn't count either. Chats working at the same time each count; *on the clock*, in the tooltip, counts that time once. The cost is each reply's tokens at the API list prices (cache reads and 5-minute or 1-hour cache writes at their own prices), as Claude Code prices its `/usage`; a reply in two transcripts (a forked chat) counts once. The tips use the rules, thresholds and weights of Claude Code's `/usage` (*What's contributing to your limits usage?*), and add how long Claude waited for your answers and how often a usage limit stopped you. A *cold resume* is a reply more than an hour after the chat's last one that writes 20k tokens or more of its context to the cache again (on a plan the cache keeps a chat's context an hour); its cost is what that write cost more than reading the same tokens. The plan windows are this computer's accounts', from the usage the widget saw (the 5-hour and weekly bars). A chat shared between accounts counts on each account that has it. What was read is kept in `~/.cache/talpy-den/week-2.json`.
 - **Rules for permission prompts:** the Permissions tab lists the prompts you allowed in the last 7 days in a chat on this computer and the rule that would have let each through: a folder of another project to read (`permissions.additionalDirectories`), edits in the chat's own folder (`permissions.defaultMode` `acceptEdits`), a read-only command (`Bash(git log *)`, `Bash(grep *)`, …) or a site's pages (`WebFetch(domain:…)`). Only those: never a prompt Claude flagged as unsafe, one you refused, a command with pipes, redirects or `&&`, nor anything in a hidden config folder of your home (`~/.ssh`, `~/.config`, …), outside your home or in a temporary folder. **Allow…** says what it changes, and on **Allow** the rule goes into the `.claude/settings.local.json` of the folder the chats started in (Claude reads it for chats started there; git doesn't share it), keeping what's in the file; your user settings never change. **Undo** takes back a rule it added, as it was (the file goes again if the widget made it). A rule your settings have already shows *Allowed now*. The setting *Suggest rules for the permission prompts you answered* leaves the rules out, with their **Allow…** buttons: the tab then only counts the prompts.
 - **Permissions you gave:** the Permissions tab lists everything that lets chats go without asking you, here and on the SSH hosts shown (each as listed there): in the settings files (each account's `settings.json`, the `.claude/settings.local.json` and `.claude/settings.json` of every folder Claude ran in, and your administrator's `/etc/claude-code/managed-settings.json`), the `permissions.allow` rules, `permissions.additionalDirectories`, a `permissions.defaultMode` that skips prompts (accept edits, auto, bypass permissions), approved `.mcp.json` servers, and the settings that loosen a check (bypass or auto mode without their warning, fetching pages without the site check, commands without asking in the sandbox, remote control, unattended remote tools, channels, chats uploaded by themselves); and in each account's `.claude.json`, the folders you trusted (those that still exist) and what was approved in them. The rules Claude saved when you answered *don't ask again* are among them. **Revoke…** says what it changes in which file; **Revoke** then changes that entry only (on a host, there), keeping the rest of the file: a rule or setting goes, a trusted folder is marked untrusted (Claude asks again before it works there). A rule the tab's **Allow** added goes as **Undo** would take it. Not changed here: a folder's `.claude/settings.json` (shared through git: *In git*) and your administrator's (*Administrator's*).
@@ -158,7 +158,7 @@ You can add it more than once, e.g. on the panel and on each screen's desktop: t
 
 Each [release](https://github.com/wzaielamri/talpy-den/releases) also has the widget as a `.plasmoid` file and the GNOME extension as a `.zip`, for installing without the repository (its notes say how). `./install.sh` is still the easiest way: it also adds the status-line snippet.
 
-For VS Code, [Talpy Den for VS Code](https://github.com/wzaielamri/talpy-den-vscode) is an extension of its own, installed from its [releases](https://github.com/wzaielamri/talpy-den-vscode/releases/latest) (a `.vsix`). It brings its own copy of the backend, so it doesn't need the widget, and it works alongside it.
+For VS Code, [Talpy Den for VS Code](vscode/) is an extension of its own, installed from the same [releases](https://github.com/wzaielamri/talpy-den/releases/latest) (a `.vsix`). It brings its own copy of the backend, so it doesn't need the widget, and it works alongside it.
 
 `install.sh` does two things:
 
@@ -441,6 +441,14 @@ tools/gnome/shell.sh /tmp/gnome                 # run it in a headless GNOME She
 tools/gnome/shell.sh /tmp/gnome tools/gnome/steps-actions.sh   # jumping, notifications, settings, turning it off and on
 ```
 
+VS Code extension (in `vscode/`; its [README](vscode/README.md#development) says more):
+
+```bash
+cd vscode && npm ci                             # once
+npm run check && npm test                       # type check, its tests
+npm run package                                 # build talpy-den-<version>.vsix
+```
+
 ```
 package/                  the widget (what install.sh installs)
 ├── metadata.json
@@ -454,12 +462,19 @@ package/                  the widget (what install.sh installs)
     ├── ui/talpy/         Talpy, the pet: its parts, moods and actions (shared with GNOME and VS Code)
     └── pets/             Talpy's notification icons (made by tools/talpy_icons.mjs)
 gnome/                    the GNOME Shell extension: extension/ (GJS: indicator.js, logic.js, ui/, prefs.js), build.sh, tests/
+vscode/                   the VS Code extension (TypeScript: src/ the extension, webview/ its view); each build copies the
+                          backend, Talpy and the snippet into vscode/vendor/
 statusline-snippet.sh     the snippet install.sh adds to your status line
 tests/                    unit tests: they build Claude Code's files in temporary folders
-tools/                    render_popup.sh (offscreen screenshots), talpy_icons.mjs (Talpy's still pictures), gnome/ (headless GNOME Shell test)
+tools/                    render_popup.sh (offscreen screenshots), talpy_icons.mjs (Talpy's still pictures), gnome/ (headless GNOME Shell test),
+                          check_public.py (nothing private gets committed)
 ```
 
 The tests build Claude Code's files (sessions, background jobs, transcripts, shared-chat links, a switched `~/.claude` link) in temporary folders. `tests/test_remote.py` drives the SSH code through a stand-in `ssh` that runs the command locally.
+
+**Releases:** the widget, the GNOME extension and the VS Code extension share one version. Raise it in `package/metadata.json`, `gnome/extension/metadata.json` and `vscode/package.json`, add a `## <version>` entry to `CHANGELOG.md` and `vscode/CHANGELOG.md`, commit, then push a tag (`git tag v<version> && git push origin main v<version>`). The release workflow checks, tests and builds all three and publishes them with those entries as the notes.
+
+**Nothing private:** `tools/check_public.py` refuses commits with tokens, keys, IP addresses, emails, home folders or anything naming the machine it runs on or its SSH hosts (CI runs it on every file and the whole history). Turn it on once per clone with `git config core.hooksPath .githooks`.
 
 **Contributing:** issues and pull requests are welcome. Please run the tests, and check QML changes with `tools/render_popup.sh`. Keep `talpy_den.py` and `sharing.py` compatible with Python 3.7, because they also run on SSH hosts (a test checks this).
 

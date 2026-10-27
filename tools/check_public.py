@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Check that what goes into this repository can be published.
 
-    python3 scripts/check_public.py --staged     files staged for commit + the author (pre-commit hook)
-    python3 scripts/check_public.py --message F  a commit message (commit-msg hook)
-    python3 scripts/check_public.py --all        every tracked file
-    python3 scripts/check_public.py --history    every commit: authors, messages and every added line
-    python3 scripts/check_public.py PATH...      these files or folders (e.g. an unpacked .vsix)
+    python3 tools/check_public.py --staged     files staged for commit + the author (pre-commit hook)
+    python3 tools/check_public.py --message F  a commit message (commit-msg hook)
+    python3 tools/check_public.py --all        every tracked file
+    python3 tools/check_public.py --history    every commit: authors, messages and every added line
+    python3 tools/check_public.py PATH...      these files or folders (e.g. an unpacked .vsix)
 
 Two kinds of rules:
 - generic ones, the same everywhere (CI too): API keys and tokens, private
@@ -16,7 +16,7 @@ Two kinds of rules:
   So this script names nothing personal itself.
 
 Allowed: documentation examples (example.com, 192.0.2.x, /home/alice), the
-identities in scripts/public-identities.txt, and any line containing
+identities in tools/public-identities.txt, and any line containing
 "check-public: ok". Exit status 1, with one line per finding, when something
 is found; matches are masked so the output can go into CI logs.
 """
@@ -50,9 +50,12 @@ TOKEN_RES = [(name, re.compile(rx)) for name, rx in TOKENS]
 IPV4 = re.compile(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?!\w|\.\d)")  # also at a sentence's end
 EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}")
 HOME_PATH = re.compile(r"(?:/home|/Users|[A-Za-z]:\\+Users)[/\\]+([A-Za-z0-9._-]+)")
-EXAMPLE_USERS = {"alice", "bob", "carol", "user", "you", "me", "example", "someone"}
+EXAMPLE_USERS = {"alice", "bob", "carol", "user", "you", "me", "example", "someone", "tester", "u", "x"}
 EXAMPLE_DOMAINS = ("example.com", "example.org", "example.net")  # the domain itself or a subdomain
 EXAMPLE_TLDS = (".example", ".invalid", ".test", ".localhost")
+# Commits a contributor made and that are published as they are: --history
+# doesn't check their author and committer (all they added still is)
+PUBLISHED_IDENTITIES = {"a993a0a8e24450b2ea6490d06f74ef04bc0bfe92", "af361e91e3e685c8e3f101fab0b7c02eab50871d"}
 # Values from ~/.ssh/config that are far too common to be personal
 COMMON = {"root", "git", "ubuntu", "admin", "user", "debian", "pi", "localhost", "github.com", "gitlab.com",
           "bitbucket.org", "ssh.github.com", "ssh.dev.azure.com", "vs-ssh.visualstudio.com"}
@@ -63,7 +66,7 @@ def mask(text):
 
 
 def public_identities():
-    path = ROOT / "scripts" / "public-identities.txt"
+    path = ROOT / "tools" / "public-identities.txt"
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError:
@@ -120,7 +123,10 @@ def personal_strings():
     except OSError:
         pass
     found |= ssh_config_values(Path.home() / ".ssh" / "config", set())
-    private = ROOT / ".git" / "info" / "private-patterns"
+    try:  # (the repository's own .git, also from a worktree, whose .git is a file)
+        private = Path(git("rev-parse", "--path-format=absolute", "--git-common-dir").strip()) / "info" / "private-patterns"
+    except (OSError, subprocess.CalledProcessError):
+        private = ROOT / ".git" / "info" / "private-patterns"
     try:
         for line in private.read_text(encoding="utf-8").splitlines():
             if line.strip() and not line.lstrip().startswith("#"):
@@ -186,7 +192,7 @@ class Checker:
 
     def check_identity(self, label, email):
         if not self.email_ok(email):
-            self.report(label, "commit identity not in scripts/public-identities.txt", email)
+            self.report(label, "commit identity not in tools/public-identities.txt", email)
 
     def report(self, where, rule, match):
         self.findings.append(f"{where}: {rule}: {mask(match)}")
@@ -225,6 +231,8 @@ def main(argv):
             elif m == "--history":
                 for line in git("log", "--all", "--format=%H %ae %ce").splitlines():
                     sha, author, committer = line.split(" ", 2)
+                    if sha in PUBLISHED_IDENTITIES:
+                        continue
                     checker.check_identity(f"commit {sha[:10]} author", author)
                     checker.check_identity(f"commit {sha[:10]} committer", committer)
                 log = git("log", "--all", "-p", "--no-color", "--no-ext-diff", "--text", "--format=@@commit %H%n%B")

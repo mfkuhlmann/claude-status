@@ -3,13 +3,52 @@
 // --tests bundles test/*.test.ts into out/test for `node --test`; --harness
 // bundles the dev pages' scripts (dev/*.tsx) into dev/out, to look at the
 // webview with demo data in a browser.
+//
+// Every run first copies into vendor/ the parts of the widget (the rest of
+// this repository) that the extension ships or bundles: the Python backend,
+// Talpy (the pet), codeview.mjs and the status-line snippet. They are changed
+// where they are, never in vendor/, which isn't committed. --vendor only
+// copies; --watch copies again when one of them changes.
 import * as esbuild from "esbuild";
-import { readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, watch as watchFolder, writeFileSync } from "node:fs";
+import * as path from "node:path";
 
 const production = process.argv.includes("--production");
 const watch = process.argv.includes("--watch");
 const tests = process.argv.includes("--tests");
 const harness = process.argv.includes("--harness");
+const onlyVendor = process.argv.includes("--vendor");
+
+// [folder in the repository, folder in vendor/, which of its files]
+const VENDOR = [
+  ["../package/contents/code", "code", (name) => name.endsWith(".py")],
+  ["../package/contents/ui/talpy", "talpy", (name) => name.endsWith(".mjs") || name.endsWith(".d.mts")],
+  ["../package/contents/ui", ".", (name) => name === "codeview.mjs" || name === "codeview.d.mts"],
+  ["..", ".", (name) => name === "statusline-snippet.sh"],
+];
+
+function vendor() {
+  const keep = new Set();
+  for (const [from, to, take] of VENDOR) {
+    const folder = path.join("vendor", to);
+    mkdirSync(folder, { recursive: true });
+    keep.add(folder);
+    for (const name of readdirSync(from).filter(take)) {
+      const file = path.join(folder, name);
+      keep.add(file);
+      const data = readFileSync(path.join(from, name));
+      // (an unchanged file isn't written: --watch would rebuild for nothing)
+      if (!existsSync(file) || !readFileSync(file).equals(data)) writeFileSync(file, data);
+    }
+  }
+  // What the widget no longer has, and a test run's __pycache__
+  for (const [, to] of VENDOR) {
+    const folder = path.join("vendor", to);
+    for (const name of readdirSync(folder)) {
+      if (!keep.has(path.join(folder, name))) rmSync(path.join(folder, name), { recursive: true, force: true });
+    }
+  }
+}
 
 const common = {
   bundle: true,
@@ -65,7 +104,12 @@ const builds = harness
       },
     ];
 
-if (watch) {
+vendor();
+if (onlyVendor) {
+  // copied, nothing to build
+} else if (watch) {
+  let again;
+  for (const [from] of VENDOR) watchFolder(from, () => { clearTimeout(again); again = setTimeout(vendor, 100); });
   for (const options of builds) await (await esbuild.context(options)).watch();
 } else {
   await Promise.all(builds.map((options) => esbuild.build(options)));

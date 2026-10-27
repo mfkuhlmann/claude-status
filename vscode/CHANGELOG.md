@@ -159,6 +159,13 @@
 - **What the chats do now, under the big Talpy:** one line with the step a
   working chat does right now, taking turns between the chats at work (a
   chat that did something new goes first). Click it for that chat's tab.
+- **Now in the Talpy Den repository:** the extension moved to
+  [github.com/wzaielamri/talpy-den](https://github.com/wzaielamri/talpy-den)
+  (`vscode/`), next to the widget, and its releases come from there, with the
+  widget's: download the `.vsix` from the
+  [latest release](https://github.com/wzaielamri/talpy-den/releases/latest).
+  The backend is the widget's own at each build, no longer a copy that
+  could lag behind.
 
 ## 1.15.2
 

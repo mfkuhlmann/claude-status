@@ -20,7 +20,7 @@ for KDE Plasma and GNOME; all of them use the same backend.
   once a limit resets, moving a chat to another account, and Talpy acting it
   all out.
 - **Install**: download `talpy-den-<version>.vsix` from the
-  [latest release](https://github.com/wzaielamri/talpy-den-vscode/releases/latest),
+  [latest release](https://github.com/wzaielamri/talpy-den/releases/latest),
   then `code --install-extension talpy-den-<version>.vsix`. Needs
   Linux, Python 3.7+ and Claude Code; `jq` for the plan usage bars.
 - **On your desktop**: the
@@ -361,7 +361,7 @@ it. The bars fill in after the next reply in each account's chats.
 ## Install
 
 Not on the Marketplace yet. Download `talpy-den-<version>.vsix` from the
-[latest release](https://github.com/wzaielamri/talpy-den-vscode/releases/latest),
+[latest release](https://github.com/wzaielamri/talpy-den/releases/latest),
 then in VS Code open the Extensions view, **⋯** → **Install from VSIX…**, or:
 
 ```sh
@@ -372,6 +372,7 @@ A downloaded extension doesn't update by itself: install a newer release the
 same way. Or build it from a clone:
 
 ```sh
+git clone https://github.com/wzaielamri/talpy-den.git && cd talpy-den/vscode
 npm ci
 npm run package                     # builds talpy-den-<version>.vsix
 code --install-extension talpy-den-*.vsix
@@ -538,6 +539,10 @@ you paste goes straight to Claude on the host.
 
 ## Development
 
+The extension is the `vscode/` folder of the
+[Talpy Den repository](https://github.com/wzaielamri/talpy-den), next to the
+widget; these run in that folder:
+
 ```sh
 npm ci
 npm run build          # dist/: the extension and the webview
@@ -547,25 +552,16 @@ npm run watch          # rebuild on change; F5 in VS Code starts a test window
 node esbuild.mjs --harness   # dev pages: look at the view with demo data in a browser
 ```
 
-`vendor/` is the widget's backend and Talpy (the pet's drawing, moods and
-actions, shared with the widget), copied by `scripts/sync-widget.sh` from a
-widget commit; change them there.
+`vendor/` is what the extension takes from the widget: its Python backend
+(`package/contents/code`), Talpy (the pet's drawing, moods and actions,
+`package/contents/ui/talpy`), `codeview.mjs` and the status-line snippet.
+Every build copies them there from the rest of the repository
+(`node esbuild.mjs --vendor` only copies), so change them where they are:
+`vendor/` isn't committed.
 
-To release: raise `version` in `package.json`, add a `## <version>` section to
-`CHANGELOG.md`, commit, then push a tag. The Release workflow checks, tests and
-packages it and publishes the `.vsix` with those notes:
-
-```sh
-git tag v<version> && git push origin main v<version>
-```
-
-This repository is kept publishable: `scripts/check_public.py` refuses
-commits with tokens, keys, IP addresses, emails, home folders or anything
-naming the machine it runs on or its SSH hosts. Enable it once per clone:
-
-```sh
-git config core.hooksPath .githooks
-```
+Releases and the check that keeps the repository publishable are described
+in the repository's
+[README](https://github.com/wzaielamri/talpy-den#development).
 
 ## Credits
 

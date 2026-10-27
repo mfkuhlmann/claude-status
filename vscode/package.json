@@ -11,11 +11,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/wzaielamri/talpy-den-vscode.git"
+    "url": "https://github.com/wzaielamri/talpy-den.git",
+    "directory": "vscode"
   },
-  "homepage": "https://github.com/wzaielamri/talpy-den-vscode#readme",
+  "homepage": "https://github.com/wzaielamri/talpy-den/tree/main/vscode#readme",
   "bugs": {
-    "url": "https://github.com/wzaielamri/talpy-den-vscode/issues"
+    "url": "https://github.com/wzaielamri/talpy-den/issues"
   },
   "private": true,
   "engines": {
@@ -636,9 +637,9 @@
   "scripts": {
     "build": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
-    "check": "tsc -p . && tsc -p webview",
+    "check": "node esbuild.mjs --vendor && tsc -p . && tsc -p webview",
     "test": "node esbuild.mjs --tests && node --test out/test/*.test.js",
-    "package": "node esbuild.mjs --production && vsce package --no-dependencies",
+    "package": "node esbuild.mjs --production && vsce package --no-dependencies --baseContentUrl https://github.com/wzaielamri/talpy-den/blob/HEAD/vscode --baseImagesUrl https://github.com/wzaielamri/talpy-den/raw/HEAD/vscode",
     "vscode:prepublish": "node esbuild.mjs --production"
   },
   "devDependencies": {
