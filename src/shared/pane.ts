@@ -85,7 +85,8 @@ export type PaneHostMessage =
   | { type: "review"; answer: ReviewAnswer | null; error: string }
   | { type: "result"; kind: string; ok: boolean; message: string; ask?: boolean } // ask: its terminal takes no text: choose
   | { type: "textSize"; scale: number } // claudeStatus.chatTextScale
-  | { type: "picture"; id: string; path: string; error: string }; // a pasted picture, saved (path: where the chat opens it)
+  | { type: "picture"; id: string; path: string; error: string } // a pasted picture, saved (path: where the chat opens it)
+  | { type: "file"; id: string; path: string }; // a file dropped on the tab: named in the reply (@path)
 
 // tab -> extension
 export type PaneMessage =
@@ -103,7 +104,20 @@ export type PaneMessage =
   | { type: "moveToClaudeCode" } // Claude quits in its terminal, the chat reopens in a Claude Code tab (asks first)
   | { type: "copy"; text: string } // a code block of a reply, to the clipboard
   | { type: "textSize"; scale: number } // A− / A+: claudeStatus.chatTextScale
-  | { type: "picture"; id: string; mime: string; data: string }; // pasted in the reply (base64): saved, an SSH host's copied there
+  | { type: "picture"; id: string; mime: string; data: string } // pasted in the reply (base64): saved, an SSH host's copied there
+  | { type: "attach"; id: string; path: string } // a file dropped from VS Code's Explorer: a picture saved as one, a file named
+  | { type: "screenshot"; id: string }; // a region of the screen you pick, as a picture
+
+// A file named in a reply as Claude's prompt names one (@path; quoted with spaces)
+export function fileMention(path: string): string {
+  return /\s/.test(path) ? `@"${path}"` : `@${path}`;
+}
+
+// The paths of file:// links (a drop's text/uri-list)
+export function droppedPaths(uriList: string): string[] {
+  return uriList.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.startsWith("file://"))
+    .map((l) => { try { return decodeURIComponent(new URL(l).pathname); } catch { return ""; } }).filter(Boolean);
+}
 
 // The pictures Claude takes, pasted into a reply
 export const PICTURE_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];

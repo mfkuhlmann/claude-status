@@ -263,3 +263,12 @@ test("the pictures a reply names, each once, and taking one out", () => {
   assert.deepEqual(picturesIn(text), [a, "/x/b.jpg"]);
   assert.equal(withoutPicture(text, a), "look and [Image: /x/b.jpg] again ");
 });
+
+test("a file dropped on a reply is named as Claude's prompt names it; a drop's links are its paths", async () => {
+  const { droppedPaths, fileMention } = await import("../src/shared/pane");
+  assert.equal(fileMention("/home/me/src/app.py"), "@/home/me/src/app.py");
+  assert.equal(fileMention("/home/me/My Notes/todo.md"), '@"/home/me/My Notes/todo.md"');
+  assert.deepEqual(droppedPaths("file:///home/me/a%20b.txt\r\nhttps://example.com/x\n# a comment\nfile:///tmp/c.png"),
+    ["/home/me/a b.txt", "/tmp/c.png"]);
+  assert.deepEqual(droppedPaths(""), []);
+});

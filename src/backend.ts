@@ -249,6 +249,19 @@ export class Backend {
     return r?.ok && typeof r.path === "string" ? { path: r.path, message: "" } : { message: String(r?.message ?? "the helper gave no answer") };
   }
 
+  // A region of the screen you pick (jump.py --screenshot), saved as a picture; a
+  // file dropped on a reply (jump.py --attach): a picture saved as one, a file named where it is
+  async screenshot(): Promise<{ path?: string; message: string }> {
+    const r = await this.json(["jump.py", "--screenshot"], 300000);
+    return r?.ok && typeof r.path === "string" ? { path: r.path, message: "" } : { message: String(r?.message ?? "the helper gave no answer") };
+  }
+
+  async attach(path: string): Promise<{ path?: string; picture?: boolean; message: string }> {
+    const r = await this.json(["jump.py", "--attach", path], 30000);
+    return r?.ok && typeof r.path === "string" ? { path: r.path, picture: r.picture === true, message: "" }
+      : { message: String(r?.message ?? "the helper gave no answer") };
+  }
+
   // That picture copied to an SSH host (remote.py --put-image): the copy's path there
   async putImage(host: string, path: string): Promise<{ path?: string; message: string }> {
     const r = await this.json(["remote.py", "--put-image", host, path], 120000);

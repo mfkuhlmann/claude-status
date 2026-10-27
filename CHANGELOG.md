@@ -10,6 +10,14 @@
   open burrow is drawn once and copied into each picture, which halves what
   a picture costs. A pet you pick up trails your mouse on a spring, swings
   as you move it and wobbles when you let go.
+- **Drop files and screenshots on a chat:** in a chat's tab, drop files
+  from VS Code's Explorer on the reply (hold Shift while dragging, as for
+  any web page in VS Code): a picture goes in as a pasted one, any other
+  file is named in it (`@path`, as in Claude's prompt); pictures can be
+  dropped from anywhere. **Screenshot…** lets you pick a region of the
+  screen and puts its picture in your reply (Spectacle; GNOME Screenshot,
+  grim and slurp, or maim elsewhere). An SSH host's chat takes pictures
+  only (copied there).
 - **Keyboard answers:** *Allow the Oldest Prompt* (Ctrl+Alt+Shift+Y) and
   *Deny the Oldest Prompt* (Ctrl+Alt+Shift+N) answer the chat that has
   waited longest for a permission (a plan: approve it, or keep planning);

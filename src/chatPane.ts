@@ -401,6 +401,27 @@ class Pane implements vscode.Disposable {
                     error: there.path ? "" : this.host && saved.path ? `Couldn't copy the picture to ${this.host}: ${there.message}` : there.message });
         break;
       }
+      case "screenshot":
+      case "attach": {
+        // a picture goes in as a pasted one (an SSH host's chat gets a copy there,
+        // as you asked for it on its tab); another file is named, this computer's chats only
+        if (typeof m.id !== "string" || (m.type === "attach" && typeof m.path !== "string")) break;
+        const got = m.type === "screenshot" ? await backend.screenshot() : await backend.attach(m.path);
+        if (!got.path) {
+          if (got.message !== "No screenshot taken") this.post({ type: "picture", id: m.id, path: "", error: got.message });
+          else this.post({ type: "picture", id: m.id, path: "", error: "" });
+          break;
+        }
+        if (m.type === "attach" && "picture" in got && got.picture === false) {
+          if (this.host) this.post({ type: "picture", id: m.id, path: "", error: `Only pictures go to ${this.host}'s chat (copied there): that file is on this computer` });
+          else this.post({ type: "file", id: m.id, path: got.path });
+          break;
+        }
+        const there = this.host ? await backend.putImage(this.host, got.path) : got;
+        this.post({ type: "picture", id: m.id, path: there.path ?? "",
+                    error: there.path ? "" : `Couldn't copy the picture to ${this.host}: ${there.message}` });
+        break;
+      }
       case "textSize":
         if (typeof m.scale === "number" && Number.isFinite(m.scale))
           await vscode.workspace.getConfiguration("claudeStatus").update("chatTextScale", textScale(m.scale), vscode.ConfigurationTarget.Global);

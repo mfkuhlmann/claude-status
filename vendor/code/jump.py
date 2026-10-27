@@ -26,6 +26,8 @@ a new chat (used by the Claude Status widget).
     python3 -I jump.py --phone-devices           (the phones paired with KDE Connect)
     python3 -I jump.py --paste-image             (save the clipboard's picture for a new chat's task)
     python3 -I jump.py --save-image TYPE         (save a picture, base64 on stdin, of TYPE image/png, …)
+    python3 -I jump.py --screenshot              (a region of the screen you pick, saved as a picture)
+    python3 -I jump.py --attach PATH             (a dropped file: a picture is copied in as one, else named as is)
     python3 -I jump.py --agent-run AGENT_ID --chat CHAT_ID [--profile PROFILE] [--no-open]
                                                  (a subagent's whole run, as a Markdown file)
 
@@ -1064,6 +1066,69 @@ def save_picture(home, picture, kind):
     with os.fdopen(fd, "wb") as f:
         f.write(picture)
     return True, "", {"path": str(path)}
+
+
+def screenshot_tool(path):
+    """How to take a picture of a region you pick, saved to path: the
+    command, or None and what to install."""
+    out = str(path)
+    if shutil.which("spectacle"):   # (Plasma)
+        return ["spectacle", "--region", "--background", "--nonotify", "--output", out], ""
+    if shutil.which("gnome-screenshot"):
+        return ["gnome-screenshot", "--area", "--file", out], ""
+    if os.environ.get("WAYLAND_DISPLAY") and shutil.which("grim") and shutil.which("slurp"):
+        return ["sh", "-c", 'region=$(slurp) && grim -g "$region" "$1"', "sh", out], ""
+    if shutil.which("maim"):
+        return ["maim", "--select", out], ""
+    return None, "To take a screenshot, install Spectacle (or GNOME Screenshot, or grim and slurp)"
+
+
+def screenshot(home):
+    """A region of the screen you pick, as a picture in cs.images_dir: (ok,
+    message, {"path"}); nothing if you cancel."""
+    folder = cs.images_dir(home)
+    folder.mkdir(parents=True, exist_ok=True)
+    folder.chmod(0o700)
+    target = folder / f".shot-{os.getpid()}.png"
+    cmd, missing = screenshot_tool(target)
+    if cmd is None:
+        return False, missing, {}
+    try:
+        subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300)
+        picture = target.read_bytes() if target.is_file() else b""
+    except (OSError, subprocess.TimeoutExpired):
+        picture = b""
+    finally:
+        try:
+            target.unlink()
+        except OSError:
+            pass
+    if not picture:
+        return False, "No screenshot taken", {}
+    return save_picture(home, picture, "image/png")
+
+
+PICTURE_FILES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif"}
+
+
+def attach_file(home, path):
+    """A file dropped on a reply or a task: a picture is copied in (as a
+    pasted one: cs.images_dir, so a chat reads it without asking), any
+    other file is named where it is: (ok, message, {"path", "picture"})."""
+    try:
+        p = Path(path).expanduser().resolve()
+        if not p.is_file():
+            return False, f"Not a file: {path}", {}
+        kind = PICTURE_FILES.get(p.suffix.lower())
+        if kind is None:
+            return True, "", {"path": str(p), "picture": False}
+        if p.stat().st_size > IMAGE_MAX:
+            return False, f"That picture is too big (over {IMAGE_MAX // 2 ** 20} MB)", {}
+        picture = p.read_bytes()
+    except OSError as exc:
+        return False, f"Couldn't read {path}: {exc.strerror or exc}", {}
+    ok, message, out = save_picture(home, picture, kind)
+    return ok, message, dict(out, picture=True)
 
 
 # ---------------------------------------------------------------- tasks waiting for a usage limit
@@ -2234,6 +2299,10 @@ def main(argv=None):
             action, session_id = paste_image, "-"
         elif arg == "--save-image" and args:
             action, image_type, session_id = save_image, args.pop(0), "-"
+        elif arg == "--screenshot":
+            action, session_id = screenshot, "-"
+        elif arg == "--attach" and args:
+            action, attach_path, session_id = attach_file, args.pop(0), "-"
         elif arg == "--turn":
             turn = True
         elif arg == "--list":
@@ -2361,6 +2430,10 @@ def main(argv=None):
             ok, message, extra_out = paste_image(Path.home())
         elif action is save_image:
             ok, message, extra_out = save_image(Path.home(), image_type, sys.stdin.read())
+        elif action is screenshot:
+            ok, message, extra_out = screenshot(Path.home())
+        elif action is attach_file:
+            ok, message, extra_out = attach_file(Path.home(), attach_path)
         elif action is show_agent_run:
             ok, message, run_file = show_agent_run(Path.home(), extra, session_id, agent_id, profile_dir, open_it)
         elif action is show_changes and listing:

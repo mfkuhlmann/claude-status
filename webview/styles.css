@@ -3181,3 +3181,13 @@ body.vscode-light .pane {
   -webkit-mask-image: linear-gradient(to bottom, black 75%, transparent);
   mask-image: linear-gradient(to bottom, black 75%, transparent);
 }
+
+/* Dropping files on the reply (chat.tsx) */
+.pane-replybox.dropping {
+  outline: 2px dashed var(--vscode-focusBorder, #0078d4);
+  outline-offset: 2px;
+}
+
+.pane-shot {
+  margin-right: auto;
+}

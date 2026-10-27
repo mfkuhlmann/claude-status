@@ -6,7 +6,7 @@
 
 import { render } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { picturesIn, PICTURE_TYPES, routeHint, testsText, TEXT_SCALES, withoutPicture, type Conversation, type PaneChat, type PaneHostMessage, type PaneItem, type PaneMessage, type ReviewAnswer } from "../src/shared/pane";
+import { droppedPaths, fileMention, picturesIn, PICTURE_TYPES, routeHint, testsText, TEXT_SCALES, withoutPicture, type Conversation, type PaneChat, type PaneHostMessage, type PaneItem, type PaneMessage, type ReviewAnswer } from "../src/shared/pane";
 import { AskBox, Diff } from "./components/AskBox";
 import type { Answers, Decision } from "../src/shared/types";
 import { Tag } from "./components/Tag";
@@ -134,6 +134,49 @@ function ChatApp() {
     };
     reader.readAsDataURL(file);
   };
+  // Dropped on the tab: files from VS Code's Explorer (held Shift) by their
+  // paths (a picture goes in as one, a file is named), pictures from
+  // elsewhere as pasted ones; the screenshot button: a region you pick
+  const [dragging, setDragging] = useState(false);
+  const pendingAt = (id: string) => {
+    pending.current[id] = { at: reply.current?.selectionStart ?? text.length, url: "" };
+    setSaving((n) => n + 1);
+  };
+  const dropped = (e: DragEvent) => {
+    e.preventDefault();
+    setDragging(false);
+    const dt = e.dataTransfer;
+    if (!dt) return;
+    const paths = droppedPaths(dt.getData("text/uri-list") || dt.getData("application/vnd.code.uri-list"));
+    if (paths.length) {
+      for (const path of paths) {
+        const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        pendingAt(id);
+        post({ type: "attach", id, path });
+      }
+      return;
+    }
+    const files = Array.from(dt.files ?? []);
+    const picture = files.find((f) => PICTURE_TYPES.includes(f.type));
+    if (!picture) {
+      if (files.length) setInfo({ ok: false, message: "Drop files from VS Code's Explorer (hold Shift) to name them; pictures can come from anywhere" });
+      return;
+    }
+    const at = reply.current?.selectionStart ?? text.length;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = String(reader.result);
+      const p = { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, mime: picture.type, data: url.slice(url.indexOf(",") + 1), url, at };
+      if (chat?.host) setOffer(p);
+      else savePicture(p);
+    };
+    reader.readAsDataURL(picture);
+  };
+  const screenshot = () => {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    pendingAt(id);
+    post({ type: "screenshot", id });
+  };
   const savePicture = (p: { id: string; mime: string; data: string; url: string; at: number }) => {
     pending.current[p.id] = { at: p.at, url: p.url };
     setSaving((n) => n + 1);
@@ -159,15 +202,27 @@ function ChatApp() {
         const p = pending.current[m.id];
         delete pending.current[m.id];
         setSaving((n) => Math.max(0, n - 1));
-        if (!m.path) setInfo({ ok: false, message: m.error || "Couldn't save the picture" });
-        else if (p) {
-          setThumbs((t) => ({ ...t, [m.path]: p.url }));
+        if (!m.path) {
+          if (m.error) setInfo({ ok: false, message: m.error });
+        } else if (p) {
+          if (p.url) setThumbs((t) => ({ ...t, [m.path]: p.url }));
           setText((t) => {
             const at = Math.min(p.at, t.length);
             return t.slice(0, at) + (at > 0 && t.charAt(at - 1).trim() ? " " : "") + `[Image: ${m.path}] ` + t.slice(at);
           });
           reply.current?.focus();
         }
+      }
+      else if (m.type === "file") {
+        const p = pending.current[m.id];
+        delete pending.current[m.id];
+        setSaving((n) => Math.max(0, n - 1));
+        const at = Math.min(p?.at ?? Infinity, Infinity);
+        setText((t) => {
+          const i = Math.min(at, t.length);
+          return t.slice(0, i) + (i > 0 && t.charAt(i - 1).trim() ? " " : "") + `${fileMention(m.path)} ` + t.slice(i);
+        });
+        reply.current?.focus();
       }
       else if (m.type === "conversation") {
         const a: Conversation = m.answer;
@@ -370,13 +425,16 @@ function ChatApp() {
               <button type="button" class="btn secondary small" onClick={() => post({ type: "unqueue" })}>Cancel</button>
             </div>
           ) : null}
-          <div class="pane-replybox">
+          <div class={"pane-replybox" + (dragging ? " dropping" : "")}
+            onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={dropped}>
           <span class="pane-prompt" aria-hidden="true">›</span>
           <textarea
             class="pane-reply"
             rows={3}
             ref={reply}
-            placeholder={chat?.permission ? "It's asking you something: answer that first" : "Reply to Claude… (Enter sends, Shift+Enter: new line, Ctrl+V: a picture too)"}
+            placeholder={chat?.permission ? "It's asking you something: answer that first" : "Reply to Claude… (Enter sends, Shift+Enter: new line; Ctrl+V or drop with Shift: a picture or a file too)"}
             value={text}
             onInput={(e) => setText((e.target as HTMLTextAreaElement).value)}
             onPaste={pasted}
@@ -410,9 +468,13 @@ function ChatApp() {
               <button type="button" class="btn secondary small" onClick={() => setOffer(null)}>Cancel</button>
             </div>
           ) : null}
-          {saving ? <div class="pane-hint">{chat?.host ? `Copying the picture to ${chat.host}…` : "Saving the picture…"}</div> : null}
+          {saving ? <div class="pane-hint">{chat?.host ? `Copying the picture to ${chat.host}…` : "Adding it to your reply…"}</div> : null}
           <div class="pane-hint">{chat ? routeHint(chat.route, chat.state !== "done" || !!chat.busy, "", chat.host) : ""}</div>
           <div class="pane-buttons">
+            <button type="button" class="btn secondary pane-shot" title="Screenshot: pick a region of the screen, its picture goes in your reply"
+              onClick={screenshot}>
+              Screenshot…
+            </button>
             {terminal ? (
               <button type="button" class="btn secondary" disabled={!text.trim()} onClick={() => send("copy", false)}>
                 Copy and open its terminal
