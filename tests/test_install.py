@@ -96,6 +96,15 @@ class InstallTests(unittest.TestCase):
         out = self.install("--uninstall")
         self.assertNotIn(">>>", script.read_text())
 
+    def test_the_old_vs_code_extension_is_named_until_vs_code_uninstalled_it(self):
+        extensions = self.home / ".vscode/extensions"
+        (extensions / "wzaielamri.claude-status-1.15.2").mkdir(parents=True)
+        hint = "The VS Code extension is now Talpy Den too"
+        self.assertIn(hint, self.install().stdout)
+        # (VS Code keeps an uninstalled one's folder until it starts again)
+        (extensions / ".obsolete").write_text('{"wzaielamri.claude-status-1.15.2":true}')
+        self.assertNotIn(hint, self.install().stdout)
+
     def test_uninstall_keeps_the_snippet_another_front_end_uses(self):
         script = self.statusline("~/.claude/statusline.sh", "#!/bin/sh\ninput=$(cat)\n")
         self.install()

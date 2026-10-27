@@ -73,6 +73,18 @@ confirm() {
   [[ "$reply" =~ ^[Yy] ]]
 }
 
+# Whether VS Code has the extension $1 (publisher.name): a folder of it that
+# VS Code hasn't uninstalled (it keeps that one, named in .obsolete, until it
+# starts again)
+vscode_has() {
+  local dir
+  for dir in "$HOME"/.vscode*/extensions/"$1"-*; do
+    [ -d "$dir" ] || continue
+    grep -qF "\"${dir##*/}\"" "${dir%/*}/.obsolete" 2>/dev/null || return 0
+  done
+  return 1
+}
+
 # Status-line scripts in use, one per line (links resolved, duplicates dropped).
 find_statuslines() {
   local given="${TALPY_DEN_STATUSLINE:-${CLAUDE_WIDGET_STATUSLINE:-}}"  # (its first name too)
@@ -419,7 +431,7 @@ if [ "$uninstall" = 1 ]; then
   others=()
   [ "$target" != plasma ] && [ -d "$HOME/.local/share/plasma/plasmoids/$id" ] && others+=("the Plasma widget")
   [ "$target" != gnome ] && [ -d "$HOME/.local/share/gnome-shell/extensions/$uuid" ] && others+=("the GNOME extension")
-  compgen -G "$HOME/.vscode*/extensions/wzaielamri.talpy-den-*" >/dev/null && others+=("the VS Code extension")
+  vscode_has wzaielamri.talpy-den && others+=("the VS Code extension")
   if [ "${#others[@]}" -gt 0 ]; then
     echo "Kept the status-line snippet: ${others[*]} still uses it."
   else
@@ -491,7 +503,7 @@ if [ "$target" = plasma ]; then
   fi
 fi
 
-compgen -G "$HOME/.vscode*/extensions/wzaielamri.claude-status-*" >/dev/null &&
+vscode_has wzaielamri.claude-status &&
   echo "The VS Code extension is now Talpy Den too: install the new one and remove \"Claude Status\" from VS Code's extensions."
 echo
 if [ "$target" = gnome ]; then
