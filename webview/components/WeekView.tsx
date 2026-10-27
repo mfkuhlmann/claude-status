@@ -152,6 +152,7 @@ export function WeekView({ hosts, currency }: { hosts: string[]; currency: strin
           <Timeline recap={recap} />
           <Plan recap={recap} />
           <Projects recap={recap} />
+          <Lanes recap={recap} />
           <Chats recap={recap} />
           <Work recap={recap} />
           <Models recap={recap} />
@@ -356,6 +357,44 @@ function Projects({ recap }: { recap: WeekRecap }) {
           ];
         })}
       </ul>
+    </section>
+  );
+}
+
+// The Day view, chat by chat: when each chat worked, waited for you (a
+// permission, a question) or was paused (asleep, a usage limit); between
+// those it was your turn. A name brings the chat up.
+function Lanes({ recap }: { recap: WeekRecap }) {
+  const lanes = recap.lanes ?? [];
+  if (!lanes.length) return null;
+  const t0 = Math.min(...lanes.map((l) => l.parts[0][0]));
+  const t1 = Math.max(...lanes.map((l) => l.parts[l.parts.length - 1][1]));
+  const span = Math.max(60000, t1 - t0);
+  const time = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const kinds = { w: "Claude worked", y: "Waited for you", p: "Paused (asleep, a limit)" };
+  return (
+    <section class="week-section">
+      <h2>Chat by chat</h2>
+      <div class="week-lanes-legend small muted">
+        {(["w", "y", "p"] as const).map((k) => <span key={k}><i class={`lane-${k}`} aria-hidden="true" />{kinds[k]}</span>)}
+      </div>
+      <ul class="week-lanes">
+        {lanes.map((l) => (
+          <li key={l.key}>
+            <button type="button" class="week-lane-name small" disabled={!!l.host || !l.id}
+              title={l.host ? `${l.name} on ${l.host}` : `Open “${l.name}”`}
+              onClick={() => post({ type: "openWeekChat", chatId: l.id, profileDir: l.profileDir ?? "", name: l.name, cwd: "" })}>
+              {(l.host ? l.host + ": " : "") + l.name}
+            </button>
+            <span class="week-lane" title={`${l.name}\nClaude worked ${hoursText(l.workedMs)}, waited for you ${hoursText(l.waitedMs)}${l.project ? `\n${l.project}` : ""}`}>
+              {l.parts.map(([a, b, k], i) => (
+                <i key={i} class={`lane-${k}`} style={{ left: `${((a - t0) / span) * 100}%`, width: `max(1.5px, ${((b - a) / span) * 100}%)` }} />
+              ))}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <div class="week-lanes-times small muted"><span>{time(t0)}</span><span>{time(t1)}</span></div>
     </section>
   );
 }

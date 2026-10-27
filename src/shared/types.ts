@@ -738,6 +738,18 @@ export interface PermsData {
 // What the Recap tab shows: a day, the last 7 days (or 7 before), or everything kept
 export type WeekSpan = "day" | "week" | "all";
 
+export interface WeekLane {
+  key: string;
+  id: string;
+  host: string;
+  name: string;
+  profileDir?: string;
+  project: string;
+  parts: [number, number, "w" | "y" | "p"][];
+  workedMs: number;
+  waitedMs: number;
+}
+
 export interface WeekRecap {
   ok: true;
   generatedAt: number;
@@ -755,6 +767,8 @@ export interface WeekRecap {
   trend: ((WeekNumbers & { start: number }) | null)[]; // the 5 weeks up to these days (null: older than what's kept)
   projects: WeekProject[];
   chats: WeekChat[];
+  // The Day view: a lane per chat, its stretches [from, to, w (worked) | y (waited for you) | p (paused)]
+  lanes?: WeekLane[];
   models: WeekModel[];
   cacheSaved: number;
   spend: {

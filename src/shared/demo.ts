@@ -2,7 +2,7 @@
 // Claude Code) and for the webview's dev harness. Nothing here is real: the
 // accounts, folders, hosts and chats are invented, times are relative to now.
 
-import type { Agent, ChatStats, Group, HostState, PermsData, Session, Status, UsageStats, ViewState, WeekChat, WeekDay, WeekRecap, WeekSpan } from "./types";
+import type { WeekLane, Agent, ChatStats, Group, HostState, PermsData, Session, Status, UsageStats, ViewState, WeekChat, WeekDay, WeekRecap, WeekSpan } from "./types";
 
 const MIN = 60000;
 const HOUR = 60 * MIN;
@@ -399,6 +399,24 @@ const DEMO_CHATS: WeekChat[] = [
 // usage limits, the rules the permission prompts you answered ask for
 const TOKENS_PER_DOLLAR = 1_853_000; // (a made-up week's tokens, about the breakdown below)
 
+// The Day view's lanes: a few made-up chats through the day (starts: its midnight)
+function demoLanes(start: number): WeekLane[] {
+  const h = 3_600_000;
+  const at = (hours: number) => start + Math.round(hours * h);
+  const lane = (id: string, name: string, project: string, parts: [number, number, "w" | "y" | "p"][], host = ""): WeekLane => ({
+    key: host + "|" + id, id, host, name, project, profileDir: ".claude",
+    parts: parts.map(([a, b, k]) => [at(a), at(b), k] as [number, number, "w" | "y" | "p"]),
+    workedMs: parts.filter((p) => p[2] === "w").reduce((n, p) => n + (p[1] - p[0]) * h, 0),
+    waitedMs: parts.filter((p) => p[2] === "y").reduce((n, p) => n + (p[1] - p[0]) * h, 0),
+  });
+  return [
+    lane("demo-1", "Fix the date parser", "webapp", [[9, 9.6, "w"], [9.6, 10.4, "y"], [10.4, 11.2, "w"], [14, 15.1, "w"]]),
+    lane("demo-2", "Release notes for 2.0", "api-server", [[9.5, 9.8, "w"], [9.8, 9.9, "y"], [9.9, 10.5, "w"], [16, 16.3, "y"]]),
+    lane("demo-3", "Train the ranking model", "ranker", [[10, 12.5, "w"], [12.5, 13.5, "p"], [13.5, 17, "w"]], "build-server"),
+    lane("demo-4", "Nightly dependency check", "webapp", [[11, 11.3, "w"]]),
+  ];
+}
+
 export function demoWeek(now: number, back = 0, account = "", span: WeekSpan = "week"): WeekRecap {
   if (span !== "week") {
     // a day: today's (or the one back days before) out of the made-up week;
@@ -406,7 +424,8 @@ export function demoWeek(now: number, back = 0, account = "", span: WeekSpan = "
     const week = demoWeek(now, span === "day" ? Math.floor(back / 7) : 0, account);
     if (span === "day") {
       const d = week.days[Math.max(0, week.days.length - 1 - (back % 7))];
-      return { ...week, span, back, backMax: 13, first: week.days[0].day, from: d.day, to: d.day, days: [d], trend: week.trend.slice(-5) };
+      return { ...week, span, back, backMax: 13, first: week.days[0].day, from: d.day, to: d.day, days: [d], trend: week.trend.slice(-5),
+               lanes: demoLanes(d.start) };
     }
     const before = demoWeek(now, 1, account);
     const row = (w: WeekRecap): WeekDay => ({

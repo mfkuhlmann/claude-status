@@ -3246,3 +3246,86 @@ body.vscode-light .pane {
   line-height: 1.35;
   white-space: pre;
 }
+
+/* The Day view, chat by chat (WeekView.tsx Lanes) */
+.week-lanes {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.week-lanes li {
+  display: grid;
+  grid-template-columns: minmax(6em, 12em) 1fr;
+  gap: 6px;
+  align-items: center;
+  margin: 2px 0;
+}
+
+.week-lane-name {
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.week-lane-name:disabled {
+  cursor: default;
+}
+
+.week-lane {
+  position: relative;
+  height: 10px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--cs-fg) 7%, transparent);
+}
+
+.week-lane i,
+.week-lanes-legend i {
+  display: inline-block;
+  border-radius: 2px;
+}
+
+.week-lane i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+
+.week-lanes-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.week-lanes-legend i {
+  width: 9px;
+  height: 9px;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
+.lane-w {
+  background: var(--vscode-focusBorder, #0078d4);
+}
+
+.lane-y {
+  background: var(--cs-waiting, #d18616);
+}
+
+.lane-p {
+  background: color-mix(in srgb, var(--cs-fg) 30%, transparent);
+}
+
+.week-lanes-times {
+  display: flex;
+  justify-content: space-between;
+  margin-left: calc(min(12em, 30%) + 6px);
+}

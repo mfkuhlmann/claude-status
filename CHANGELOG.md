@@ -10,6 +10,11 @@
   open burrow is drawn once and copied into each picture, which halves what
   a picture costs. A pet you pick up trails your mouse on a spring, swings
   as you move it and wobbles when you let go.
+- **The day, chat by chat:** the Recap's **Day** view has a lane for each
+  chat that did something that day: when Claude worked, when it waited for
+  you to allow something or answer a question, and when it was paused
+  (asleep, a usage limit); between those it was your turn. Point at a lane
+  for its numbers; a name brings the chat up.
 - **The Monday recap:** once a week (Monday from 9 o'clock, or the first
   time VS Code runs after that), a notification sums up the last 7 days:
   how long Claude worked over how many chats, your time and prompts, the
