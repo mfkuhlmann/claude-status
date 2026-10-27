@@ -45,6 +45,8 @@ its permission prompt and its review.
         what the reply box offers as you type: / commands (Claude's own, yours
         and the project's) and skills, the project's files for @, and your
         past prompts in its folder (newest first) for ↑
+  --logs JOB [--profile P]
+        a background session's screen now (claude logs), as lines of text
   --oldest allow|deny [--osd]
         answer the oldest prompt a chat waits on (one the hook relayed; a plan:
         approve it, or keep planning), for a keyboard shortcut; --osd: say on
@@ -543,6 +545,108 @@ def completions(home, extra_dirs, chat_id, profile_key=None):
     files, cut = project_files(cwd)
     return {"ok": True, "cwd": cwd, "commands": sorted(unique, key=lambda c: c["name"]), "files": files, "filesCut": cut,
             "history": past_prompts(profile, cwd)}
+
+
+# ---------------------------------------------------------------- a background session's screen
+#
+# claude logs ID gives a background session's recent terminal output: its
+# screen as Claude draws it (cursor moves, colors). screen_of plays that into
+# a grid and gives the lines that show, for the pane's Output tab. It only
+# asks the background service that runs (never starts one: claude would).
+
+ESCAPE = re.compile(r"\x1b(?:\[([0-9;?]*)([A-Za-z@`])|\]([^\x07\x1b]*)(?:\x07|\x1b\\)|([78])|[()][0-9A-Za-z]|.)")
+
+
+def screen_of(stream, width=200, height=60):
+    """The lines a terminal shows after stream (a TUI's output), trailing
+    spaces and empty lines at the end left out."""
+    grid = [[" "] * width for _ in range(height)]
+    row = col = 0
+    saved = (0, 0)
+    pos = 0
+    text = stream.replace("\r\n", "\n")
+    for m in ESCAPE.finditer(text):
+        for ch in text[pos:m.start()]:
+            if ch == "\r":
+                col = 0
+            elif ch == "\n":
+                row, col = min(height - 1, row + 1), 0
+            elif ch == "\b":
+                col = max(0, col - 1)
+            elif ch >= " ":
+                if col < width:
+                    grid[row][col] = ch
+                col += 1
+        pos = m.end()
+        args, op = m.group(1), m.group(2)
+        if m.group(4) == "7":
+            saved = (row, col)
+        elif m.group(4) == "8":
+            row, col = saved
+        elif op:
+            nums = [int(n) if n.isdigit() else 0 for n in (args or "").replace("?", "").split(";")]
+            n = nums[0] if nums and nums[0] else 1
+            if op == "A":
+                row = max(0, row - n)
+            elif op == "B":
+                row = min(height - 1, row + n)
+            elif op == "C":
+                col = min(width - 1, col + n)
+            elif op == "D":
+                col = max(0, col - n)
+            elif op == "G":
+                col = min(width - 1, n - 1)
+            elif op in "Hf":
+                row = min(height - 1, max(0, (nums[0] if nums and nums[0] else 1) - 1))
+                col = min(width - 1, max(0, (nums[1] if len(nums) > 1 and nums[1] else 1) - 1))
+            elif op == "K":
+                mode = nums[0] if nums else 0
+                for c in (range(col, width) if mode == 0 else range(0, col + 1) if mode == 1 else range(width)):
+                    grid[row][c] = " "
+            elif op == "J":
+                mode = nums[0] if nums else 0
+                rows = range(row + 1, height) if mode == 0 else range(0, row) if mode == 1 else range(height)
+                for r in rows:
+                    grid[r] = [" "] * width
+                if mode == 0:
+                    grid[row][col:] = [" "] * (width - col)
+    for ch in text[pos:]:
+        if ch >= " " and col < width:
+            grid[row][col] = ch
+            col += 1
+    lines, out = ["".join(r).rstrip() for r in grid], []
+    for line in lines:
+        if line or (out and out[-1]):   # (the empty part of the screen: one empty line)
+            out.append(line)
+    while out and not out[-1]:
+        out.pop()
+    return out
+
+
+def job_screen(home, extra_dirs, job_id, profile_key=None):
+    """A background session's screen now (claude logs): {"ok", "lines"}."""
+    if not re.fullmatch(r"[0-9a-f]{8}", job_id or ""):
+        return {"ok": False, "message": f"Not a background session: {job_id}"}
+    profiles = [p for p in cs.discover_profiles(home, extra_dirs) if profile_key in (None, p.key)]
+    profile = next((p for p in profiles if (p.path / "jobs" / job_id / "state.json").is_file()), None)
+    if profile is None:
+        return {"ok": False, "message": "That background session isn't there any more"}
+    service = cs.service_config_dir(profile)
+    if service is None:
+        return {"ok": False, "message": "Its background service isn't running: it shows nothing now"}
+    claude = cs.find_claude(home)
+    if not claude:
+        return {"ok": False, "message": "Claude Code isn't installed here"}
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE", "ANTHROPIC"))}
+    env["CLAUDE_CONFIG_DIR"] = service   # (the service's own name: another name of the folder would wait for ever)
+    try:
+        r = subprocess.run([claude, "logs", job_id], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           env=env, timeout=20)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"ok": False, "message": f"claude logs didn't answer: {exc}"}
+    if r.returncode != 0:
+        return {"ok": False, "message": (r.stderr or r.stdout).decode(errors="replace").strip()[:300] or "claude logs failed"}
+    return {"ok": True, "lines": screen_of(r.stdout.decode("utf-8", "replace"))}
 
 
 # ---------------------------------------------------------------- keyboard answers
@@ -1331,7 +1435,7 @@ def main(argv=None):
     session, text, stamp, limit, files, config_dirs, answers = None, None, None, PANE_ITEMS, [], [], None
     after, off, remote, pretty, source = False, False, False, False, None
     actions = ("--conversation", "--send", "--answer", "--keys", "--review", "--undo", "--commit", "--reviewed",
-               "--relay", "--live", "--oldest", "--shortcuts", "--complete")
+               "--relay", "--live", "--oldest", "--shortcuts", "--complete", "--logs")
     osd = False
     while args:
         arg = args.pop(0)
@@ -1423,6 +1527,8 @@ def main(argv=None):
         elif action == "--answer":
             ok, said = answer_request(cache_root, target, decision, note, answers)
             result = {"ok": ok, "message": said}
+        elif action == "--logs":
+            result = job_screen(home, config_dirs, target, profile)
         elif action == "--complete":
             result = completions(home, config_dirs, target, profile)
         elif action == "--oldest":

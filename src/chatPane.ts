@@ -256,7 +256,9 @@ class Pane implements vscode.Disposable {
       review: session?.review ?? recent?.review ?? null,
       queued: queued ? { id: queued.id, prompt: queued.prompt, error: queued.error } : null,
       canMove: !!session && this.owner.ext.actions.canMoveToClaudeCode(this.chat),
+      jobId: session && session.kind === "bg" && session.pid && session.jobId ? session.jobId : undefined,
     };
+    this.lastJob = chat.jobId ?? "";
     this.panel.title = chat.name || this.chatId.slice(0, 8);
     if (this.ready) this.post({ type: "chat", chat });
     // its turn began or ended, it asks something: the conversation now
@@ -422,6 +424,15 @@ class Pane implements vscode.Disposable {
                     error: there.path ? "" : `Couldn't copy the picture to ${this.host}: ${there.message}` });
         break;
       }
+      case "logs": {
+        const job = this.lastJob;
+        if (!job) break;
+        const r = await backend.pane(["--logs", job, ...(this.chat.profileDir ? ["--profile", this.chat.profileDir] : []),
+          ...(this.host ? ["--host", this.host] : configDirArgs())], this.host ? 60000 : 20000);
+        this.post({ type: "output", lines: r.ok && Array.isArray(r.lines) ? r.lines.map(String) : [],
+                    error: r.ok ? "" : String(r.message ?? "Its output can't be read now") });
+        break;
+      }
       case "dictate":
         await this.dictate(m.action);
         break;
@@ -442,6 +453,7 @@ class Pane implements vscode.Disposable {
   // The microphone: record, then whisper.cpp writes it down on this computer
   // (dictate.py); only when this window runs here (else the microphone would be the remote's)
   private recording = "";
+  private lastJob = ""; // (the background session the Output tab reads)
   private async dictate(action: "toggle" | "cancel" | "getModel"): Promise<void> {
     const { backend } = this.owner.ext;
     const tell = (m: Omit<Extract<import("./shared/pane").PaneHostMessage, { type: "dictation" }>, "type">) => this.post({ type: "dictation", ...m });

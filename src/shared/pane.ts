@@ -76,6 +76,7 @@ export interface PaneChat {
   review: Review | null;
   queued: { id: string; prompt: string; error: string } | null; // a reply waiting for its turn to end
   canMove: boolean; // runs in a terminal, on the account Claude Code is on: it can move to a Claude Code tab
+  jobId?: string; // a running background session: its screen is in the Output tab (pane.py --logs)
 }
 
 // extension -> tab
@@ -90,6 +91,7 @@ export type PaneHostMessage =
   | { type: "offers"; offers: Offers } // what the reply box offers as you type (pane.py --complete)
   // dictating: "recording", "writing", "model" (downloading one), "" (done: text written down, or
   // why not); offerModel: whisper.cpp is there but no speech model (the tab asks before one comes)
+  | { type: "output"; lines: string[]; error: string } // a background session's screen (pane.py --logs)
   | { type: "dictation"; state: "" | "recording" | "writing" | "model"; text?: string; message?: string; offerModel?: boolean };
 
 // tab -> extension
@@ -112,6 +114,7 @@ export type PaneMessage =
   | { type: "attach"; id: string; path: string } // a file dropped from VS Code's Explorer: a picture saved as one, a file named
   | { type: "screenshot"; id: string } // a region of the screen you pick, as a picture
   | { type: "complete" } // what the reply box offers (answered with "offers")
+  | { type: "logs" } // a background session's screen now (answered with "output")
   | { type: "dictate"; action: "toggle" | "cancel" | "getModel" }; // the microphone (answered with "dictation")
 
 // What the reply box offers as you type (pane.py --complete): / at the start

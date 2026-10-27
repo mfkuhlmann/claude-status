@@ -10,6 +10,10 @@
   open burrow is drawn once and copied into each picture, which halves what
   a picture costs. A pet you pick up trails your mouse on a spring, swings
   as you move it and wobbles when you let go.
+- **A background session's screen:** the tab of a background session
+  (`claude --bg`) has an **Output** tab: its terminal as Claude draws it
+  right now (what `claude attach` would show), read again every 2 seconds
+  while you look at it, from its background service (never started for it).
 - **Dictate a reply:** **Dictate** in a chat's tab records what you say;
   click it again and whisper.cpp writes it down where you're typing (×
   drops it). It runs on this computer only (not in a Remote window): what

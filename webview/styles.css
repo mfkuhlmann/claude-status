@@ -3234,3 +3234,15 @@ body.vscode-light .pane {
   background: var(--vscode-editorSuggestWidget-selectedBackground, var(--vscode-list-activeSelectionBackground, rgba(0, 120, 212, 0.3)));
   color: var(--vscode-editorSuggestWidget-selectedForeground, inherit);
 }
+
+/* A background session's screen (the Output tab) */
+.pane-output {
+  flex: 1;
+  margin: 0;
+  padding: 8px 12px;
+  overflow: auto;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: calc(var(--vscode-editor-font-size, 13px) * 0.95);
+  line-height: 1.35;
+  white-space: pre;
+}

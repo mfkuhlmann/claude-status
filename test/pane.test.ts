@@ -319,5 +319,5 @@ test("the microphone: recorded, then written down; a missing model is offered; R
   status = { ok: false, tool: "/usr/bin/whisper-cli", model: null };
   assert.deepEqual(await say("toggle"), { type: "dictation", state: "", offerModel: true });
   status = { ok: false, tool: null, model: null, missing: ["whisper.cpp"] };
-  assert.equal((await say("toggle")).message, "To dictate, install whisper.cpp.");
+  assert.equal(((await say("toggle")) as { message?: string }).message, "To dictate, install whisper.cpp.");
 });

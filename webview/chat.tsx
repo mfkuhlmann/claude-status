@@ -14,7 +14,7 @@ import { Markdown } from "./util/markdown";
 
 declare global {
   interface Window {
-    CLAUDE_CHAT: { tab: "chat" | "review"; local: boolean; scale?: number };
+    CLAUDE_CHAT: { tab: "chat" | "review" | "output"; local: boolean; scale?: number };
   }
 }
 
@@ -90,7 +90,20 @@ function ChatApp() {
   const [more, setMore] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState("");
-  const [tab, setTab] = useState<"chat" | "review">(config.tab);
+  const [tab, setTab] = useState<"chat" | "review" | "output">(config.tab);
+  // A background session's screen (the Output tab), read again every 2 s while it shows
+  const [output, setOutput] = useState<{ lines: string[]; error: string } | null>(null);
+  useEffect(() => {
+    if (tab !== "output" || !chat?.jobId) return undefined;
+    post({ type: "logs" });
+    const t = setInterval(() => {
+      if (document.visibilityState === "visible") post({ type: "logs" });
+    }, 2000);
+    return () => clearInterval(t);
+  }, [tab, chat?.jobId]);
+  useEffect(() => {
+    if (tab === "output" && chat && !chat.jobId) setTab("chat");
+  }, [tab, chat?.jobId]);
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [text, setText] = useState("");
   const [askHow, setAskHow] = useState(false);
@@ -265,6 +278,7 @@ function ChatApp() {
         }
       }
       else if (m.type === "offers") setOffers(m.offers);
+      else if (m.type === "output") setOutput({ lines: m.lines, error: m.error });
       else if (m.type === "dictation") {
         setDictating(m.state);
         if (m.state === "recording") setRecordedAt(Date.now());
@@ -422,13 +436,22 @@ function ChatApp() {
         <button type="button" role="tab" aria-selected={tab === "chat"} class={tab === "chat" ? "on" : ""} onClick={() => setTab("chat")}>
           Chat
         </button>
+        {chat?.jobId ? (
+          <button type="button" role="tab" aria-selected={tab === "output"} class={tab === "output" ? "on" : ""} onClick={() => setTab("output")}>
+            Output
+          </button>
+        ) : null}
         <button type="button" role="tab" aria-selected={tab === "review"} class={tab === "review" ? "on" : ""} onClick={() => setTab("review")}>
           {chat?.changes ? `Review ±${chat.changes}${chat.reviewPending ? " •" : ""}` : "Review"}
         </button>
       </div>
       {info ? <div class={info.ok ? "pane-info" : "pane-info bad"}>{info.message}</div> : null}
 
-      {tab === "chat" ? (
+      {tab === "output" ? (
+        <pre class="pane-output" title="Its terminal as Claude draws it now (claude logs)">
+          {output?.error || (output ? output.lines.join("\n") : "Reading its screen…")}
+        </pre>
+      ) : tab === "chat" ? (
         <>
           <div
             class="pane-list"
