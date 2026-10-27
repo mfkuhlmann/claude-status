@@ -1025,3 +1025,24 @@ class LaneTests(unittest.TestCase):
         self.assertEqual([p[2] for p in a["parts"]], ["w", "y", "w", "p", "w"])
         self.assertEqual(a["waitedMs"], 600_000)
         self.assertEqual(a["workedMs"], 2 * h - 600_000 + h - 1800_000)
+
+
+class ProjectTests(unittest.TestCase):
+    """The Projects tab (week.projects): chats by project, newest first."""
+
+    def test_projects_with_their_chats_newest_first(self):
+        now = 100 * 86400_000
+        chat = lambda cid, project, name, turns, prompts=(): {
+            "id": cid, "project": project, "folder": project and project + "/sub", "name": name, "profiles": [".claude"], "hours": {},
+            "turns": turns, "prompts": list(prompts)}
+        chats = [chat("a" * 8, "/r/app", "fix it", [[now - 2 * 86400_000, now - 2 * 86400_000 + 3600_000, 3600_000, [], {}]]),
+                 chat("b" * 8, "/r/app", "old one", [[now - 30 * 86400_000, now - 30 * 86400_000 + 600_000, 600_000, [], {}]]),
+                 chat("c" * 8, "/r/web", "today", [[now - 3600_000, now - 60_000, 1800_000, [], {}]]),
+                 chat("d" * 8, "", "nowhere", [[now - 60_000, now, 60_000, [], {}]]),
+                 chat("e" * 8, "/r/empty", "never", [])]
+        rows = week.projects(chats, now, Path("/home/x"))
+        self.assertEqual([p["name"] for p in rows], ["web", "app"])
+        app = rows[1]
+        self.assertEqual((app["workedMs"], app["weekMs"], app["chatCount"]), (4200_000, 3600_000, 2))
+        self.assertEqual([c["name"] for c in app["chats"]], ["fix it", "old one"])
+        self.assertEqual(app["chats"][0]["cwd"], "/r/app/sub")

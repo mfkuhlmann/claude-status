@@ -45,7 +45,7 @@ PlasmaExtras.Representation {
                 Layout.minimumWidth: implicitWidth
                 // (set by a click, not by the bar's own index: a new popup
                 // starts at its first tab, which mustn't undo the one shown)
-                currentIndex: ["chats", "week", "perms"].indexOf(root.popupTab)
+                currentIndex: ["chats", "week", "perms", "projects"].indexOf(root.popupTab)
 
                 PlasmaComponents3.TabButton {
                     width: implicitWidth   // (else the bar gives each the same share)
@@ -62,10 +62,15 @@ PlasmaExtras.Representation {
                     text: i18n("Permissions")
                     onClicked: root.popupTab = "perms"
                 }
+                PlasmaComponents3.TabButton {
+                    width: implicitWidth
+                    text: i18n("Projects")
+                    onClicked: root.popupTab = "projects"
+                }
                 Connections {
                     target: root
                     function onPopupTabChanged() {
-                        tabs.currentIndex = ["chats", "week", "perms"].indexOf(root.popupTab)
+                        tabs.currentIndex = ["chats", "week", "perms", "projects"].indexOf(root.popupTab)
                     }
                 }
             }
@@ -150,7 +155,7 @@ PlasmaExtras.Representation {
         spacing: Kirigami.Units.smallSpacing
         // A tab slides in from the side it's on (Chats | Recap | Permissions)
         transform: Translate { id: tabSlide }
-        property int tabIndex: ["chats", "week", "perms"].indexOf(root.popupTab)
+        property int tabIndex: ["chats", "week", "perms", "projects"].indexOf(root.popupTab)
         onTabIndexChanged: {
             if (!root.animateRows)
                 return
@@ -214,6 +219,13 @@ PlasmaExtras.Representation {
             Layout.fillWidth: true
             Layout.fillHeight: true
             source: "WeekView.qml"
+        }
+        Loader {
+            active: root.popupTab === "projects"
+            visible: active
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            source: "ProjectsView.qml"
         }
         Loader {
             active: root.popupTab === "perms"

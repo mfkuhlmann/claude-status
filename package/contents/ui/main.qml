@@ -3063,6 +3063,51 @@ PlasmoidItem {
         onTriggered: root.loadWeek()
     }
 
+    // The Projects tab (ProjectsView.qml, week.py --projects): every project
+    // with its chats, time and cost; read when the tab opens and every 10
+    // minutes while it shows (what goes on now comes from the status)
+    property var projectsData: null
+    property string projectsError: ""
+    property bool projectsBusy: false
+    readonly property bool projectsShown: popupTab === "projects" && dashboardShown && !coveredByWindow
+    onProjectsShownChanged: if (projectsShown) loadProjects()
+    function loadProjects() {
+        projectsBusy = true
+        projectsReader.connectSource("python3 -I " + shellQuote(codeDir + "week.py") + " --projects"
+                                     + (weekCurrency !== "USD" ? " --currency " + shellQuote(weekCurrency) : "") + configDirArgs)
+    }
+    Exec {
+        id: projectsReader
+        onNewData: (source, data) => {
+            disconnectSource(source)
+            root.projectsBusy = false
+            const r = root.helperResult(data)
+            if (r.ok) {
+                root.projectsData = r
+                root.projectsError = ""
+            } else {
+                root.projectsError = r.error || r.message || i18n("Couldn't read your projects")
+            }
+        }
+    }
+    Timer {
+        interval: 600000
+        repeat: true
+        running: root.projectsShown
+        onTriggered: root.loadProjects()
+    }
+    // New chat here: the new-chat box of the account its newest chat is on, with that folder first
+    function newChatInProject(project) {
+        const newest = project.chats.length ? project.chats[0] : null
+        const g = groups.find(x => newest && (x.profileKeys || []).indexOf(newest.profileDir) >= 0) || groups[0]
+        if (!g)
+            return
+        popupTab = "chats"
+        newChatFolder = { groupKey: g.id, path: project.path, short: project.short, newChatCommand: "" }
+        planComposer = ""
+        newChatGroup = g.id
+    }
+
     function loadWeek() {
         if (popupTab !== "week")
             return

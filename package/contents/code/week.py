@@ -2284,6 +2284,47 @@ def host_chats(host, back, span="week"):
     return {"host": host, "ok": True, "chats": chats, "accounts": answer.get("accounts") or []}
 
 
+# ---------------------------------------------------------------- projects
+#
+# The Projects tab: each project (a chat's git repository, else its folder)
+# with how long Claude worked on it and what it cost, all of it and the last
+# 7 days, when it was last at work there, and its chats (newest first). The
+# front ends add what's going on now from the status (open chats, plans,
+# memories, Claude's last recap).
+
+PROJECT_CHATS = 40
+
+
+def projects(chats, now_ms, home):
+    week_ago = now_ms - 7 * 86400_000
+    out = {}
+    for c in chats:
+        folder = c.get("project") or c.get("folder") or ""
+        if not folder:
+            continue
+        cost = sum(request_cost(key, t) for agg in c["hours"].values() for key, t in agg["t"].items())
+        worked = sum(t[2] for t in c["turns"])
+        recent = sum(t[2] for t in c["turns"] if t[1] >= week_ago)
+        last = max([t[1] for t in c["turns"]] + c["prompts"] + [0])
+        if not last:
+            continue
+        p = out.setdefault(folder, {"name": project_name(folder, home), "path": folder, "short": cs.short_path(folder, home),
+                                    "workedMs": 0, "weekMs": 0, "cost": 0.0, "lastAt": 0, "chats": []})
+        p["workedMs"] += worked
+        p["weekMs"] += recent
+        p["cost"] += cost
+        p["lastAt"] = max(p["lastAt"], last)
+        p["chats"].append({"id": c["id"], "name": chat_label(c) or c["id"][:8], "profileDir": c["profiles"][0] if c["profiles"] else "",
+                           "cwd": c.get("folder") or "", "lastAt": last, "workedMs": int(worked), "cost": round(cost, 4)})
+    rows = sorted(out.values(), key=lambda p: -p["lastAt"])
+    for p in rows:
+        p["chats"].sort(key=lambda c: -c["lastAt"])
+        p["chatCount"] = len(p["chats"])
+        p["chats"] = p["chats"][:PROJECT_CHATS]
+        p["workedMs"], p["weekMs"], p["cost"] = int(p["workedMs"]), int(p["weekMs"]), round(p["cost"], 2)
+    return rows
+
+
 # ---------------------------------------------------------------- the Monday recap
 #
 # Once a week (Monday from 9 o'clock, or the first check after it that week)
@@ -2330,7 +2371,7 @@ def monday_recap(sources, now_ms, home):
 def main(argv=None):
     args = sys.argv[1:] if argv is None else list(argv)
     back, account, hosts, config_dirs, currency, span = 0, "", [], [], "USD", "week"
-    pretty = remote = data = perms = status = forget = monday = False
+    pretty = remote = data = perms = status = forget = monday = projects_asked = False
     allow = undo = revoke = history = on = None
     while args:
         arg = args.pop(0)
@@ -2370,6 +2411,8 @@ def main(argv=None):
             perms = True
         elif arg == "--monday-recap":
             monday = True
+        elif arg == "--projects":
+            projects_asked = True
         else:
             sys.exit(__doc__)
     os.umask(0o077)  # cache files are private to the user
@@ -2404,6 +2447,18 @@ def main(argv=None):
                 result = {"ok": ok, "message": message}
         except Exception as exc:
             result = {"ok": False, "message": "{}: {}".format(type(exc).__name__, exc)}
+        return emit(result)
+    if projects_asked:   # (the Projects tab: every chat the cache has, by project)
+        try:
+            profiles = cs.discover_profiles(home, config_dirs)
+            cache = updated_cache(cache_root, profiles, now_ms)
+            chats = chats_between(cache, profiles, 0, now_ms + 1, home)
+            for cid, c in chats.items():
+                c["id"] = cid
+            result = {"ok": True, "generatedAt": now_ms, "projects": projects(list(chats.values()), now_ms, home),
+                      "currency": currency_of(currency, cache_root, now_ms / 1000)}
+        except Exception as exc:
+            result = {"ok": False, "error": "{}: {}".format(type(exc).__name__, exc)}
         return emit(result)
     if monday:   # (cheap unless it's due: then the last 7 days)
         try:

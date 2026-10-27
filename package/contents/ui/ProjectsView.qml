@@ -1,0 +1,249 @@
+import QtQuick
+import QtQuick.Layouts
+import org.kde.plasma.components as PlasmaComponents3
+import org.kde.plasma.core as PlasmaCore
+import org.kde.plasma.extras as PlasmaExtras
+import org.kde.kirigami as Kirigami
+
+// The Projects tab: each project (a chat's git repository, else its folder),
+// newest first, with what goes on there now (its open chats), Claude's last
+// recap of it, how long Claude worked on it and what that cost (the last 7
+// days and everything kept), its chats, plans and memories, and a button for
+// a new chat there. The numbers come from week.py --projects (main.qml:
+// loadProjects), what goes on now from the status.
+PlasmaComponents3.ScrollView {
+    id: view
+
+    readonly property var projects: root.projectsData ? root.projectsData.projects || [] : []
+    readonly property real gu: Kirigami.Units.gridUnit
+    property var open: ({})        // project path -> unfolded (the first three are)
+    contentWidth: availableWidth
+    PlasmaComponents3.ScrollBar.horizontal.policy: PlasmaComponents3.ScrollBar.AlwaysOff
+
+    function under(folder, path) {
+        return !!folder && (folder === path || folder.startsWith(path + "/"))
+    }
+    // What the status has about a project now: its open chats, plans, memories, the last recap
+    function now(project) {
+        const sessions = [], plans = [], memories = [], recents = []
+        for (const g of root.groups) {
+            for (const s of g.sessions)
+                if (under(s.cwd, project.path))
+                    sessions.push({ key: root.petKeyOf(s, ""), session: s, host: "", account: g.title })
+            for (const p of g.plans || [])
+                if (under(p.cwd, project.path))
+                    plans.push(p)
+            for (const m of g.memories || [])
+                if (m.folder && under(m.folder, project.path))
+                    memories.push(m)
+            for (const r of g.recent || [])
+                if (under(r.cwd, project.path) && r.recap && r.recap.text)
+                    recents.push(r)
+        }
+        recents.sort((a, b) => (b.lastActive || 0) - (a.lastActive || 0))
+        plans.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+        memories.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+        return { sessions: sessions, plans: plans, memories: memories, recap: recents.length ? recents[0].recap.text : "" }
+    }
+    function isOpen(project, index) {
+        return project.path in open ? open[project.path] : index < 3
+    }
+    // (as the Recap shows money: its currency, symbol and rounding)
+    readonly property var currency: root.projectsData && root.projectsData.currency ? root.projectsData.currency : ({ code: "USD", rate: 1 })
+    readonly property var symbols: ({ USD: "$", EUR: "€", GBP: "£", JPY: "¥", CNY: "¥", INR: "₹", KRW: "₩", ILS: "₪", TRY: "₺", PHP: "₱", THB: "฿" })
+    function money(usd) {
+        const amount = (usd || 0) * (currency.rate || 1)
+        const symbol = symbols[currency.code]
+        const put = text => symbol ? symbol + text : text + " " + currency.code
+        const whole = amount >= 100 || ["JPY", "KRW", "HUF", "ISK", "IDR"].indexOf(currency.code) >= 0
+        return amount < (whole ? 1 : 0.01) ? put("0") : put(Number(amount).toLocaleString(Qt.locale(), "f", whole ? 0 : 2))
+    }
+
+    ColumnLayout {
+        width: view.availableWidth
+        spacing: Kirigami.Units.largeSpacing
+
+        PlasmaComponents3.Label {
+            textFormat: Text.PlainText
+            Layout.fillWidth: true
+            Layout.margins: Kirigami.Units.smallSpacing
+            visible: root.projectsBusy && view.projects.length === 0
+            text: i18n("Reading your chats by project…")
+            opacity: 0.7
+        }
+        PlasmaComponents3.Label {
+            textFormat: Text.PlainText
+            Layout.fillWidth: true
+            Layout.margins: Kirigami.Units.smallSpacing
+            visible: root.projectsError !== ""
+            text: root.projectsError
+            color: Kirigami.Theme.negativeTextColor
+            wrapMode: Text.Wrap
+        }
+        PlasmaExtras.PlaceholderMessage {
+            Layout.fillWidth: true
+            Layout.margins: Kirigami.Units.gridUnit
+            visible: !root.projectsBusy && root.projectsData !== null && view.projects.length === 0
+            iconName: "folder-open"
+            text: i18n("No projects yet")
+            explanation: i18n("A project is a folder (or the git repository it's in) where you chatted with Claude.")
+        }
+
+        Repeater {
+            model: view.projects.length
+            delegate: ColumnLayout {
+                id: card
+                required property int index
+                readonly property var project: view.projects[index] || ({ name: "", path: "", short: "", chats: [], chatCount: 0 })
+                readonly property bool unfolded: view.isOpen(project, index)
+                readonly property var here: unfolded ? view.now(project) : ({ sessions: [], plans: [], memories: [], recap: "" })
+                Layout.fillWidth: true
+                Layout.leftMargin: Kirigami.Units.smallSpacing
+                Layout.rightMargin: Kirigami.Units.smallSpacing
+                spacing: Kirigami.Units.smallSpacing
+
+                Kirigami.Separator {
+                    Layout.fillWidth: true
+                    visible: card.index > 0
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Kirigami.Units.smallSpacing
+
+                    Kirigami.Icon {
+                        source: card.unfolded ? "go-down" : "go-next"
+                        Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                        Layout.preferredHeight: Layout.preferredWidth
+                    }
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 0
+                        Kirigami.Heading {
+                            level: 4
+                            textFormat: Text.PlainText
+                            Layout.fillWidth: true
+                            text: card.project.name
+                            elide: Text.ElideRight
+                        }
+                        PlasmaComponents3.Label {
+                            textFormat: Text.PlainText
+                            Layout.fillWidth: true
+                            text: card.project.short + " · " + i18n("last at work %1 ago", root.duration(Math.max(60000, Date.now() - card.project.lastAt)))
+                            font: Kirigami.Theme.smallFont
+                            opacity: 0.65
+                            elide: Text.ElideMiddle
+                        }
+                    }
+                    PlasmaComponents3.Label {
+                        textFormat: Text.PlainText
+                        text: i18n("7 days: %1", root.duration(card.project.weekMs)) + "\n" + i18n("all: %1 · %2", root.duration(card.project.workedMs), view.money(card.project.cost))
+                        font: Kirigami.Theme.smallFont
+                        horizontalAlignment: Text.AlignRight
+                        opacity: 0.8
+                    }
+                    PlasmaComponents3.ToolButton {
+                        icon.name: "list-add"
+                        display: PlasmaComponents3.AbstractButton.IconOnly
+                        text: i18n("New chat here")
+                        onClicked: root.newChatInProject(card.project)
+
+                        PlasmaCore.ToolTipArea {
+                            textFormat: Text.PlainText
+                            anchors.fill: parent
+                            mainText: i18n("New chat here")
+                            subText: card.project.short
+                        }
+                    }
+                    TapHandler {
+                        onTapped: view.open = Object.assign({}, view.open, { [card.project.path]: !card.unfolded })
+                    }
+                }
+
+                // What goes on there now
+                Repeater {
+                    model: card.here.sessions.length
+                    delegate: FocusLine {
+                        required property int index
+                        Layout.fillWidth: true
+                        item: card.here.sessions[index] || null
+                    }
+                }
+                // Claude's last recap of it (its own, in the chat)
+                PlasmaComponents3.Label {
+                    textFormat: Text.PlainText
+                    Layout.fillWidth: true
+                    Layout.leftMargin: Kirigami.Units.iconSizes.small + Kirigami.Units.smallSpacing
+                    visible: card.unfolded && card.here.recap !== ""
+                    text: "“" + card.here.recap + "”"
+                    font.italic: true
+                    wrapMode: Text.Wrap
+                    maximumLineCount: 4
+                    elide: Text.ElideRight
+                    opacity: 0.8
+                }
+                // Its chats, newest first (click: brings it up)
+                Repeater {
+                    model: card.unfolded ? Math.min(5, card.project.chats.length) : 0
+                    delegate: WeekChatLine {
+                        required property int index
+                        readonly property var c: card.project.chats[index] || ({ id: "", name: "", profileDir: "", cwd: "", lastAt: 0, workedMs: 0, cost: 0 })
+                        chat: ({ name: c.name, chatId: c.id, host: "", profileDir: c.profileDir, folder: "", cwd: c.cwd })
+                        where: i18n("%1 ago", root.duration(Math.max(60000, Date.now() - c.lastAt)))
+                        numbers: root.duration(c.workedMs) + " · " + view.money(c.cost)
+                        indent: Kirigami.Units.iconSizes.small
+                    }
+                }
+                PlasmaComponents3.Label {
+                    textFormat: Text.PlainText
+                    Layout.leftMargin: Kirigami.Units.iconSizes.small + Kirigami.Units.smallSpacing * 2
+                    visible: card.unfolded && card.project.chatCount > 5
+                    text: i18np("and %1 more chat", "and %1 more chats", card.project.chatCount - 5)
+                    font: Kirigami.Theme.smallFont
+                    opacity: 0.6
+                }
+                // Its plans and memories
+                Flow {
+                    Layout.fillWidth: true
+                    Layout.leftMargin: Kirigami.Units.iconSizes.small + Kirigami.Units.smallSpacing
+                    visible: card.unfolded && (card.here.plans.length + card.here.memories.length) > 0
+                    spacing: Kirigami.Units.smallSpacing
+                    Repeater {
+                        model: Math.min(4, card.here.plans.length)
+                        delegate: PlasmaComponents3.ToolButton {
+                            required property int index
+                            readonly property var plan: card.here.plans[index]
+                            icon.name: "view-task"
+                            text: plan ? plan.title : ""
+                            onClicked: if (plan) root.openPlan(plan.slug, plan.profileDir, "")
+                        }
+                    }
+                    Repeater {
+                        model: Math.min(4, card.here.memories.length)
+                        delegate: PlasmaComponents3.ToolButton {
+                            required property int index
+                            readonly property var memory: card.here.memories[index]
+                            icon.name: "note"
+                            text: memory ? memory.name : ""
+                            onClicked: if (memory) root.openMemory(memory, "", false)
+                        }
+                    }
+                    PlasmaComponents3.Label {
+                        textFormat: Text.PlainText
+                        visible: card.here.plans.length > 4 || card.here.memories.length > 4
+                        height: implicitHeight * 2
+                        verticalAlignment: Text.AlignVCenter
+                        text: [card.here.plans.length > 4 ? i18np("%1 more plan", "%1 more plans", card.here.plans.length - 4) : "",
+                               card.here.memories.length > 4 ? i18np("%1 more memory", "%1 more memories", card.here.memories.length - 4) : ""]
+                              .filter(t => t).join(" · ") + " " + i18n("(under its account in Chats)")
+                        font: Kirigami.Theme.smallFont
+                        opacity: 0.6
+                    }
+                }
+            }
+        }
+
+        Item {
+            implicitHeight: Kirigami.Units.smallSpacing
+        }
+    }
+}
