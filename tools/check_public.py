@@ -109,19 +109,22 @@ def ssh_config_values(path, seen):
 def personal_strings():
     """Things that identify this machine or its owner; never in a public file."""
     found = set()
-    try:
-        found.add(getpass.getuser())
-    except Exception:
-        pass
-    home = str(Path.home())
-    if home not in ("/", "/root"):
-        found.add(home)
-    try:
-        name = socket.gethostname()
-        found.add(name)
-        found.add(name.split(".")[0])
-    except OSError:
-        pass
+    # (on GitHub Actions the machine is a runner: its user is "runner", a word
+    # the code uses, and nothing about it is anyone's)
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        try:
+            found.add(getpass.getuser())
+        except Exception:
+            pass
+        home = str(Path.home())
+        if home not in ("/", "/root"):
+            found.add(home)
+        try:
+            name = socket.gethostname()
+            found.add(name)
+            found.add(name.split(".")[0])
+        except OSError:
+            pass
     found |= ssh_config_values(Path.home() / ".ssh" / "config", set())
     try:  # (the repository's own .git, also from a worktree, whose .git is a file)
         private = Path(git("rev-parse", "--path-format=absolute", "--git-common-dir").strip()) / "info" / "private-patterns"
