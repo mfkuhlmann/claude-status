@@ -272,6 +272,12 @@ export class Backend {
       : { message: String(r?.message ?? "the helper gave no answer") };
   }
 
+  // A PNG to the clipboard (jump.py --copy-image)
+  async copyImage(path: string): Promise<{ ok: boolean; message: string }> {
+    const r = await this.json(["jump.py", "--copy-image", path], 15000);
+    return { ok: !!r?.ok, message: String(r?.message ?? "the helper gave no answer") };
+  }
+
   // That picture copied to an SSH host (remote.py --put-image): the copy's path there
   async putImage(host: string, path: string): Promise<{ path?: string; message: string }> {
     const r = await this.json(["remote.py", "--put-image", host, path], 120000);

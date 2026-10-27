@@ -828,6 +828,7 @@ export function isDecision(d: unknown): d is Decision {
 // webview -> extension
 export type WebviewMessage =
   | { type: "ready" }
+  | { type: "shareCard"; how: "save" | "copy"; name: string; png: string } // the Recap's card (base64 PNG)
   | { type: "open"; chat: ChatRef }
   | { type: "openPane"; chat: ChatRef; tab?: "chat" | "review" } // the chat's tab: its conversation, a reply box, its review
   | { type: "openWindow"; chat: ChatRef } // its own terminal or Claude Code tab, whatever a click does

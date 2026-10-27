@@ -1295,4 +1295,30 @@ export class Actions {
       );
     }
   }
+
+  // The Recap's card: saved in the Pictures folder (else home), or copied (jump.py --copy-image)
+  async shareCard(how: "save" | "copy", name: string, png: string): Promise<void> {
+    const fs = await import("node:fs/promises");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const data = Buffer.from(png, "base64");
+    if (how === "save") {
+      const pictures = path.join(os.homedir(), "Pictures");
+      const folder = await fs.stat(pictures).then((st) => (st.isDirectory() ? pictures : os.homedir()), () => os.homedir());
+      const file = path.join(folder, name);
+      try {
+        await fs.writeFile(file, data);
+        const choice = await vscode.window.showInformationMessage(`Saved: ${file}`, "Show It");
+        if (choice === "Show It") await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(file));
+      } catch (e) {
+        void vscode.window.showErrorMessage(`Claude Status: couldn't save the card: ${(e as Error).message}`);
+      }
+      return;
+    }
+    const file = path.join(os.tmpdir(), name);
+    await fs.writeFile(file, data);
+    const r = await this.backend.copyImage(file);
+    if (r.ok) void vscode.window.setStatusBarMessage("$(check) The card is copied: paste it anywhere", 5000);
+    else void vscode.window.showErrorMessage(`Claude Status: couldn't copy the card: ${r.message}`);
+  }
 }

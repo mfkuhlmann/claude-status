@@ -1,4 +1,5 @@
-import { useEffect, useState } from "preact/hooks";
+import { drawCard } from "../util/card";
+import { useEffect, useRef, useState } from "preact/hooks";
 import type { WeekChat, WeekDay, WeekPlanWindow, WeekRecap, WeekSpan } from "../../src/shared/types";
 import {
   cacheText,
@@ -44,6 +45,7 @@ export function WeekView({ hosts, currency }: { hosts: string[]; currency: strin
   const [back, setBack] = useState(answer?.back ?? 0);
   const [account, setAccount] = useState(answer?.account ?? "");
   const [busy, setBusy] = useState(true); // asked, and its answer hasn't come
+  const [sharing, setSharing] = useState(false);
   const [copied, setCopied] = useState("");
   const hostsKey = hosts.join(",");
 
@@ -108,7 +110,12 @@ export function WeekView({ hosts, currency }: { hosts: string[]; currency: strin
         <button type="button" class="icon-btn" title="Read again" aria-label="Read again" onClick={ask}>
           <Icon name="refresh" />
         </button>
+        <button type="button" class="icon-btn" title="Share as a picture: these days as a card with Talpa, to save or copy"
+          aria-label="Share as a picture" disabled={!(recap && hasData)} onClick={() => setSharing(true)}>
+          <Icon name="share" />
+        </button>
       </div>
+      {sharing && recap ? <ShareCard recap={recap} onClose={() => setSharing(false)} /> : null}
 
       {recap && recap.accounts.length > 1 ? (
         <div class="week-accounts" role="radiogroup" aria-label="Whose chats">
@@ -161,6 +168,30 @@ export function WeekView({ hosts, currency }: { hosts: string[]; currency: strin
           <div class="week-foot small muted">{footText(recap)}</div>
         </>
       ) : null}
+    </div>
+  );
+}
+
+// The card to share (util/card.ts): a preview, the projects named or not, Save or Copy
+function ShareCard({ recap, onClose }: { recap: WeekRecap; onClose: () => void }) {
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const [names, setNames] = useState(false);
+  useEffect(() => {
+    if (canvas.current) drawCard(canvas.current, recap, names);
+  }, [recap, names]);
+  const send = (how: "save" | "copy") => {
+    const url = canvas.current?.toDataURL("image/png") ?? "";
+    post({ type: "shareCard", how, name: `claude-${recap.span ?? "week"}-${recap.to}.png`, png: url.slice(url.indexOf(",") + 1) });
+  };
+  return (
+    <div class="week-share" role="dialog" aria-label="Share as a picture">
+      <canvas ref={canvas} class="week-share-card" />
+      <label class="small"><input type="checkbox" checked={names} onChange={(e) => setNames((e.target as HTMLInputElement).checked)} /> Name the projects on it</label>
+      <div class="ask-buttons">
+        <button type="button" class="btn" onClick={() => send("save")}>Save</button>
+        <button type="button" class="btn secondary" onClick={() => send("copy")}>Copy</button>
+        <button type="button" class="btn secondary" onClick={onClose}>Close</button>
+      </div>
     </div>
   );
 }

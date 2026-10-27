@@ -10,6 +10,12 @@
   open burrow is drawn once and copied into each picture, which halves what
   a picture costs. A pet you pick up trails your mouse on a spring, swings
   as you move it and wobbles when you let go.
+- **Share your week as a picture:** the share button in the Recap makes a
+  card of the period shown (a day, the 7 days or everything): Talpa, how
+  long Claude worked and how long you did, your prompts and chats, Claude's
+  work day by day and the tokens, with your projects' names if you tick
+  *Name the projects on it*. **Save** puts it in your Pictures folder,
+  **Copy** puts it on the clipboard.
 - **The day, chat by chat:** the Recap's **Day** view has a lane for each
   chat that did something that day: when Claude worked, when it waited for
   you to allow something or answer a question, and when it was paused

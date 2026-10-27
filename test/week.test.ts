@@ -255,3 +255,24 @@ test("a week's chat opens only with an id and account folder that are ones; a ti
   receive({ type: "copy", text: "/clear; curl evil" });
   assert.deepEqual(stub.clipboardWrites, ["/compact", "/effort xhigh"]);
 });
+
+test("the Recap's card draws the period shown, the projects named only when asked", async () => {
+  const { drawCard, CARD_W } = await import("../webview/util/card");
+  const { demoWeek } = await import("../src/shared/demo");
+  const texts: string[] = [];
+  const ctx = new Proxy({} as Record<string | symbol, unknown>, {
+    get: (t, k) => (k in t ? t[k] : k === "createLinearGradient" || k === "createRadialGradient" ? () => ({ addColorStop() {} })
+      : k === "measureText" ? (s: string) => ({ width: s.length * 14 }) : k === "fillText" ? (s: string) => void texts.push(s) : () => undefined),
+    set: (t, k, v) => ((t[k] = v), true),
+  });
+  const canvas = { width: 0, height: 0, getContext: () => ctx } as unknown as HTMLCanvasElement;
+  const recap = demoWeek(Date.now());
+  drawCard(canvas, recap, false);
+  assert.equal(canvas.width, CARD_W);
+  assert.ok(texts.includes("My week with Claude"));
+  assert.ok(texts.some((t) => /\d+ projects?$/.test(t)), texts.join(" | "));
+  assert.ok(!texts.some((t) => t.includes(recap.projects[0].name)));
+  texts.length = 0;
+  drawCard(canvas, recap, true);
+  assert.ok(texts.some((t) => t.includes(recap.projects[0].name)));
+});

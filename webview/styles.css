@@ -3329,3 +3329,20 @@ body.vscode-light .pane {
   justify-content: space-between;
   margin-left: calc(min(12em, 30%) + 6px);
 }
+
+/* The Recap's card to share (WeekView.tsx ShareCard) */
+.week-share {
+  margin: 8px 0;
+  padding: 10px;
+  border: 1px solid var(--vscode-widget-border, color-mix(in srgb, var(--cs-fg) 15%, transparent));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--cs-fg) 4%, transparent);
+}
+
+.week-share-card {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-bottom: 6px;
+  border-radius: 10px;
+}

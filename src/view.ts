@@ -353,6 +353,11 @@ export class ViewHost implements vscode.WebviewViewProvider, vscode.Disposable {
         );
         break;
       }
+      case "shareCard":
+        if ((m.how === "save" || m.how === "copy") && typeof m.png === "string" && m.png.length < 8_000_000
+            && typeof m.name === "string" && /^claude-(day|week|all)-[\w-]{1,20}\.png$/.test(m.name))
+          void this.actions.shareCard(m.how, m.name, m.png);
+        break;
       case "openWeekChat":
         if (typeof m.chatId === "string" && CHAT_ID.test(m.chatId) && typeof m.profileDir === "string" && PROFILE_DIR.test(m.profileDir))
           void this.actions.openWeekChat(m.chatId, m.profileDir, text(m.name) ?? m.chatId.slice(0, 8),
