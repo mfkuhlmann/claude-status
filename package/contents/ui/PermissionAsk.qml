@@ -134,9 +134,9 @@ ColumnLayout {
     DiffView {
         visible: ask.diff.length > 0
         Layout.fillWidth: true
-        lines: ask.diff.length > ask.diffLines
-               ? ask.diff.slice(0, ask.diffLines).concat([i18n("… %1 more lines", ask.diff.length - ask.diffLines)])
-               : ask.diff
+        lines: ask.diff
+        maxRows: ask.diffLines
+        path: ask.permission ? ask.permission.file || "" : ""
     }
     QuestionForm {
         id: questionForm

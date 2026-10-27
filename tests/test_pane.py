@@ -193,6 +193,45 @@ class ConversationTests(PaneFixture):
         self.assertEqual([i["key"] for i in items[1:4]], ["m1", "t1", "t2"])
         self.assertEqual(len({i["key"] for i in items}), len(items))
 
+    def test_an_edits_diff_shows_under_it(self):
+        # At the file's line numbers: from the patch the call gave back, all
+        # of a file a Write made, an edit not made yet from where its text is
+        t = self.now - 100
+        a, new, later = (str(self.folder / n) for n in ("a.py", "new.py", "later.py"))
+        write(self.folder / "later.py", "one\ntwo\nthree = 3\n")
+        done = tool_result("e1", t + 2)
+        done["toolUseResult"] = {"filePath": a, "originalFile": "x\ny\nx = 1\n", "structuredPatch": [
+            {"oldStart": 2, "oldLines": 2, "newStart": 2, "newLines": 2, "lines": [" y", "-x = 1", "+x = 2"]}]}
+        made = tool_result("w1", t + 4)
+        made["toolUseResult"] = {"type": "create", "filePath": new, "content": "z = 0\nz += 1\n", "originalFile": None}
+        self.chat(tool_use("e1", "Edit", {"file_path": a, "old_string": "x = 1", "new_string": "x = 2"}, t + 1, "m1"),
+                  done,
+                  tool_use("w1", "Write", {"file_path": new, "content": "z = 0\nz += 1\n"}, t + 3, "m2"),
+                  made,
+                  tool_use("e2", "Edit", {"file_path": later, "old_string": "three = 3", "new_string": "three = 4"}, t + 5, "m3"),
+                  tool_use("e3", "Edit", {"file_path": a, "old_string": "q", "new_string": "r"}, t + 6, "m4"),
+                  tool_result("e3", t + 7, error=True, text="String not found"))
+        edit, write_, waiting, failed = pane.conversation(self.transcript)[0]
+        self.assertEqual(edit["diff"], ["@@ -2,2 +2,2 @@", " y", "-x = 1", "+x = 2"])
+        self.assertEqual(write_["diff"], ["@@ -0,0 +1,2 @@", "+z = 0", "+z += 1"])
+        self.assertEqual(waiting["diff"], ["@@ -3 +3 @@", "-three = 3", "+three = 4"])
+        self.assertEqual(failed["diff"], [])
+
+    def test_older_edits_keep_a_glimpse_of_their_diff(self):
+        t = self.now - 100
+        a = str(self.folder / "a.py")
+        entries = []
+        for n in range(30):
+            old = "\n".join(f"old {n} {k}" for k in range(30))
+            entries.append(tool_use(f"e{n}", "Edit", {"file_path": a, "old_string": old, "new_string": old.replace("old", "new")},
+                                    t + n, f"m{n}"))
+        self.chat(*entries)
+        items = pane.conversation(self.transcript)[0]
+        self.assertEqual(len(items[-1]["diff"]), pane.EDIT_DIFF_LINES + 1)   # (the newest: all it may have, and a note)
+        self.assertEqual(items[0]["diff"][-1][:2], "… ")
+        self.assertLessEqual(len(items[0]["diff"]), pane.DIFF_GLIMPSE + 1)
+        self.assertLessEqual(sum(len(i["diff"]) for i in items), pane.DIFF_BUDGET + 2 * pane.DIFF_GLIMPSE * len(items))
+
     def test_what_came_of_each_tool_call(self):
         t = self.now - 100
         a = str(self.folder / "a.py")
@@ -767,6 +806,34 @@ class ReviewTests(PaneFixture):
         self.assertEqual(r["repos"], [str(self.folder)] if HAVE_GIT else [])
         self.assertEqual(r["message"], "change x\n\nYou changed x to 3 and added new.py.")
 
+    def test_a_file_without_backups(self):
+        # A file outside the chat's folder has no backups (Claude keeps none
+        # there, nor does git): what the chat's Edit or Write calls gave back
+        # says how it was; one that says nothing shows how it is now
+        t = self.now - 50
+        notes, plan, odd = (str(self.home / "notes" / n) for n in ("today.md", "plan.md", "odd.md"))
+        write(self.home / "notes/today.md", "# Today\nwrote this\n")
+        write(self.home / "notes/plan.md", "step 1\nstep 2 done\n")
+        write(self.home / "notes/odd.md", "a\nb\n")
+        made = tool_result("n1", t + 1)
+        made["toolUseResult"] = {"type": "create", "filePath": notes, "content": "# Today\nwrote this\n", "originalFile": None}
+        edited = tool_result("n2", t + 3)
+        edited["toolUseResult"] = {"filePath": plan, "originalFile": "step 1\nstep 2\n", "structuredPatch": []}
+        later = tool_result("n4", t + 7)
+        later["toolUseResult"] = {"filePath": plan, "originalFile": "step 1\nstep 2 wrong\n", "structuredPatch": []}
+        with open(self.transcript, "a") as f:
+            f.write(lines(tool_use("n1", "Write", {"file_path": notes, "content": "x"}, t, "n1"), made,
+                          tool_use("n2", "Edit", {"file_path": plan, "old_string": "step 2", "new_string": "step 2 done"}, t + 2, "n2"),
+                          edited,
+                          tool_use("n3", "Edit", {"file_path": odd, "old_string": "a", "new_string": "a"}, t + 4, "n3"),
+                          tool_result("n3", t + 5),
+                          tool_use("n4", "Edit", {"file_path": plan, "old_string": "x", "new_string": "y"}, t + 6, "n4"), later))
+        files = {f["label"]: f for f in self.cli("--review", SID)["files"]}
+        self.assertEqual((files["~/notes/today.md"]["created"], files["~/notes/today.md"]["diff"]),
+                         (True, ["@@ -0,0 +1,2 @@", "+# Today", "+wrote this"]))
+        self.assertEqual(files["~/notes/plan.md"]["diff"], ["@@ -1,2 +1,2 @@", " step 1", "-step 2", "+step 2 done"])
+        self.assertEqual((files["~/notes/odd.md"]["unknown"], files["~/notes/odd.md"]["now"]), (True, ["a", "b"]))
+
     def test_undo(self):
         ok, message = pane.undo(self.home, [], SID, None, {str(self.folder / "new.py")})
         self.assertEqual((ok, message), (True, "Put back 1 file as before the chat"))
@@ -944,3 +1011,54 @@ class PaneMarkdownTests(unittest.TestCase):
         text = "\n".join(line for line in MARKDOWN.read_text().splitlines() if not line.lstrip().startswith("//"))
         self.assertNotRegex(text, r"\?\.[\w(\[]|\?\?")
         self.assertNotIn("(?<", text)
+
+
+UI = Path(__file__).resolve().parent.parent / "package/contents/ui"
+
+
+@unittest.skipUnless(shutil.which("node"), "node isn't installed")
+class CodeViewTests(unittest.TestCase):
+    """codeview.mjs (shared with the VS Code extension) and codehtml.mjs (the pane's rich text)."""
+
+    def node(self, script):
+        code = (f"import * as C from {json.dumps(str(UI / 'codeview.mjs'))};\n"
+                f"import * as H from {json.dumps(str(UI / 'codehtml.mjs'))};\n" + script)
+        out = subprocess.run(["node", "--input-type=module", "-e", code], capture_output=True, text=True, timeout=60)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return json.loads(out.stdout)
+
+    def test_rows_side_by_side_and_what_changed(self):
+        r = self.node("""
+const lines = ['@@ -10,3 +10,4 @@ tick', ' a', '-let b = foo(2);', '+let b = foo(3);', '+c', ' d', '… (2 more lines)'];
+const rows = C.diffRows(lines);
+console.log(JSON.stringify({
+    rows: rows.map(r => [r.kind, r.old, r.new]),
+    split: C.splitRows(rows).map(p => [p.left && p.left.kind, p.right && p.right.kind]),
+    changed: C.changed('let b = foo(2);', 'let b = foo(3);'), unlike: C.changed('abc', 'xyz'),
+    plain: C.diffRows(['@@ @@', '-a', '+b']).map(r => r.old), made: C.diffRows(['@@ -0,0 +1,2 @@', '+a', '+b']).map(r => r.new),
+    read: C.readLines('    12\\tx = 1\\n    13\\ty'), notRead: C.readLines('Error: no such file'),
+    js: C.highlight('const x = f("a") // hi', 'js'), lang: [C.language('a/b.qml'), C.language('Makefile'), C.language('x.bin')]
+}));""")
+        self.assertEqual(r["rows"], [["hunk", None, None], ["same", 10, 10], ["del", 11, None], ["add", None, 11],
+                                     ["add", None, 12], ["same", 12, 13], ["note", None, None]])
+        self.assertEqual(r["split"], [["hunk", "hunk"], ["same", "same"], ["del", "add"], [None, "add"], ["same", "same"],
+                                      ["note", "note"]])
+        self.assertEqual((r["changed"], r["unlike"]), ([12, 13, 13], None))
+        self.assertEqual((r["plain"], r["made"]), ([None, None, None], [None, 1, 2]))
+        self.assertEqual((r["read"], r["notRead"]), ([{"no": 12, "text": "x = 1"}, {"no": 13, "text": "y"}], None))
+        self.assertEqual(r["js"], [["kw", "const"], ["", " x = "], ["fn", "f"], ["", "("], ["str", '"a"'], ["", ") "],
+                                   ["com", "// hi"]])
+        self.assertEqual(r["lang"], ["js", "sh", ""])
+
+    def test_html_escapes_everything_and_folds(self):
+        r = self.node("""
+const p = H.palette(true, '#eeeeee', '#202020', 'monospace', 10);
+const lines = ['@@ -1,2 +1,2 @@', '-<b>old</b>', '+<img src=x onerror=alert(1)>', ...Array.from({ length: 20 }, (_, i) => ' ctx ' + i)];
+console.log(JSON.stringify({ unified: H.diffHtml(lines, 'a.html', p, 0), folded: H.diffHtml(lines, 'a.html', p, 6),
+    split: H.splitHtml(lines, 'a.html', p, 0), tool: H.toolHtml({ name: 'Bash', input: '$ echo "<x>"', output: '<y>' }, '', p),
+    listing: H.listingHtml(['<z>', '… (3 more lines)'], 'a.md', p, 0) }));""")
+        for name, html in r.items():
+            for raw in ("<b>old", "<img", "<x>", "<y>", "<z>"):
+                self.assertNotIn(raw, html, name)
+        self.assertIn("… 17 more", r["folded"])
+        self.assertNotIn("ctx 10", r["folded"])

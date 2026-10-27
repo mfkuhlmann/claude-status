@@ -41,6 +41,7 @@ KCM.SimpleKCM {
     property bool cfg_newChatInVscode   // set with the Terminal | VS Code switch in the popup
     property bool cfg_focusView         // set with the filter button in the popup's header
     property int cfg_paneTextPercent    // set with A− / A+ in the chat pane
+    property bool cfg_diffSideBySide    // set with the chat pane's side-by-side button
     property string cfg_newChatModel    // these three in the popup's new-chat box
     property string cfg_newChatEffort
     property string cfg_newChatMode
@@ -84,6 +85,7 @@ KCM.SimpleKCM {
     property bool cfg_newChatInVscodeDefault
     property bool cfg_focusViewDefault
     property int cfg_paneTextPercentDefault
+    property bool cfg_diffSideBySideDefault
     property string cfg_newChatModelDefault
     property string cfg_newChatEffortDefault
     property string cfg_newChatModeDefault

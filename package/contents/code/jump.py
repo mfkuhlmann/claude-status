@@ -28,6 +28,7 @@ a new chat (used by the Claude Status widget).
     python3 -I jump.py --save-image TYPE         (save a picture, base64 on stdin, of TYPE image/png, …)
     python3 -I jump.py --screenshot              (a region of the screen you pick, saved as a picture)
     python3 -I jump.py --attach PATH             (a dropped file: a picture is copied in as one, else named as is)
+    python3 -I jump.py --pick-files [FOLDER]     (files to attach, from the desktop's file dialog: their paths)
     python3 -I jump.py --copy-image PATH         (a PNG to the clipboard: wl-copy, else xclip)
     python3 -I jump.py --agent-run AGENT_ID --chat CHAT_ID [--profile PROFILE] [--no-open]
                                                  (a subagent's whole run, as a Markdown file)
@@ -978,6 +979,30 @@ def choose_folder(title, start):
     if r.returncode != 0 or not folder:
         return None, ""
     return folder, ""
+
+
+def choose_files(title, start):
+    """Files picked in the desktop's file dialog (KDE's, else GTK's; on GNOME
+    GTK's first), opening at start: (paths, "") or (None, error); none
+    picked (cancelled): ([], "")."""
+    kde = ["kdialog", "--title", title, "--multiple", "--separate-output", "--getopenfilename", str(start)]
+    gtk = ["zenity", "--file-selection", "--multiple", "--separator=\n", "--title", title, f"--filename={start}/"]
+    args = next((a for a in ([gtk, kde] if on_gnome() else [kde, gtk]) if shutil.which(a[0])), None)
+    if args is None:
+        return None, f"No file dialog found (install {'zenity' if on_gnome() else 'kdialog'})"
+    r = subprocess.run(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    if r.returncode != 0:
+        return [], ""
+    return [p for p in r.stdout.split("\n") if p.strip() and os.path.isfile(p)], ""
+
+
+def pick_files(home, start):
+    """--pick-files: (ok, message, {"paths"}) of the files to attach to a reply."""
+    folder = start if start and os.path.isdir(start) else str(home)
+    paths, error = choose_files("Attach to your reply", folder)
+    if paths is None:
+        return False, error, {}
+    return True, "", {"paths": paths}
 
 
 # ---------------------------------------------------------------- pictures in a task
@@ -2329,6 +2354,9 @@ def main(argv=None):
             action, session_id = screenshot, "-"
         elif arg == "--attach" and args:
             action, attach_path, session_id = attach_file, args.pop(0), "-"
+        elif arg == "--pick-files":
+            action, session_id = pick_files, "-"
+            attach_path = args.pop(0) if args and not args[0].startswith("--") else ""
         elif arg == "--turn":
             turn = True
         elif arg == "--list":
@@ -2462,6 +2490,8 @@ def main(argv=None):
             ok, message, extra_out = copy_image(Path.home(), attach_path)
         elif action is attach_file:
             ok, message, extra_out = attach_file(Path.home(), attach_path)
+        elif action is pick_files:
+            ok, message, extra_out = pick_files(Path.home(), attach_path)
         elif action is show_agent_run:
             ok, message, run_file = show_agent_run(Path.home(), extra, session_id, agent_id, profile_dir, open_it)
         elif action is show_changes and listing:

@@ -3652,6 +3652,27 @@ PlasmoidItem {
         pasteFor[cmd] = { host: host || "", target: target || "task" }
         imagePaster.connectSource(cmd)
     }
+    // The pane's + : files from the desktop's file dialog, opening in the
+    // chat's folder, attached as dropped ones
+    function pickFiles(host, target, folder) {
+        const cmd = "python3 -I " + shellQuote(codeDir + "jump.py") + " --pick-files " + shellQuote(host ? "" : folder || "")
+        pickFor[cmd] = { host: host || "", target: target || "task" }
+        filePicker.connectSource(cmd)
+    }
+    property var pickFor: ({})
+    Exec {
+        id: filePicker
+        onNewData: (source, data) => {
+            disconnectSource(source)
+            const pick = root.pickFor[source] || { host: "", target: "task" }
+            delete root.pickFor[source]
+            const result = root.helperResult(data)
+            if (result.ok)
+                root.attachFiles(result.paths || [], pick.host, pick.target)
+            else if (pick.target === "pane")
+                root.paneNote(result.message || "")
+        }
+    }
     function attachFiles(paths, host, target) {
         paths.forEach((path, i) => {
             const cmd = "python3 -I " + shellQuote(codeDir + "jump.py") + " --attach " + shellQuote(path) + " # " + Date.now() + "." + i

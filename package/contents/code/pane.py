@@ -134,12 +134,58 @@ def tool_input_text(block):
 
 
 EDITS = ("Edit", "MultiEdit", "Write", "NotebookEdit")
+EDIT_DIFF_LINES = 40  # of one edit's diff, in the chat (the Review tab has whole files)
+DIFF_BUDGET = 600  # of all the edits' diffs in one answer, the newest first: older ones keep a glimpse
+DIFF_GLIMPSE = 6
 READ_LINE = re.compile(r"^\s*\d+[\t\u2192]")
 TOOL_ERROR = re.compile(r"</?tool_use_error>")
 
 
 def plural(n, word):
     return f"{n} {word}" + ("" if n == 1 else "s")
+
+
+def edit_lines(name, inp, result, current=None):
+    """The lines of a unified diff (@@ lines included) of what an Edit,
+    MultiEdit, Write or NotebookEdit call changed, as the chat shows it under
+    the call: from what the call gave back (its patch, at the file's line
+    numbers; all of a new file), else from what it was asked (numbered from
+    the change, with current: the file's text, at its line numbers; nothing
+    for a Write, which may replace a whole file)."""
+    lines = None
+    if isinstance(result, dict):
+        patch = result.get("structuredPatch")
+        if result.get("type") == "create" and isinstance(result.get("content"), str):
+            body = result["content"].splitlines()
+            lines = [f"@@ -0,0 +1,{len(body)} @@"] + ["+" + l for l in body]
+        elif isinstance(patch, list) and patch:
+            lines = []
+            for h in patch:
+                if isinstance(h, dict) and isinstance(h.get("lines"), list):
+                    lines.append(f"@@ -{h.get('oldStart', 0)},{h.get('oldLines', 0)} +{h.get('newStart', 0)},{h.get('newLines', 0)} @@")
+                    lines += [l for l in h["lines"] if isinstance(l, str)]
+    if lines is None:
+        lines = cs.edit_diff(name, inp, current, limit=None) if name != "Write" else []
+    return lines
+
+
+def capped(lines):
+    """An edit's diff lines as the chat gets them: the first EDIT_DIFF_LINES, and how many more."""
+    shown = [l[:500] for l in lines[:EDIT_DIFF_LINES]]
+    if len(lines) > EDIT_DIFF_LINES:
+        shown.append(f"… ({len(lines) - EDIT_DIFF_LINES} more lines)")
+    return shown
+
+
+def change_summary(name, diff, fallback=""):
+    """What an edit changed, in a line: from its diff's lines."""
+    added = sum(1 for d in diff if d.startswith("+") and not d.startswith("+++"))
+    removed = sum(1 for d in diff if d.startswith("-") and not d.startswith("---"))
+    if name != "Edit" and name != "MultiEdit" and not removed:
+        return plural(added, "line")
+    if added and removed:
+        return f"{plural(added, 'line')} added, {removed} removed"
+    return f"{plural(added, 'line')} added" if added else f"{plural(removed, 'line')} removed" if removed else fallback
 
 
 def tool_summary(name, inp, output, error):
@@ -154,14 +200,7 @@ def tool_summary(name, inp, output, error):
         read = sum(1 for r in rows if READ_LINE.match(r))
         return plural(read, "line") if read else first   # (an image, a PDF: no numbered lines)
     if name in EDITS:
-        diff = cs.edit_diff(name, inp, None, limit=None)
-        added = sum(1 for d in diff if d.startswith("+") and not d.startswith("+++"))
-        removed = sum(1 for d in diff if d.startswith("-") and not d.startswith("---"))
-        if name != "Edit" and name != "MultiEdit":
-            return plural(added, "line")
-        if added and removed:
-            return f"{plural(added, 'line')} added, {removed} removed"
-        return f"{plural(added, 'line')} added" if added else f"{plural(removed, 'line')} removed" if removed else first
+        return change_summary(name, cs.edit_diff(name, inp, None, limit=None), first)
     if not rows:
         return "(no output)" if name == "Bash" else ""
     return first + (f" … +{plural(len(rows) - 1, 'line')}" if len(rows) > 1 else "")
@@ -172,7 +211,7 @@ def conversation_items(lines):
     "text"} for a prompt of yours, {"kind": "claude", "text"} for Claude's
     reply (markdown), {"kind": "tool", "name", "line", "status":
     "ok"|"error"|"open", "input", "output", "summary" (what came of it, in a
-    line)} for a tool call and {"kind":
+    line), "diff" (an edit's: edit_lines)} for a tool call and {"kind":
     "note", "text"} for an interruption, a usage limit or a compaction;
     each with "at" (ms) and "key" (the same in the next answer, as long as
     the item is listed). Entries of subagents (sidechains) aren't in it."""
@@ -196,13 +235,21 @@ def conversation_items(lines):
         if kind == "user":
             if e.get("isCompactSummary") or e.get("isMeta"):
                 continue
-            for c in blocks:
-                if c.get("type") == "tool_result" and c.get("tool_use_id") in tools:
+            results = [c for c in blocks if c.get("type") == "tool_result"]
+            for c in results:
+                if c.get("tool_use_id") in tools:
                     item, inp = tools.pop(c["tool_use_id"])
                     output = result_text(c)
                     item["status"] = "error" if c.get("is_error") else "ok"
                     item["output"] = clip(output)
                     item["summary"] = tool_summary(item["name"], inp, output, bool(c.get("is_error")))
+                    if item["name"] in EDITS and c.get("is_error"):
+                        item["diff"] = []
+                    elif item["name"] in EDITS:  # (what came back is the entry's, when it has one result)
+                        full = edit_lines(item["name"], inp, e.get("toolUseResult") if len(results) == 1 else None)
+                        item["diff"] = capped(full)
+                        if full:
+                            item["summary"] = change_summary(item["name"], full, item["summary"])
             prompt = cs.human_prompt(e)
             if prompt is not None:
                 items.append({"kind": "you", "key": uid, "text": clip(prompt, TEXT_CHARS, 10 ** 6), "at": at})
@@ -228,10 +275,37 @@ def conversation_items(lines):
                     items.append({"kind": "claude", "key": mid or uid, "text": clip(c["text"].strip(), TEXT_CHARS, 10 ** 6),
                                   "at": at})
             elif c.get("type") == "tool_use" and isinstance(c.get("id"), str):
+                inp = c.get("input") if isinstance(c.get("input"), dict) else {}
                 item = {"kind": "tool", "key": c["id"], "name": c.get("name") or "tool", "line": cs.describe_tool(c),
-                        "status": "open", "input": clip(tool_input_text(c)), "output": "", "summary": "", "at": at}
-                tools[c["id"]] = (item, c.get("input") if isinstance(c.get("input"), dict) else {})
+                        "status": "open", "input": clip(tool_input_text(c)), "output": "", "summary": "", "at": at,
+                        "diff": capped(edit_lines(c.get("name"), inp, None)) if c.get("name") in EDITS else []}
+                tools[c["id"]] = (item, inp)
                 items.append(item)
+    for item, inp in tools.values():  # (an edit not made yet: at the file's line numbers)
+        path = inp.get("file_path")
+        if item["name"] == "Edit" and isinstance(path, str) and path.startswith("/"):
+            try:
+                data = read_bytes(path) if os.path.getsize(path) < (2 << 20) else None
+            except OSError:
+                data = None
+            if data is not None:
+                item["diff"] = capped(edit_lines("Edit", inp, None, data.decode("utf-8", "replace")))
+    return items
+
+
+def within_budget(items):
+    """The edits' diffs cut to DIFF_BUDGET lines in all, the newest whole:
+    an older one keeps its first DIFF_GLIMPSE lines (and says how many more)."""
+    left = DIFF_BUDGET
+    for item in reversed(items):
+        diff = item.get("diff")
+        if not diff:
+            continue
+        if len(diff) > left:
+            keep = min(len(diff), max(left, DIFF_GLIMPSE))
+            more = sum(1 for l in diff[keep:] if not l.startswith("@@"))
+            item["diff"] = diff[:keep] + ([f"… ({more} more lines)"] if more else [])
+        left = max(0, left - len(diff))
     return items
 
 
@@ -256,7 +330,7 @@ def conversation(path, limit=PANE_ITEMS):
         lines, whole = tail_lines(path, size, nbytes)
         items = conversation_items(lines)
         if whole or len(items) > limit or nbytes >= PANE_TAIL_MAX:
-            return items[-limit:], len(items) > limit or not whole
+            return within_budget(items[-limit:]), len(items) > limit or not whole
         nbytes *= 4
 
 
@@ -1062,12 +1136,49 @@ def backup_content(profiles, sessions, name):
     return None
 
 
+def tool_originals(transcripts, wanted):
+    """{file: its content before the chat's first Edit or Write of it (b""
+    for one a Write made)} for the files in wanted, from what those calls
+    gave back (toolUseResult: type "create", else originalFile), oldest
+    first. A first call that gave neither leaves the file out."""
+    found, seen = {}, set()
+    for t in transcripts:
+        try:
+            f = open(t, "rb")
+        except OSError:
+            continue
+        with f:
+            for line in f:
+                if b'"toolUseResult"' not in line or b'"filePath"' not in line:
+                    continue
+                try:
+                    e = json.loads(line)
+                except ValueError:
+                    continue
+                r = e.get("toolUseResult") if isinstance(e, dict) else None
+                if not isinstance(r, dict) or not isinstance(r.get("filePath"), str) or not r["filePath"].startswith("/"):
+                    continue
+                full = os.path.normpath(r["filePath"])
+                if full not in wanted or full in seen:
+                    continue
+                seen.add(full)
+                if r.get("type") == "create":
+                    found[full] = b""
+                elif isinstance(r.get("originalFile"), str):
+                    found[full] = r["originalFile"].encode("utf-8")
+    return found
+
+
 def originals(profiles, path, cwd):
     """[(file, its content before the chat (b"" if it didn't exist; None if
     unknown), created)] of each file the chat changed (outside Claude's own
-    folders), from Claude's backups, else git's last commit."""
+    folders), from Claude's backups, else what its Edit or Write calls gave
+    back (a file outside the chat's folder has no backups), else git's last
+    commit."""
     rec = cs.chat_edits(path)
     skip = cs.own_folders(profiles)
+    unbacked = {cs.absolute_path(key, cwd) for key, first in rec["files"].items() if first[0] is False}
+    told = tool_originals([path, *cs.subagent_transcripts(path)], unbacked) if unbacked else {}
     out = {}
     for key, first in rec["files"].items():
         full = cs.absolute_path(key, cwd)
@@ -1076,8 +1187,8 @@ def originals(profiles, path, cwd):
         backup = first[0]
         if backup is None:
             original = b""  # it didn't exist yet
-        elif backup is False:
-            original = git_original(full)  # no backup on record: git's last commit
+        elif backup is False:  # no backup on record: what its first call gave back, else git's last commit
+            original = told[full] if full in told else git_original(full)
         else:
             original = backup_content(profiles, rec["sessions"], backup)
             if original is None:  # Claude removed the backup since
@@ -1088,6 +1199,21 @@ def originals(profiles, path, cwd):
 
 def is_text(data):
     return data is not None and b"\0" not in data[:8192]
+
+
+def text_lines(data):
+    """A text file's first lines (as many as a diff shows), [] for a binary one."""
+    if not is_text(data):
+        return []
+    lines = data.decode("utf-8", "replace").splitlines()
+    shown, size = [], 0
+    for l in lines:
+        if len(shown) >= cs.DIFF_LINES or size > cs.DIFF_CHARS:
+            shown.append(f"… ({len(lines) - len(shown)} more lines)")
+            break
+        shown.append(l[:500])
+        size += len(shown[-1])
+    return shown
 
 
 def file_diff(original, current, label):
@@ -1121,7 +1247,8 @@ def commit_message(name, recap, reply):
 
 def chat_review(home, extra_dirs, chat_id, profile_key=None, reviewed_at=None):
     """{"ok", "files": [{"label", "path", "added", "removed", "diff",
-    "created", "deleted", "binary", "unknown"}], "tests", "editedAt",
+    "created", "deleted", "binary", "unknown", "now" (with no earlier
+    version kept: its first lines as they are now)}], "tests", "editedAt",
     "message" (a commit message), "repos" (git roots of the files), "cwd",
     "name"} of what a chat changed, against the files before the chat."""
     if not cs.valid_id(chat_id):
@@ -1143,6 +1270,8 @@ def chat_review(home, extra_dirs, chat_id, profile_key=None, reviewed_at=None):
         if original is not None:
             added, removed, diff = file_diff(original, current, label)
             item.update(added=added, removed=removed, diff=diff, binary=added is None)
+        elif current is not None:  # (no earlier version: how it is now)
+            item.update(now=text_lines(current), binary=not is_text(current))
         files.append(item)
         root = git_root(os.path.dirname(full) if os.path.isdir(os.path.dirname(full)) else cwd)
         if root:

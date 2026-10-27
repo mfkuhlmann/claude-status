@@ -7,6 +7,7 @@ import org.kde.plasma.core as PlasmaCore
 import org.kde.kirigami as Kirigami
 import "hub"
 import "markdown.mjs" as Md
+import "codehtml.mjs" as Code
 
 // A chat beside the popup (main.qml: openPane): its conversation, updating
 // while it works, drawn the way Claude's terminal draws it (a dot before each
@@ -82,6 +83,8 @@ Window {
         blockBg: hex(dark ? Qt.tint(surface.Kirigami.Theme.backgroundColor, Qt.rgba(0, 0, 0, 0.28)) : mix(textColor, 0.04)),
         border: hex(borderColor), link: hex(surface.Kirigami.Theme.linkColor)
     })
+    // Code and changes (codehtml.mjs): a tool call's details
+    readonly property var codeStyle: Code.palette(dark, hex(textColor), mdStyle.blockBg, monoFamily, pt)
 
     FontMetrics {
         id: fm
@@ -317,11 +320,12 @@ Window {
             const it = list[i]
             const flat = { kind: it.kind, key: String(it.key), text: it.text || "", line: it.line || "",
                            name: it.name || "", status: it.status || "", input: it.input || "", output: it.output || "",
-                           summary: it.summary || "", at: it.at || 0, bad: !!it.error, prev: i > 0 ? list[i - 1].kind : "" }
+                           summary: it.summary || "", at: it.at || 0, bad: !!it.error, prev: i > 0 ? list[i - 1].kind : "",
+                           diff: (it.diff || []).join("\n") }
             if (i < items.count && items.get(i).key === flat.key) {
                 const old = items.get(i)
                 if (old.text !== flat.text || old.status !== flat.status || old.output !== flat.output
-                        || old.input !== flat.input || old.summary !== flat.summary || old.prev !== flat.prev)
+                        || old.input !== flat.input || old.summary !== flat.summary || old.prev !== flat.prev || old.diff !== flat.diff)
                     items.set(i, flat)
             } else if (i < items.count) {
                 items.insert(i, flat)
@@ -1041,6 +1045,7 @@ Window {
                         required property string summary
                         required property string prev
                         required property bool bad
+                        required property string diff
                         readonly property bool unfolded: pane.openTools[key] === true
                         // more room before your prompt (a new turn) than between steps
                         readonly property real gap: index === 0 ? 0
@@ -1157,6 +1162,7 @@ Window {
                                 spacing: Kirigami.Units.smallSpacing
                                 readonly property bool asking: !!pane.permission && entry.status === "open" && entry.index === items.count - 1
                                 readonly property bool going: entry.status === "open" && pane.busy
+                                readonly property string args: entry.line.indexOf(entry.name + ": ") === 0 ? entry.line.slice(entry.name.length + 2) : ""
 
                                 Rectangle {
                                     Layout.fillWidth: true
@@ -1184,13 +1190,13 @@ Window {
                                             Layout.fillWidth: true
                                             spacing: 0
 
+                                            // Bash  git status: the tool, then what it got, set apart in code's font
                                             PlasmaComponents3.Label {
                                                 Layout.fillWidth: true
-                                                readonly property string args: entry.line.indexOf(entry.name + ": ") === 0 ? entry.line.slice(entry.name.length + 2) : ""
                                                 textFormat: Text.StyledText
-                                                text: args ? "<b>" + Md.escape(entry.name) + "</b>" + "<font color=\"" + pane.hex(pane.mutedColor) + "\">(</font>"
-                                                             + Md.escape(args) + "<font color=\"" + pane.hex(pane.mutedColor) + "\">)</font>"
-                                                           : "<b>" + Md.escape(entry.line) + "</b>"
+                                                text: toolBox.args ? "<b>" + Md.escape(entry.name) + "</b>&nbsp;&nbsp;<font face=\"" + pane.monoFamily
+                                                                     + "\" color=\"" + pane.hex(pane.codeColor) + "\">" + Md.escape(toolBox.args) + "</font>"
+                                                                   : "<b>" + Md.escape(entry.line) + "</b>"
                                                 wrapMode: Text.Wrap
                                                 maximumLineCount: entry.unfolded ? 20 : 2
                                                 elide: Text.ElideRight
@@ -1208,6 +1214,23 @@ Window {
                                                 color: entry.status === "error" ? Kirigami.Theme.negativeTextColor
                                                      : toolBox.asking ? Kirigami.Theme.neutralTextColor : pane.mutedColor
                                             }
+                                            // An edit's change, right under it (its first lines; unfolded, all
+                                            // of it). Made only for an edit: the pane opens as quickly as before
+                                            Loader {
+                                                active: entry.diff !== ""
+                                                visible: active
+                                                Layout.fillWidth: true
+                                                Layout.topMargin: active ? Kirigami.Units.smallSpacing : 0
+                                                sourceComponent: DiffView {
+                                                    lines: entry.diff.split("\n")
+                                                    path: toolBox.args
+                                                    maxRows: entry.unfolded ? 0 : 6
+                                                    canSplit: entry.unfolded
+                                                    pt: pane.pt
+                                                    mono: pane.monoFamily
+                                                    base: pane.mdStyle.blockBg
+                                                }
+                                            }
                                         }
                                     }
                                     HoverHandler {
@@ -1222,30 +1245,36 @@ Window {
                                         }
                                     }
                                 }
-                                Rectangle {
-                                    visible: entry.unfolded && (entry.input !== "" || entry.output !== "")
+                                // Unfolded: the command and what it printed, the lines it read
+                                // (numbered, in the file's colors), or what it was asked and got
+                                // (codehtml.mjs; an edit's change is above, its error here)
+                                Loader {
+                                    active: entry.unfolded && (entry.input !== "" || entry.output !== "")
+                                            && (entry.diff === "" || entry.status === "error")
+                                    visible: active
                                     Layout.fillWidth: true
                                     Layout.leftMargin: pane.gutter
-                                    implicitHeight: detail.implicitHeight + Kirigami.Units.largeSpacing * 1.5
-                                    radius: Kirigami.Units.cornerRadius
-                                    color: pane.mdStyle.blockBg
-                                    border.width: 1
-                                    border.color: pane.borderColor
+                                    sourceComponent: Rectangle {
+                                        implicitHeight: detail.implicitHeight + Kirigami.Units.largeSpacing * 1.5
+                                        radius: Kirigami.Units.cornerRadius
+                                        color: pane.mdStyle.blockBg
+                                        border.width: 1
+                                        border.color: pane.borderColor
 
-                                    TextEdit {
-                                        id: detail
-                                        anchors.fill: parent
-                                        anchors.margins: Kirigami.Units.largeSpacing * 0.75
-                                        text: entry.input + (entry.input && entry.output ? "\n──\n" : "") + entry.output
-                                        textFormat: TextEdit.PlainText
-                                        readOnly: true
-                                        selectByMouse: true
-                                        wrapMode: TextEdit.Wrap
-                                        color: Kirigami.Theme.textColor
-                                        selectionColor: Kirigami.Theme.focusColor
-                                        selectedTextColor: Kirigami.Theme.highlightedTextColor
-                                        font.family: pane.monoFamily
-                                        font.pointSize: pane.pt * 0.88
+                                        TextEdit {
+                                            id: detail
+                                            anchors.fill: parent
+                                            anchors.margins: Kirigami.Units.largeSpacing * 0.75
+                                            text: Code.toolHtml({ name: entry.name, input: entry.input, output: entry.output, status: entry.status },
+                                                                toolBox.args, pane.codeStyle)
+                                            textFormat: TextEdit.RichText
+                                            readOnly: true
+                                            selectByMouse: true
+                                            wrapMode: TextEdit.Wrap
+                                            color: Kirigami.Theme.textColor
+                                            selectionColor: Kirigami.Theme.focusColor
+                                            selectedTextColor: Kirigami.Theme.highlightedTextColor
+                                        }
                                     }
                                 }
                             }
@@ -1582,6 +1611,20 @@ Window {
                         onClicked: pane.cancelDictation()
                     }
                     PlasmaComponents3.ToolButton {
+                        icon.name: "list-add"
+                        text: i18n("Attach files…")
+                        display: PlasmaComponents3.AbstractButton.IconOnly
+                        onClicked: root.pickFiles(pane.host, "pane", pane.row ? pane.row.cwd || "" : pane.chat.cwd || "")
+
+                        PlasmaCore.ToolTipArea {
+                            textFormat: Text.PlainText
+                            anchors.fill: parent
+                            mainText: i18n("Attach files…")
+                            subText: pane.host ? i18n("Pick pictures for your reply (copied to %1 once you say so).", pane.host)
+                                               : i18n("Pick files for your reply: a picture goes in as one, another file is named for Claude to read. You can drop them on the pane too.")
+                        }
+                    }
+                    PlasmaComponents3.ToolButton {
                         icon.name: "spectacle"
                         text: i18n("Screenshot…")
                         display: PlasmaComponents3.AbstractButton.IconOnly
@@ -1699,6 +1742,21 @@ Window {
                         TestsBadge {
                             review: pane.row ? pane.row.review : (pane.review ? { tests: pane.review.tests } : null)
                         }
+                        PlasmaComponents3.ToolButton {
+                            icon.name: "view-split-left-right"
+                            checkable: true
+                            checked: Plasmoid.configuration.diffSideBySide
+                            display: PlasmaComponents3.AbstractButton.IconOnly
+                            text: i18n("Side by side")
+                            onToggled: Plasmoid.configuration.diffSideBySide = checked
+
+                            PlasmaCore.ToolTipArea {
+                                textFormat: Text.PlainText
+                                anchors.fill: parent
+                                mainText: i18n("Side by side")
+                                subText: i18n("Each change as before | after, where the pane is wide enough; else removed and added lines one after the other.")
+                            }
+                        }
                     }
                     Repeater {
                         model: pane.review ? pane.review.files.length : 0
@@ -1754,7 +1812,7 @@ Window {
                                 PlasmaComponents3.Label {
                                     textFormat: Text.PlainText
                                     visible: !!fileItem.file.binary || !!fileItem.file.unknown
-                                    text: fileItem.file.unknown ? i18n("no earlier version kept") : i18n("binary")
+                                    text: fileItem.file.binary ? i18n("binary") : i18n("no earlier version kept")
                                     opacity: 0.6
                                     font: Kirigami.Theme.smallFont
                                 }
@@ -1782,11 +1840,29 @@ Window {
                                 onConfirmed: pane.undo(fileItem.file.path)
                                 onCancelled: pane.undoAsk = ""
                             }
-                            DiffView {
-                                visible: fileItem.unfolded
+                            PlasmaComponents3.Label {
+                                visible: fileItem.unfolded && !!fileItem.file.unknown && !!fileItem.file.now && fileItem.file.now.length > 0
                                 Layout.fillWidth: true
                                 Layout.leftMargin: Kirigami.Units.gridUnit
-                                lines: fileItem.unfolded ? fileItem.file.diff || [] : []
+                                textFormat: Text.PlainText
+                                text: i18n("No earlier version was kept, so this is how it is now:")
+                                font: Kirigami.Theme.smallFont
+                                opacity: 0.7
+                                wrapMode: Text.Wrap
+                            }
+                            Loader {
+                                active: fileItem.unfolded && ((fileItem.file.diff || []).length > 0 || (fileItem.file.now || []).length > 0)
+                                visible: active
+                                Layout.fillWidth: true
+                                Layout.leftMargin: Kirigami.Units.gridUnit
+                                sourceComponent: DiffView {
+                                    lines: fileItem.file.diff || []
+                                    now: fileItem.file.unknown ? fileItem.file.now || [] : []
+                                    path: fileItem.file.path
+                                    pt: pane.pt
+                                    mono: pane.monoFamily
+                                    base: pane.mdStyle.blockBg
+                                }
                             }
                         }
                     }
