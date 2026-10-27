@@ -12,6 +12,14 @@
   recognizes what the old extension added (its snippet, its status-line
   wrapper) and brings it up to date. In the view the app's name is the first
   tab (your chats), where the title *Claude Code* and a *Chats* tab were.
+- **Enter on a chat in a terminal copies your reply:** for a chat whose
+  terminal takes no text from outside, the first Enter in the chat tab
+  changed nothing you could see (it only got ready to ask), and the next
+  one, or an Enter on a reply from a notification, made Claude in that
+  terminal quit and the chat go on in the background. Enter now puts your
+  reply on the clipboard and opens the chat's terminal, to paste it there;
+  Claude there never quits on an Enter. **Send, go on in the background**
+  still moves it to the background.
 - **Replies you send while Claude works show in a chat's tab:** a message
   sent in the middle of a turn never showed there (only prompts that started
   a turn did). It now shows the moment you send it, where you sent it, and

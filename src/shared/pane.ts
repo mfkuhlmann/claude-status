@@ -111,7 +111,7 @@ export type PaneHostMessage =
 export type PaneMessage =
   | { type: "ready" }
   | { type: "more" } // older items too
-  | { type: "send"; text: string; how: "auto" | "background" | "copy"; afterTurn: boolean }
+  | { type: "send"; text: string; how: "auto" | "background" | "copy" | "enter"; afterTurn: boolean }
   | { type: "unqueue" } // the reply waiting for the turn to end
   | { type: "answer"; decision: Decision; note: string; answers?: Answers }
   | { type: "review" }

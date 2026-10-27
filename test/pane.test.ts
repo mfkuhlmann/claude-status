@@ -102,6 +102,15 @@ test("a reply goes to pane.py --send; copy goes to the clipboard and opens the c
   assert.equal((await p.send(chatRefOf(row), "   ", "auto", false)).ok, false);
   const ask = panes(state, { how: "ask" });
   assert.equal((await ask.p.send(chatRefOf(row), "hi", "auto", false)).ask, true);
+  // Enter: a terminal that takes no text gets the copy (Claude there doesn't quit), asked of pane.py as auto
+  const entered = await ask.p.send(chatRefOf(row), " and the tests ", "enter", false);
+  assert.deepEqual(entered, { ok: true, message: "Its terminal takes no text from outside, so your message is in the clipboard: paste it there" });
+  assert.deepEqual(ask.calls[1].slice(0, 6), ["--send", row.chatId, "--text", "and the tests", "--how", "auto"]);
+  assert.equal(clipboardWrites.at(-1), "and the tests");
+  assert.equal(ask.opened.length, 1);
+  const typed = panes(state, { how: "typed", message: "Sent" });
+  assert.deepEqual(await typed.p.send(chatRefOf(row), "hi", "enter", false), { ok: true, message: "Sent" });
+  assert.equal(typed.opened.length, 0);
 });
 
 test("a click on a chat opens its tab, unless clicks open the chat itself; answers use the extension's chat", () => {

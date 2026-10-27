@@ -96,19 +96,22 @@ export class ChatPanes implements vscode.Disposable {
   }
 
   // Your message to a chat: typed into this window's terminal it runs in, or
-  // as pane.py --send does (tmux, its Claude Code tab's input, the background)
-  async send(chat: ChatRef, text: string, how: "auto" | "background" | "copy", afterTurn: boolean): Promise<{ ok: boolean; message: string; ask?: boolean }> {
+  // as pane.py --send does (tmux, its Claude Code tab's input, the background).
+  // how "enter" (Enter in the tab): auto, but a terminal that takes no text
+  // gets the copy, so Claude there never quits on an Enter
+  async send(chat: ChatRef, text: string, how: "auto" | "background" | "copy" | "enter", afterTurn: boolean): Promise<{ ok: boolean; message: string; ask?: boolean }> {
     text = text.trim();
     if (!text) return { ok: false, message: "Write your message first" };
     if (text.length > TEXT_MAX) return { ok: false, message: "That message is too long" };
     const host = chat.host ?? "";
     const chatId = chat.chatId || chat.sessionId;
     const { session } = findPaneRow(this.dash.state(), host, chatId);
-    if (!afterTurn && how === "copy") {
+    const copy = async (said: string) => {
       await vscode.env.clipboard.writeText(text);
       if (session) await this.actions.open(chatRefOf(session, host || undefined));
-      return { ok: true, message: "Your message is in the clipboard: paste it into the chat" };
-    }
+      return { ok: true, message: said };
+    };
+    if (!afterTurn && how === "copy") return copy("Your message is in the clipboard: paste it into the chat");
     // in one of this window's terminals: typed in, as a paste, then Enter
     const terminal = !afterTurn ? await this.windowTerminal(session, host) : undefined;
     if (terminal && session) {
@@ -120,10 +123,13 @@ export class ChatPanes implements vscode.Disposable {
       return { ok: true, message: "Sent (typed into its terminal)" };
     }
     const sid = session?.sessionId ?? chat.sessionId;
-    const args = ["--send", chatId, "--text", text, "--how", how, ...(sid ? ["--session", sid] : []),
+    // (enter goes as auto: the copy is VS Code's clipboard, also in a remote window)
+    const args = ["--send", chatId, "--text", text, "--how", how === "enter" ? "auto" : how, ...(sid ? ["--session", sid] : []),
                   ...(chat.profileDir ? ["--profile", chat.profileDir] : []), ...(afterTurn ? ["--after-turn", "--name", chat.name || ""] : []),
                   ...(host ? ["--host", host] : configDirArgs())];
     const r = await this.backend.pane(args, 180000);
+    if (r.ok && r.how === "ask" && how === "enter")
+      return copy("Its terminal takes no text from outside, so your message is in the clipboard: paste it there");
     if (r.ok && r.how === "ask") return { ok: true, message: String(r.message ?? ""), ask: true };
     if (r.ok && r.how === "vscode" && typeof r.link === "string" && r.link.startsWith("vscode://anthropic.claude-code/open?"))
       await vscode.env.openExternal(vscode.Uri.parse(r.link));
@@ -339,7 +345,7 @@ class Pane implements vscode.Disposable {
         await this.load();
         break;
       case "send": {
-        if (typeof m.text !== "string" || !["auto", "background", "copy"].includes(m.how)) break;
+        if (typeof m.text !== "string" || !["auto", "background", "copy", "enter"].includes(m.how)) break;
         const r = await this.owner.send(this.chat, m.text, m.how, m.afterTurn === true);
         this.result(m.afterTurn ? "later" : "send", r);
         this.stamp = "";
