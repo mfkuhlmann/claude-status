@@ -193,6 +193,59 @@ class ConversationTests(PaneFixture):
         self.assertEqual([i["key"] for i in items[1:4]], ["m1", "t1", "t2"])
         self.assertEqual(len({i["key"] for i in items}), len(items))
 
+    def test_a_message_sent_while_claude_works_shows_when_it_is_sent(self):
+        # Claude Code writes it when it's sent (enqueue), and again once the
+        # turn takes it in (an attachment), after the next tool result
+        t = self.now - 100
+
+        def queue(op, text, ts, **kw):
+            return {"type": "queue-operation", "operation": op, "timestamp": iso(ts), "content": text, **kw}
+
+        def taken(text, ts, source, **kw):
+            return {"type": "attachment", "uuid": f"a{ts}", "timestamp": iso(ts), "attachment": {
+                "type": "queued_command", "prompt": text, "source_uuid": source, "commandMode": "prompt",
+                "origin": {"kind": "human"}, **kw}}
+
+        self.chat(prompt("go", t, cwd=str(self.folder)),
+                  tool_use("t1", "Bash", {"command": "sleep 60"}, t + 1, "m1"),
+                  queue("enqueue", "also this", t + 2))
+        self.assertEqual([(i["kind"], i["text"]) for i in pane.conversation(self.transcript)[0] if i["kind"] == "you"],
+                         [("you", "go"), ("you", "also this")])
+        # taken in: still one, where it was sent
+        self.chat(prompt("go", t, cwd=str(self.folder)),
+                  tool_use("t1", "Bash", {"command": "sleep 60"}, t + 1, "m1"),
+                  queue("enqueue", "also this", t + 2),
+                  tool_result("t1", t + 9),
+                  queue("remove", "also this", t + 9, reason="absorbed_mid_turn", commandUuid="c1"),
+                  taken("also this", t + 2, "c1"))
+        items = pane.conversation(self.transcript)[0]
+        self.assertEqual([(i["kind"], i.get("text")) for i in items if i["kind"] == "you"],
+                         [("you", "go"), ("you", "also this")])
+        self.assertEqual([i["kind"] for i in items], ["you", "tool", "you"])   # (before its tool's result came back)
+        # one whose enqueue isn't in the transcript shows when it's taken in, if it's yours
+        self.chat(taken("never seen", t + 3, "c2"),
+                  taken("a subagent's report", t + 4, "c3", origin={"kind": "peer", "from": "x"}),
+                  taken("<task-notification>done</task-notification>", t + 5, "c4", commandMode="task-notification"),
+                  taken([{"type": "text", "text": "with a picture"}, {"type": "image"}], t + 6, "c5"))
+        self.assertEqual([i["text"] for i in pane.conversation(self.transcript)[0]], ["never seen", "with a picture"])
+
+    def test_a_queued_message_taken_back_or_run_as_a_turn_shows_once(self):
+        t = self.now - 100
+        queued = {"type": "queue-operation", "operation": "enqueue", "timestamp": iso(t + 1), "content": "first"}
+        # taken back into the input box
+        self.chat(queued, {**queued, "operation": "popAll", "timestamp": iso(t + 2)})
+        self.assertEqual(pane.conversation(self.transcript)[0], [])
+        # run as the chat's next turn (dequeue, then its prompt)
+        self.chat(queued, text_reply("done", t + 2, "m1", "end_turn"),
+                  {**queued, "operation": "dequeue", "timestamp": iso(t + 3), "content": None},
+                  prompt("first", t + 3, cwd=str(self.folder)))
+        items = pane.conversation(self.transcript)[0]
+        self.assertEqual([(i["kind"], i["text"]) for i in items], [("you", "first"), ("claude", "done")])
+        # (put together with others: its own text, not twice)
+        self.chat(queued, {**queued, "operation": "dequeue", "timestamp": iso(t + 3), "content": None},
+                  prompt("first\nsecond", t + 3, cwd=str(self.folder)))
+        self.assertEqual([i["text"] for i in pane.conversation(self.transcript)[0]], ["first\nsecond"])
+
     def test_an_edits_diff_shows_under_it(self):
         # At the file's line numbers: from the patch the call gave back, all
         # of a file a Write made, an edit not made yet from where its text is
