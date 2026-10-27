@@ -154,7 +154,8 @@ def chosen():
 def choose(name):
     data_dir().mkdir(parents=True, exist_ok=True)
     if name is None:
-        (data_dir() / "settings.json").unlink(missing_ok=True)
+        with contextlib.suppress(FileNotFoundError):  # (unlink(missing_ok=True) needs Python 3.8)
+            (data_dir() / "settings.json").unlink()
     else:
         (data_dir() / "settings.json").write_text(json.dumps({"model": name}) + "\n")
 
@@ -459,7 +460,8 @@ def delete_model(name):
         if eng == "faster-whisper":
             shutil.rmtree(path, ignore_errors=True)
         else:
-            Path(path).unlink(missing_ok=True)
+            with contextlib.suppress(FileNotFoundError):
+                Path(path).unlink()
         if chosen() == name:
             choose(None)
     return {"ok": True, "message": f"The {name} model is deleted"}
