@@ -81,6 +81,12 @@ export interface PaneChat {
   jobId?: string; // a running background session: its screen is in the Output tab (pane.py --logs)
 }
 
+// A background session's screen in color (pane.py screen_view): each row's
+// runs of [text, index in styles]; a style's fg / bg ("#rrggbb", null: the
+// terminal's), bold, dim, italic, underline, inverse
+export type TermRun = [string, number];
+export interface TermStyle { fg: string | null; bg: string | null; b: boolean; d: boolean; i: boolean; u: boolean; inv: boolean }
+
 // extension -> tab
 export type PaneHostMessage =
   | { type: "chat"; chat: PaneChat }
@@ -95,7 +101,7 @@ export type PaneHostMessage =
   | { type: "offers"; offers: Offers } // what the reply box offers as you type (pane.py --complete)
   // dictating: "recording", "writing", "model" (downloading one), "" (done: text written down, or
   // why not); offerModel: whisper.cpp is there but no speech model (the tab asks before one comes)
-  | { type: "output"; lines: string[]; error: string } // a background session's screen (pane.py --logs)
+  | { type: "output"; lines: string[]; runs?: TermRun[][]; styles?: TermStyle[]; error: string } // a background session's screen (pane.py --logs)
   | { type: "dictation"; state: "" | "recording" | "writing" | "model"; text?: string; message?: string; offerModel?: boolean };
 
 // tab -> extension

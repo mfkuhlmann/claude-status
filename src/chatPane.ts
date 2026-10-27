@@ -16,7 +16,7 @@ import { openComparison } from "./changes";
 import { configDirArgs } from "./config";
 import type { Dashboard } from "./dashboard";
 import { chatRefOf, doingText, liveOf, recentRef, stateText } from "./shared/model";
-import { answersOf, PICTURE_TYPES, queuedReply, reviewPending, textScale, type PaneChat, type PaneHostMessage, type PaneMessage } from "./shared/pane";
+import { answersOf, PICTURE_TYPES, queuedReply, reviewPending, textScale, type PaneChat, type PaneHostMessage, type PaneMessage, type TermRun, type TermStyle } from "./shared/pane";
 import type { Answers, ChatRef, Decision, RecentChat, Session, ViewState } from "./shared/types";
 import { isDecision } from "./shared/types";
 import { localAncestors, type Terminals } from "./terminals";
@@ -435,6 +435,8 @@ class Pane implements vscode.Disposable {
         const r = await backend.pane(["--logs", job, ...(this.chat.profileDir ? ["--profile", this.chat.profileDir] : []),
           ...(this.host ? ["--host", this.host] : configDirArgs())], this.host ? 60000 : 20000);
         this.post({ type: "output", lines: r.ok && Array.isArray(r.lines) ? r.lines.map(String) : [],
+                    runs: r.ok && Array.isArray(r.runs) ? (r.runs as TermRun[][]) : undefined,
+                    styles: r.ok && Array.isArray(r.styles) ? (r.styles as TermStyle[]) : undefined,
                     error: r.ok ? "" : String(r.message ?? "Its output can't be read now") });
         break;
       }

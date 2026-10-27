@@ -6,9 +6,9 @@
 
 import { render } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { droppedPaths, fileMention, picturesIn, PICTURE_TYPES, routeHint, suggestFor, type Offers, type Suggestion, testsText, TEXT_SCALES, withoutPicture, type Conversation, type PaneChat, type PaneHostMessage, type PaneItem, type PaneMessage, type ReviewAnswer } from "../src/shared/pane";
+import { droppedPaths, fileMention, picturesIn, PICTURE_TYPES, routeHint, suggestFor, type Offers, type Suggestion, testsText, TEXT_SCALES, withoutPicture, type Conversation, type PaneChat, type PaneHostMessage, type PaneItem, type PaneMessage, type ReviewAnswer, type TermRun, type TermStyle } from "../src/shared/pane";
 import { AskBox } from "./components/AskBox";
-import { Diff, Listing, ToolDetail } from "./components/CodeView";
+import { Diff, Listing, TermScreen, ToolDetail } from "./components/CodeView";
 import type { Answers, Decision } from "../src/shared/types";
 import { Tag } from "./components/Tag";
 import { Markdown } from "./util/markdown";
@@ -90,7 +90,14 @@ function ChatApp() {
   const [loadError, setLoadError] = useState("");
   const [tab, setTab] = useState<"chat" | "review" | "output">(config.tab);
   // A background session's screen (the Output tab), read again every 2 s while it shows
-  const [output, setOutput] = useState<{ lines: string[]; error: string } | null>(null);
+  const [output, setOutput] = useState<{ lines: string[]; runs?: TermRun[][]; styles?: TermStyle[]; error: string } | null>(null);
+  // (it stays at the end as the screen changes, unless you scrolled up)
+  const term = useRef<HTMLDivElement | null>(null);
+  const termAtEnd = useRef(true);
+  useLayoutEffect(() => {
+    const el = term.current;
+    if (el && termAtEnd.current) el.scrollTop = el.scrollHeight;
+  }, [output, tab]);
   useEffect(() => {
     if (tab !== "output" || !chat?.jobId) return undefined;
     post({ type: "logs" });
@@ -289,7 +296,9 @@ function ChatApp() {
         }
       }
       else if (m.type === "offers") setOffers(m.offers);
-      else if (m.type === "output") setOutput({ lines: m.lines, error: m.error });
+      else if (m.type === "output")   // (drawn again only when the screen changed)
+        setOutput((was) => (was && !was.error && !m.error && was.lines.join("\n") === m.lines.join("\n") ? was
+          : { lines: m.lines, runs: m.runs, styles: m.styles, error: m.error }));
       else if (m.type === "dictation") {
         setDictating(m.state);
         if (m.state === "recording") setRecordedAt(Date.now());
@@ -459,9 +468,21 @@ function ChatApp() {
       {info ? <div class={info.ok ? "pane-info" : "pane-info bad"}>{info.message}</div> : null}
 
       {tab === "output" ? (
-        <pre class="pane-output" title="Its terminal as Claude draws it now (claude logs)">
-          {output?.error || (output ? output.lines.join("\n") : "Reading its screen…")}
-        </pre>
+        <div class="term-pane">
+          <div class="term-head">
+            <span class={`term-dot${output?.error ? " off" : ""}`} aria-hidden="true" />
+            <span class="term-note">{output?.error || "Its terminal right now, as Claude draws it in the background"}</span>
+            <button type="button" class="btn secondary small" title="To the end of its screen"
+              onClick={() => { termAtEnd.current = true; if (term.current) term.current.scrollTop = term.current.scrollHeight; }}>
+              ⤓
+            </button>
+          </div>
+          <div class="term-card" ref={term} title="Its terminal as Claude draws it now (claude logs)"
+            onScroll={(e) => { const el = e.currentTarget; termAtEnd.current = el.scrollTop >= el.scrollHeight - el.clientHeight - 24; }}>
+            {output && !output.error ? <TermScreen lines={output.lines} runs={output.runs} styles={output.styles} />
+              : <div class="term-wait">{output?.error ? "" : "Reading its screen…"}</div>}
+          </div>
+        </div>
       ) : tab === "chat" ? (
         <>
           <div

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **The Output tab looks like the terminal:** a background session's screen
+  shows in Claude's own colors on a terminal's dark ground (tool calls,
+  diffs, the spinner, the prompt box, your status line), stays at the end as
+  it changes unless you scrolled up (⤓ takes you back), and is drawn again
+  only when the screen changed.
 - **Pets move in even steps:** each picture of a pet's move shows for the same
   number of frames (counted, not timed), so a frame that comes a little early
   or late no longer makes one picture show for a frame and the next for three.

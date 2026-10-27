@@ -3393,15 +3393,64 @@ body.vscode-light .pane {
 }
 
 /* A background session's screen (the Output tab) */
-.pane-output {
+/* The Output tab: a background session's terminal, in its colors on a dark
+   ground (CodeView.tsx TermScreen) */
+.term-pane {
   flex: 1;
-  margin: 0;
-  padding: 8px 12px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.term-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--cs-muted);
+  font-size: 0.85em;
+}
+
+.term-note {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.term-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--cs-idle);
+}
+
+.term-dot.off {
+  background: var(--cs-muted);
+}
+
+.term-card {
+  flex: 1;
+  min-height: 0;
   overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  background: #1f2124;
+  color: #e3e3e3;
   font-family: var(--vscode-editor-font-family, monospace);
-  font-size: calc(var(--vscode-editor-font-size, 13px) * 0.95);
+  font-size: calc(var(--vscode-editor-font-size, 13px) * 0.92);
   line-height: 1.35;
+}
+
+.term-row {
+  min-height: 1.35em;
   white-space: pre;
+}
+
+.term-wait {
+  color: #9a9a9a;
 }
 
 /* The Day view, chat by chat (WeekView.tsx Lanes) */

@@ -2,6 +2,7 @@
 // chat, its conversation, and its review when the page asks for it.
 
 import "../webview/chat";
+import demoScreen from "./demoScreen.json";
 import type { PaneChat, PaneHostMessage, PaneItem, ReviewAnswer } from "../src/shared/pane";
 
 const params = new URLSearchParams(location.search);
@@ -53,6 +54,7 @@ const chat: PaneChat = {
   reviewPending: false,
   review: { editedAt: now - 60_000, tests: { command: "npm test -- parser", ok: true, at: now - 30_000 } },
   queued: params.get("queued") === "1" ? { id: "q1", prompt: "Then update the changelog.", error: "" } : null,
+  jobId: params.get("output") === "1" ? "c0ffee12" : undefined, // ?output=1: a background session (the Output tab)
 };
 
 const items: PaneItem[] = [
@@ -117,6 +119,8 @@ window.addEventListener("harness-post", (e: Event) => {
   } else if (m.type === "picture") {
     const id = (m as unknown as { id: string }).id;
     setTimeout(() => send({ type: "picture", id, path: `/home/alice/.cache/claude-widget/images/20261026-1015${id.slice(-2)}.png`, error: "" }), 200);
+  } else if (m.type === "logs") {
+    send({ type: "output", ...(demoScreen as { lines: string[] }), error: "" });
   } else if (m.type === "review") {
     send({ type: "review", answer: review, error: "" });
   } else if (m.type === "complete") {
