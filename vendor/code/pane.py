@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The chat pane of Claude Status: one chat's conversation, a reply to it,
+"""The chat pane of Talpy Den: one chat's conversation, a reply to it,
 its permission prompt and its review.
 
     python3 -I pane.py ACTION [--host HOST] [--config-dir DIR]... [--remote] [--pretty]
@@ -56,7 +56,7 @@ its permission prompt and its review.
         shortcuts: Meta+Alt+Y allows, Meta+Alt+N denies, where they're free)
 
 --host HOST: the same on an SSH host (remote.py runs this file there, after
-claude_status.py); --remote: the JSON after a marker line, as there.
+talpy_den.py); --remote: the JSON after a marker line, as there.
 Python 3.7+ and the standard library only.
 """
 import base64
@@ -73,14 +73,14 @@ import unicodedata
 from pathlib import Path
 
 sys.dont_write_bytecode = True  # no __pycache__ inside the installed widget...
-if os.path.isfile(globals().get("__file__") or ""):  # (on an SSH host it comes on stdin, after claude_status.py)
-    if sys.version_info >= (3, 8):  # ...but claude_status.py compiled in the cache, as poll.py does
-        _cache = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "claude-widget"
+if os.path.isfile(globals().get("__file__") or ""):  # (on an SSH host it comes on stdin, after talpy_den.py)
+    if sys.version_info >= (3, 8):  # ...but talpy_den.py compiled in the cache, as poll.py does
+        _cache = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "talpy-den"
         if _cache.is_dir():
             sys.pycache_prefix = str(_cache / "pycache")
             sys.dont_write_bytecode = False
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # -I leaves the script dir off sys.path
-import claude_status as cs  # noqa: E402
+import talpy_den as cs  # noqa: E402
 
 # ---------------------------------------------------------------- the conversation
 
@@ -868,9 +868,9 @@ def job_screen(home, extra_dirs, job_id, profile_key=None):
 # runs an action's command when its keys are pressed) and registers them
 # with kglobalaccel right away over D-Bus, with Meta+Alt+Y and Meta+Alt+N
 # where no other shortcut has them (else none: you pick them in System
-# Settings → Shortcuts → Claude Status). --shortcuts off takes them out.
+# Settings → Shortcuts → Talpy Den). --shortcuts off takes them out.
 
-SHORTCUTS_COMPONENT = "org.wzaielamri.claudestatus.answers.desktop"
+SHORTCUTS_COMPONENT = "org.wzaielamri.talpyden.answers.desktop"
 SHORTCUT_ACTIONS = (  # (action, its name, default keys, the same as Qt's key code)
     ("allow", "Allow the oldest prompt", "Meta+Alt+Y", 0x10000000 | 0x08000000 | 0x59),
     ("deny", "Deny the oldest prompt", "Meta+Alt+N", 0x10000000 | 0x08000000 | 0x4E),
@@ -918,7 +918,7 @@ def show_note(text, ok):
     tries = [[gdbus, "call", "--session", "--dest", "org.kde.plasmashell", "--object-path", "/org/kde/osdService",
               "--method", "org.kde.osdService.showText", icon, text]] if gdbus else []
     if shutil.which("notify-send"):
-        tries.append(["notify-send", "--app-name=Claude Status", f"--icon={icon}", "--expire-time=4000", "Claude Status", text])
+        tries.append(["notify-send", "--app-name=Talpy Den", f"--icon={icon}", "--expire-time=4000", "Talpy Den", text])
     for cmd in tries:
         try:
             if subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5).returncode == 0:
@@ -944,7 +944,7 @@ def shortcuts_desktop(script, free=None):
     """The desktop file with the two actions (script: this pane.py); keys
     only for the actions in free (None: all)."""
     run = lambda action: " ".join(desktop_quote(a) for a in ("python3", "-I", str(script), "--oldest", action, "--osd"))
-    lines = ["[Desktop Entry]", "Type=Application", "Name=Claude Status",
+    lines = ["[Desktop Entry]", "Type=Application", "Name=Talpy Den",
              "Comment=Answer the oldest permission prompt of your Claude chats", "Icon=dialog-question", "NoDisplay=true",
              "Exec=true", "Actions=" + "".join(a + ";" for a, _, _, _ in SHORTCUT_ACTIONS), ""]
     for action, name, keys, _ in SHORTCUT_ACTIONS:
@@ -998,7 +998,7 @@ def shortcuts(home, on, script=None):
     tmp.write_text(shortcuts_desktop(script or Path(__file__).resolve(), free), encoding="utf-8")
     os.replace(tmp, path)
     for action, name, keys, code in SHORTCUT_ACTIONS:
-        ids = gv_strings([SHORTCUTS_COMPONENT, action, "Claude Status", name])
+        ids = gv_strings([SHORTCUTS_COMPONENT, action, "Talpy Den", name])
         ok, out = kglobalaccel("doRegister", ids)
         if not ok:
             return True, "Keyboard answers are set up for your next login (Plasma's shortcuts didn't answer: " + out + ")"
@@ -1008,7 +1008,7 @@ def shortcuts(home, on, script=None):
     taken = [keys for action, _, keys, _ in SHORTCUT_ACTIONS if action not in free]
     if taken:
         return True, ("Keyboard answers are on; " + " and ".join(taken) + (" is" if len(taken) == 1 else " are")
-                      + " another shortcut's: pick yours in System Settings → Shortcuts → Claude Status")
+                      + " another shortcut's: pick yours in System Settings → Shortcuts → Talpy Den")
     return True, "Keyboard answers are on: Meta+Alt+Y allows the oldest prompt, Meta+Alt+N denies it"
 
 
@@ -1039,8 +1039,8 @@ def tmux_type(entry, text):
     base, target = tmux_base(entry)
     if base is None:
         return False, "It doesn't run in tmux (or tmux isn't installed)"
-    for args, data in ((["load-buffer", "-b", "claude-status", "-"], text.encode()),
-                       (["paste-buffer", "-p", "-d", "-b", "claude-status", "-t", target], None),
+    for args, data in ((["load-buffer", "-b", "talpy-den", "-"], text.encode()),
+                       (["paste-buffer", "-p", "-d", "-b", "talpy-den", "-t", target], None),
                        (["send-keys", "-t", target, "Enter"], None)):
         if args[0] == "send-keys":
             time.sleep(0.3)  # (Claude takes the paste in first)
@@ -1451,7 +1451,7 @@ def undo(home, extra_dirs, chat_id, profile_key=None, wanted=()):
                     done += 1
             elif current != original:
                 os.makedirs(os.path.dirname(full), exist_ok=True)
-                tmp = full + ".claude-status-undo"
+                tmp = full + ".talpy-den-undo"
                 with open(tmp, "wb") as f:
                     f.write(original)
                 if current is not None:
@@ -1527,7 +1527,7 @@ def mark_reviewed(cache_root, chat_id, host="", on=True, now_ms=None):
 # take out again: the permission hook (--relay: permission prompts and
 # Claude's questions answered from the widget) and the live hook (--live:
 # each step of each chat as it happens). Each runs from a copy in
-# ~/.local/share/claude-widget, named in the hook list of each of its events.
+# ~/.local/share/talpy-den, named in the hook list of each of its events.
 
 HOOK_FILE = "permission-hook.py"
 HOOK_TIMEOUT_S = 86400
@@ -1566,7 +1566,8 @@ def settings_files(home, extra_dirs):
 
 def is_ours(hook, kind="relay"):
     command = str(hook.get("command") or "") if isinstance(hook, dict) else ""
-    return HOOKS[kind]["file"] in command and "claude-widget" in command
+    # (also the copy an earlier version put in its first folder, claude-widget)
+    return HOOKS[kind]["file"] in command and ("talpy-den" in command or "claude-widget" in command)
 
 
 def has_hook(settings, kind="relay"):
@@ -1602,7 +1603,7 @@ def set_hook(settings, command, on, kind="relay"):
 
 
 def hook_path(home, kind="relay"):
-    return Path(os.environ.get("XDG_DATA_HOME") or home / ".local" / "share") / "claude-widget" / HOOKS[kind]["file"]
+    return Path(os.environ.get("XDG_DATA_HOME") or home / ".local" / "share") / "talpy-den" / HOOKS[kind]["file"]
 
 
 def install_hook(home, extra_dirs, on, kind, source=None):
@@ -1631,7 +1632,7 @@ def install_hook(home, extra_dirs, on, kind, source=None):
         set_hook(data, hook_command(target, kind), on, kind)
         if json.dumps(data, sort_keys=True) == before:
             continue  # (as it was: the file isn't touched)
-        tmp = path.with_name(path.name + ".claude-status.tmp")
+        tmp = path.with_name(path.name + ".talpy-den.tmp")
         tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         if path.exists():
             shutil.copymode(path, tmp)
@@ -1754,6 +1755,7 @@ def main(argv=None):
         sys.exit(__doc__)
     os.umask(0o077)
     home = Path.home()
+    cs.adopt_legacy_dirs(home)
     cache_root = cs.cache_dir(home)
 
     def emit(result):
