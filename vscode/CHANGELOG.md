@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.16.0
 
 - **Now Talpy Den:** the extension is called **Talpy Den** and the pet
   **Talpy**. It is a new extension (`wzaielamri.talpy-den`, settings
