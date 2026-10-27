@@ -267,7 +267,7 @@ Window {
     // every executable DataSource in plasmashell keeps each name, hub/Exec.qml)
     function run(kind, args) {
         const cmd = "python3 -I " + root.shellQuote(root.codeDir + "pane.py") + " " + args
-                    + (kind === "conversation" ? "" : " # " + Date.now())
+                    + (kind === "conversation" || kind === "logs" ? "" : " # " + Date.now())   // (read again and again: one name)
         runs[cmd] = kind
         runner.connectSource(cmd)
     }
@@ -475,6 +475,12 @@ Window {
                 keepEnd()
             return
         }
+        if (kind === "logs") {
+            outputError = result.ok ? "" : (result.message || i18n("Its output can't be read now"))
+            if (result.ok)
+                outputLines = result.lines || []
+            return
+        }
         if (kind === "review") {
             reviewLoading = false
             review = result.ok ? result : null
@@ -671,7 +677,28 @@ Window {
         reviewLoading = true
         run("review", "--review " + root.shellQuote(chatId) + paneArgs())
     }
-    onTabChanged: if (tab === "review" && review === null) loadReview()
+    onTabChanged: {
+        if (tab === "review" && review === null)
+            loadReview()
+        if (tab === "output")
+            loadOutput()
+    }
+
+    // A background session's screen (the Output tab)
+    readonly property string jobId: row && row.kind === "bg" && row.jobId && row.pid ? row.jobId : ""
+    property var outputLines: []
+    property string outputError: ""
+    function loadOutput() {
+        if (jobId)
+            run("logs", "--logs " + root.shellQuote(jobId) + paneArgs())
+    }
+    Timer {
+        interval: 2000
+        repeat: true
+        running: pane.tab === "output" && pane.visible && pane.visibility !== Window.Minimized && pane.jobId !== ""
+        onTriggered: pane.loadOutput()
+    }
+    onJobIdChanged: if (!jobId && tab === "output") tab = "chat"
     readonly property real editedAt: row && row.review ? row.review.editedAt || 0 : 0
     onEditedAtChanged: if (tab === "review") loadReview()
 
@@ -840,12 +867,12 @@ Window {
 
                 Repeater {
                     model: [
-                        { tab: "chat", text: i18n("Chat") },
+                        { tab: "chat", text: i18n("Chat") }].concat(pane.jobId ? [{ tab: "output", text: i18n("Output") }] : []).concat([
                         { tab: "review", text: pane.row && pane.row.changes
                               ? (pane.reviewPending ? i18nc("tab: the files a chat changed, not reviewed yet", "Review ±%1 •", pane.row.changes.count)
                                                     : i18nc("tab: the files a chat changed", "Review ±%1", pane.row.changes.count))
                               : i18n("Review") }
-                    ]
+                    ])
                     delegate: MouseArea {
                         id: tabButton
                         required property var modelData
@@ -1598,6 +1625,30 @@ Window {
                         text: pane.route === "terminal" || pane.askHow ? i18n("Send, go on in the background") : i18n("Send")
                         onClicked: pane.send(pane.route === "terminal" || pane.askHow ? "background" : "auto", false)
                     }
+                }
+            }
+
+            // ---------------------------------------------------------------- Output
+            // A background session's screen now (pane.py --logs: claude logs),
+            // as its terminal would show it, read again every 2 s while shown
+            PlasmaComponents3.ScrollView {
+                id: outputView
+                visible: pane.tab === "output"
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                PlasmaComponents3.ScrollBar.horizontal.policy: PlasmaComponents3.ScrollBar.AsNeeded
+
+                TextEdit {
+                    text: pane.outputError || pane.outputLines.join("\n")
+                    textFormat: TextEdit.PlainText
+                    readOnly: true
+                    selectByMouse: true
+                    color: pane.outputError ? pane.mutedColor : Kirigami.Theme.textColor
+                    selectionColor: Kirigami.Theme.focusColor
+                    font.family: pane.monoFamily
+                    font.pointSize: pane.pt * 0.9
+                    leftPadding: pane.gutter
+                    topPadding: Kirigami.Units.smallSpacing
                 }
             }
 

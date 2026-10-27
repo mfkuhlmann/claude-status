@@ -126,6 +126,32 @@ class CompleteTests(PaneFixture):
         self.assertEqual(sorted(got["files"]), [".gitignore", "lib/util.py"])
 
 
+class ScreenTests(PaneFixture):
+    """A background session's screen (pane.py --logs: claude logs, played into a grid)."""
+
+    def test_a_tui_stream_becomes_the_lines_it_shows(self):
+        e = "\x1b"
+        stream = (f"{e}7{e}8{e}[2J{e}[H{e}[H\r{e}[1B{e}[38;2;215;119;87m Claude Code{e}[39m\r{e}[1BHaiku"
+                  f"\r{e}[3B{e}[48;2;55;55;55m> count to 3{e}[49m\r{e}[37B· Thinking…\r{e}[1B status line"
+                  f"{e}[50;1H{e}[H\r{e}[8B● 1\r{e}[2C{e}[1B2\r{e}[2C{e}[1B3"
+                  f"{e}[H\r{e}[42B{e}[K{e}]0;title\x07✻ Done{e}[1G✻")
+        lines = pane.screen_of(stream)
+        self.assertEqual(lines[:8], [" Claude Code", "Haiku", "", "> count to 3", "", "● 1", "  2", "  3"])
+        self.assertIn("✻ Done", lines)          # (the spinner line erased, then written again)
+        self.assertNotIn("· Thinking…", lines)
+        self.assertNotIn("title", "".join(lines))  # (a window title isn't on the screen)
+        self.assertEqual(lines[-1], " status line")
+        self.assertFalse(any(a == b == "" for a, b in zip(lines, lines[1:])))   # (one empty line, at most)
+
+    def test_only_a_running_service_is_asked(self):
+        job = self.home / ".claude-work/jobs/0a1b2c3d/state.json"
+        write(job, {"state": "running"})
+        self.assertEqual(pane.job_screen(self.home, [], "0a1b2c3d"),
+                         {"ok": False, "message": "Its background service isn't running: it shows nothing now"})
+        self.assertEqual(pane.job_screen(self.home, [], "../x")["message"], "Not a background session: ../x")
+        self.assertEqual(pane.job_screen(self.home, [], "ffffffff")["message"], "That background session isn't there any more")
+
+
 class ConversationTests(PaneFixture):
     def test_items(self):
         t = self.now - 100
