@@ -180,12 +180,13 @@ export class Pet {
     // and holds up), its name tag, and a grab area around its body
     // The hero: every frame, live until a new pose has settled, breathing at
     // rest; a chat's pet: 30 pictures a second, pictures in between poses,
-    // still at rest
+    // still at rest; both: a move too slow for a picture every frame is drawn
+    // live (as in the widget, where such moves stepped)
     this.film = new Films(
       this.talpa,
       this.lone
-        ? { frameMs: 16.7, maxFrames: 24, sheets: 26, tweenMs: 0, restMs: 200, slackMs: 8 }
-        : { frameMs: 33.3, maxFrames: 16, sheets: 20, tweenMs: 200, tweens: 4, slackMs: 8 },
+        ? { frameMs: 16.7, maxFrames: 32, sheets: 36, tweenMs: 0, restMs: 200, slackMs: 8, smooth: true }
+        : { frameMs: 33.3, maxFrames: 32, sheets: 32, tweenMs: 200, tweens: 5, slackMs: 8, smooth: true },
     );
     this.sheets = div("cs-pet-sheets");
     this.view = document.createElement("canvas");
