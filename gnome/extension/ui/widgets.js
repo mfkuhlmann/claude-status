@@ -181,7 +181,7 @@ export function meter(pct, colorClass, styleClass = 'claude-meter') {
 }
 
 // A plan usage bar: filled to pct%, then, lighter, to where it would be when
-// the window resets at your pace (projected, e.g. claude_status.py's
+// the window resets at your pace (projected, e.g. talpy_den.py's
 // forecast.atReset), and a thin tick where an even pace would be by now
 export function usageMeter(pct, colorClass, projected = pct, projectedClass = colorClass, evenPct = null) {
     const trough = new St.Widget({style_class: 'claude-meter', x_expand: true, y_align: Clutter.ActorAlign.CENTER});

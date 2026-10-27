@@ -3,7 +3,7 @@ import QtQuick
 
 // One status check for every copy of the widget in plasmashell (panel,
 // tray, one per desktop…): Plasma runs them all in one QML engine, where a
-// singleton is shared, so claude_status.py runs once per interval instead of
+// singleton is shared, so talpy_den.py runs once per interval instead of
 // once per copy, and so does each SSH host's check (remote.py --status). Each
 // copy says what it wants (want: a command and how often) and gets every
 // answer to it (output). Copies with other settings (a moment while shared
@@ -16,9 +16,9 @@ QtObject {
     property var copies: ({})
     // The copy that sends the notifications and plays the sounds: the one
     // here longest. Across programs (another plasmashell, a test window),
-    // claude_status.py --instance still picks one (notifier in its answer).
+    // talpy_den.py --instance still picks one (notifier in its answer).
     property string leaderId: ""
-    // The name these copies go by in claude_status.py's election: the first
+    // The name these copies go by in talpy_den.py's election: the first
     // copy's, kept when that copy goes, so the others keep notifying
     property string instanceName: ""
     property var running: ({})       // full command line -> command

@@ -918,7 +918,7 @@ from test_remote import FakeSSH  # noqa: E402  (a stand-in ssh: runs the command
 
 class HostTests(FakeSSH):
     """An SSH host's week: this file runs there (on python3's stdin, after
-    claude_status.py) and sends its chats of those days back."""
+    talpy_den.py) and sends its chats of those days back."""
 
     def test_an_ssh_hosts_chats(self):
         now = int(time.time() * 1000)
@@ -978,7 +978,7 @@ class OutputTests(Home):
         self.assertTrue(result["ok"], result)
         self.assertEqual(result["sum"]["turns"], 1)
         self.assertEqual(result["currency"]["code"], "USD")
-        self.assertTrue((self.cache_root / "claude-widget" / week.CACHE_FILE).is_file())
+        self.assertTrue((self.cache_root / "talpy-den" / week.CACHE_FILE).is_file())
         out = io.StringIO()
         with redirect_stdout(out):
             week.main(["--data", "--remote"])

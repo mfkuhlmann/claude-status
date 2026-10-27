@@ -1,6 +1,7 @@
 """install.sh in a made-up home: stand-ins for kpackagetool6, gdbus and
 GNOME's tools only note how they were called, so nothing is installed for
 real."""
+import json
 import os
 import shutil
 import stat
@@ -54,7 +55,7 @@ class InstallTests(unittest.TestCase):
         out = self.install()
         self.assertEqual(out.returncode, 0, out.stderr)
         text = script.read_text()
-        self.assertTrue(text.startswith("#!/bin/bash\ninput=\"$(cat)\"\n# >>> claude-widget >>>\n"), text)
+        self.assertTrue(text.startswith("#!/bin/bash\ninput=\"$(cat)\"\n# >>> talpy-den >>>\n"), text)
         self.assertEqual(stat.S_IMODE(script.stat().st_mode), 0o750)  # its mode kept
         self.assertEqual(len(list(script.parent.glob("statusline.sh.bak.*"))), 1)
         self.assertIn("already up to date", self.install().stdout)
@@ -68,33 +69,52 @@ class InstallTests(unittest.TestCase):
         (self.home / ".claude/statusline").write_text("#!/bin/sh\ninput=$(cat)\necho ok\n")
         (self.home / ".claude/settings.json").write_text('{"statusLine": {"command": "~/.claude/statusline"}}')
         self.install()
-        self.assertIn("# >>> claude-widget >>>", (self.home / ".claude/statusline").read_text())
+        self.assertIn("# >>> talpy-den >>>", (self.home / ".claude/statusline").read_text())
 
     def test_a_line_that_goes_on_isnt_the_place(self):
         script = self.statusline("~/.claude/statusline.sh", "#!/bin/sh\ninput=$(cat) && echo \"$input\"\n")
         out = self.install()
         self.assertIn("no 'input=$(cat)' line found", out.stderr)
-        self.assertNotIn("claude-widget", script.read_text())
+        self.assertNotIn("talpy-den", script.read_text())
+
+    def test_an_upgrade_replaces_the_snippet_and_hook_of_the_first_name(self):
+        old = ("#!/bin/sh\ninput=$(cat)\n# >>> claude-widget >>>\n: old snippet\n# <<< claude-widget <<<\n")
+        script = self.statusline("~/.claude/statusline.sh", old)
+        hook = "python3 -I %s/.local/share/claude-widget/permission-hook.py" % self.home
+        settings = json.loads((self.home / ".claude/settings.json").read_text())
+        settings["hooks"] = {"PermissionRequest": [{"matcher": "*", "hooks": [{"type": "command", "command": hook}]}]}
+        (self.home / ".claude/settings.json").write_text(json.dumps(settings))
+        out = self.install()
+        self.assertEqual(out.returncode, 0, out.stderr)
+        text = script.read_text()
+        self.assertNotIn("claude-widget", text)
+        self.assertEqual(text.count("# >>> talpy-den >>>"), 1)
+        settings = (self.home / ".claude/settings.json").read_text()
+        self.assertNotIn("claude-widget", settings)
+        self.assertEqual(settings.count("permission-hook.py"), 1)
+        self.assertIn(".local/share/talpy-den/permission-hook.py", settings)
+        out = self.install("--uninstall")
+        self.assertNotIn(">>>", script.read_text())
 
     def test_uninstall_keeps_the_snippet_another_front_end_uses(self):
         script = self.statusline("~/.claude/statusline.sh", "#!/bin/sh\ninput=$(cat)\n")
         self.install()
-        (self.home / ".vscode/extensions/wzaielamri.claude-status-1.10.0").mkdir(parents=True)
+        (self.home / ".vscode/extensions/wzaielamri.talpy-den-1.10.0").mkdir(parents=True)
         out = self.install("--uninstall")
         self.assertIn("Kept the status-line snippet: the VS Code extension still uses it.", out.stdout)
-        self.assertIn("claude-widget", script.read_text())
+        self.assertIn("talpy-den", script.read_text())
 
     def test_the_permission_hook_with_plasma(self):
         self.statusline("~/.claude/statusline.sh", "#!/bin/sh\ninput=$(cat)\n")
         out = self.install()
         self.assertIn("Permission prompts can be answered from the widget", out.stdout)
         settings = (self.home / ".claude/settings.json").read_text()
-        self.assertIn(".local/share/claude-widget/permission-hook.py", settings)
-        self.assertTrue((self.home / ".local/share/claude-widget/permission-hook.py").is_file())
+        self.assertIn(".local/share/talpy-den/permission-hook.py", settings)
+        self.assertTrue((self.home / ".local/share/talpy-den/permission-hook.py").is_file())
         self.assertIn("the hook is up to date", self.install().stdout)  # (an upgrade keeps it, brought up to date)
         out = self.install("--uninstall")
         self.assertNotIn("permission-hook", (self.home / ".claude/settings.json").read_text())
-        self.assertFalse((self.home / ".local/share/claude-widget/permission-hook.py").exists())
+        self.assertFalse((self.home / ".local/share/talpy-den/permission-hook.py").exists())
 
     @unittest.skipUnless(shutil.which("kwriteconfig6") and shutil.which("kreadconfig6"), "needs KDE's kwriteconfig6")
     def test_the_chat_panes_icon(self):
@@ -103,20 +123,20 @@ class InstallTests(unittest.TestCase):
         mine = "[General]\ncount=1\nrules=mine\n\n[mine]\nDescription=my rule\n"
         rules.write_text(mine)
         out = self.install()
-        self.assertIn("The chat pane shows Talpa in the taskbar", out.stdout)
+        self.assertIn("The chat pane shows Talpy in the taskbar", out.stdout)
         text = rules.read_text()
-        self.assertIn("count=2\nrules=mine,claude-status-chat-pane\n", text)
-        self.assertIn("[claude-status-chat-pane]\n", text)
+        self.assertIn("count=2\nrules=mine,talpy-den-chat-pane\n", text)
+        self.assertIn("[talpy-den-chat-pane]\n", text)
         self.assertIn("title=— Claude chat\n", text)
-        self.assertIn("desktopfile=org.wzaielamri.claudestatus.chat\ndesktopfilerule=2\n", text)
+        self.assertIn("desktopfile=org.wzaielamri.talpyden.chat\ndesktopfilerule=2\n", text)
         self.assertIn("[mine]\nDescription=my rule\n", text)
-        desktop = self.home / ".local/share/applications/org.wzaielamri.claudestatus.chat.desktop"
-        self.assertIn(f"Icon={self.home}/.local/share/plasma/plasmoids/org.wzaielamri.claudestatus/contents/pets/window.svg\n",
+        desktop = self.home / ".local/share/applications/org.wzaielamri.talpyden.chat.desktop"
+        self.assertIn(f"Icon={self.home}/.local/share/plasma/plasmoids/org.wzaielamri.talpyden/contents/pets/window.svg\n",
                       desktop.read_text())
         self.assertIn("org.kde.KWin.reconfigure", self.log.read_text())
         out = self.install()  # (an upgrade: the same rule, once)
-        self.assertNotIn("The chat pane shows Talpa", out.stdout)
-        self.assertIn("count=2\nrules=mine,claude-status-chat-pane\n", rules.read_text())
+        self.assertNotIn("The chat pane shows Talpy", out.stdout)
+        self.assertIn("count=2\nrules=mine,talpy-den-chat-pane\n", rules.read_text())
         self.install("--uninstall")
         self.assertEqual(rules.read_text(), mine)
         self.assertFalse(desktop.exists())

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runs inside the container's D-Bus session: starts GNOME Shell, then the steps.
 set -uo pipefail
-uuid=claude-status@wzaielamri.github.io
+uuid=talpy-den@wzaielamri.github.io
 gsettings set org.gnome.shell disable-user-extensions false
 gsettings set org.gnome.shell enabled-extensions "['$uuid', 'devtools@local']"
 export XDG_CURRENT_DESKTOP=ubuntu:GNOME XDG_SESSION_TYPE=wayland
@@ -36,4 +36,4 @@ sleep 4   # the first status check
 source /steps.sh
 kill "$shell" 2>/dev/null
 wait "$shell" 2>/dev/null
-grep -E "claude-status|JS ERROR|TypeError|ReferenceError|SyntaxError|Error:" /out/shell.log | grep -v "devtools@local" || echo "(no errors in shell.log)"
+grep -E "talpy-den|JS ERROR|TypeError|ReferenceError|SyntaxError|Error:" /out/shell.log | grep -v "devtools@local" || echo "(no errors in shell.log)"

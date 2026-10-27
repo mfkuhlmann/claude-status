@@ -4,7 +4,7 @@ import org.kde.plasma.components as PlasmaComponents3
 import org.kde.plasma.core as PlasmaCore
 import org.kde.kirigami as Kirigami
 
-// An account's last days (claude_status.py: token_stats): tokens per day as
+// An account's last days (talpy_den.py: token_stats): tokens per day as
 // bars (today's in the accent color), the totals, its busiest folders and
 // its models.
 ColumnLayout {

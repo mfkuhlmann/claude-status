@@ -48,18 +48,18 @@ shot message-list
 ev 'Main.panel.statusArea.dateMenu.menu.close()'
 
 # The settings window
-gnome-extensions prefs claude-status@wzaielamri.github.io >/dev/null 2>&1 &
+gnome-extensions prefs talpy-den@wzaielamri.github.io >/dev/null 2>&1 &
 sleep 6
 shot prefs
 
 # Turning the extension off and on again leaves nothing behind
 ev 'Main.panel.statusArea.dateMenu.menu.close()'
 for i in 1 2 3 4 5; do
-  gnome-extensions disable claude-status@wzaielamri.github.io; sleep 1
-  gnome-extensions enable claude-status@wzaielamri.github.io; sleep 2
+  gnome-extensions disable talpy-den@wzaielamri.github.io; sleep 1
+  gnome-extensions enable talpy-den@wzaielamri.github.io; sleep 2
 done
-gnome-extensions disable claude-status@wzaielamri.github.io; sleep 3
-echo "after disable: panel button $(ev "'claude-status@wzaielamri.github.io' in Main.panel.statusArea"), helpers running: $(pgrep -fc 'code/(claude_status|remote|jump).py' || true)"
-echo "raiser after disable: $(gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell/Extensions/ClaudeStatus --method org.gnome.Shell.Extensions.ClaudeStatus.RaiseWindow '"{}"' 2>&1 | head -c 120)"
-gnome-extensions enable claude-status@wzaielamri.github.io; sleep 3
-echo "enabled again: $(ev "'claude-status@wzaielamri.github.io' in Main.panel.statusArea")"
+gnome-extensions disable talpy-den@wzaielamri.github.io; sleep 3
+echo "after disable: panel button $(ev "'talpy-den@wzaielamri.github.io' in Main.panel.statusArea"), helpers running: $(pgrep -fc 'code/(talpy_den|remote|jump).py' || true)"
+echo "raiser after disable: $(gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell/Extensions/TalpyDen --method org.gnome.Shell.Extensions.TalpyDen.RaiseWindow '"{}"' 2>&1 | head -c 120)"
+gnome-extensions enable talpy-den@wzaielamri.github.io; sleep 3
+echo "enabled again: $(ev "'talpy-den@wzaielamri.github.io' in Main.panel.statusArea")"

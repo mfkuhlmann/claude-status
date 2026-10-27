@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Build the GNOME Shell extension from this repo:
 #   gnome/build.sh [--gnome43] [OUT_DIR]   (default gnome/build)
-# makes OUT_DIR/claude-status@wzaielamri.github.io/ (the extension folder) and
-# OUT_DIR/claude-status@wzaielamri.github.io.shell-extension.zip (for
-# `gnome-extensions install`). The Python helpers, Talpa (the pet) and its
+# makes OUT_DIR/talpy-den@wzaielamri.github.io/ (the extension folder) and
+# OUT_DIR/talpy-den@wzaielamri.github.io.shell-extension.zip (for
+# `gnome-extensions install`). The Python helpers, Talpy (the pet) and its
 # pictures come from the Plasma widget's package/contents, so both front ends
 # share them.
 # --gnome43 converts the result for GNOME Shell 43/44 (gnome/gnome43/port43.py).
@@ -15,19 +15,19 @@ if [ "${1:-}" = --gnome43 ]; then
 fi
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(dirname "$here")"
-uuid="claude-status@wzaielamri.github.io"
+uuid="talpy-den@wzaielamri.github.io"
 out="$(realpath -m "${1:-$here/build}")"
 dest="$out/$uuid"
 zip="$out/$uuid.shell-extension.zip"
 
 rm -rf "$dest" "$zip"
-mkdir -p "$dest/code" "$dest/pets" "$dest/ui/talpa"
+mkdir -p "$dest/code" "$dest/pets" "$dest/ui/talpy"
 cp -r "$here/extension/." "$dest/"
 cp "$repo"/package/contents/code/*.py "$dest/code/"
 cp "$repo"/package/contents/pets/*.svg "$repo/package/contents/pets/README.md" "$dest/pets/"
-# Talpa, the pet, is the widget's own code (ES modules: .mjs there, .js here)
-for f in "$repo"/package/contents/ui/talpa/*.mjs; do
-  sed "s/\.mjs';\$/.js';/" "$f" > "$dest/ui/talpa/$(basename "${f%.mjs}").js"
+# Talpy, the pet, is the widget's own code (ES modules: .mjs there, .js here)
+for f in "$repo"/package/contents/ui/talpy/*.mjs; do
+  sed "s/\.mjs';\$/.js';/" "$f" > "$dest/ui/talpy/$(basename "${f%.mjs}").js"
 done
 cp "$repo/LICENSE" "$dest/"
 glib-compile-schemas --strict "$dest/schemas"

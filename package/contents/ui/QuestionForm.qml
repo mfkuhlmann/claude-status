@@ -4,7 +4,7 @@ import org.kde.plasma.components as PlasmaComponents3
 import org.kde.plasma.core as PlasmaCore
 import org.kde.kirigami as Kirigami
 
-// Claude's multiple-choice questions (its AskUserQuestion tool; claude_status.py:
+// Claude's multiple-choice questions (its AskUserQuestion tool; talpy_den.py:
 // question_view): each question with its options, one to choose (or several,
 // for a multiSelect one), and a field to answer in your own words instead
 // (as "Type something." in Claude's dialog). PermissionAsk.qml sends them.

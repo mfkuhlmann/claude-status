@@ -433,7 +433,7 @@ KCM.SimpleKCM {
             font: Kirigami.Theme.smallFont
             opacity: 0.7
             text: (page.liveMessage ? page.liveMessage + "\n" : "")
-                  + i18n("Adds a hook to each Claude profile's settings.json that notes each step of each chat as it happens (Claude doesn't wait for it): rows, the chat pane and the line under the big Talpa follow every tool call at once, and the widget checks the rest less often. Without it, a chat that starts, waits or finishes still shows at once; its steps show at each check. Applies at once.")
+                  + i18n("Adds a hook to each Claude profile's settings.json that notes each step of each chat as it happens (Claude doesn't wait for it): rows, the chat pane and the line under the big Talpy follow every tool call at once, and the widget checks the rest less often. Without it, a chat that starts, waits or finishes still shows at once; its steps show at each check. Applies at once.")
         }
 
         QQC2.CheckBox {
@@ -450,7 +450,7 @@ KCM.SimpleKCM {
             font: Kirigami.Theme.smallFont
             opacity: 0.7
             text: (page.keysMessage ? page.keysMessage + "\n" : "")
-                  + i18n("Two global shortcuts answer the chat that has waited longest for a permission, from anywhere: Allow once (a plan: Approve) or Deny (a plan: Keep planning); a note on screen says what was answered. They take \"Answer permission prompts from the widget\"; Claude's questions are answered in the panel. Pick other keys in System Settings → Shortcuts → Claude Status. Applies at once.")
+                  + i18n("Two global shortcuts answer the chat that has waited longest for a permission, from anywhere: Allow once (a plan: Approve) or Deny (a plan: Keep planning); a note on screen says what was answered. They take \"Answer permission prompts from the widget\"; Claude's questions are answered in the panel. Pick other keys in System Settings → Shortcuts → Talpy Den. Applies at once.")
         }
 
         QQC2.TextField {
@@ -657,7 +657,7 @@ KCM.SimpleKCM {
                 icon.name: "smartphone"
                 onClicked: {
                     page.phoneStatus = i18n("Sending…")
-                    phoneHelper.connectSource(page.jumpCommand(["--phone", i18n("Claude Status: this is how chats that need you will show up here."),
+                    phoneHelper.connectSource(page.jumpCommand(["--phone", i18n("Talpy Den: this is how chats that need you will show up here."),
                                                                 ...(page.cfg_phoneDevice ? ["--device", page.cfg_phoneDevice] : [])]))
                 }
             }
@@ -843,13 +843,13 @@ KCM.SimpleKCM {
             wrapMode: Text.Wrap
             font: Kirigami.Theme.smallFont
             opacity: 0.7
-            text: i18n("Claude Status can sit in the system tray too: right-click the tray's arrow → Configure System Tray… → Entries → Claude Status. \"Shown when relevant\" shows it while a chat runs. Several Claude Status widgets share these settings, and only one of them notifies.")
+            text: i18n("Talpy Den can sit in the system tray too: right-click the tray's arrow → Configure System Tray… → Entries → Talpy Den. \"Shown when relevant\" shows it while a chat runs. Several Talpy Den widgets share these settings, and only one of them notifies.")
         }
 
         QQC2.CheckBox {
             id: showPet
             Kirigami.FormData.label: i18n("Pet:")
-            text: i18n("Show Talpa, the pet, in the popup and in notifications")
+            text: i18n("Show Talpy, the pet, in the popup and in notifications")
         }
 
         QQC2.SpinBox {
@@ -911,7 +911,7 @@ KCM.SimpleKCM {
             wrapMode: Text.Wrap
             font: Kirigami.Theme.smallFont
             opacity: 0.7
-            text: i18n("Claude Code deletes chats after 30 days (its cleanupPeriodDays setting). The Recap's Overall keeps their numbers past that, in ~/.cache/claude-widget: times, tokens, costs, folders and chat names. Off, it keeps only what Claude still has. This changes at once, for the VS Code extension too.")
+            text: i18n("Claude Code deletes chats after 30 days (its cleanupPeriodDays setting). The Recap's Overall keeps their numbers past that, in ~/.cache/talpy-den: times, tokens, costs, folders and chat names. Off, it keeps only what Claude still has. This changes at once, for the VS Code extension too.")
                   + (!page.history ? "" : "\n" + (page.history.since
                          ? i18np("Kept since %2, with %1 chat Claude has deleted · %3 KB", "Kept since %2, with %1 chats Claude has deleted · %3 KB",
                                  page.history.deletedChats, Qt.locale().toString(new Date(page.history.since + "T00:00"), "d MMM yyyy"),
@@ -987,7 +987,7 @@ KCM.SimpleKCM {
             wrapMode: Text.Wrap
             font: Kirigami.Theme.smallFont
             opacity: 0.7
-            text: i18n("Plans and subagent runs are Markdown. Okular shows it rendered; in your browser the widget shows it as a page of its own (it loads nothing from the internet). VS Code's preview needs the Claude Status extension for VS Code 1.13 or newer, else the file opens in its editor. Your app for Markdown files is often a text editor: a change you make there to a plan is the plan's. Whatever you pick that isn't installed, your browser shows it.")
+            text: i18n("Plans and subagent runs are Markdown. Okular shows it rendered; in your browser the widget shows it as a page of its own (it loads nothing from the internet). VS Code's preview needs the Talpy Den extension for VS Code 1.13 or newer, else the file opens in its editor. Your app for Markdown files is often a text editor: a change you make there to a plan is the plan's. Whatever you pick that isn't installed, your browser shows it.")
         }
     }
 }

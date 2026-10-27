@@ -5,6 +5,7 @@ import json
 import ast
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -16,7 +17,7 @@ from unittest import mock
 
 sys.dont_write_bytecode = True  # keep __pycache__ out of the plasmoid package
 ROOT = Path(__file__).resolve().parent.parent
-spec = importlib.util.spec_from_file_location("claude_status", ROOT / "package/contents/code/claude_status.py")
+spec = importlib.util.spec_from_file_location("talpy_den", ROOT / "package/contents/code/talpy_den.py")
 cs = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(cs)
 
@@ -511,6 +512,50 @@ SHELLS = [s for s in ("sh", "dash", "bash", "zsh") if shutil.which(s)]
 
 
 @unittest.skipUnless(shutil.which("jq"), "the status-line snippet needs jq")
+class LegacyDirTests(unittest.TestCase):
+    """The folders of the first name (claude-widget) move to talpy-den."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.home = Path(self.tmp.name)
+        env = mock.patch.dict(os.environ, {"XDG_CACHE_HOME": "", "XDG_DATA_HOME": ""})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def test_cache_and_data_move_and_leave_a_link(self):
+        write(self.home / ".cache/claude-widget/keep.json", "{}")
+        write(self.home / ".cache/claude-widget/statusline/p/s.json", "{}")
+        write(self.home / ".local/share/claude-widget/live-hook.py", "hook")
+        cs.adopt_legacy_dirs(self.home)
+        self.assertEqual((self.home / ".cache/talpy-den/keep.json").read_text(), "{}")
+        self.assertTrue((self.home / ".cache/talpy-den/statusline/p/s.json").is_file())
+        self.assertEqual((self.home / ".local/share/talpy-den/live-hook.py").read_text(), "hook")
+        # an older snippet or hook still writing/reading the old name lands in the new folder
+        self.assertTrue((self.home / ".cache/claude-widget").is_symlink())
+        write(self.home / ".cache/claude-widget/statusline/p/t.json", "{}")
+        self.assertTrue((self.home / ".cache/talpy-den/statusline/p/t.json").is_file())
+        self.assertEqual(stat.S_IMODE((self.home / ".cache/talpy-den").stat().st_mode), 0o700)
+        cs.adopt_legacy_dirs(self.home)  # (nothing more to do)
+        self.assertTrue((self.home / ".cache/talpy-den/keep.json").is_file())
+
+    def test_what_the_new_folder_has_already_is_kept(self):
+        write(self.home / ".cache/claude-widget/keep.json", '{"old": 1}')
+        write(self.home / ".cache/claude-widget/stars.json", '{"old": 1}')
+        write(self.home / ".cache/talpy-den/keep.json", '{"new": 1}')
+        cs.adopt_legacy_dirs(self.home)
+        self.assertEqual((self.home / ".cache/talpy-den/keep.json").read_text(), '{"new": 1}')
+        self.assertEqual((self.home / ".cache/talpy-den/stars.json").read_text(), '{"old": 1}')
+        # the old folder keeps what couldn't move: not replaced by a link
+        self.assertTrue((self.home / ".cache/claude-widget/keep.json").is_file())
+        self.assertFalse((self.home / ".cache/claude-widget").is_symlink())
+
+    def test_nothing_to_move(self):
+        cs.adopt_legacy_dirs(self.home)
+        self.assertFalse((self.home / ".cache/claude-widget").exists())
+        self.assertFalse((self.home / ".cache/talpy-den").exists())
+
+
 class SnippetTests(unittest.TestCase):
     def run_snippet(self, payload, cfg):
         """Runs the snippet in every shell here; all must do the same."""
@@ -539,18 +584,18 @@ class SnippetTests(unittest.TestCase):
         payload = {"session_id": "s3", "transcript_path": "/h/it's a $(dir)/.claude-personal/projects/-x/s3.jsonl"}
         out, err, files = self.run_snippet(payload, "/x/.claude-work")
         self.assertEqual((out, err), ("ok\n", ""))
-        self.assertEqual([f for f, _ in files], ["cache/claude-widget/statusline/.claude-personal/s3.json"])
+        self.assertEqual([f for f, _ in files], ["cache/talpy-den/statusline/.claude-personal/s3.json"])
 
     def test_writes_snapshot_per_profile(self):
         out, err, files = self.run_snippet({"session_id": "abc-123", "rate_limits": {}}, "/x/.claude-work/")
         self.assertEqual((out, err), ("ok\n", ""))
-        self.assertEqual(files, [("cache/claude-widget/statusline/.claude-work/abc-123.json", 0o600)])
+        self.assertEqual(files, [("cache/talpy-den/statusline/.claude-work/abc-123.json", 0o600)])
 
     def test_profile_from_transcript_path(self):
         payload = {"session_id": "s1",
                    "transcript_path": "/h/projects/.claude-personal/projects/-h-repo/s1/subagents/a.jsonl"}
         out, err, files = self.run_snippet(payload, "/x/.claude-work")
-        self.assertEqual([f for f, _ in files], ["cache/claude-widget/statusline/.claude-personal/s1.json"])
+        self.assertEqual([f for f, _ in files], ["cache/talpy-den/statusline/.claude-personal/s1.json"])
 
     def test_link_filed_under_the_real_folder(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -559,7 +604,7 @@ class SnippetTests(unittest.TestCase):
             (Path(tmp) / ".claude").symlink_to(real)
             payload = {"session_id": "s2", "transcript_path": f"{tmp}/.claude/projects/-h-repo/s2.jsonl"}
             out, err, files = self.run_snippet(payload, "/x/.claude-work")
-            self.assertEqual([f for f, _ in files], ["cache/claude-widget/statusline/.claude-personal/s2.json"])
+            self.assertEqual([f for f, _ in files], ["cache/talpy-den/statusline/.claude-personal/s2.json"])
 
     def test_rejects_unsafe_session_id(self):
         out, err, files = self.run_snippet({"session_id": "../../evil"}, "/x/.claude")
@@ -1034,11 +1079,11 @@ class OutputTests(Fixture):
         write(self.home / ".claude-work/projects/-tmp-x/half-emoji.jsonl", title + prompt + reply + "\n")
         env = {**os.environ, "HOME": str(self.home), "XDG_CACHE_HOME": str(self.cache)}
         for args in ([], ["--remote"]):
-            out = subprocess.run([sys.executable, "-I", str(ROOT / "package/contents/code/claude_status.py"), "--no-tokens", *args],
+            out = subprocess.run([sys.executable, "-I", str(ROOT / "package/contents/code/talpy_den.py"), "--no-tokens", *args],
                                  capture_output=True, text=True, env=env)
             self.assertEqual(out.returncode, 0, out.stderr)
             self.assertTrue(out.stdout.isascii())
-            answer = json.loads(out.stdout.rsplit("@@claude-status@@", 1)[-1])
+            answer = json.loads(out.stdout.rsplit("@@talpy-den@@", 1)[-1])
             names = [c["name"] for g in answer["groups"] for c in g["recent"]]
             self.assertIn("Fix the \ud83d", names)
 
@@ -1253,10 +1298,10 @@ class SharedCopiesTests(Fixture):
 
 
 class OldPythonTests(unittest.TestCase):
-    """claude_status.py, sharing.py, accounts.py, week.py and the live hook also run on SSH hosts, whose python3 may be as old as 3.7."""
+    """talpy_den.py, sharing.py, accounts.py, week.py and the live hook also run on SSH hosts, whose python3 may be as old as 3.7."""
 
     def test_no_syntax_or_calls_newer_than_37(self):
-        for name in ("claude_status.py", "sharing.py", "accounts.py", "week.py", "live_hook.py", "live.py"):
+        for name in ("talpy_den.py", "sharing.py", "accounts.py", "week.py", "live_hook.py", "live.py"):
             source = (ROOT / "package/contents/code" / name).read_text()
             # no := or f"{x=}" (3.7 itself parses only what it supports)
             tree = ast.parse(source, feature_version=(3, 7)) if sys.version_info >= (3, 8) else ast.parse(source)
@@ -1391,7 +1436,7 @@ class SeveralWidgetsTests(unittest.TestCase):
         home = Path(self.tmp.name) / "home"
         (home / ".claude/sessions").mkdir(parents=True)
         env = dict(os.environ, HOME=str(home), XDG_CACHE_HOME=str(Path(self.tmp.name)))
-        run = lambda *a: json.loads(subprocess.run([sys.executable, "-I", str(ROOT / "package/contents/code/claude_status.py"),
+        run = lambda *a: json.loads(subprocess.run([sys.executable, "-I", str(ROOT / "package/contents/code/talpy_den.py"),
                                                     "--no-tokens", *a], capture_output=True, text=True, env=env).stdout)
         self.assertNotIn("notifier", run())   # GNOME and VS Code: one copy, no question
         first = run("--instance", "12/3", "--interval-ms", "2000")

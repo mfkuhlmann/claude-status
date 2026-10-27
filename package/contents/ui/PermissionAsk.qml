@@ -5,7 +5,7 @@ import org.kde.plasma.core as PlasmaCore
 import org.kde.kirigami as Kirigami
 import "markdown.mjs" as Md
 
-// What a chat waiting for a permission asks (claude_status.py:
+// What a chat waiting for a permission asks (talpy_den.py:
 // note_permissions): the command, or the file and the change; then Allow
 // once, Always allow and Deny (with a note), where the widget can answer it
 // (answer "hook": through the hook, "keys": in its tmux pane). Claude's

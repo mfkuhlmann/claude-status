@@ -21,7 +21,7 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parent.parent
-spec = importlib.util.spec_from_file_location("claude_status_chats", ROOT / "package/contents/code/claude_status.py")
+spec = importlib.util.spec_from_file_location("talpy_den_chats", ROOT / "package/contents/code/talpy_den.py")
 cs = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(cs)
 
@@ -720,10 +720,10 @@ class RemoteModeTests(World):
         env = {"HOME": str(self.home), "PATH": ":".join([*path_dirs, str(self.home / "no-bin")]),
                "XDG_CACHE_HOME": str(self.cache), "XDG_STATE_HOME": str(self.state)}
         out = subprocess.run([sys.executable, "-I", "-", "--remote", "--no-tokens", *args], env=env,
-                             input=(ROOT / "package/contents/code/claude_status.py").read_text(),
+                             input=(ROOT / "package/contents/code/talpy_den.py").read_text(),
                              capture_output=True, text=True, check=True).stdout
-        mark = out.rindex("@@claude-status@@ ")
-        return json.loads(out[mark + len("@@claude-status@@ "):]), claude
+        mark = out.rindex("@@talpy-den@@ ")
+        return json.loads(out[mark + len("@@talpy-den@@ "):]), claude
 
     def test_rows_carry_their_commands(self):
         folder = self.home / "proj"
@@ -761,14 +761,14 @@ class RemoteModeTests(World):
 
     def test_dismiss_over_the_wire(self):
         env = {"HOME": str(self.home), "PATH": "/usr/bin:/bin", "XDG_CACHE_HOME": str(self.cache)}
-        script = (ROOT / "package/contents/code/claude_status.py").read_text()
+        script = (ROOT / "package/contents/code/talpy_den.py").read_text()
         out = subprocess.run([sys.executable, "-I", "-", "--remote", "--dismiss", "abc"], env=env, input=script,
                              capture_output=True, text=True, check=True).stdout
-        self.assertEqual(json.loads(out.split("@@claude-status@@ ")[-1])["ok"], True)
-        self.assertIn("abc", cs.load_dismissed(self.cache / "claude-widget"))
+        self.assertEqual(json.loads(out.split("@@talpy-den@@ ")[-1])["ok"], True)
+        self.assertIn("abc", cs.load_dismissed(self.cache / "talpy-den"))
         subprocess.run([sys.executable, "-I", "-", "--undismiss-all"], env=env, input=script, check=True,
                        capture_output=True, text=True)
-        self.assertEqual(cs.load_dismissed(self.cache / "claude-widget"), {})
+        self.assertEqual(cs.load_dismissed(self.cache / "talpy-den"), {})
 
 
 class RecurringTests(unittest.TestCase):

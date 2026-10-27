@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Same settings, defaults and ranges as the Plasma widget's package/contents/config/main.xml -->
 <schemalist>
-  <schema id="org.gnome.shell.extensions.claude-status" path="/org/gnome/shell/extensions/claude-status/">
+  <schema id="org.gnome.shell.extensions.talpy-den" path="/org/gnome/shell/extensions/talpy-den/">
     <key name="poll-interval" type="i">
       <default>2000</default>
       <range min="1000" max="60000"/>
@@ -76,12 +76,12 @@
     </key>
     <key name="show-pet" type="b">
       <default>true</default>
-      <summary>Show Talpa, the pet, in the popup and in notifications</summary>
+      <summary>Show Talpy, the pet, in the popup and in notifications</summary>
     </key>
     <key name="chat-pets" type="i">
       <default>5</default>
       <range min="0" max="8"/>
-      <summary>Pets for each account's chats in the list, at most (0 = only the big Talpa)</summary>
+      <summary>Pets for each account's chats in the list, at most (0 = only the big Talpy)</summary>
     </key>
     <key name="show-tokens" type="b">
       <default>true</default>

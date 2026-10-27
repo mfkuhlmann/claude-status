@@ -2,13 +2,13 @@ import QtQuick
 import org.kde.plasma.components as PlasmaComponents3
 import org.kde.plasma.core as PlasmaCore
 import org.kde.kirigami as Kirigami
-import "talpa/talpa.mjs" as T
+import "talpy/talpy.mjs" as T
 
-// One Talpa on the pet strip (PetStrip.qml). The creature itself (looks,
-// moods, what it does) is talpa/talpa.mjs, drawn by TalpaView.qml; this is
+// One Talpy on the pet strip (PetStrip.qml). The creature itself (looks,
+// moods, what it does) is talpy/talpy.mjs, drawn by TalpyView.qml; this is
 // where it lives on the stage and what it does with you.
 //
-// The lone Talpa (petKey "") mirrors all your sessions and has a life of its
+// The lone Talpy (petKey "") mirrors all your sessions and has a life of its
 // own: it digs over to wherever your mouse is, has hobbies, naps and reacts to
 // you. Click to pet it (many quick clicks tickle), double-click to make it
 // dance, drag it out of its burrow and drop it.
@@ -22,7 +22,7 @@ Item {
     id: pet
 
     required property Item strip
-    property string petKey: ""          // the chat's key ("" for the lone Talpa)
+    property string petKey: ""          // the chat's key ("" for the lone Talpy)
     readonly property bool lone: petKey === ""
     property var chat: null             // the chat's session row, null once it's done
     property var lastChat: null         // the last one seen (opened when clicked)
@@ -36,7 +36,7 @@ Item {
 
     onChatChanged: if (chat) lastChat = chat
 
-    // Talpa's moods: idle working agents needs done failed limit (error loading for the lone one)
+    // Talpy's moods: idle working agents needs done failed limit (error loading for the lone one)
     readonly property string mood: lone ? root.petMood
                                  : !chat ? "idle"
                                  : chat.state === "waiting" ? "needs"
@@ -53,7 +53,7 @@ Item {
     readonly property real bodyHeight: strip.bodyHeight
     readonly property real ground: lone ? strip.loneGround : strip.chatGround
     // Where it can be: anywhere on the stage, its burrow (wider than its body)
-    // staying on it; the lone Talpa walks over the headline
+    // staying on it; the lone Talpy walks over the headline
     readonly property real reach: box * 27 / 64 + Kirigami.Units.smallSpacing
     readonly property real minX: reach
     readonly property real maxX: Math.max(minX, strip.width - reach)
@@ -79,7 +79,7 @@ Item {
     property int quickClicks: 0
     property int sleepyClicks: 0
     property string lastMood: ""
-    readonly property var talpa: view.talpa
+    readonly property var talpy: view.talpy
 
     anchors.fill: parent
 
@@ -88,14 +88,14 @@ Item {
     }
 
     function react(name, done) {
-        if (talpa)
-            talpa.react(name, done || null)
+        if (talpy)
+            talpy.react(name, done || null)
     }
 
     // Digs over to x (it dives in, tunnels across, pops up there); quick: its
     // spot moved (a new chat makes room), so it hurries
     function digTo(x, quick) {
-        if (held || leaving || arriving || !talpa)
+        if (held || leaving || arriving || !talpy)
             return
         travelTo = clampX(x)
         if (Math.abs(travelTo - px) < bodyWidth * 0.3) {
@@ -124,7 +124,7 @@ Item {
     }
 
     function start() {
-        talpa.setMood(mood)
+        talpy.setMood(mood)
         lastMood = mood
         if (lone && !strip.firstShown)
             return            // the first time the popup opens it's just there
@@ -133,9 +133,9 @@ Item {
     }
 
     onMoodChanged: {
-        if (!talpa)
+        if (!talpy)
             return
-        talpa.setMood(mood)
+        talpy.setMood(mood)
         if (lastMood === "done" && mood !== "done" && !leaving)
             react("yawn")     // woken up by work
         lastMood = mood
@@ -158,7 +158,7 @@ Item {
         }
     }
     onLiveChanged: {
-        if (!live || !lone || !talpa || mood === "done" || mood === "loading")
+        if (!live || !lone || !talpy || mood === "done" || mood === "loading")
             return
         const holiday = holidayGreeting()
         if (holiday) {
@@ -179,7 +179,7 @@ Item {
         })
     }
 
-    // Clicked: the lone Talpa gets petted, a chat's pet opens its chat
+    // Clicked: the lone Talpy gets petted, a chat's pet opens its chat
     function clicked() {
         if (lone) {
             petIt()
@@ -239,9 +239,9 @@ Item {
         landing = true
         fall.stop()   // grabbed again while falling
         stride.stop()
-        if (talpa) {
+        if (talpy) {
             // (its hole doesn't come along: it stays where it was, until it has landed)
-            const open = talpa.setHeld(true)
+            const open = talpy.setHeld(true)
             if (open > 0)
                 leaveHole(open)
         }
@@ -266,11 +266,11 @@ Item {
         held = false
         if (leftHole.shown)
             closeHole.restart()   // (the one it left is filled in; it digs a new one where it is)
-        if (!talpa) {
+        if (!talpy) {
             landing = false
             return
         }
-        const feel = talpa.land(fromHeight / unit, () => {
+        const feel = talpy.land(fromHeight / unit, () => {
             pet.landing = false
             if (pet.leaving)
                 pet.goAway()      // its chat left while you held it: now it goes
@@ -315,7 +315,7 @@ Item {
         }
     }
 
-    // The lone Talpa turns towards the mouse while it hovers the stage
+    // The lone Talpy turns towards the mouse while it hovers the stage
     Timer {
         interval: 350
         repeat: true
@@ -337,7 +337,7 @@ Item {
         running: pet.playing && pet.contextFullText !== "" && (pet.mood === "working" || pet.mood === "agents") && !pet.leaving
         triggeredOnStart: true
         onTriggered: {
-            if (!pet.held && pet.talpa && !pet.talpa.run) {
+            if (!pet.held && pet.talpy && !pet.talpy.run) {
                 pet.react("contextFull")
                 pet.say(pet.contextFullText)
             }
@@ -351,7 +351,7 @@ Item {
         running: pet.playing && pet.isMain && root.highUsageText !== "" && pet.mood !== "done" && !pet.leaving
         triggeredOnStart: true
         onTriggered: {
-            if (pet.held || !pet.talpa || pet.talpa.run)
+            if (pet.held || !pet.talpy || pet.talpy.run)
                 return
             pet.react(root.maxFiveHour >= 100 ? "battery" : "mindblown")
             pet.say(root.highUsageText)
@@ -419,7 +419,7 @@ Item {
         onFinished: leftHole.shown = false
     }
 
-    TalpaView {
+    TalpyView {
         id: view
         visible: !pet.departed   // (dug away: not even back up for the moment before it's removed)
         box: pet.box
@@ -436,9 +436,9 @@ Item {
         playing: pet.playing
         travels: pet.lone
         tint: pet.lone ? "transparent" : pet.tint
-        // Both are films (TalpaView.qml), drawn live while you hold them and
+        // Both are films (TalpyView.qml), drawn live while you hold them and
         // until they've landed, and for a move too slow for a picture every
-        // tick (it would step). The big Talpa: a picture every frame of the
+        // tick (it would step). The big Talpy: a picture every frame of the
         // clock, live until a new pose has settled, breathing at rest. A
         // chat's pet: smaller, so a picture every other tick (30 a second in
         // the popup, 15 on the desktop: even steps, each picture as long),

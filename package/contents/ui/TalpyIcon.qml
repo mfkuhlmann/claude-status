@@ -1,7 +1,7 @@
 import QtQuick
-import "talpa/glyph.mjs" as G
+import "talpy/glyph.mjs" as G
 
-// The panel icon: Talpa peeking up through the panel's edge (talpa/glyph.mjs),
+// The panel icon: Talpy peeking up through the panel's edge (talpy/glyph.mjs),
 // in the state's color. It pops up when a chat needs you, glances around while
 // Claude works, smiles when it's your turn and sleeps when nothing runs.
 Canvas {

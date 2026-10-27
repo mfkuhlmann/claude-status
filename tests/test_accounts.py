@@ -19,7 +19,7 @@ spec.loader.exec_module(accounts)
 cs = accounts.cs
 import jump  # noqa: E402  (accounts.py opens its terminals through it)
 
-from test_claude_status import session, write  # noqa: E402
+from test_talpy_den import session, write  # noqa: E402
 
 # A stand-in claude: notes each call (its arguments and CLAUDE_CONFIG_DIR),
 # answers `auth status` from the folder's .claude.json and logs out the way
@@ -215,7 +215,7 @@ class AddTests(Home):
         write(self.bin / "claude-switch", "#!/bin/sh\necho the real claude-switch\n")
         ok, message, _ = self.add("switch", with_command=True)
         self.assertFalse(ok)
-        self.assertIn("~/.local/bin/claude-switch is there already (not made by Claude Status)", message)
+        self.assertIn("~/.local/bin/claude-switch is there already (not made by Talpy Den)", message)
         self.assertFalse((self.home / ".claude-switch").exists())  # nothing made
         self.assertTrue(self.add("switch")[0])  # without the command it's fine
         profile, _ = accounts.find_profile(self.home, [], ".claude-switch")

@@ -1,20 +1,20 @@
 #!/usr/bin/env node
-// Draws Talpa's still pictures as SVG files from the same code that animates
-// it (package/contents/ui/talpa): the notification icons, the chat pane's
+// Draws Talpy's still pictures as SVG files from the same code that animates
+// it (package/contents/ui/talpy): the notification icons, the chat pane's
 // window icon, and on request the VS Code extension's icons.
 //
-//   node tools/talpa_icons.mjs                    notification and window icons in package/contents/pets/
-//   node tools/talpa_icons.mjs --store OUT.svg    the 128 px store icon (Talpa in its burrow on navy)
-//   node tools/talpa_icons.mjs --glyph OUT.svg    the one-color panel icon (VS Code's sidebar)
+//   node tools/talpy_icons.mjs                    notification and window icons in package/contents/pets/
+//   node tools/talpy_icons.mjs --store OUT.svg    the 128 px store icon (Talpy in its burrow on navy)
+//   node tools/talpy_icons.mjs --glyph OUT.svg    the one-color panel icon (VS Code's sidebar)
 //
-// A small stand-in for a canvas records what Talpa draws, with every point
+// A small stand-in for a canvas records what Talpy draws, with every point
 // already moved by the transform, as SVG paths.
 
 import { writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Talpa } from '../package/contents/ui/talpa/talpa.mjs';
-import { drawGlyph } from '../package/contents/ui/talpa/glyph.mjs';
+import { Talpy } from '../package/contents/ui/talpy/talpy.mjs';
+import { drawGlyph } from '../package/contents/ui/talpy/glyph.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const num = v => +v.toFixed(2);
@@ -133,8 +133,8 @@ class SvgContext {
     }
 }
 
-function talpaPicture(step, viewBox, background, place) {
-    const t = new Talpa({ brain: false });
+function talpyPicture(step, viewBox, background, place) {
+    const t = new Talpy({ brain: false });
     t.tick(10000);
     t.pose(step);
     t.tick(10000);
@@ -158,7 +158,7 @@ const args = process.argv.slice(2);
 if (args[0] === '--store') {
     const bg = '<defs><linearGradient id="navy" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2a3463"/>'
         + '<stop offset="1" stop-color="#161b36"/></linearGradient></defs><rect x="4" y="4" width="120" height="120" rx="28" fill="url(#navy)"/>';
-    const svg = talpaPicture({ depth: 'half', eyes: 'open', mouth: 'smile', lamp: 'idle' }, '0 0 128 128', bg,
+    const svg = talpyPicture({ depth: 'half', eyes: 'open', mouth: 'smile', lamp: 'idle' }, '0 0 128 128', bg,
         ctx => { ctx.translate(10, 4); ctx.scale(108 / 64, 108 / 64); });
     writeFileSync(args[1], svg);
 } else if (args[0] === '--glyph') {
@@ -168,9 +168,9 @@ if (args[0] === '--store') {
 } else {
     const dir = join(here, '../package/contents/pets');
     for (const [name, step] of Object.entries(NOTIFY))   // (the sign needs room on the right)
-        writeFileSync(join(dir, `notify-${name}.svg`), talpaPicture(step, name === 'oncall' ? '0 -6 70 70' : '1 -1 62 64'));
-    writeFileSync(join(dir, 'talpa.svg'), talpaPicture({ depth: 'half', eyes: 'open', mouth: 'smile', lamp: 'idle' }, '1 -1 62 64'));
+        writeFileSync(join(dir, `notify-${name}.svg`), talpyPicture(step, name === 'oncall' ? '0 -6 70 70' : '1 -1 62 64'));
+    writeFileSync(join(dir, 'talpy.svg'), talpyPicture({ depth: 'half', eyes: 'open', mouth: 'smile', lamp: 'idle' }, '1 -1 62 64'));
     // the chat pane's icon in the taskbar (install.sh's window rule): further
     // out of its burrow, filling the square as other apps' icons do
-    writeFileSync(join(dir, 'window.svg'), talpaPicture({ depth: 'high', eyes: 'open', mouth: 'smile', lamp: 'idle' }, '4 8.1 56 56'));
+    writeFileSync(join(dir, 'window.svg'), talpyPicture({ depth: 'high', eyes: 'open', mouth: 'smile', lamp: 'idle' }, '4 8.1 56 56'));
 }

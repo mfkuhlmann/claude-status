@@ -1,6 +1,6 @@
 // The pets (port of the Plasma widget's PetStrip.qml and Pet.qml).
 //
-// The hero: the big Talpa at the top of the popup, on a stage lit in the
+// The hero: the big Talpy at the top of the popup, on a stage lit in the
 // whole dashboard's mood (orange and pulsing when a chat needs you, the
 // accent while chats work, green when it's your turn, a starry night once
 // everything is done), with a headline and the session counts.
@@ -11,7 +11,7 @@
 // out, opens it when clicked, and stays until the chat leaves the list; then
 // it waves and digs away.
 //
-// Talpa itself (looks, moods, what it does) is talpa/talpa.js, shared with the
+// Talpy itself (looks, moods, what it does) is talpy/talpy.js, shared with the
 // Plasma widget and the VS Code extension; it's drawn with Cairo
 // (cairoCanvas.js). Nothing moves while the popup is closed.
 
@@ -22,8 +22,8 @@ import St from 'gi://St';
 
 import * as L from '../logic.js';
 import {CairoCanvas} from './cairoCanvas.js';
-import {Pictures} from './talpa/pictures.js';
-import {Talpa, LILAC, calmColors} from './talpa/talpa.js';
+import {Pictures} from './talpy/pictures.js';
+import {Talpy, LILAC, calmColors} from './talpy/talpy.js';
 import {box, dot, label, link} from './widgets.js';
 
 // Colors that stay apart from each other on light and dark themes
@@ -118,14 +118,14 @@ class Pet {
         this.timers = new Timers();
 
         const s = stage.size;
-        this.talpa = new Talpa({colors: this.lone ? LILAC : calmColors(this.tint), theme: stage.pets.theme,
+        this.talpy = new Talpy({colors: this.lone ? LILAC : calmColors(this.tint), theme: stage.pets.theme,
             travels: this.lone});
-        this.talpa.onTravel = ms => this._travel(ms);
-        this.talpa.tick(Date.now());
+        this.talpy.onTravel = ms => this._travel(ms);
+        this.talpy.tick(Date.now());
         this.actor = new St.Widget({reactive: true, track_hover: true, width: s.slot, height: s.canvasH + s.tag});
-        // Talpa on its view, drawn from its sheets (Cairo surfaces): a chat's
-        // pet as pictures (talpa/pictures.js), the hero live on its one sheet
-        this.pictures = new Pictures(this.talpa, this.lone ? 1 : 5);
+        // Talpy on its view, drawn from its sheets (Cairo surfaces): a chat's
+        // pet as pictures (talpy/pictures.js), the hero live on its one sheet
+        this.pictures = new Pictures(this.talpy, this.lone ? 1 : 5);
         this.sheets = [];
         this._sheetSize = '';
         this.view = new St.DrawingArea({width: s.canvasW, height: s.canvasH, x: Math.round((s.slot - s.canvasW) / 2)});
@@ -243,7 +243,7 @@ class Pet {
         return this.stage.live;
     }
 
-    // Talpa's moods: idle working agents needs done failed limit (error loading for the hero)
+    // Talpy's moods: idle working agents needs done failed limit (error loading for the hero)
     get mood() {
         if (this.lone)
             return this.stage.ctxMood;
@@ -267,7 +267,7 @@ class Pet {
             return;
         const mood = this.mood;
         if (mood !== this.lastMood) {
-            this.talpa.setMood(mood);
+            this.talpy.setMood(mood);
             if (this.lastMood === 'done' && mood !== 'done' && !this.leaving)
                 this.react('yawn');   // woken up by work
             this.lastMood = mood;
@@ -288,7 +288,7 @@ class Pet {
     // ------------------------------------------------------------ actions
 
     react(name, done) {
-        this.talpa.react(name, done || null);
+        this.talpy.react(name, done || null);
     }
 
     clampX(x) {
@@ -320,7 +320,7 @@ class Pet {
             to = cursor >= 0 ? cursor + (Math.random() - 0.5) * s.body : Math.random() * this.stage.width;
         }
         to = this.clampX(to);
-        this.talpa.facingLeft = to < this.px;
+        this.talpy.facingLeft = to < this.px;
         this.actor.remove_transition('x');
         this.actor.ease({
             x: Math.round(to - this.stage.size.slot / 2),
@@ -417,15 +417,15 @@ class Pet {
         if (!live)
             return;
         this.sync();
-        this.talpa.setTheme(this.stage.pets.theme);
+        this.talpy.setTheme(this.stage.pets.theme);
         this.pictures.reset();   // (the theme may have changed)
         // its clock, and its picture: the hero's as often as that shows
-        // something new (talpa.frameMs: 25 times a second for quick moves,
+        // something new (talpy.frameMs: 25 times a second for quick moves,
         // down to 5 at rest), a chat's pet's when what it shows changes
         // (pictures: a sheet to draw, or another one to show)
         this.timers.every('frame', 40, () => {
             const now = Date.now();
-            this.talpa.tick(now);
+            this.talpy.tick(now);
             if (this.gone)
                 return;   // (it dug away in that tick: removed)
             if (this.pictures.tick(now) || this.pictures.sheets.some(s => s.paint))
@@ -436,7 +436,7 @@ class Pet {
             this.timers.every('face', 350, () => {
                 const cursor = this.stage.cursorX;
                 if (cursor >= 0 && Math.abs(cursor - this.px) > this.stage.size.body * 0.4 && this.mood !== 'done')
-                    this.talpa.facingLeft = cursor < this.px;
+                    this.talpy.facingLeft = cursor < this.px;
             });
         }
         // a working chat whose context is nearly full, or a limit close by
@@ -445,7 +445,7 @@ class Pet {
     }
 
     _worry() {
-        if (this.leaving || this.talpa.busy)
+        if (this.leaving || this.talpy.busy)
             return;
         const ctx = this.stage.ctx, mood = this.mood;
         const contextFull = !this.lone
@@ -515,7 +515,7 @@ class Stage {
 
         const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
         const gu = 16 * scale;
-        // Talpa's 64-unit box, its canvas (room around it for what it throws and
+        // Talpy's 64-unit box, its canvas (room around it for what it throws and
         // holds up), where the floor is on the canvas, and its body's size
         const boxPx = (hero ? 5.6 : 3.8) * gu;
         this.size = {
@@ -905,10 +905,10 @@ export class Pets {
         this.mood = 'loading';
         this.accentRgb = [53, 132, 228];   // "working" blue (stylesheet.css)
         this.hero = new Stage(this, 'hero', true);
-        const talpa = new Pet(this.hero, '', {});
-        this.hero.list.set('', talpa);
-        this.hero.actor.insert_child_below(talpa.actor, this.hero.bubble);
-        talpa.sync();
+        const talpy = new Pet(this.hero, '', {});
+        this.hero.list.set('', talpy);
+        this.hero.actor.insert_child_below(talpy.actor, this.hero.bubble);
+        talpy.sync();
         this._heroShown = null;
     }
 
@@ -924,7 +924,7 @@ export class Pets {
         return this.settings.get_boolean('show-pet');
     }
 
-    // Talpa's words and particles take the popup's text color
+    // Talpy's words and particles take the popup's text color
     updateTheme(actor) {
         if (!actor.get_stage())
             return;

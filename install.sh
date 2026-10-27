@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install or upgrade Claude Status (the Plasma widget, or the GNOME Shell
+# Install or upgrade Talpy Den (the Plasma widget, or the GNOME Shell
 # extension) and hook the Claude status line.
 #   ./install.sh              install/upgrade; add the status-line snippet and
 #                             (Plasma) the permission hook (asks first)
@@ -13,9 +13,15 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-id="org.wzaielamri.claudestatus"
-uuid="claude-status@wzaielamri.github.io"
-marker_start="# >>> claude-widget >>>"
+id="org.wzaielamri.talpyden"
+uuid="talpy-den@wzaielamri.github.io"
+marker_start="# >>> talpy-den >>>"
+# What earlier versions installed under their first name, replaced on upgrade
+legacy_id="org.wzaielamri.claudestatus"
+legacy_uuid="claude-status@wzaielamri.github.io"
+legacy_marker_start="# >>> claude-widget >>>"
+legacy_pane_app="org.wzaielamri.claudestatus.chat"
+legacy_pane_rule="claude-status-chat-pane"
 yes=0
 uninstall=0
 target=""
@@ -45,7 +51,7 @@ if [ -z "$target" ]; then
 fi
 
 if [ "$target" = plasma ] && ! command -v kpackagetool6 >/dev/null; then
-  echo "kpackagetool6 not found: Claude Status needs KDE Plasma 6 (Plasma 5 isn't supported)," >&2
+  echo "kpackagetool6 not found: Talpy Den needs KDE Plasma 6 (Plasma 5 isn't supported)," >&2
   echo "or GNOME Shell 43/44 or 49 or newer (./install.sh --gnome)." >&2
   exit 1
 fi
@@ -112,7 +118,7 @@ patched_statusline() {
 import re, sys
 path, snippet_path, mode = sys.argv[1:4]
 text = open(path, encoding="utf-8").read()
-block = re.compile(r"^# >>> claude-widget >>>\n.*?^# <<< claude-widget <<<\n", re.S | re.M)
+block = re.compile(r"^# >>> (talpy-den|claude-widget) >>>\n.*?^# <<< \1 <<<\n", re.S | re.M)
 text = block.sub("", text)
 if mode == "add":
     snippet = open(snippet_path, encoding="utf-8").read()
@@ -131,6 +137,10 @@ if mode == "add":
     text = "".join(lines)
 sys.stdout.write(text)
 EOF
+}
+
+has_snippet() {  # the snippet is in the script $1 (under either of its names)
+  grep -qF "$marker_start" "$1" || grep -qF "$legacy_marker_start" "$1"
 }
 
 apply_statusline() {
@@ -161,7 +171,7 @@ apply_statusline() {
     chmod --reference="$target" "$new" 2>/dev/null || chmod 755 "$new"
     mv -f "$new" "$target"
     echo "Patched $statusline (backup next to it)."
-  elif grep -qF "$marker_start" "$statusline"; then
+  elif has_snippet "$statusline"; then
     echo "Skipped $statusline; its widget snippet stays as it was."
   else
     echo "Skipped $statusline; plan-usage bars stay empty until the snippet is added."
@@ -177,12 +187,12 @@ install_gnome() {
   # GNOME Shell 43/44 load extensions the older way: build a converted copy
   major="$(gnome-shell --version 2>/dev/null | sed -nE 's/^GNOME Shell ([0-9]+).*/\1/p')"
   if [ -n "$major" ] && [ "$major" -ge 45 ] && [ "$major" -le 48 ]; then
-    echo "GNOME Shell $major isn't supported: Claude Status runs on GNOME Shell 43/44 and 49 or newer." >&2
+    echo "GNOME Shell $major isn't supported: Talpy Den runs on GNOME Shell 43/44 and 49 or newer." >&2
     exit 1
   fi
   if [ -n "$major" ] && [ "$major" -lt 45 ]; then
     if [ "$major" -lt 43 ]; then
-      echo "GNOME Shell $major is too old: Claude Status needs GNOME Shell 43 or newer." >&2
+      echo "GNOME Shell $major is too old: Talpy Den needs GNOME Shell 43 or newer." >&2
       exit 1
     fi
     "$here/gnome/build.sh" --gnome43 >/dev/null
@@ -220,12 +230,12 @@ uninstall_gnome() {
 # The chat pane's icon (Plasma). The pane is a window of plasmashell, so the
 # taskbar would show Plasma's icon for it; a KWin window rule gives windows
 # titled "… — Claude chat" a desktop file of their own (hidden from menus)
-# with Talpa as its icon. It shows in System Settings → Window Rules.
-pane_app="org.wzaielamri.claudestatus.chat"
+# with Talpy as its icon. It shows in System Settings → Window Rules.
+pane_app="org.wzaielamri.talpyden.chat"
 pane_desktop="${XDG_DATA_HOME:-$HOME/.local/share}/applications/$pane_app.desktop"
-pane_rule="claude-status-chat-pane"
+pane_rule="talpy-den-chat-pane"
 pane_rule_keys=(
-  "Description=Claude Status: Talpa as the chat pane's icon"
+  "Description=Talpy Den: Talpy as the chat pane's icon"
   "title=— Claude chat" "titlematch=2"         # 2: the title has it
   "wmclass=plasmashell" "wmclassmatch=2"       # (org.kde.plasmashell on Wayland)
   "types=1"                                    # normal windows
@@ -251,7 +261,7 @@ install_pane_icon() {
 [Desktop Entry]
 Type=Application
 Name=Claude chat
-Comment=The chat pane of the Claude Status widget
+Comment=The chat pane of the Talpy Den widget
 Icon=$HOME/.local/share/plasma/plasmoids/$id/contents/pets/window.svg
 Exec=true
 NoDisplay=true
@@ -266,7 +276,7 @@ EOF
     set_kwin_rules "${rules[@]}"  # (KWin reads the rule again)
   else
     set_kwin_rules "${rules[@]}" "$pane_rule"
-    echo "The chat pane shows Talpa in the taskbar (a window rule: System Settings → Window Rules)."
+    echo "The chat pane shows Talpy in the taskbar (a window rule: System Settings → Window Rules)."
   fi
 }
 
@@ -287,6 +297,42 @@ uninstall_pane_icon() {
   if [ "$found" = 1 ]; then
     set_kwin_rules "${rules[@]}"
   fi
+}
+
+# The widget/extension an earlier version installed under its first name:
+# taken out, with the chat pane's window rule and desktop file. (Its settings
+# and place in the panel don't carry over: add the new one again.)
+remove_legacy() {
+  if [ "$target" = gnome ]; then
+    [ -d "$HOME/.local/share/gnome-shell/extensions/$legacy_uuid" ] || return 0
+    gnome-extensions disable "$legacy_uuid" 2>/dev/null || true
+    gnome-extensions uninstall "$legacy_uuid" 2>/dev/null || rm -rf "$HOME/.local/share/gnome-shell/extensions/$legacy_uuid"
+    local list
+    list="$(gsettings get org.gnome.shell enabled-extensions 2>/dev/null || true)"
+    case "$list" in
+      *"'$legacy_uuid'"*)
+        list="$(printf '%s' "$list" | sed -e "s/, '$legacy_uuid'//; s/'$legacy_uuid', //; s/'$legacy_uuid'//")"
+        gsettings set org.gnome.shell enabled-extensions "$list" || true ;;
+    esac
+    echo "Replaced the old Claude Status extension."
+    return 0
+  fi
+  rm -f "${XDG_DATA_HOME:-$HOME/.local/share}/applications/$legacy_pane_app.desktop"
+  if command -v kreadconfig6 >/dev/null && command -v kwriteconfig6 >/dev/null; then
+    local key rules=() rule found=0
+    while IFS= read -r rule; do
+      if [ "$rule" = "$legacy_pane_rule" ]; then found=1; else rules+=("$rule"); fi
+    done < <(kwin_rules)
+    if [ "$found" = 1 ]; then
+      for key in Description title titlematch wmclass wmclassmatch types desktopfile desktopfilerule; do
+        kwriteconfig6 --file kwinrulesrc --group "$legacy_pane_rule" --key "$key" --delete
+      done
+      set_kwin_rules "${rules[@]}"
+    fi
+  fi
+  [ -d "$HOME/.local/share/plasma/plasmoids/$legacy_id" ] || return 0
+  kpackagetool6 -t Plasma/Applet -r "$legacy_id" || true
+  echo "Replaced the old Claude Status widget: add Talpy Den to your panel (right-click the panel → Add Widgets…)."
 }
 
 mapfile -t statuslines < <(find_statuslines)
@@ -311,28 +357,30 @@ if [ "$uninstall" = 1 ]; then
     kpackagetool6 -t Plasma/Applet -r "$id" || true
     uninstall_pane_icon
   fi
+  remove_legacy
   # The snippet stays while something else still reads what it saves
   others=()
   [ "$target" != plasma ] && [ -d "$HOME/.local/share/plasma/plasmoids/$id" ] && others+=("the Plasma widget")
   [ "$target" != gnome ] && [ -d "$HOME/.local/share/gnome-shell/extensions/$uuid" ] && others+=("the GNOME extension")
-  compgen -G "$HOME/.vscode*/extensions/wzaielamri.claude-status-*" >/dev/null && others+=("the VS Code extension")
+  compgen -G "$HOME/.vscode*/extensions/wzaielamri.talpy-den-*" >/dev/null && others+=("the VS Code extension")
   if [ "${#others[@]}" -gt 0 ]; then
     echo "Kept the status-line snippet: ${others[*]} still uses it."
   else
     for statusline in "${statuslines[@]}"; do
-      [ -f "$statusline" ] && grep -qF "$marker_start" "$statusline" && apply_statusline remove
+      [ -f "$statusline" ] && has_snippet "$statusline" && apply_statusline remove
     done
     # (the permission hook too: nothing would answer what it hands on; and
     # the live hook: nothing would read what it notes)
     relay off
     live off
   fi
-  echo "Uninstalled. Cached data is in ${XDG_CACHE_HOME:-$HOME/.cache}/claude-widget (safe to delete)."
+  echo "Uninstalled. Cached data is in ${XDG_CACHE_HOME:-$HOME/.cache}/talpy-den (safe to delete)."
   exit 0
 fi
 
 # 1. Widget (without Python bytecode caches a test run may have left in it)
 find "$here/package" -name __pycache__ -type d -prune -exec rm -rf {} +
+remove_legacy
 if [ "$target" = gnome ]; then
   install_gnome
 elif [ -d "$HOME/.local/share/plasma/plasmoids/$id" ]; then
@@ -382,6 +430,8 @@ if [ "$target" = plasma ]; then
   fi
 fi
 
+compgen -G "$HOME/.vscode*/extensions/wzaielamri.claude-status-*" >/dev/null &&
+  echo "The VS Code extension is now Talpy Den too: install the new one and remove \"Claude Status\" from VS Code's extensions."
 echo
 if [ "$target" = gnome ]; then
   if [ "$upgraded" = 1 ]; then
@@ -394,5 +444,5 @@ if [ "$target" = gnome ]; then
 elif [ "$upgraded" = 1 ]; then
   echo "Widget upgraded. If the panel still shows the old version: systemctl --user restart plasma-plasmashell"
 else
-  echo "Widget installed. Right-click the panel → Add Widgets… → search \"Claude Status\"."
+  echo "Widget installed. Right-click the panel → Add Widgets… → search \"Talpy Den\"."
 fi

@@ -22,7 +22,7 @@ PlasmaExtras.Representation {
             spacing: Kirigami.Units.smallSpacing
 
             // In the system tray, the tray's own heading names the widget
-            TalpaIcon {
+            TalpyIcon {
                 visible: !root.inTray
                 Layout.preferredWidth: Kirigami.Units.iconSizes.small
                 Layout.preferredHeight: Kirigami.Units.iconSizes.small
@@ -30,17 +30,11 @@ PlasmaExtras.Representation {
                 mode: root.overall
                 moving: root.dashboardShown && !root.coveredByWindow
             }
-            Kirigami.Heading {
-                textFormat: Text.PlainText
-                visible: !root.inTray
-                level: 3
-                text: i18n("Claude Code")
-            }
-            // Your chats now, your last 7 days with Claude (WeekView.qml), or
-            // the permissions you gave (PermsView.qml)
+            // The app's name is the first tab: your chats now. The others: your
+            // last 7 days with Claude (WeekView.qml), the permissions you gave
+            // (PermsView.qml), your projects (ProjectsView.qml)
             PlasmaComponents3.TabBar {
                 id: tabs
-                Layout.leftMargin: root.inTray ? 0 : Kirigami.Units.smallSpacing
                 // (squeezed, it shares out what's left, and "Recap" broke onto two lines)
                 Layout.minimumWidth: implicitWidth
                 // (set by a click, not by the bar's own index: a new popup
@@ -49,7 +43,7 @@ PlasmaExtras.Representation {
 
                 PlasmaComponents3.TabButton {
                     width: implicitWidth   // (else the bar gives each the same share)
-                    text: i18n("Chats")
+                    text: i18n("Talpy Den")
                     onClicked: root.popupTab = "chats"
                 }
                 PlasmaComponents3.TabButton {
@@ -78,7 +72,7 @@ PlasmaExtras.Representation {
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
                 horizontalAlignment: Text.AlignRight
-                text: hero.visible ? "" : root.summaryText()   // the big Talpa's headline says it
+                text: hero.visible ? "" : root.summaryText()   // the big Talpy's headline says it
                 opacity: 0.8
                 elide: Text.ElideRight
             }
@@ -174,7 +168,7 @@ PlasmaExtras.Representation {
             onStopped: { tabSlide.x = 0; tabContent.opacity = 1 }
         }
 
-        // The big Talpa: the whole dashboard at a glance (stays put while the list scrolls)
+        // The big Talpy: the whole dashboard at a glance (stays put while the list scrolls)
         PetStrip {
             id: hero
             hero: true

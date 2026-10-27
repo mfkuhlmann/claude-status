@@ -397,7 +397,7 @@ PlasmaComponents3.ScrollView {
                     textFormat: Text.PlainText
                     anchors.fill: parent
                     mainText: parent.text
-                    subText: i18n("These days as a card with Talpa: save it or copy it, with your projects' names or without.")
+                    subText: i18n("These days as a card with Talpy: save it or copy it, with your projects' names or without.")
                 }
             }
         }

@@ -25,7 +25,7 @@ python3 -I - "$work/pkg" "$out" "$secs" <<'PY'
 import json, os, sys
 pkg, out, secs = sys.argv[1:4]
 meta = json.load(open(f"{pkg}/metadata.json"))
-meta["KPlugin"]["Id"] = "org.wzaielamri.claudestatus.rendertest"
+meta["KPlugin"]["Id"] = "org.wzaielamri.talpyden.rendertest"
 json.dump(meta, open(f"{pkg}/metadata.json", "w"), indent=2)
 full = f"{pkg}/contents/ui/FullRepresentation.qml"
 s = open(full).read()
@@ -57,26 +57,26 @@ grab = """
 s = s.replace("PlasmoidItem {\n    id: root\n", "PlasmoidItem {\n    id: root\n" + grab, 1)
 open(main, "w").write(s)
 PY
-mkdir -p "$work/data" "$work/config" "$work/state" "$work/cache/claude-widget"
+mkdir -p "$work/data" "$work/config" "$work/state" "$work/cache/talpy-den"
 for f in kdeglobals plasmarc; do [ -f "$HOME/.config/$f" ] && cp "$HOME/.config/$f" "$work/config/"; done
 # A copy of the widget's cache (the status-line snapshots for plan usage, and
 # the token and transcript caches so the first check is quick), not the
 # cache itself: the render mustn't sign up as another copy of the widget
 # (instances.json) or hand its settings to the real ones (settings.json)
-real_cache="${XDG_CACHE_HOME:-$HOME/.cache}/claude-widget"
+real_cache="${XDG_CACHE_HOME:-$HOME/.cache}/talpy-den"
 if [ -d "$real_cache" ]; then
-  [ -d "$real_cache/statusline" ] && cp -a "$real_cache/statusline" "$work/cache/claude-widget/"
-  [ -d "$real_cache/live" ] && cp -a "$real_cache/live" "$work/cache/claude-widget/"  # (live mode's steps)
+  [ -d "$real_cache/statusline" ] && cp -a "$real_cache/statusline" "$work/cache/talpy-den/"
+  [ -d "$real_cache/live" ] && cp -a "$real_cache/live" "$work/cache/talpy-den/"  # (live mode's steps)
   find "$real_cache" -maxdepth 1 -name '*.json' ! -name instances.json ! -name settings.json \
-    -exec cp -p {} "$work/cache/claude-widget/" \;
+    -exec cp -p {} "$work/cache/talpy-den/" \;
 fi
 {
-  printf '[Applets][1]\nimmutability=1\nplugin=org.wzaielamri.claudestatus.rendertest\n\n'
+  printf '[Applets][1]\nimmutability=1\nplugin=org.wzaielamri.talpyden.rendertest\n\n'
   printf '[Applets][1][Configuration]\ngeometry=0,0,%s,%s\n' "${WIN_W:-520}" "${WIN_H:-560}"
   [ -n "${SSH_HOSTS:-}" ] && printf '\n[Applets][1][Configuration][General]\nsshHosts=%s\nremotePollSeconds=10\n' "$SSH_HOSTS"
 } > "$work/config/plasmawindowedrc"
 export XDG_CONFIG_HOME="$work/config" XDG_STATE_HOME="$work/state" XDG_DATA_HOME="$work/data" XDG_CACHE_HOME="$work/cache"
 kpackagetool6 -t Plasma/Applet -i "$work/pkg" >/dev/null
 QT_FORCE_STDERR_LOGGING=1 QT_QPA_PLATFORMTHEME=kde QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
-  timeout $((secs + 20)) plasmawindowed org.wzaielamri.claudestatus.rendertest > "${out%.png}.log" 2>&1 || true
+  timeout $((secs + 20)) plasmawindowed org.wzaielamri.talpyden.rendertest > "${out%.png}.log" 2>&1 || true
 grep -E "RENDER|TypeError|ReferenceError|Error:" "${out%.png}.log" || echo "no RENDER line: see ${out%.png}.log"

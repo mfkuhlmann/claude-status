@@ -1,4 +1,4 @@
-"""Talpa, the pet: what the widget asks of it exists, its shared code runs in
+"""Talpy, the pet: what the widget asks of it exists, its shared code runs in
 every host, and its rules hold (run in Node where it's installed)."""
 import json
 import re
@@ -9,15 +9,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent / "package/contents"
 PETS = ROOT / "pets"
-TALPA = ROOT / "ui/talpa"
+TALPY = ROOT / "ui/talpy"
 
 
 def quoted(text):
     return set(re.findall(r'"([a-zA-Z][\w-]*)"', text))
 
 
-def talpa_names():
-    text = (TALPA / "actions.mjs").read_text()
+def talpy_names():
+    text = (TALPY / "actions.mjs").read_text()
     actions = text[text.index("export const ACTIONS = {"):text.index("export const MOODS")]
     moods = text[text.index("export const MOODS"):]
     pools = re.findall(r"pool: \{([^}]*)\}", moods)
@@ -27,20 +27,20 @@ def talpa_names():
 
 
 def run_node(script):
-    """Runs a module script in Node with Talpa imported; returns its JSON output."""
+    """Runs a module script in Node with Talpy imported; returns its JSON output."""
     if not shutil.which("node"):
         raise unittest.SkipTest("node isn't installed")
-    code = (f"import {{ Talpa }} from {json.dumps(str(TALPA / 'talpa.mjs'))};\n"
-            f"import {{ ACTIONS, MOODS }} from {json.dumps(str(TALPA / 'actions.mjs'))};\n"
-            f"import {{ Pictures }} from {json.dumps(str(TALPA / 'pictures.mjs'))};\n"
-            f"import {{ Films }} from {json.dumps(str(TALPA / 'films.mjs'))};\n" + script)
+    code = (f"import {{ Talpy }} from {json.dumps(str(TALPY / 'talpy.mjs'))};\n"
+            f"import {{ ACTIONS, MOODS }} from {json.dumps(str(TALPY / 'actions.mjs'))};\n"
+            f"import {{ Pictures }} from {json.dumps(str(TALPY / 'pictures.mjs'))};\n"
+            f"import {{ Films }} from {json.dumps(str(TALPY / 'films.mjs'))};\n" + script)
     out = subprocess.run(["node", "--input-type=module", "-e", code], capture_output=True, text=True, timeout=120)
     if out.returncode:
         raise AssertionError(out.stderr)
     return json.loads(out.stdout)
 
 
-# A canvas that draws nothing, for running Talpa's drawing code (and one
+# A canvas that draws nothing, for running Talpy's drawing code (and one
 # that counts what it's asked to draw)
 CALL_COUNTER = """
 let calls = 0;
@@ -53,28 +53,28 @@ const ctx = new Proxy({}, { get: (t, k) => k === 'createLinearGradient' ? () => 
 """
 
 
-class TalpaTests(unittest.TestCase):
+class TalpyTests(unittest.TestCase):
     def test_every_action_and_mood_the_widget_asks_for_exists(self):
-        actions, moods, pools = talpa_names()
+        actions, moods, pools = talpy_names()
         pet = (ROOT / "ui/Pet.qml").read_text()
         asked = set()
         for call in re.findall(r"react\(([^)]*)\)", pet):
             asked |= quoted(call)
         events = pet[pet.index("const action = {"):]
         asked |= quoted(events[:events.index("\n")])
-        self.assertEqual(sorted(asked - actions), [], "actions Pet.qml asks for that Talpa doesn't have")
+        self.assertEqual(sorted(asked - actions), [], "actions Pet.qml asks for that Talpy doesn't have")
         self.assertLessEqual(pools, actions, "a mood picks an action that doesn't exist")
         block = pet[pet.index("readonly property string mood:"):]
         main = (ROOT / "ui/main.qml").read_text()
         mood = main[main.index("readonly property string petMood"):]
         used = quoted(block[:block.index("\n\n")]) | quoted(mood[:mood.index("\n    }\n")])
         used -= {"waiting", "working", "idle", "failed"} - moods   # (the chat states it reads)
-        self.assertEqual(sorted(used - moods - {"waiting"}), [], "moods the widget sets that Talpa doesn't have")
+        self.assertEqual(sorted(used - moods - {"waiting"}), [], "moods the widget sets that Talpy doesn't have")
 
     def test_the_shared_code_runs_in_every_host(self):
         # Qt's and GNOME Shell's JavaScript engines: no optional chaining, no
         # nullish operator, no class fields; imports only of its own modules
-        for path in TALPA.glob("*.mjs"):
+        for path in TALPY.glob("*.mjs"):
             text = re.sub(r"//.*", "", path.read_text())
             self.assertNotRegex(text, r"\?\.[\w(\[]|\?\?", path.name)
             for body in re.findall(r"(?ms)^(?:export )?class \w+ \{\n(.*?)^\}", text):
@@ -86,7 +86,7 @@ class TalpaTests(unittest.TestCase):
         result = run_node(NULL_CANVAS + """
 const out = {};
 for (const name of Object.keys(ACTIONS)) {
-    const t = new Talpa({ travels: true });
+    const t = new Talpy({ travels: true });
     t.onTravel = () => {};
     let now = 1000, ended = null;
     t.tick(now);
@@ -103,7 +103,7 @@ console.log(JSON.stringify(out));""")
         # (seen on the design page, 2026-10-23). Held, it waits; dropped, it
         # lands and digs in where it landed.
         result = run_node(NULL_CANVAS + """
-const t = new Talpa({ travels: true });
+const t = new Talpy({ travels: true });
 t.onTravel = () => {};
 let now = 1000;
 t.tick(now);
@@ -135,7 +135,7 @@ for (const [name, setup] of [
     ['half dug in', t => { t.react('arrive'); t.tick(1040); }],
     ['tunnelling', t => { t.onTravel = () => {}; t.react('dig'); for (let i = 0; i < 30; i++) t.tick(1040 + i * 50); }],
     ['away', t => { t.react('leave'); for (let i = 0; i < 80; i++) t.tick(1040 + i * 50); }]]) {
-    const t = new Talpa({ brain: false });
+    const t = new Talpy({ brain: false });
     t.tick(1000); setup(t);
     const was = t.v.hole;
     const open = t.setHeld(true);
@@ -145,8 +145,8 @@ const drawn = [];
 const ctx = new Proxy({}, { get: (t, k) => k === 'fill' || k === 'stroke' ? () => drawn.push(k)
     : k in t ? t[k] : () => {}, set: (t, k, v) => { t[k] = v; return true; } });
 drawHole(ctx, 1);
-const t = new Talpa({ brain: false });
-console.log(JSON.stringify({ left: left, drawn: drawn.length, again: t.setHeld(false) }));""" % json.dumps(str(TALPA / "talpa.mjs")))
+const t = new Talpy({ brain: false });
+console.log(JSON.stringify({ left: left, drawn: drawn.length, again: t.setHeld(false) }));""" % json.dumps(str(TALPY / "talpy.mjs")))
         self.assertEqual(result["left"]["in its burrow"][1:3], [1, 0])
         for name, (was, open, hole) in result["left"].items():
             self.assertEqual(hole, 0, name + ": its hole stays behind")
@@ -154,19 +154,19 @@ console.log(JSON.stringify({ left: left, drawn: drawn.length, again: t.setHeld(f
         self.assertGreater(result["drawn"], 10)
         self.assertEqual(result["again"], 0)
         pet = (ROOT / "ui/Pet.qml").read_text()
-        self.assertIn("const open = talpa.setHeld(true)", pet)
+        self.assertIn("const open = talpy.setHeld(true)", pet)
         self.assertIn("T.drawHole(ctx, open)", pet)
         # (the one it left under the pet, filled in once it has landed)
         self.assertLess(pet.index("id: leftHole"), pet.index("id: view"))
         landed = pet[pet.index("function landed("):]
-        self.assertIn("closeHole.restart()", landed[:landed.index("talpa.land(")])
+        self.assertIn("closeHole.restart()", landed[:landed.index("talpy.land(")])
 
     def test_it_asks_to_be_drawn_only_as_often_as_it_changes(self):
         # Drawing every pet 30 times a second made Plasma Shell busy (four
         # desktop dashboards: 90% of a core, 2026-10-23). At rest it asks for
         # 5 pictures a second; quick moves (held, digging) get 25.
         result = run_node("""
-const t = new Talpa({ brain: false });
+const t = new Talpy({ brain: false });
 let now = 1000;
 t.tick(now);
 t.pose({ eyes: 'closed', mouth: 'small', depth: 'low' });   // asleep: no blinking
@@ -197,7 +197,7 @@ console.log(JSON.stringify({ scoot: length('scoot'), dig: length('dig'),
         self.assertIn('react(quick ? "scoot" : "dig")', pet)
 
     def test_the_hero_walks_anywhere_on_its_stage_over_the_headline(self):
-        # The user wanted the big Talpa free to go left too, not kept to the
+        # The user wanted the big Talpy free to go left too, not kept to the
         # right half clear of the headline: it walks in front of the words
         pet = (ROOT / "ui/Pet.qml").read_text()
         strip = (ROOT / "ui/PetStrip.qml").read_text()
@@ -222,7 +222,7 @@ console.log(JSON.stringify({ scoot: length('scoot'), dig: length('dig'),
         # (2026-10-23). Now, whenever some of it is down in the burrow (and
         # not all of it, lamp included), the hole is all there.
         result = run_node("""
-const t = new Talpa({ brain: false });
+const t = new Talpy({ brain: false });
 t.onTravel = () => {};
 let now = 1000, bad = [];
 const watch = (name, ms) => {
@@ -252,7 +252,7 @@ console.log(JSON.stringify({ bad: bad.slice(0, 5), away: away, back: t.v.depth }
 
     def test_it_never_clips_inside_a_clip(self):
         # Qt's canvas puts a clip back under the wrong transform once a clip
-        # made inside it is undone: Talpa's cut slid down by its depth and its
+        # made inside it is undone: Talpy's cut slid down by its depth and its
         # hands showed under the burrow in Plasma (2026-10-23). So its drawing
         # makes at most one clip at a time.
         result = run_node("""
@@ -266,7 +266,7 @@ const ctx = new Proxy({}, { get: (t, k) => {
 }, set: (t, k, v) => { t[k] = v; return true; } });
 let now = 1000;
 for (const name of Object.keys(ACTIONS)) {
-    const t = new Talpa({ brain: false });
+    const t = new Talpy({ brain: false });
     t.onTravel = () => {};
     t.tick(now); t.react(name);
     for (let i = 0; i < 200 && t.run; i++) { now += 50; t.tick(now); t.draw(ctx); }
@@ -276,11 +276,11 @@ console.log(JSON.stringify({ nested: nested }));""")
 
     def test_how_it_looks_after_a_fall_is_what_it_says(self):
         # "Ugh… I don't feel so good." came with a happy face: the widget
-        # judged the height its own way. Now Talpa says how it feels.
+        # judged the height its own way. Now Talpy says how it feels.
         result = run_node("""
 const out = {};
 for (const h of [5, 20, 35]) {
-    const t = new Talpa({ brain: false });
+    const t = new Talpy({ brain: false });
     t.tick(1000); t.setHeld(true); t.tick(1040);
     const feel = t.land(h, null); t.tick(1080);
     out[h] = [feel, t.st.eyes];
@@ -290,18 +290,18 @@ console.log(JSON.stringify(out));""")
         self.assertEqual(result["20"], ["dizzy", "spiral"])
         self.assertEqual(result["35"], ["sick", "spiral"])
         pet = (ROOT / "ui/Pet.qml").read_text()
-        self.assertIn('const feel = talpa.land(', pet)
+        self.assertIn('const feel = talpy.land(', pet)
         self.assertIn('if (feel === "sick")', pet)
 
     def test_a_chats_pet_as_pictures_shows_every_action(self):
-        # Only the big Talpa is drawn every frame; a chat's pet shows pictures
+        # Only the big Talpy is drawn every frame; a chat's pet shows pictures
         # (stillKey / drawStill), drawn when what it shows changes. Every
         # action still shows each of its poses, a quick move as two pictures.
         result = run_node(NULL_CANVAS + """
 let now = 1000;
 const out = { shown: {}, typing: new Set(), quiet: 0 };
 for (const name of Object.keys(ACTIONS)) {
-    const t = new Talpa({ brain: false });
+    const t = new Talpy({ brain: false });
     t.onTravel = () => {};
     t.tick(now); t.react(name);
     const poses = new Set(), steps = new Set();
@@ -317,7 +317,7 @@ for (const name of Object.keys(ACTIONS)) {
     out.shown[name] = poses.size >= 1 && poses.size >= Math.min(steps.size, 1);
 }
 // resting, asleep, it changes its picture only now and then
-const t = new Talpa({}); t.tick(now); t.setMood('done');
+const t = new Talpy({}); t.tick(now); t.setMood('done');
 let last = '';
 for (let i = 0; i < 250; i++) { now += 40; t.tick(now); const k = t.stillKey(); if (k !== last) { out.quiet++; last = k; } }
 out.typing = out.typing.size;
@@ -338,7 +338,7 @@ let seed = 7;
 Math.random = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
 const out = { fades: 0, bad: [] };
 for (const mood of ['working', 'agents', 'needs', 'idle', 'done', 'failed', 'limit']) {
-    const t = new Talpa({}); let now = 1e12; t.tick(now); t.setMood(mood);
+    const t = new Talpy({}); let now = 1e12; t.tick(now); t.setMood(mood);
     const p = new Pictures(t, 5);
     let fading = false;
     for (let i = 0; i < 3000; i++) {
@@ -363,7 +363,7 @@ console.log(JSON.stringify(out));""")
         # Typing showed two pictures a beat apart (choppy); now four, each
         # drawn once and then shown again as the hands go round
         result = run_node(NULL_CANVAS + """
-const t = new Talpa({ brain: false }); let now = 1e12; t.tick(now);
+const t = new Talpy({ brain: false }); let now = 1e12; t.tick(now);
 t.pose({ arms: 'type', prop: 'laptop', depth: 'high', look: [0, 1.6], mouth: 'none' });
 const p = new Pictures(t, 5);
 const paints = [], shown = new Set();
@@ -382,7 +382,7 @@ console.log(JSON.stringify({ shown: shown.size, late: paints.filter(i => i > 30)
         # they're drawn live (12 a second), and the confetti lands before
         # there are pictures again
         result = run_node(NULL_CANVAS + """
-const t = new Talpa({}); let now = 1e12; t.tick(now); t.setMood('working');
+const t = new Talpy({}); let now = 1e12; t.tick(now); t.setMood('working');
 for (let i = 0; i < 10; i++) { now += 40; t.tick(now); }
 const p = new Pictures(t, 5);
 t.react('finished');
@@ -411,7 +411,7 @@ Math.random = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return se
 const out = {};
 for (const mood of ['working', 'agents', 'needs', 'idle', 'done', 'failed', 'limit']) {
     seed = 7;
-    const t = new Talpa({}); let now = 1e12; t.tick(now); t.setMood(mood);
+    const t = new Talpy({}); let now = 1e12; t.tick(now); t.setMood(mood);
     const p = new Pictures(t, 5);
     let paints = 0;
     for (let i = 0; i < 4500; i++) {
@@ -431,7 +431,7 @@ console.log(JSON.stringify(out));""")
         # Four pictures a move looked like a flip book; a film has a picture
         # every frame of the move's round (at most maxFrames), each drawn once
         result = run_node(NULL_CANVAS + """
-const t = new Talpa({ brain: false }); let now = 1e12; t.tick(now);
+const t = new Talpy({ brain: false }); let now = 1e12; t.tick(now);
 t.pose({ arms: 'wave', depth: 'high', eyes: 'happy' });
 const f = new Films(t, { frameMs: 33.3, maxFrames: 24, sheets: 26 });
 const paints = [], shown = new Set();
@@ -449,7 +449,7 @@ console.log(JSON.stringify({ shown: shown.size, late: paints.filter(i => i > 30)
         # A chat's pet faded from pose to pose; now its arms, depth and lamp
         # move there in pictures in between, and only when something moves
         result = run_node(NULL_CANVAS + """
-const t = new Talpa({ brain: false }); let now = 1e12; t.tick(now);
+const t = new Talpy({ brain: false }); let now = 1e12; t.tick(now);
 t.pose({ depth: 'half', eyes: 'open' });
 const f = new Films(t, { frameMs: 33.3, tweenMs: 200, tweens: 4, sheets: 20 });
 const between = [], arms = [];
@@ -467,9 +467,9 @@ console.log(JSON.stringify({ between: between.slice(0, tweensBefore), eyesOnly: 
         self.assertTrue(all(0 < p < 1 for p in result["between"]))
         self.assertEqual(result["eyesOnly"], 0)                           # only the eyes changed: it just shows
 
-    def test_the_big_talpa_is_drawn_live_until_a_new_pose_has_settled(self):
+    def test_the_big_talpy_is_drawn_live_until_a_new_pose_has_settled(self):
         result = run_node(NULL_CANVAS + """
-const t = new Talpa({ brain: false }); let now = 1e12; t.tick(now);
+const t = new Talpy({ brain: false }); let now = 1e12; t.tick(now);
 t.pose({ depth: 'half' });
 const f = new Films(t, { frameMs: 16.7, tweenMs: 0, maxFrames: 24, sheets: 26 });
 for (let i = 0; i < 30; i++) { now += 16.7; t.tick(now); f.tick(now); for (const s of f.sheets) if (s.paint) f.paint(s, ctx); }
@@ -485,7 +485,7 @@ console.log(JSON.stringify({ first: live.slice(0, 12), last: live.slice(-10) }))
         # A yawn's stretch, a throw, a twirl of the lamp have no pictures: a
         # film showed them done at once (cut short); they're drawn live
         result = run_node(NULL_CANVAS + """
-const t = new Talpa({ brain: false }); let now = 1e12; t.tick(now);
+const t = new Talpy({ brain: false }); let now = 1e12; t.tick(now);
 const out = {};
 for (const step of [{ body: 'stretch' }, { arms: 'throw' }, { plume: 'twirl', it: 2 }]) {
     t.play({ steps: () => [Object.assign({ t: 3000 }, step)] }, null, false);
@@ -500,7 +500,7 @@ console.log(JSON.stringify(out));""")
 
     def test_what_flies_about_is_drawn_on_its_own_and_slowly_for_zs(self):
         result = run_node(NULL_CANVAS + """
-const t = new Talpa({ brain: false }); let now = 1e12; t.tick(now);
+const t = new Talpy({ brain: false }); let now = 1e12; t.tick(now);
 const f = new Films(t, { frameMs: 33.3, sheets: 20 });
 t.react('pet');
 let quick = 0, sheets = 0;
@@ -518,27 +518,27 @@ console.log(JSON.stringify({ quick: quick, off: off, zs: zs }));""")
 
     def test_the_open_hole_can_come_from_the_hosts_sheet(self):
         # Half of a picture's drawing was its hole; a host draws the open hole
-        # once (drawHoleSide) and Talpa copies it in
+        # once (drawHoleSide) and Talpy copies it in
         result = run_node("""
 import { drawHoleSide } from %s;
 let calls = 0; const images = [];
 const ctx = new Proxy({}, { get: (t, k) => k === 'drawImage' ? (img) => { images.push(img); calls++; }
     : k === 'createLinearGradient' || k === 'createRadialGradient' ? () => ({ addColorStop() {} })
     : k in t ? t[k] : () => { calls++; }, set: (t, k, v) => { t[k] = v; return true; } });
-const t = new Talpa({ brain: false }); t.tick(1e12); t.pose({ depth: 'half' });
+const t = new Talpy({ brain: false }); t.tick(1e12); t.pose({ depth: 'half' });
 t.draw(ctx); const drawn = calls; calls = 0;
 t.holeImage = (part, left) => part + (left ? '-left' : '-right');
 t.draw(ctx); const copied = calls; calls = 0;
 drawHoleSide(ctx, 'front', true); const side = calls;
 t.facingLeft = true; images.length = 0; t.draw(ctx);
-console.log(JSON.stringify({ drawn: drawn, copied: copied, side: side, images: images }));""" % json.dumps(str(TALPA / "talpa.mjs")))
+console.log(JSON.stringify({ drawn: drawn, copied: copied, side: side, images: images }));""" % json.dumps(str(TALPY / "talpy.mjs")))
         self.assertLess(result["copied"], result["drawn"] * 0.6)
         self.assertGreater(result["side"], 50)
         self.assertEqual(result["images"], ["back-left", "front-left"])
 
     def test_films_cost_the_desktop_about_what_pictures_did(self):
         # Four desktop dashboards (2026-10-23): what the pets draw a second
-        # (canvas calls) mustn't grow; the big Talpa draws much less than
+        # (canvas calls) mustn't grow; the big Talpy draws much less than
         # live, and a chat's pet at most a little more than with pictures.
         # (Slow moves are drawn live since 2026-10-27, so they don't step: a
         # mood full of them, out of steam at a limit, costs a bit more.)
@@ -549,7 +549,7 @@ const out = {};
 for (const lone of [true, false]) for (const mood of ['working', 'agents', 'needs', 'idle', 'done', 'failed', 'limit']) {
     const cost = films => {
         seed = 7; calls = 0;
-        const t = new Talpa({ travels: lone }); t.onTravel = lone ? () => {} : null; let now = 1e12; t.tick(now); t.setMood(mood);
+        const t = new Talpy({ travels: lone }); t.onTravel = lone ? () => {} : null; let now = 1e12; t.tick(now); t.setMood(mood);
         const tick = films ? 33.33 : 40;
         let f = null, p = null;
         if (films) { t.holeImage = () => ({});
@@ -579,7 +579,7 @@ console.log(JSON.stringify(out));""")
         result = run_node(NULL_CANVAS + """
 const out = {};
 for (const smooth of [true, false]) for (const body of ['nod', 'float', 'sway']) {
-    const t = new Talpa({ brain: false }); let now = 1e12; t.tick(now);
+    const t = new Talpy({ brain: false }); let now = 1e12; t.tick(now);
     t.play({ steps: () => [{ depth: 'half', body: body, t: 8000 }] });
     const f = new Films(t, { frameMs: 33.3, maxFrames: 32, sheets: 32, tweenMs: 200, smooth: smooth });
     let sig = '', at = 0, holds = {};
@@ -608,7 +608,7 @@ let seed = 3;
 const jitter = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return (seed / 2147483648 - 0.5) * 4; };
 const out = {};
 for (const [name, move, frameMs] of [['typing', { arms: 'type' }, 33.3], ['bounce', { body: 'bounce' }, 33.3], ['wave', { arms: 'wave' }, 16.7]]) {
-    const t = new Talpa({ brain: false }); const start = 1e12; t.tick(start);
+    const t = new Talpy({ brain: false }); const start = 1e12; t.tick(start);
     t.play({ steps: () => [Object.assign({ depth: 'half', eyes: 'happy', t: 9000 }, move)] });   // (no blinks: pictures of their own)
     const f = new Films(t, { frameMs: frameMs, maxFrames: 32, sheets: 32, tweenMs: 200, clockMs: 1000 / 60 });
     let sig = '', at = 0; const holds = {};
@@ -625,16 +625,16 @@ console.log(JSON.stringify(out));""")
         self.assertEqual(result, {"typing": [2], "bounce": [2], "wave": [2]})
 
     def test_nothing_shows_under_the_burrows_lip(self):
-        # Talpa and what it holds are cut along the same edge the lip is drawn
+        # Talpy and what it holds are cut along the same edge the lip is drawn
         # up to, so nothing peeks out between the lip's lumps
-        art = (TALPA / "art.mjs").read_text()
+        art = (TALPY / "art.mjs").read_text()
         edge = re.search(r"export const EDGE = '([^']*)'", art).group(1)
         front = re.search(r"V55\.6(A[^V]*)V", edge).group(1)   # the opening's front edge
         self.assertIn("L53.5 55.6" + front + "Z', DIRT", art)
 
     def test_notification_icons_use_colors_qt_can_read(self):
         # Qt's SVG renderer paints rgba() black: the notifications showed a
-        # black Talpa
+        # black Talpy
         for p in PETS.glob("*.svg"):
             self.assertNotIn("rgba(", p.read_text(), p.name)
 
@@ -650,7 +650,7 @@ console.log(JSON.stringify(out));""")
             self.assertNotRegex(p.read_text(), r"(?i)<script|<image|<foreignObject|href=\"(?!#)|url\((?!#)|@import", p.name)
 
     def test_no_clawd_left(self):
-        # Talpa replaced Clawd (Anthropic's mascot) everywhere
+        # Talpy replaced Clawd (Anthropic's mascot) everywhere
         repo = ROOT.parent.parent
         for path in list((repo / "package").rglob("*")) + list((repo / "gnome/extension").rglob("*")) + [repo / "README.md"]:
             if path.is_file() and path.suffix in {".qml", ".js", ".mjs", ".py", ".xml", ".md", ".svg", ".json", ".css"}:
@@ -738,7 +738,7 @@ class SeveralCopiesTests(unittest.TestCase):
 
     def test_the_status_check_runs_once_for_all_copies(self):
         # main.qml asks hub/Hub.qml (a singleton, shared by the copies in
-        # plasmashell); only the hub runs claude_status.py and names the copy
+        # plasmashell); only the hub runs talpy_den.py and names the copy
         main = (ROOT / "ui/main.qml").read_text()
         hub = (ROOT / "ui/hub/Hub.qml").read_text()
         self.assertNotIn("\" --instance", main)
@@ -839,7 +839,7 @@ class SeveralCopiesTests(unittest.TestCase):
         # Every repeating timer and endless animation of the pets runs only
         # while it can be seen (playing), not just while the popup is open
         # (live): on the desktop the dashboard is always "open".
-        for name in ("Pet.qml", "PetStrip.qml", "TalpaView.qml"):
+        for name in ("Pet.qml", "PetStrip.qml", "TalpyView.qml"):
             lines = (ROOT / "ui" / name).read_text().split("\n")
             for i, line in enumerate(lines):
                 if not re.search(r"^\s*(loops: Animation\.Infinite|repeat: true)\s*$", line):
@@ -1057,12 +1057,12 @@ class PetLifeTests(unittest.TestCase):
         self.assertRegex(grab, r"onCanceled:\s*\{[^}]*pet\.drop\(\)")
 
     def test_a_pet_whose_chat_left_waves_and_digs_away(self):
-        # "then it waves and digs away" (PetStrip.qml): leaving plays Talpa's
+        # "then it waves and digs away" (PetStrip.qml): leaving plays Talpy's
         # leave, which waves before it digs in, and only then is the pet gone
         pet = (ROOT / "ui/Pet.qml").read_text()
         self.assertRegex(pet, r"onLeavingChanged: \{\n\s+if \(leaving && !held\)\n\s+goAway\(\)")
         self.assertRegex(pet, r'react\("leave", ok => \{\n\s+if \(ok && pet\.leaving\) \{\n\s+pet\.departed = true\n\s+pet\.gone\(\)')
-        actions = (TALPA / "actions.mjs").read_text()
+        actions = (TALPY / "actions.mjs").read_text()
         leave = actions[actions.index("    leave: {"):]
         leave = leave[:leave.index("}] }")]
         self.assertLess(leave.index("arms: 'wave'"), leave.index("depth: 'gone'"))

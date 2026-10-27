@@ -1,5 +1,5 @@
 // What the dashboard says, worked out from the status script's JSON
-// (package/contents/code/claude_status.py, see its collect()). No GNOME Shell
+// (package/contents/code/talpy_den.py, see its collect()). No GNOME Shell
 // imports here, so `gjs -m gnome/tests/test_logic.js` can test it.
 //
 // A port of the logic in the Plasma widget's main.qml: keep the two in step.
@@ -268,7 +268,7 @@ export function openHint(session, remoteHost) {
 
 // A chat with a process of its own can be stopped, whatever it's doing: in a
 // terminal its claude quits (the chat is kept), in VS Code its tab shows it as
-// interrupted and goes on with the next message (claude_status.py: stopping
+// interrupted and goes on with the next message (talpy_den.py: stopping
 // and interrupting chats). One in tmux that's working can be interrupted
 // instead: Ctrl+C in its pane, like VS Code's stop button.
 export function canEnd(session) {
@@ -324,7 +324,7 @@ export function stopQuestion(session) {
     return fmt("Stop “%1”? It's finished, so this only shuts down its idle process. The conversation is kept.", session.name);
 }
 
-// The pets' mood for the whole dashboard (the big Talpa)
+// The pets' mood for the whole dashboard (the big Talpy)
 export function petMood(status, errorText, overallState, agentsRunning) {
     if (!status && errorText)
         return 'error';

@@ -1,4 +1,4 @@
-// The panel icon: Talpa peeking up through the panel's edge (talpa/glyph.js,
+// The panel icon: Talpy peeking up through the panel's edge (talpy/glyph.js,
 // the same as the Plasma widget's), in the color of its style class
 // (claude-fg-*). It pops up when a chat needs you, glances around while Claude
 // works, smiles when it's your turn and sleeps when nothing runs.
@@ -9,10 +9,10 @@ import GObject from 'gi://GObject';
 import St from 'gi://St';
 
 import {CairoCanvas} from './cairoCanvas.js';
-import {drawGlyph, glyphMoves} from './talpa/glyph.js';
+import {drawGlyph, glyphMoves} from './talpy/glyph.js';
 
-export const TalpaIcon = GObject.registerClass(
-class ClaudeTalpaIcon extends St.DrawingArea {
+export const TalpyIcon = GObject.registerClass(
+class ClaudeTalpyIcon extends St.DrawingArea {
     _init(styleClass = 'claude-spark') {
         super._init({style_class: styleClass, y_align: Clutter.ActorAlign.CENTER});
         this._timer = 0;

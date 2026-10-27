@@ -18,7 +18,7 @@ RowLayout {
     // A background session with a running process can be stopped (`claude stop`),
     // and so can a chat with a process of its own, whatever it's doing: in a
     // terminal its claude quits (the chat is kept), in VS Code its tab shows it
-    // as interrupted and goes on with the next message (claude_status.py:
+    // as interrupted and goes on with the next message (talpy_den.py:
     // stopping and interrupting chats). One in tmux that's working can be
     // interrupted instead: Ctrl+C in its pane, like VS Code's stop button.
     readonly property bool canEnd: session.kind === "interactive" && session.pid !== null
@@ -108,14 +108,14 @@ RowLayout {
     readonly property string petColor: root.petColors[root.petKeyOf(session, remoteHost)] || ""
     readonly property bool showAgents: root.expandedAgents[rowKey] === true
     readonly property var agents: session.agents || null
-    // A peek at the chat (claude_status.py: chat_peek), its task list and the
+    // A peek at the chat (talpy_den.py: chat_peek), its task list and the
     // files it changed
     readonly property var peek: session.peek || null
     readonly property var tasks: session.tasks || null
     readonly property var changes: session.changes || null
     readonly property bool showPeek: root.expandedPeek[rowKey] === true
     readonly property var recap: session.stats || null
-    // Claude's own recap of the chat (claude_status.py: recap_of), while nothing was said after it
+    // Claude's own recap of the chat (talpy_den.py: recap_of), while nothing was said after it
     readonly property var summary: peek && peek.recap ? peek.recap : null
     // What stopped it: a usage limit (and when that resets) or an expired login
     readonly property var stopped: session.stopped || null
@@ -315,7 +315,7 @@ RowLayout {
                         tooltip: root.modeHint(row.peek ? row.peek.mode : "")
                     }
                     Tag {
-                        // the plan it made (claude_status.py: plan_of)
+                        // the plan it made (talpy_den.py: plan_of)
                         visible: !!row.session.plan
                         text: i18nc("a chat's plan, click to open it", "plan ↗")
                         clickable: true
@@ -338,7 +338,7 @@ RowLayout {
                                  + (row.remoteHost ? "" : " " + i18n("Then send your changes to this chat (↩ send to Claude): Claude revises the plan."))
                     }
                     Tag {
-                        // you changed its plan since the chat last did anything (claude_status.py: plan_edited)
+                        // you changed its plan since the chat last did anything (talpy_den.py: plan_edited)
                         visible: !!row.session.plan && !!row.session.plan.edited && !row.remoteHost && !!row.session.chatId
                         text: i18nc("send your changes to the plan to the chat", "↩ send to Claude")
                         active: true
@@ -349,7 +349,7 @@ RowLayout {
                                  + "\n\n" + i18n("In tmux it's typed in for you. Else it goes to the clipboard and the chat comes up: paste it there (if Claude asks whether to go ahead with the plan, choose to keep planning first). A chat that isn't open reopens in plan mode with it.")
                     }
                     Tag {
-                        // another chat with a process changed some of the same files (claude_status.py: note_overlaps)
+                        // another chat with a process changed some of the same files (talpy_den.py: note_overlaps)
                         visible: !!row.session.overlaps && row.session.overlaps.length > 0
                         text: i18nc("two chats changed the same files", "⚠ same files")
                         warning: true

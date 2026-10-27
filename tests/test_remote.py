@@ -183,7 +183,7 @@ class StatusTests(FakeSSH):
         ((host, command),) = self.calls()
         self.assertEqual((host, command), ("lab", "python3 -I - --remote --recent 3 --no-tokens"))
         # nothing was written on the remote except the widget's cache
-        self.assertEqual(sorted(p.name for p in (self.fake_home / ".cache").iterdir()), ["claude-widget"])
+        self.assertEqual(sorted(p.name for p in (self.fake_home / ".cache").iterdir()), ["talpy-den"])
 
     def test_login_noise_before_the_answer(self):
         self.mode("noisy")
@@ -233,11 +233,11 @@ class ActionTests(FakeSSH):
 
     def test_dismiss_on_the_host(self):
         self.assertEqual(remote.dismiss("lab", "abc12345"), (True, "Removed from the list"))
-        self.assertIn("abc12345", cs.load_dismissed(self.fake_home / ".cache/claude-widget"))
+        self.assertIn("abc12345", cs.load_dismissed(self.fake_home / ".cache/talpy-den"))
         out = remote.status("lab", tokens=False)
         self.assertEqual(out["result"]["groups"][0]["sessions"], [])
         self.assertEqual(remote.dismiss("lab")[0], True)
-        self.assertEqual(cs.load_dismissed(self.fake_home / ".cache/claude-widget"), {})
+        self.assertEqual(cs.load_dismissed(self.fake_home / ".cache/talpy-den"), {})
 
     def test_stop_an_idle_chat_on_the_host(self):
         proc = subprocess.Popen([sys.executable, "-c", "print('ready', flush=True); import time; time.sleep(60)"],
@@ -323,7 +323,7 @@ class ActionTests(FakeSSH):
         finally:
             jump.open_markdown = old
         self.assertEqual((ok, message), (True, "The run of “Check the host” on lab"))
-        self.assertEqual(Path(path).parent, Path(self.env["XDG_CACHE_HOME"]) / "claude-widget/agent-runs")  # saved here
+        self.assertEqual(Path(path).parent, Path(self.env["XDG_CACHE_HOME"]) / "talpy-den/agent-runs")  # saved here
         self.assertIn(cs.REMOTE_MARK + ' {"ok": false}', Path(path).read_text())  # the marker in the run is just text
         self.assertEqual(opened, [Path(path)])
         self.mode("unreachable")
@@ -347,16 +347,16 @@ class ActionTests(FakeSSH):
         with tempfile.TemporaryDirectory(dir="/tmp") as tmp:
             os.environ["XDG_RUNTIME_DIR"] = tmp
             d = remote.control_dir()
-            self.assertEqual(d, Path(tmp) / "claude-status-ssh")
+            self.assertEqual(d, Path(tmp) / "talpy-den-ssh")
             self.assertEqual(d.stat().st_mode & 0o777, 0o700)
             self.assertIn(f"ControlPath={d}/%C", remote.ssh_options())
             self.assertLessEqual(len(f"{d}/{'0' * 40}.{'x' * 16}"), 107)  # what ssh binds
             # no runtime folder: one in /tmp, unless it's a link (or someone else's)
             del os.environ["XDG_RUNTIME_DIR"]
             remote.SOCKET_TMP = tmp
-            self.assertEqual(remote.control_dir(), Path(tmp) / f"claude-status-ssh-{os.getuid()}")
+            self.assertEqual(remote.control_dir(), Path(tmp) / f"talpy-den-ssh-{os.getuid()}")
             os.rmdir(str(remote.control_dir()))
-            os.symlink(tmp, str(Path(tmp) / f"claude-status-ssh-{os.getuid()}"))
+            os.symlink(tmp, str(Path(tmp) / f"talpy-den-ssh-{os.getuid()}"))
             self.assertIsNone(remote.control_dir())
             self.assertNotIn("ControlMaster=auto", remote.ssh_options())
             # a runtime folder so long that the socket path wouldn't fit: none either
@@ -388,7 +388,7 @@ class TwoAccountHost(FakeSSH):
 
 class SharingTests(TwoAccountHost):
     """Sharing a chat between the host's accounts: sharing.py runs there, sent
-    with claude_status.py like the status script."""
+    with talpy_den.py like the status script."""
 
     def open_in_a_session(self):
         proc = subprocess.Popen([sys.executable, "-c", "print('ready', flush=True); import time; time.sleep(60)"],
@@ -530,7 +530,7 @@ class HostNoiseTests(FakeSSH):
 
 class AccountTests(FakeSSH):
     """The host's Claude accounts: accounts.py runs there, sent with
-    claude_status.py like sharing.py; a login opens a terminal here (ssh -t)."""
+    talpy_den.py like sharing.py; a login opens a terminal here (ssh -t)."""
 
     def setUp(self):
         super().setUp()
@@ -627,7 +627,7 @@ class AccountTests(FakeSSH):
 
 
 class HostTaskTests(TwoAccountHost):
-    """Finding chats, starting tasks and plans on a host (claude_status.py and
+    """Finding chats, starting tasks and plans on a host (talpy_den.py and
     sharing.py there, sent over the connection)."""
 
     def setUp(self):
@@ -683,7 +683,7 @@ class HostTaskTests(TwoAccountHost):
         here.parent.mkdir(parents=True)
         here.write_bytes(b"\x89PNG\r\n\x1a\n\x00\xff a picture")
         answer = remote.put_image("lab", str(here))
-        there = self.fake_home / ".cache/claude-widget/images"
+        there = self.fake_home / ".cache/talpy-den/images"
         self.assertEqual(answer, {"ok": True, "message": "", "path": str(there / here.name), "local": str(here)})
         self.assertEqual((there / here.name).read_bytes(), here.read_bytes())
         self.assertEqual((oct(there.stat().st_mode & 0o777), oct((there / here.name).stat().st_mode & 0o777)),
@@ -786,7 +786,7 @@ class LoginTests(FakeSSH):
         self.assertEqual(argv[:8], ["-o", "ControlMaster=auto", "-o", "ControlPersist=30m",
                                     "-o", "ForwardAgent=no", "-o", "ForwardX11=no"])
         self.assertNotIn("BatchMode=yes", argv)  # it may ask for a password, a code, a host key
-        self.assertIn(f"ControlPath={self.run_dir}/claude-status-ssh/%C", argv)
+        self.assertIn(f"ControlPath={self.run_dir}/talpy-den-ssh/%C", argv)
         self.assertNotIn("StrictHostKeyChecking=no", " ".join(argv))
         self.assertEqual(argv[-3:], ["-T", "lab", "sh -c true"])
         self.assertTrue(remote.login_marker("lab").exists())

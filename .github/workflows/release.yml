@@ -31,9 +31,9 @@ jobs:
         run: |
           v="${GITHUB_REF_NAME#v}"
           mkdir dist
-          (cd package && python3 -m zipfile -c "../dist/claude-status-$v.plasmoid" metadata.json contents)
+          (cd package && python3 -m zipfile -c "../dist/talpy-den-$v.plasmoid" metadata.json contents)
           gnome/build.sh
-          cp gnome/build/claude-status@wzaielamri.github.io.shell-extension.zip dist/
+          cp gnome/build/talpy-den@wzaielamri.github.io.shell-extension.zip dist/
       - name: Notes
         run: |
           v="${GITHUB_REF_NAME#v}"
@@ -46,12 +46,12 @@ jobs:
           **Easiest:** download the source code below, unpack it and run \`./install.sh\`. It installs the Plasma widget or, in a GNOME session, the GNOME extension, and adds the status-line snippet that plan usage needs. On GNOME, log out and back in afterwards.
 
           **Only the widget:**
-          - KDE Plasma 6: \`kpackagetool6 -t Plasma/Applet -i claude-status-$v.plasmoid\` (\`-u\` to update), then add *Claude Status* to your panel.
-          - GNOME Shell 49 or 50: \`gnome-extensions install --force claude-status@wzaielamri.github.io.shell-extension.zip\`, log out and back in, then \`gnome-extensions enable claude-status@wzaielamri.github.io\`.
+          - KDE Plasma 6: \`kpackagetool6 -t Plasma/Applet -i talpy-den-$v.plasmoid\` (\`-u\` to update), then add *Talpy Den* to your panel.
+          - GNOME Shell 49 or 50: \`gnome-extensions install --force talpy-den@wzaielamri.github.io.shell-extension.zip\`, log out and back in, then \`gnome-extensions enable talpy-den@wzaielamri.github.io\`.
 
           This way plan usage stays empty until you add \`statusline-snippet.sh\` to your status line (see the README).
           NOTES
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --title "Claude Status ${GITHUB_REF_NAME#v}" --notes-file notes.md --verify-tag
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "Talpy Den ${GITHUB_REF_NAME#v}" --notes-file notes.md --verify-tag

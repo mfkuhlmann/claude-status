@@ -31,12 +31,12 @@ const SOUNDS = [
     ['No sound', ''],
 ];
 
-export default class ClaudeStatusPreferences extends ExtensionPreferences {
+export default class TalpyDenPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
         const settings = this.getSettings();
         window._claudeSettings = settings;   // lives as long as the window
         window.set_default_size(620, 760);
-        const page = new Adw.PreferencesPage({title: 'Claude Status', icon_name: 'preferences-system-symbolic'});
+        const page = new Adw.PreferencesPage({title: 'Talpy Den', icon_name: 'preferences-system-symbolic'});
         window.add(page);
 
         const spin = (key, title, subtitle, min, max, step) => {
@@ -100,8 +100,8 @@ export default class ClaudeStatusPreferences extends ExtensionPreferences {
 
         const look = new Adw.PreferencesGroup({title: 'Panel and popup'});
         look.add(toggle('show-usage-in-panel', 'Show 5-hour usage next to the icon'));
-        look.add(toggle('show-pet', 'Show Talpa, the pet', 'in the popup and in notifications'));
-        look.add(needs(spin('chat-pets', 'Chat pets per account, at most', '0 keeps only the big Talpa', 0, 8, 1),
+        look.add(toggle('show-pet', 'Show Talpy, the pet', 'in the popup and in notifications'));
+        look.add(needs(spin('chat-pets', 'Chat pets per account, at most', '0 keeps only the big Talpy', 0, 8, 1),
             'show-pet'));
         look.add(toggle('show-tokens', 'Show token totals', 'from local transcripts'));
         look.add(this._currencyRow(settings));
@@ -408,7 +408,7 @@ export default class ClaudeStatusPreferences extends ExtensionPreferences {
     // extension, kept next to their cache, so it changes at once
     _historyGroup(window) {
         const group = new Adw.PreferencesGroup({title: 'Recap history',
-            description: "Claude Code deletes chats after 30 days (its cleanupPeriodDays setting). The Recap's Overall keeps their numbers past that, in ~/.cache/claude-widget: times, tokens, costs, folders and chat names. Off, it keeps only what Claude still has. This changes at once, for the VS Code extension too."});
+            description: "Claude Code deletes chats after 30 days (its cleanupPeriodDays setting). The Recap's Overall keeps their numbers past that, in ~/.cache/talpy-den: times, tokens, costs, folders and chat names. Off, it keeps only what Claude still has. This changes at once, for the VS Code extension too."});
         const week = args => new Promise(resolve => {
             try {
                 const proc = Gio.Subprocess.new(['python3', '-I', GLib.build_filenamev([this.path, 'code', 'week.py']), ...args],
@@ -540,7 +540,7 @@ export default class ClaudeStatusPreferences extends ExtensionPreferences {
                 '--volume', String(settings.get_int('sound-volume')), '--force', '--theme', theme],
             Gio.SubprocessFlags.STDOUT_SILENCE | Gio.SubprocessFlags.STDERR_SILENCE);
         } catch (e) {
-            console.warn(`Claude Status: couldn't play ${sound}: ${e.message}`);
+            console.warn(`Talpy Den: couldn't play ${sound}: ${e.message}`);
         }
     }
 }

@@ -71,7 +71,7 @@ class DictateTests(unittest.TestCase):
         self.assertIn("--rate 16000 --channels 1 --format s16", calls)
         self.assertIn(f"-m {self.model}", calls)
         self.assertIn("-l de", calls)
-        folder = self.home / "cache/claude-widget/dictation"
+        folder = self.home / "cache/talpy-den/dictation"
         self.assertEqual(list(folder.iterdir()), [])   # (what you said isn't kept)
         self.assertEqual(oct(folder.stat().st_mode & 0o777), "0o700")
 
@@ -82,7 +82,7 @@ class DictateTests(unittest.TestCase):
         time.sleep(0.2)
         self.assertEqual(self.run_it("--cancel", "r2"), {"ok": True, "message": "Not written down"})
         self.assertNotIn("-m ", self.log.read_text())
-        self.assertEqual(list((self.home / "cache/claude-widget/dictation").iterdir()), [])
+        self.assertEqual(list((self.home / "cache/talpy-den/dictation").iterdir()), [])
 
     def test_nothing_to_write_with_offers_the_setup(self):
         self.tool("pw-record", FAKE_RECORDER)
@@ -100,7 +100,7 @@ class DictateTests(unittest.TestCase):
         self.tool("pw-record", FAKE_RECORDER)
         self.tool("whisper-cli", FAKE_WHISPER)
         # one downloaded by the widget, one whisper.cpp keeps (not the widget's to delete)
-        folder = self.home / "data/claude-widget/whisper"
+        folder = self.home / "data/talpy-den/whisper"
         folder.mkdir(parents=True)
         (folder / "ggml-base.bin").write_bytes(b"m")
         theirs = self.home / ".local/share/whisper.cpp/models"
@@ -142,7 +142,7 @@ class FasterWhisperTests(DictateTests):
     """Set up: its environment (a stand-in Python) in the widget's folder."""
     def setUp(self):
         super().setUp()
-        self.whisper = self.home / "data/claude-widget/whisper"
+        self.whisper = self.home / "data/talpy-den/whisper"
         python = self.whisper / "venv/bin/python"
         python.parent.mkdir(parents=True)
         python.write_text(FAKE_FW_PYTHON.format(python=sys.executable, log=str(self.log)))
@@ -167,7 +167,7 @@ class FasterWhisperTests(DictateTests):
         self.assertTrue(line.startswith(str(self.whisper / "models/base") + " "), line)
         self.assertIn(" de ", line)
         self.assertTrue(line.endswith("offline=1"))   # (nothing over the network)
-        self.assertEqual(list((self.home / "cache/claude-widget/dictation").iterdir()), [])
+        self.assertEqual(list((self.home / "cache/talpy-den/dictation").iterdir()), [])
 
     def test_models_downloaded_chosen_and_deleted(self):
         self.fw_model("base")

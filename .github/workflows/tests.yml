@@ -47,4 +47,4 @@ jobs:
       - name: Build the extension
         run: |
           gnome/build.sh
-          python3 -m zipfile -l gnome/build/claude-status@wzaielamri.github.io.shell-extension.zip | grep -E 'metadata.json|schemas/gschemas.compiled|code/claude_status.py'
+          python3 -m zipfile -l gnome/build/talpy-den@wzaielamri.github.io.shell-extension.zip | grep -E 'metadata.json|schemas/gschemas.compiled|code/talpy_den.py'

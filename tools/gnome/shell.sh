@@ -16,9 +16,9 @@ repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 out="$(realpath -m "$1")"
 steps="$(realpath "${2:-$repo/tools/gnome/steps.sh}")"
 mkdir -p "$out"
-podman image exists claude-status-gnome ||
-  podman build -t claude-status-gnome -f "$repo/tools/gnome/Containerfile" "$repo/tools/gnome"
+podman image exists talpy-den-gnome ||
+  podman build -t talpy-den-gnome -f "$repo/tools/gnome/Containerfile" "$repo/tools/gnome"
 "$repo/gnome/build.sh" "$out/build" >/dev/null
 podman run --rm --security-opt label=disable --userns=keep-id:uid=1001,gid=1001 \
   -v "$repo:/src:ro" -v "$out:/out" -v "$steps:/steps.sh:ro" \
-  claude-status-gnome bash /src/tools/gnome/inside.sh
+  talpy-den-gnome bash /src/tools/gnome/inside.sh

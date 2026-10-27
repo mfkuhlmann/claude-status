@@ -21,7 +21,7 @@ jump = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(jump)
 cs = jump.cs
 
-from test_claude_status import Fixture, session, vscode_link_params, write  # noqa: E402
+from test_talpy_den import Fixture, session, vscode_link_params, write  # noqa: E402
 
 
 class Patch:
@@ -165,7 +165,7 @@ class DesktopTests(unittest.TestCase):
         ok, calls = self.raised(kwin=None, gnome=True)
         self.assertTrue(ok)
         dest, method, (arg,) = calls[-1]
-        self.assertEqual((dest, method), ("org.gnome.Shell", "org.gnome.Shell.Extensions.ClaudeStatus.RaiseWindow"))
+        self.assertEqual((dest, method), ("org.gnome.Shell", "org.gnome.Shell.Extensions.TalpyDen.RaiseWindow"))
         self.assertEqual(json.loads(json.loads(arg)), {"pids": [10, 1], "caption": "my tab",
                                                        "require": False, "prefer": "x"})
         self.assertFalse(self.raised(kwin=None, gnome=None)[0])     # extension not running
@@ -223,7 +223,7 @@ class DesktopTests(unittest.TestCase):
 
     def test_raise_hint(self):
         with Patch(on_gnome=lambda: True):
-            self.assertEqual(jump.raise_hint(), "is the Claude Status extension enabled?")
+            self.assertEqual(jump.raise_hint(), "is the Talpy Den extension enabled?")
         with Patch(on_gnome=lambda: False):
             self.assertEqual(jump.raise_hint(), "is KWin scripting available?")
 
@@ -401,7 +401,7 @@ class StopTests(Fixture):
                 calls.append((args, kw["env"].get("CLAUDE_CONFIG_DIR", "<unset>")))
                 return type("R", (), {"returncode": returncode, "stdout": stdout, "stderr": stderr})()
 
-        # (claude stop runs in claude_status.stop_background)
+        # (claude stop runs in talpy_den.stop_background)
         with Patch(shutil=type("W", (), {"which": staticmethod(lambda n: "/usr/bin/" + n)})), \
                 mock.patch.object(subprocess, "run", FakeSubprocess.run):
             return jump.stop(self.home, [], session_id), calls
@@ -540,7 +540,7 @@ class ChatStopTests(Fixture):
     def test_command_line(self):
         proc = self.chat("cli-chat", status="busy")
         env = dict(os.environ, HOME=str(self.home), XDG_CACHE_HOME=str(self.cache))
-        run = lambda *args: json.loads(subprocess.run([sys.executable, "-I", str(CODE / "claude_status.py"), *args],
+        run = lambda *args: json.loads(subprocess.run([sys.executable, "-I", str(CODE / "talpy_den.py"), *args],
                                                       capture_output=True, text=True, env=env).stdout)
         self.assertFalse(run("--end", "cli-chat", "--profile", ".claude-work")["ok"])   # it's working: not without --busy
         self.assertEqual(run("--end", "cli-chat", "--profile", ".claude-work", "--busy"),
@@ -610,7 +610,7 @@ class ScopeTests(unittest.TestCase):
         prefix, [check] = self.prefix("code-insiders")
         self.assertEqual(check, ["/usr/bin/systemd-run", "--user", "--scope", "--quiet", "--collect", "--", "true"])
         self.assertEqual(prefix[:5], ["/usr/bin/systemd-run", "--user", "--scope", "--quiet", "--collect"])
-        self.assertRegex(prefix[5], r"^--unit=app-claudestatus-code_insiders-[0-9a-f]{8}\.scope$")
+        self.assertRegex(prefix[5], r"^--unit=app-talpyden-code_insiders-[0-9a-f]{8}\.scope$")
         self.assertEqual(prefix[6:], ["--"])
         self.assertNotEqual(self.prefix()[0][5], self.prefix()[0][5])   # a new name each time
 
@@ -1325,7 +1325,7 @@ class VscodeTerminalTests(unittest.TestCase):
 
     def extension(self, version):
         write(self.home / ".vscode/extensions/extensions.json",
-              [{"identifier": {"id": "wzaielamri.claude-status"}, "version": version}])
+              [{"identifier": {"id": "wzaielamri.talpy-den"}, "version": version}])
 
     def test_the_terminal_a_process_runs_in(self):
         host = subprocess.Popen([sys.executable, "-c", PTY_HOST, "--type=ptyHost"], stdout=subprocess.PIPE,
@@ -1379,8 +1379,8 @@ class VscodeTerminalTests(unittest.TestCase):
             with Patch(tmux_client_pids=lambda pane, socket=None: [700]):
                 self.assertTrue(jump.jump_terminal({**entry, "tmux": "s:@1.%3"})[0])
         self.assertEqual(self.raised, [(([500, 400, 300, 200], "app"), {}), (([700, 650, 300, 200], "app"), {})])
-        self.assertEqual(self.opened, [["/usr/bin/xdg-open", "vscode://wzaielamri.claude-status/terminal?pid=400"],
-                                       ["/usr/bin/xdg-open", "vscode://wzaielamri.claude-status/terminal?pid=650"]])
+        self.assertEqual(self.opened, [["/usr/bin/xdg-open", "vscode://wzaielamri.talpy-den/terminal?pid=400"],
+                                       ["/usr/bin/xdg-open", "vscode://wzaielamri.talpy-den/terminal?pid=650"]])
         # an extension too old for the link (it would say it doesn't know it): the window only
         self.raised, self.opened = [], []
         self.extension("1.10.1")
@@ -1402,7 +1402,7 @@ class VscodeTerminalTests(unittest.TestCase):
                                                     "and no VS Code window here is connected to it"))
         self.assertEqual(self.raised, [(([100], "[SSH: labserver]"), {"require": True, "prefer": "proj"})])
         self.assertEqual(self.opened, [["/usr/bin/xdg-open",
-                                        "vscode://wzaielamri.claude-status/terminal?pid=4321&host=labserver"]])
+                                        "vscode://wzaielamri.talpy-den/terminal?pid=4321&host=labserver"]])
 
     def test_command_line(self):
         calls = []
@@ -1509,7 +1509,7 @@ class ChangesTests(Fixture):
 
     def test_opens_one_view_through_the_extension(self):
         write(self.home / ".vscode/extensions/extensions.json",
-              [{"identifier": {"id": "wzaielamri.claude-status"}, "version": "1.8.0"}])
+              [{"identifier": {"id": "wzaielamri.talpy-den"}, "version": "1.8.0"}])
         started, diffs = [], []
         with Patch(start_vscode_chat=lambda code, folder, link: started.append((folder, link)),
                    later=lambda task: diffs.append(task)), \
@@ -1518,14 +1518,14 @@ class ChangesTests(Fixture):
         self.assertEqual((ok, message), (True, "Comparing 1 changed file in its last turn in VS Code"))
         ((folder, link),) = started
         self.assertEqual(folder, str(self.proj))
-        self.assertTrue(link.startswith("vscode://wzaielamri.claude-status/changes?file="), link)
+        self.assertTrue(link.startswith("vscode://wzaielamri.talpy-den/changes?file="), link)
         manifest = json.loads(Path(vscode_link_params(link)["file"]).read_text())
         self.assertEqual([i["label"] for i in manifest["items"]], ["src/edited.py"])
         self.assertEqual(diffs, [])
 
     def test_one_by_one_without_the_extension(self):
         write(self.home / ".vscode/extensions/extensions.json",
-              [{"identifier": {"id": "wzaielamri.claude-status"}, "version": "1.7.0"}])  # too old
+              [{"identifier": {"id": "wzaielamri.talpy-den"}, "version": "1.7.0"}])  # too old
         tasks, runs = [], []
         with Patch(later=lambda task: tasks.append(task)), mock_home(self.home), mock_vscode(), \
                 Patch(subprocess=FakeRun(runs)):
@@ -1648,12 +1648,12 @@ class AgentRunFileTests(Fixture):
         with Patch(open_markdown=lambda path, home=None: opened.append(path) or (True, "")):
             ok, message, path = jump.show_agent_run(self.home, [], "chat1", "ab12cd34ef", ".claude-work")
         self.assertEqual((ok, message), (True, "The run of “Find / the parser: now!”"))
-        self.assertEqual(Path(path), self.cache / "claude-widget/agent-runs/Find the parser now! (ab12cd34).md")
+        self.assertEqual(Path(path), self.cache / "talpy-den/agent-runs/Find the parser now! (ab12cd34).md")
         self.assertTrue(Path(path).read_text().startswith("# Find / the parser: now!\n"))
         self.assertEqual(opened, [Path(path)])
 
     def test_old_runs_are_removed(self):
-        old = self.cache / "claude-widget/agent-runs/old (x).md"
+        old = self.cache / "talpy-den/agent-runs/old (x).md"
         write(old, "x")
         os.utime(old, (time.time() - 2 * 86400,) * 2)
         with Patch(open_markdown=lambda path, home=None: (True, "")):

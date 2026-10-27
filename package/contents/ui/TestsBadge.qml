@@ -2,7 +2,7 @@ import QtQuick
 import org.kde.kirigami as Kirigami
 
 // Whether tests ran after a chat's last edit and how they went (its row's
-// review: claude_status.py, TestsCache.review).
+// review: talpy_den.py, TestsCache.review).
 Tag {
     id: badge
 

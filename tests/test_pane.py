@@ -1,7 +1,7 @@
 """The chat pane (pane.py): a chat's conversation, sending it a message,
 answering its permission prompt (with the hook, permission_hook.py, or keys
 in tmux) and reviewing what it changed (Undo, Commit, Mark reviewed); and
-what the status rows carry for it (claude_status.py)."""
+what the status rows carry for it (talpy_den.py)."""
 import base64
 import contextlib
 import io
@@ -24,7 +24,7 @@ import pane  # noqa: E402
 
 cs = pane.cs
 
-from test_claude_status import Fixture, iso, session, write  # noqa: E402
+from test_talpy_den import Fixture, iso, session, write  # noqa: E402
 from test_tasks import FAKE_CLAUDE, lines, prompt  # noqa: E402
 
 SID = "5c1d7a6e-0d4f-4a8b-9a51-1f2e3d4c5b6a"
@@ -555,29 +555,29 @@ class HookTests(unittest.TestCase):
                                      "cwd": "/tmp", "permission_suggestions": suggestions}).encode())
         hook.stdin.close()
         deadline = time.time() + 5
-        while time.time() < deadline and not cs.permission_requests(self.cache / "claude-widget"):
+        while time.time() < deadline and not cs.permission_requests(self.cache / "talpy-den"):
             time.sleep(0.05)
-        (request,) = cs.permission_requests(self.cache / "claude-widget").values()
+        (request,) = cs.permission_requests(self.cache / "talpy-den").values()
         return hook, request
 
     def test_the_widget_answers(self):
         hook, request = self.start()
         self.assertEqual((request["tool"], request["input"], request["hookPid"]), ("Bash", {"command": "make"}, hook.pid))
-        ok, message = pane.answer_request(self.cache / "claude-widget", request["id"], "always")
+        ok, message = pane.answer_request(self.cache / "talpy-den", request["id"], "always")
         self.assertEqual((ok, message), (True, "Allowed, and from now on"))
         out = json.loads(hook.stdout.read())
         hook.wait(5)
         decision = out["hookSpecificOutput"]["decision"]
         self.assertEqual(decision["behavior"], "allow")
         self.assertEqual(decision["updatedPermissions"][0]["rules"][0]["ruleContent"], "make")
-        self.assertEqual(list((self.cache / "claude-widget/permissions").iterdir()), [])
+        self.assertEqual(list((self.cache / "talpy-den/permissions").iterdir()), [])
 
     def test_answered_in_the_chat(self):
         hook, request = self.start()
         write(self.state, {"pid": os.getpid(), "status": "busy"})  # (you answered its dialog)
         self.assertEqual(hook.stdout.read(), b"")  # no word: the dialog decided
         self.assertEqual(hook.wait(5), 0)
-        ok, message = pane.answer_request(self.cache / "claude-widget", request["id"], "allow")
+        ok, message = pane.answer_request(self.cache / "talpy-den", request["id"], "allow")
         self.assertFalse(ok)
         self.assertIn("isn't asking any more", message)
 
@@ -604,7 +604,7 @@ class HookTests(unittest.TestCase):
 
     def test_a_question(self):
         hook, request = self.start("AskUserQuestion", QUESTIONS, [])
-        cache = self.cache / "claude-widget"
+        cache = self.cache / "talpy-den"
         self.assertEqual(pane.answer_request(cache, request["id"], "allow"), (False, "Choose your answers first"))
         self.assertEqual(pane.answer_request(cache, request["id"], "answer", answers={"Pick a color": [" "]}),
                          (False, "Choose your answers first"))
@@ -622,7 +622,7 @@ class HookTests(unittest.TestCase):
         # allow must carry the call's input, a setMode makes it accept edits,
         # a deny's message is your feedback and it plans on
         plan = {"plan": "# Fix the parser\n1. Read it\n2. Fix it", "planFilePath": "/tmp/plan.md"}
-        cache = self.cache / "claude-widget"
+        cache = self.cache / "talpy-den"
         hook, request = self.start("ExitPlanMode", plan, [])
         self.assertEqual(pane.answer_request(cache, request["id"], "allow"), (False, "Approve the plan or keep planning"))
         self.assertEqual(pane.answer_request(cache, request["id"], "answer", answers={}), (False, "Approve the plan or keep planning"))
@@ -658,13 +658,13 @@ class HookTests(unittest.TestCase):
                                      "cwd": "/tmp", "permission_suggestions": []}).encode())
         hook.stdin.close()
         deadline = time.time() + 5
-        while time.time() < deadline and sid not in cs.permission_requests(self.cache / "claude-widget"):
+        while time.time() < deadline and sid not in cs.permission_requests(self.cache / "talpy-den"):
             time.sleep(0.05)
         time.sleep(0.01)   # (the next one is younger)
         return hook
 
     def test_keyboard_answers_take_the_oldest_prompt(self):
-        cache = self.cache / "claude-widget"
+        cache = self.cache / "talpy-den"
         self.assertEqual(pane.answer_oldest(cache, "allow"), (False, "No chat waits for a permission"))
         question = self.hook_for("q" * 8, "AskUserQuestion", QUESTIONS)
         self.assertEqual(pane.answer_oldest(cache, "allow"), (False, "A question waits: answer it in the panel"))
@@ -702,18 +702,18 @@ class HookTests(unittest.TestCase):
             self.assertIn("X-KDE-Shortcuts=\n", text)   # (none for deny)
             self.assertIn(f"Exec=python3 -I {CODE / 'pane.py'} --oldest allow --osd", text)
             calls = log.read_text()
-            self.assertIn("doRegister [\"org.wzaielamri.claudestatus.answers.desktop\", \"allow\"", calls)
-            self.assertIn("setShortcutKeys [\"org.wzaielamri.claudestatus.answers.desktop\", \"allow\", \"Claude Status\", "
+            self.assertIn("doRegister [\"org.wzaielamri.talpyden.answers.desktop\", \"allow\"", calls)
+            self.assertIn("setShortcutKeys [\"org.wzaielamri.talpyden.answers.desktop\", \"allow\", \"Talpy Den\", "
                           "\"Allow the oldest prompt\"] [([402653273],)] 6", calls)
-            self.assertIn("\"deny\", \"Claude Status\", \"Deny the oldest prompt\"] @a(ai) [] 6", calls)
+            self.assertIn("\"deny\", \"Talpy Den\", \"Deny the oldest prompt\"] @a(ai) [] 6", calls)
             self.assertEqual(pane.shortcuts(self.home, None), (True, "on"))
             self.assertEqual(pane.shortcuts(self.home, False), (True, "Keyboard answers are off"))
             self.assertFalse(path.exists())
-            self.assertIn("unregister \"org.wzaielamri.claudestatus.answers.desktop\" \"deny\"", log.read_text())
+            self.assertIn("unregister \"org.wzaielamri.talpyden.answers.desktop\" \"deny\"", log.read_text())
 
     def test_a_permission_takes_no_answers(self):
         hook, request = self.start()
-        ok, message = pane.answer_request(self.cache / "claude-widget", request["id"], "answer", answers={"x": ["y"]})
+        ok, message = pane.answer_request(self.cache / "talpy-den", request["id"], "answer", answers={"x": ["y"]})
         self.assertEqual((ok, message), (False, "It asks for a permission, not a question"))
 
 
@@ -976,7 +976,7 @@ class RelayTests(PaneFixture):
         self.assertEqual(pane.relay(self.home, [], True), (True, "Permission prompts can be answered from the widget"))
         self.assertTrue((self.home / ".claude-work/settings.json").is_symlink())  # (written through the link)
         groups = json.loads(shared.read_text())["hooks"]["PermissionRequest"]
-        hook = self.home / ".local/share/claude-widget/permission-hook.py"
+        hook = self.home / ".local/share/talpy-den/permission-hook.py"
         self.assertEqual(groups[0], mine)
         self.assertEqual(groups[1]["hooks"][0], {"type": "command", "command": f"python3 -I {hook}",
                                                  "timeout": pane.HOOK_TIMEOUT_S})

@@ -13,7 +13,7 @@ MouseArea {
     readonly property bool showUsage: Plasmoid.configuration.showUsageInPanel && !vertical && !root.inTray && root.panelWindow !== null
     // One count at a time, the most urgent: chats that need you (red), else
     // chats that finished since you last opened the popup (green). Working
-    // chats show as Talpa glancing around; the tooltip has every count.
+    // chats show as Talpy glancing around; the tooltip has every count.
     readonly property int badgeCount: root.counts.waiting > 0 ? root.counts.waiting : root.unseenDone
     // To catch your eye: it blinks while a chat that needs you hasn't been
     // seen, and pulses a few times when one finishes (opening the popup stops it)
@@ -83,7 +83,7 @@ MouseArea {
                 height: width
             }
 
-            TalpaIcon {
+            TalpyIcon {
                 id: icon
                 property bool dimmed: false
                 anchors.centerIn: square

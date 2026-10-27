@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Dictate a reply for Claude Status: your voice to text, on this computer
+"""Dictate a reply for Talpy Den: your voice to text, on this computer
 only, for the chat pane's reply box. It's written down by whisper.cpp's
 whisper-cli if it's on the PATH, else by faster-whisper, which the widget
 sets up in a Python environment of its own (no sudo, no compiler).
@@ -12,7 +12,7 @@ sets up in a Python environment of its own (no sudo, no compiler).
         "note", "installed", "deletable", "used"}]}
     python3 -I dictate.py --setup [NAME]
         set dictation up: faster-whisper (from pypi.org) in
-        ~/.local/share/claude-widget/whisper/venv, and the NAME (else base)
+        ~/.local/share/talpy-den/whisper/venv, and the NAME (else base)
         model; minutes
     python3 -I dictate.py --start ID
         start recording (the microphone, until --stop or --cancel; at most
@@ -23,7 +23,7 @@ sets up in a Python environment of its own (no sudo, no compiler).
         stop, nothing written, the recording deleted
     python3 -I dictate.py --get-model NAME
         download a speech model for the engine (from huggingface.co) into
-        ~/.local/share/claude-widget/whisper, and use it
+        ~/.local/share/talpy-den/whisper, and use it
     python3 -I dictate.py --use-model NAME|auto
         the model to write with (auto: the best one downloaded); for every
         copy of the widget and the VS Code extension
@@ -94,7 +94,7 @@ VALID_ID = set("abcdefghijklmnopqrstuvwxyz0123456789-")
 
 def data_dir():
     base = os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share")
-    return Path(base) / "claude-widget" / "whisper"
+    return Path(base) / "talpy-den" / "whisper"
 
 
 def venv_dir():
@@ -107,7 +107,7 @@ def fw_models():
 
 def cache_dir():
     base = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
-    path = Path(base) / "claude-widget" / "dictation"
+    path = Path(base) / "talpy-den" / "dictation"
     path.mkdir(parents=True, exist_ok=True)
     path.chmod(0o700)   # (what you said)
     return path

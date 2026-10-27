@@ -1,5 +1,5 @@
 """Recaps, permission modes, usage limits that stopped chats, plans, finding
-chats and starting tasks (claude_status.py, jump.py, sharing.py, remote.py)."""
+chats and starting tasks (talpy_den.py, jump.py, sharing.py, remote.py)."""
 import base64
 import contextlib
 import importlib.util
@@ -27,7 +27,7 @@ spec.loader.exec_module(jump)
 cs = jump.cs
 sharing = jump.sharing
 
-from test_claude_status import Fixture, iso, session, vscode_link_params, write  # noqa: E402
+from test_talpy_den import Fixture, iso, session, vscode_link_params, write  # noqa: E402
 
 
 def lines(*entries):
@@ -1569,12 +1569,12 @@ class MarkdownTests(Fixture):
     def open(self, app, which=("okular", "xdg-open", "code"), name="run.md", folder=None):
         started = []
         if app:
-            write(self.cache / "claude-widget/settings.json", {"at": 1, "by": "x", "values": {"markdownApp": app}})
-        path = (folder or self.cache / "claude-widget/agent-runs") / name
+            write(self.cache / "talpy-den/settings.json", {"at": 1, "by": "x", "values": {"markdownApp": app}})
+        path = (folder or self.cache / "talpy-den/agent-runs") / name
         write(path, "# Run\n\nDone.\n")
         self.cache.mkdir(parents=True, exist_ok=True)
         with mock.patch.object(jump, "start_app", lambda args, cwd=None: started.append(args)), \
-                mock.patch.object(jump.cs, "cache_dir", return_value=self.cache / "claude-widget"), \
+                mock.patch.object(jump.cs, "cache_dir", return_value=self.cache / "talpy-den"), \
                 mock.patch.object(jump.shutil, "which", lambda n: f"/usr/bin/{n}" if n in which else None), \
                 mock.patch.object(jump.cs, "vscode_app", return_value=("/usr/bin/code", "Code") if "code" in which else (None, None)), \
                 mock.patch.object(jump, "status_extension_since", return_value=True), \
@@ -1582,7 +1582,7 @@ class MarkdownTests(Fixture):
             return jump.open_markdown(path, self.home), started
 
     def test_okular_where_installed_else_a_page_in_the_browser(self):
-        run = self.cache / "claude-widget/agent-runs/run.md"
+        run = self.cache / "talpy-den/agent-runs/run.md"
         self.assertEqual(self.open(None)[1], [["/usr/bin/okular", str(run)]])
         (ok, _), started = self.open(None, which=("xdg-open",))
         self.assertTrue(ok)
@@ -1591,7 +1591,7 @@ class MarkdownTests(Fixture):
         self.assertEqual(self.open("okular", which=("xdg-open",))[1][0][1], str(self.cache / "run.html"))
         self.assertEqual(self.open("browser")[1][0][1], str(self.cache / "run.html"))
         self.assertEqual(self.open("default")[1], [["/usr/bin/xdg-open", str(run)]])
-        self.assertTrue(self.open("vscode")[1][0][1].startswith("vscode://wzaielamri.claude-status/markdown?path="))
+        self.assertTrue(self.open("vscode")[1][0][1].startswith("vscode://wzaielamri.talpy-den/markdown?path="))
         # a run is named after its task: all of it reaches the extension
         name = "Port C++ parser & tests (100%) (abcd1234).md"
         self.assertEqual(vscode_link_params(self.open("vscode", name=name)[1][0][1]), {"path": str(run.parent / name)})
@@ -1607,10 +1607,10 @@ class MarkdownTests(Fixture):
 
     def edit(self, app, defaults, which=("xdg-open", "gtk-launch", "code")):
         started = []
-        write(self.cache / "claude-widget/settings.json", {"at": 1, "by": "x", "values": {"markdownApp": app or "auto"}})
+        write(self.cache / "talpy-den/settings.json", {"at": 1, "by": "x", "values": {"markdownApp": app or "auto"}})
         path = self.home / "plan.md"
         with mock.patch.object(jump, "start_app", lambda args, cwd=None: started.append(args)), \
-                mock.patch.object(jump.cs, "cache_dir", return_value=self.cache / "claude-widget"), \
+                mock.patch.object(jump.cs, "cache_dir", return_value=self.cache / "talpy-den"), \
                 mock.patch.object(jump.shutil, "which", lambda n: f"/usr/bin/{n}" if n in which else None), \
                 mock.patch.object(jump.cs, "vscode_app", return_value=("/usr/bin/code", "Code") if "code" in which else (None, None)), \
                 mock.patch.object(jump, "default_app", lambda mime: defaults.get(mime, "")):

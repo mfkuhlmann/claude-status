@@ -11,7 +11,7 @@ import "hub"
 PlasmoidItem {
     id: root
 
-    // Parsed output of contents/code/claude_status.py (see its collect()).
+    // Parsed output of contents/code/talpy_den.py (see its collect()).
     property var status: null
     property string errorText: ""
     // Per-session memory across polls, per source ("" = this computer,
@@ -163,7 +163,7 @@ PlasmoidItem {
     signal petEvent(string kind, string text, string key)
     // One clock for all the pets of this widget, so its window is drawn once
     // a tick, not once for each pet; a pet draws itself only when that shows
-    // something new (TalpaView.qml)
+    // something new (TalpyView.qml)
     signal petFrame(real now)
     // 60 a second in the popup (it's open for a while), 30 on the desktop
     // (always there: every picture is a new frame of the whole desktop)
@@ -294,7 +294,7 @@ PlasmoidItem {
         return m
     }
     // Accounts close to their 5-hour limit, e.g. "work: 100% of the 5-hour limit!".
-    // Talpa shows it now and then (mind-blown, or out of steam at the limit).
+    // Talpy shows it now and then (mind-blown, or out of steam at the limit).
     readonly property string highUsageText: {
         const parts = []
         for (const g of allGroups)
@@ -352,7 +352,7 @@ PlasmoidItem {
     readonly property string configDirArgs: Plasmoid.configuration.extraConfigDirs.split(",")
         .map(d => d.trim()).filter(d => d.length).map(d => " --config-dir " + shellQuote(d)).join("")
     readonly property string command: {
-        // (poll.py runs claude_status.py with its compiled code cached)
+        // (poll.py runs talpy_den.py with its compiled code cached)
         let cmd = "python3 -I " + shellQuote(codeDir + "poll.py") + configDirArgs
         cmd += " --done-hours " + Math.max(0, Plasmoid.configuration.keepDoneHours)
         cmd += " --recent " + Math.max(0, Plasmoid.configuration.recentChats)
@@ -376,7 +376,7 @@ PlasmoidItem {
     // This widget can run several times, e.g. on a panel, in the system tray
     // and on each screen's desktop. The copies share one check (hub/Hub.qml);
     // the one here longest sends the notifications and sounds, and across
-    // programs claude_status.py picks one (several widgets at once). Settings
+    // programs talpy_den.py picks one (several widgets at once). Settings
     // are shared: a change is saved for the others at the next check, and the
     // others take it over at theirs (a new copy takes over what the others use).
     readonly property string instanceId: (Plasmoid.containment ? Plasmoid.containment.id + "/" : "") + Plasmoid.id
@@ -434,7 +434,7 @@ PlasmoidItem {
                    : inTray && overall === "none" ? PlasmaCore.Types.PassiveStatus
                    : PlasmaCore.Types.ActiveStatus
 
-    toolTipMainText: i18n("Claude Code")
+    toolTipMainText: i18n("Talpy Den")
     toolTipSubText: tooltipText()
 
     switchWidth: Kirigami.Units.gridUnit * 16
@@ -672,7 +672,7 @@ PlasmoidItem {
         return long ? d.toLocaleDateString(Qt.locale(), "dddd d MMMM") : Qt.locale().dayName(d.getDay(), Locale.NarrowFormat)
     }
 
-    // A chat's recap (claude_status.py: stats_summary), e.g. "3 prompts ·
+    // A chat's recap (talpy_den.py: stats_summary), e.g. "3 prompts ·
     // worked 51m · 278 tool calls (Bash 236, Read 23) · 85.3M tokens (249k out)"
     function recapText(st, costUsd) {
         if (!st)
@@ -847,7 +847,7 @@ PlasmoidItem {
             property var row: null         // the chat's row: a reply goes to it, a click opens the pane
             componentName: "plasma_workspace"
             eventId: "notification"
-            hints: ({ "x-kde-display-appname": "Claude Code" })
+            hints: ({ "x-kde-display-appname": "Talpy Den" })
             defaultAction: NotificationAction {
                 label: i18n("Open")
                 onActivated: root.openFromNotification(notification, true)
@@ -874,7 +874,7 @@ PlasmoidItem {
             id: recapNote
             componentName: "plasma_workspace"
             eventId: "notification"
-            hints: ({ "x-kde-display-appname": "Claude Code" })
+            hints: ({ "x-kde-display-appname": "Talpy Den" })
             iconName: "view-calendar-week"
             defaultAction: NotificationAction {
                 label: i18n("Open the Recap")
@@ -999,7 +999,7 @@ PlasmoidItem {
             }
             componentName: "plasma_workspace"
             eventId: "notification"
-            hints: ({ "x-kde-display-appname": "Claude Code" })
+            hints: ({ "x-kde-display-appname": "Talpy Den" })
             defaultAction: NotificationAction {
                 label: i18n("Open")
                 onActivated: root.openFromNotification(ask, true)
@@ -1445,7 +1445,7 @@ PlasmoidItem {
         // (a chat waiting for a permission the widget can answer: Allow / Deny buttons)
         const asks = kind === "waiting" && session && session.permission
                      && (session.permission.answer === "hook" || session.permission.answer === "keys")
-        // With the pet on, notifications show Talpa in a matching pose.
+        // With the pet on, notifications show Talpy in a matching pose.
         const summary = kind === "digest"   // while you were away: someone waits for you, or all went well
         const pose = kind === "done" && session && session.reason === "failed" ? "sad"
                    : summary ? (session ? "oncall" : "trophy")
@@ -1632,7 +1632,7 @@ PlasmoidItem {
     // Chats open in a terminal or in VS Code (OpenInSwitch.qml): one choice,
     // newChatInVscode, for new and recent chats.
     // VS Code's Claude extension runs on the account its own environment and
-    // settings say (claude_status.py: vscode_profile), so its button is only
+    // settings say (talpy_den.py: vscode_profile), so its button is only
     // on that account (an SSH host's: the host's ~/.claude)
     readonly property bool vscodeInstalled: status !== null && !!status.vscode && status.vscode.installed === true
 
@@ -2105,7 +2105,7 @@ PlasmoidItem {
         remoteAction("stop", host, "--run " + shellQuote(host) + " " + shellQuote(command))
     }
 
-    // A chat with a process on the host (claude_status.py --end there; busy:
+    // A chat with a process on the host (talpy_den.py --end there; busy:
     // you were told it's working or waiting), or one in tmux interrupted
     function remoteEnd(host, sessionId, profileDir, busy) {
         remoteAction("stop", host, "--end " + shellQuote(host) + " " + shellQuote(sessionId)
@@ -2297,7 +2297,7 @@ PlasmoidItem {
     }
 
     // ---------------------------------------------------------------- usage limits that stopped chats
-    // A chat a usage limit stopped (claude_status.py: stopped_by, limit_stop)
+    // A chat a usage limit stopped (talpy_den.py: stopped_by, limit_stop)
     // says when the limit resets. Once it has, one notification per account
     // says which of its chats can go on. Meanwhile one can continue on another
     // account that still has room (handOver: shared with it, then reopened there).
@@ -2337,7 +2337,7 @@ PlasmoidItem {
 
     // ---------------------------------------------------------------- chats changing the same files
     // Two chats with a process that changed some of the same files
-    // (claude_status.py: note_overlaps): a tag on both rows, and one
+    // (talpy_den.py: note_overlaps): a tag on both rows, and one
     // notification per pair when it starts.
 
     property var lastOverlaps: ({})   // source -> {pair key: true}
@@ -2442,7 +2442,7 @@ PlasmoidItem {
 
     // ---------------------------------------------------------------- chats that keep going
     // A chat of this computer can keep going until it's done: after each usage
-    // limit that stops it, it goes on by itself when that resets (claude_status.py:
+    // limit that stops it, it goes on by itself when that resets (talpy_den.py:
     // look_after_kept; jump.py --keep-going, --keep-off). One a limit stopped
     // can start keeping going then (jump.py --queue-continue --keep).
 
@@ -2627,7 +2627,7 @@ PlasmoidItem {
         sharer.connectSource(cmd)
     }
 
-    // A chat's permission mode (claude_status.py: mode_of), "" for the default
+    // A chat's permission mode (talpy_den.py: mode_of), "" for the default
     function modeText(mode) {
         switch (mode) {
         case "plan": return i18n("plan mode")
@@ -2909,7 +2909,7 @@ PlasmoidItem {
 
     // ---------------------------------------------------------------- finding a chat
     // The search at the top of the popup: every chat with all the words in its
-    // name, folder or your prompts (claude_status.py --find), here and on the
+    // name, folder or your prompts (talpy_den.py --find), here and on the
     // SSH hosts shown (remote.py --find), newest first.
 
     property bool searchOpen: false
@@ -3305,7 +3305,7 @@ PlasmoidItem {
 
     property var expandedMemories: ({})   // accounts showing their memories
 
-    // A memory's icon by its kind (claude_status.py: account_memories)
+    // A memory's icon by its kind (talpy_den.py: account_memories)
     function memoryIcon(type) {
         return ({ user: "user-identity", feedback: "dialog-messages", project: "folder-documents", reference: "bookmarks",
                   account: "configure" })[type] || "note"

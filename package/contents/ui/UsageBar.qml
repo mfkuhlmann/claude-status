@@ -5,7 +5,7 @@ import org.kde.plasma.core as PlasmaCore
 import org.kde.kirigami as Kirigami
 
 // One plan window: how much is used, and where it's heading at your pace
-// (claude_status.py: usage_forecast): a faded stretch up to where it would
+// (talpy_den.py: usage_forecast): a faded stretch up to where it would
 // be when the window resets, a mark where an even pace would be by now, and
 // a warning when it would run out before it resets.
 ColumnLayout {

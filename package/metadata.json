@@ -9,14 +9,14 @@
       }
     ],
     "Category": "System Information",
-    "Description": "Keeps all your Claude Code sessions in view: which are working, which need you, plan usage and tokens, across accounts and SSH hosts",
+    "Description": "Keeps all your Claude Code sessions in view: which are working, which need you, plan usage and tokens, across accounts and SSH hosts. An independent project, not affiliated with or endorsed by Anthropic.",
     "Icon": "dialog-messages",
-    "Id": "org.wzaielamri.claudestatus",
+    "Id": "org.wzaielamri.talpyden",
     "License": "MIT",
-    "Name": "Claude Status",
+    "Name": "Talpy Den",
     "Version": "1.15.2",
-    "Website": "https://github.com/wzaielamri/claude-status",
-    "BugReportUrl": "https://github.com/wzaielamri/claude-status/issues"
+    "Website": "https://github.com/wzaielamri/talpy-den",
+    "BugReportUrl": "https://github.com/wzaielamri/talpy-den/issues"
   },
   "X-Plasma-API-Minimum-Version": "6.0",
   "X-Plasma-NotificationArea": "true",

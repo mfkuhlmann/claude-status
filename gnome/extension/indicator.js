@@ -1,4 +1,4 @@
-// The panel button and its popup: polls code/claude_status.py (and the SSH
+// The panel button and its popup: polls code/talpy_den.py (and the SSH
 // hosts you picked, through code/remote.py), sends notifications, and runs
 // what you click through code/jump.py. A port of the Plasma widget's
 // main.qml, CompactRepresentation.qml and FullRepresentation.qml.
@@ -18,7 +18,7 @@ import {Notifier} from './notifier.js';
 import {Runner} from './runner.js';
 import {Pets} from './ui/pets.js';
 import {buildGroupSection, buildHostSection} from './ui/groupSection.js';
-import {TalpaIcon} from './ui/talpaIcon.js';
+import {TalpyIcon} from './ui/talpyIcon.js';
 import {buildPermsView} from './ui/permsView.js';
 import {buildWeekView} from './ui/weekView.js';
 import {box, column, iconButton, label, paragraph, textButton, Tooltips} from './ui/widgets.js';
@@ -27,12 +27,12 @@ const USAGE_PAGE = 'https://claude.ai/settings/usage';
 const WEEK_REFRESH_S = 600;   // the Recap tab reads again while it's open
 
 export const Indicator = GObject.registerClass(
-class ClaudeStatusIndicator extends PanelMenu.Button {
+class TalpyDenIndicator extends PanelMenu.Button {
     // away: {lockedAt, snapshot} when the screen was locked before this
     // (GNOME Shell turns extensions off while it's locked): the summary of
     // what happened meanwhile goes out once the first checks are back
     _init(extension, away = null) {
-        super._init(0.5, 'Claude Status', false);
+        super._init(0.5, 'Talpy Den', false);
         this._extension = extension;
         this._settings = extension.getSettings();
         this._notificationSettings = new Gio.Settings({schema_id: 'org.gnome.desktop.notifications'});
@@ -43,7 +43,7 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         this._tracker = new L.Tracker();
         this.tips = new Tooltips();
 
-        this._status = null;          // parsed output of claude_status.py
+        this._status = null;          // parsed output of talpy_den.py
         this._errorText = '';
         this._actionError = '';
         this._actionInfo = '';
@@ -228,7 +228,7 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         if (this._polling)
             return;
         this._polling = true;
-        // (poll.py runs claude_status.py with its compiled code cached)
+        // (poll.py runs talpy_den.py with its compiled code cached)
         const out = await this._runner.run('poll.py', [...this._configDirArgs, ...this._listArgs], {poll: true});
         this._polling = false;
         if (this._destroyed || out.cancelled)
@@ -244,7 +244,7 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
             try {
                 this._track('', result.status.groups, result.status.generatedAt, '');
             } catch (e) {
-                console.error(`Claude Status: following the chats failed: ${e.message}\n${e.stack}`);
+                console.error(`Talpy Den: following the chats failed: ${e.message}\n${e.stack}`);
             }
         }
         this._render();
@@ -271,7 +271,7 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
             try {
                 fn();
             } catch (e) {
-                console.error(`Claude Status: ${what} failed: ${e.message}\n${e.stack}`);
+                console.error(`Talpy Den: ${what} failed: ${e.message}\n${e.stack}`);
             }
         };
         for (const c of out.close)
@@ -366,7 +366,7 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         try {
             digest = L.awayDigest(away, this.allGroups, Date.now(), this._settings.get_int('away-minutes'));
         } catch (e) {
-            console.error(`Claude Status: the away summary failed: ${e.message}\n${e.stack}`);
+            console.error(`Talpy Den: the away summary failed: ${e.message}\n${e.stack}`);
         }
         if (!digest)
             return;
@@ -721,7 +721,7 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
             try {
                 this._track(`ssh:${host}`, result.groups, result.generatedAt, host);
             } catch (e) {
-                console.error(`Claude Status: following ${host}'s chats failed: ${e.message}\n${e.stack}`);
+                console.error(`Talpy Den: following ${host}'s chats failed: ${e.message}\n${e.stack}`);
             }
         } else {
             // keep the last answer to show (dimmed) with the error
@@ -798,7 +798,7 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         this._remoteAction('stop', host, ['--run', host, command]);
     }
 
-    // A chat with a process on the host (claude_status.py --end there; busy:
+    // A chat with a process on the host (talpy_den.py --end there; busy:
     // you were told it's working or waiting), or one in tmux interrupted
     remoteEnd(host, sessionId, profileDir, busy = false) {
         this._remoteAction('stop', host, ['--end', host, sessionId, ...profileDir ? [profileDir] : [], ...busy ? ['--busy'] : []]);
@@ -867,7 +867,7 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
     _buildPanel() {
         const panelBox = box('panel-status-indicators-box claude-panel');
         const iconBin = new St.Widget({layout_manager: new Clutter.BinLayout(), y_align: Clutter.ActorAlign.CENTER});
-        this._spark = new TalpaIcon('claude-spark');
+        this._spark = new TalpyIcon('claude-spark');
         // the count of chats that need you, on the spark's corner
         this._badge = new St.Label({style_class: 'claude-badge', visible: false,
             x_align: Clutter.ActorAlign.END, y_align: Clutter.ActorAlign.START,
@@ -914,20 +914,19 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         const popup = column('claude-popup', {x_expand: true});
         this.menu.box.add_child(popup);
 
-        // Header: Claude Code, the summary, SSH hosts, refresh
+        // Header: the tabs, the summary, SSH hosts, refresh
         const header = box('claude-header', {x_expand: true});
-        this._headerSpark = new TalpaIcon('claude-spark claude-spark-small');
+        this._headerSpark = new TalpyIcon('claude-spark claude-spark-small');
         header.add_child(this._headerSpark);
         // (the title and the tabs keep their whole names: the summary gives way)
         const whole = actor => {
             actor.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
             return actor;
         };
-        header.add_child(whole(label('Claude Code', 'claude-title')));
-        // Your chats now, your last 7 days with Claude (ui/weekView.js), or the
-        // permissions you gave (ui/permsView.js)
+        // The app's name is the first tab: your chats now. The others: your last
+        // 7 days with Claude (ui/weekView.js), the permissions you gave (ui/permsView.js)
         this._tabs = {};
-        for (const [tab, text] of [['chats', 'Chats'], ['week', 'Recap'], ['perms', 'Permissions']]) {
+        for (const [tab, text] of [['chats', 'Talpy Den'], ['week', 'Recap'], ['perms', 'Permissions']]) {
             const b = new St.Button({style_class: 'claude-tab', can_focus: true, child: whole(new St.Label({text})),
                 y_align: Clutter.ActorAlign.CENTER});
             b.connect('clicked', () => this.setTab(tab));
@@ -955,7 +954,7 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         }), 'Refresh'));
         popup.add_child(header);
 
-        // The big Talpa (pets.js) stays put while the list scrolls
+        // The big Talpy (pets.js) stays put while the list scrolls
         this._heroBin = new St.Bin({x_expand: true});
         popup.add_child(this._heroBin);
 
@@ -1196,7 +1195,7 @@ class ClaudeStatusIndicator extends PanelMenu.Button {
         for (const [tab, b] of Object.entries(this._tabs))
             b.checked = tab === this.ui.tab;   // (St.Button's :checked)
         this._heroBin.visible = chats;
-        this._summary.text = this._pets.heroShown && chats ? '' : L.summaryText(c);   // the big Talpa's headline says it
+        this._summary.text = this._pets.heroShown && chats ? '' : L.summaryText(c);   // the big Talpy's headline says it
         const hosts = this.shownHosts;
         this._hostsCount.text = hosts.length > 0 ? String(hosts.length) : '';
         this._undismissItem.label.text = L.fmt('Show removed sessions again (%1)', this._status?.dismissed || 0);

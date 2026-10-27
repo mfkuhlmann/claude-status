@@ -1,5 +1,5 @@
-// A 2D canvas context over Cairo: the calls Talpa (talpa/talpa.js) and the
-// panel icon (talpa/glyph.js) make, so GNOME Shell draws them with the same
+// A 2D canvas context over Cairo: the calls Talpy (talpy/talpy.js) and the
+// panel icon (talpy/glyph.js) make, so GNOME Shell draws them with the same
 // code as the Plasma widget and the VS Code extension.
 
 import Cairo from 'cairo';

@@ -74,7 +74,7 @@ def history(profile, folders):
 
 
 def limits(profile, sid, five, week, context, model="Opus 5.5"):
-    write(home / ".cache/claude-widget/statusline" / profile / f"{sid}.json", {
+    write(home / ".cache/talpy-den/statusline" / profile / f"{sid}.json", {
         "session_id": sid,
         "rate_limits": {"five_hour": {"used_percentage": five, "resets_at": int(now + 2 * 3600 + 900)},
                         "seven_day": {"used_percentage": week, "resets_at": int(now + 4 * 86400)}},

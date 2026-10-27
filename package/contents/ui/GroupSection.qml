@@ -624,7 +624,7 @@ ColumnLayout {
                     text: "⇄"
                     opacity: 0.6
                 }
-                // a usage limit stopped it (claude_status.py: limit_stop): until it resets;
+                // a usage limit stopped it (talpy_den.py: limit_stop): until it resets;
                 // click: it goes on by itself then (queued; again: cancelled)
                 Tag {
                     readonly property real goOnAt: root.goOnAt(recentLine.chat)

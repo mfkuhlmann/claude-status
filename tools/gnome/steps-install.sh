@@ -1,7 +1,7 @@
 # Steps for tools/gnome/shell.sh: ./install.sh on GNOME, as a fresh clone
 # would run it (uninstall, install again).
 #   tools/gnome/shell.sh OUT tools/gnome/steps-install.sh
-uuid=claude-status@wzaielamri.github.io
+uuid=talpy-den@wzaielamri.github.io
 cp -r /src "$HOME/clone" && rm -rf "$HOME/clone/gnome/build"
 cd "$HOME/clone"
 echo "--- uninstall"

@@ -7,7 +7,7 @@ import org.kde.kirigami as Kirigami
 
 // A stage where pets (Pet.qml) live. Two kinds:
 //
-// hero: the big Talpa at the top of the popup, on a little stage whose light
+// hero: the big Talpy at the top of the popup, on a little stage whose light
 // follows the whole dashboard (warm when a chat needs you, blue while chats
 // work, green when they wait for your next message, a starry night once
 // everything is done), with a headline and the session counts beside him.
@@ -28,7 +28,7 @@ Item {
     // Names this stage's colors in root.petColors (an account's group key)
     property string stageKey: hero ? "hero" : ""
 
-    // Each Talpa is drawn in a 64-unit box (TalpaView.qml): its body is 38
+    // Each Talpy is drawn in a 64-unit box (TalpyView.qml): its body is 38
     // units wide and stands about 31 units out of its burrow
     readonly property real gu: Kirigami.Units.gridUnit
     readonly property real boxSize: hero ? gu * 5.6 : gu * 3.8
@@ -341,7 +341,7 @@ Item {
             // "1 chat needs you": click to go there
             MouseArea {
                 id: headlineMouse
-                // the words only: Talpa may stand under the rest of the line, and it's grabbed there
+                // the words only: Talpy may stand under the rest of the line, and it's grabbed there
                 width: Math.min(parent.width, parent.paintedWidth)
                 height: parent.height
                 enabled: strip.callingChat !== null

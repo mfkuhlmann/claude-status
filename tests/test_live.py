@@ -12,7 +12,7 @@ from unittest import mock
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from test_claude_status import PID, ROOT, Fixture, cs, session, write  # noqa: E402
+from test_talpy_den import PID, ROOT, Fixture, cs, session, write  # noqa: E402
 
 CODE = ROOT / "package/contents/code"
 sys.path.insert(0, str(CODE))
@@ -47,7 +47,7 @@ class HookFixture(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.home = Path(self.tmp.name)
-        self.live = self.home / ".cache/claude-widget/live"
+        self.live = self.home / ".cache/talpy-den/live"
 
     def hook(self, *events, raw=None):
         """Run the hook as Claude runs it (python3 -I -S, the event on stdin), once per event."""
@@ -179,7 +179,7 @@ class WaitTests(unittest.TestCase):
         self.sessions = self.home / ".claude-work/sessions"
         self.sessions.mkdir(parents=True)
         (self.home / ".claude").symlink_to(self.home / ".claude-work")  # (the same folder: watched once)
-        self.live = self.home / ".cache/claude-widget/live"
+        self.live = self.home / ".cache/talpy-den/live"
         env = mock.patch.dict(os.environ, {"XDG_CACHE_HOME": str(self.home / ".cache")})
         env.start()
         self.addCleanup(env.stop)
@@ -257,7 +257,7 @@ class LiveSwitchTests(Fixture):
         pane.relay(self.home, [], True)
         self.assertEqual(pane.live(self.home, [], True), (True, "Chats show each step as it happens"))
         hooks = json.loads(shared.read_text())["hooks"]
-        hook = self.home / ".local/share/claude-widget/live-hook.py"
+        hook = self.home / ".local/share/talpy-den/live-hook.py"
         self.assertEqual(hook.read_text(), (CODE / "live_hook.py").read_text())
         self.assertEqual(sorted(hooks), sorted(set(pane.LIVE_EVENTS)))
         mine = {"type": "command", "command": f"python3 -I -S {hook}", "async": True, "timeout": 10}

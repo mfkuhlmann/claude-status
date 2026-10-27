@@ -1,4 +1,4 @@
-/* Claude Status. State colors: waiting (needs you) orange, working blue,
+/* Talpy Den. State colors: waiting (needs you) orange, working blue,
    ok (your turn / done) green, none grey, bad red. Mid tones, so they read
    on both the dark and the light shell theme. Working isn't the accent
    color: Ubuntu's is orange, like "needs you". */
@@ -33,7 +33,6 @@
 /* Popup */
 .claude-popup { width: 33em; spacing: 4px; }
 .claude-header { spacing: 8px; padding: 2px 8px 6px; }
-.claude-title { font-weight: bold; }
 .claude-summary { text-align: right; }
 .claude-messages { padding: 0 8px; spacing: 4px; }
 .claude-message { padding: 2px 0; }

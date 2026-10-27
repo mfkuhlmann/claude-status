@@ -22,12 +22,12 @@ var ExtensionPreferences = class ExtensionPreferences {
 
 // A row with a spin button; its value property is the button's
 var SpinRow = GObject.registerClass({
-    GTypeName: 'ClaudeStatusSpinRow',
+    GTypeName: 'TalpyDenSpinRow',
     Properties: {
         value: GObject.ParamSpec.double('value', 'Value', 'The spin button value',
             GObject.ParamFlags.READWRITE, -Number.MAX_VALUE, Number.MAX_VALUE, 0),
     },
-}, class ClaudeStatusSpinRow extends Adw.ActionRow {
+}, class TalpyDenSpinRow extends Adw.ActionRow {
     _init(props = {}) {
         super._init(props);
         this._spin = new Gtk.SpinButton({valign: Gtk.Align.CENTER});
@@ -60,12 +60,12 @@ var SpinRow = GObject.registerClass({
 
 // A row with a switch; its active property is the switch's
 var SwitchRow = GObject.registerClass({
-    GTypeName: 'ClaudeStatusSwitchRow',
+    GTypeName: 'TalpyDenSwitchRow',
     Properties: {
         active: GObject.ParamSpec.boolean('active', 'Active', 'Whether the switch is on',
             GObject.ParamFlags.READWRITE, false),
     },
-}, class ClaudeStatusSwitchRow extends Adw.ActionRow {
+}, class TalpyDenSwitchRow extends Adw.ActionRow {
     _init(props = {}) {
         super._init(props);
         this._switch = new Gtk.Switch({valign: Gtk.Align.CENTER});

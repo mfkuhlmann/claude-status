@@ -1,9 +1,9 @@
 import QtQuick
 import QtQuick.Layouts
-import "talpa/talpa.mjs" as T
+import "talpy/talpy.mjs" as T
 
 // The Recap as a card to share (WeekView.qml: Share…): the period shown with
-// Talpa, its main numbers, Claude's work day by day, and the projects if you
+// Talpy, its main numbers, Claude's work day by day, and the projects if you
 // want them named. Fixed colors (it's a picture, not part of the theme);
 // saved at twice its size (grabToImage).
 Rectangle {
@@ -39,7 +39,7 @@ Rectangle {
         return recap.from === recap.to ? f(recap.from) : f(recap.from) + " – " + f(recap.to)
     }
 
-    // A few stars, as over the big Talpa at night
+    // A few stars, as over the big Talpy at night
     Repeater {
         model: [[30, 26, 2], [120, 60, 1.5], [200, 22, 2.2], [262, 92, 1.4], [70, 120, 1.6], [560, 30, 1.8], [470, 18, 1.2]]
         delegate: Rectangle {
@@ -54,7 +54,7 @@ Rectangle {
         }
     }
 
-    // Talpa, out of its burrow, happy
+    // Talpy, out of its burrow, happy
     Canvas {
         id: pet
         x: 10
@@ -65,7 +65,7 @@ Rectangle {
         onPaint: {
             const ctx = getContext("2d")
             ctx.reset()
-            const t = new T.Talpa({ brain: false, colors: T.LILAC, theme: { fx: "rgba(255,255,255,0.6)", text: "#ffffff" } })
+            const t = new T.Talpy({ brain: false, colors: T.LILAC, theme: { fx: "rgba(255,255,255,0.6)", text: "#ffffff" } })
             t.tick(1e6)
             t.pose({ depth: "high", arms: "up", eyes: "star", mouth: "grin", plume: "up", lamp: "done", blush: 1 })
             ctx.translate(15, 10)
@@ -167,7 +167,7 @@ Rectangle {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.margins: 14
-        text: "Claude Status"
+        text: "Talpy Den"
         color: "#8f89c4"
         font.pixelSize: 11
     }

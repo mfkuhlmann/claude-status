@@ -21,7 +21,7 @@ export class Notifier {
 
     _getSource() {
         if (!this._source) {
-            this._source = new MessageTray.Source({title: 'Claude Code', icon: this._icon('talpa.svg')});
+            this._source = new MessageTray.Source({title: 'Talpy Den', icon: this._icon('talpy.svg')});
             this._source.connect('destroy', () => {
                 this._source = null;
             });
@@ -31,7 +31,7 @@ export class Notifier {
     }
 
     // n: {key, kind, title, body, icon, session, action (the button's label)};
-    // pose: show Talpa (the pet setting) in the matching pose instead of a plain icon
+    // pose: show Talpy (the pet setting) in the matching pose instead of a plain icon
     notify(n, pose, onOpen) {
         const old = this._shown.get(n.key);
         if (old)

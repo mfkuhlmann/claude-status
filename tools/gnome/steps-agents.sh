@@ -38,9 +38,9 @@ sleep 4
 ev 'const a = ext._scroll.vadjustment; a.value = 0'
 sleep 1
 popup agent-run-opened
-echo "saved runs: $(ls "$HOME/.cache/claude-widget/agent-runs/")"
+echo "saved runs: $(ls "$HOME/.cache/talpy-den/agent-runs/")"
 echo "first lines:"
-head -5 "$HOME"/.cache/claude-widget/agent-runs/*.md
+head -5 "$HOME"/.cache/talpy-den/agent-runs/*.md
 # folded again: clicking the line once more
 ev "$find find(ext._list, 'claude-agent-button')[0].emit('clicked', 1)"
 sleep 1

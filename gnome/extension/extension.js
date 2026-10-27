@@ -1,4 +1,4 @@
-// Claude Status for GNOME Shell: the panel button (indicator.js), the
+// Talpy Den for GNOME Shell: the panel button (indicator.js), the
 // window raiser that code/jump.py calls (raiser.js) and the hotkey to the
 // chat that needs you. Nothing runs until enable(), and disable() takes
 // everything down again.
@@ -17,7 +17,7 @@ import {Indicator} from './indicator.js';
 import {awaySnapshot} from './logic.js';
 import {Raiser} from './raiser.js';
 
-export default class ClaudeStatusExtension extends Extension {
+export default class TalpyDenExtension extends Extension {
     enable() {
         try {
             this._raiser = new Raiser();
@@ -50,7 +50,7 @@ export default class ClaudeStatusExtension extends Extension {
                 this._lockedSnapshot = awaySnapshot(this._indicator.allGroups);
                 this._lockedAt = Date.now();
             } catch (e) {
-                console.error(`Claude Status: couldn't note the dashboard at locking: ${e.message}`);
+                console.error(`Talpy Den: couldn't note the dashboard at locking: ${e.message}`);
             }
         }
         this._indicator?.destroy();

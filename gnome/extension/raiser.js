@@ -9,10 +9,10 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {pickWindow} from './logic.js';
 
-const PATH = '/org/gnome/Shell/Extensions/ClaudeStatus';
+const PATH = '/org/gnome/Shell/Extensions/TalpyDen';
 const IFACE = `
 <node>
-  <interface name="org.gnome.Shell.Extensions.ClaudeStatus">
+  <interface name="org.gnome.Shell.Extensions.TalpyDen">
     <method name="RaiseWindow">
       <arg type="s" direction="in" name="want"/>
       <arg type="b" direction="out" name="handled"/>
