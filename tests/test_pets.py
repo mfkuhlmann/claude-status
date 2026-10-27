@@ -654,7 +654,7 @@ console.log(JSON.stringify(out));""")
     def test_no_clawd_left(self):
         # Talpy replaced Clawd (Anthropic's mascot) everywhere
         repo = ROOT.parent.parent
-        for path in list((repo / "package").rglob("*")) + list((repo / "gnome/extension").rglob("*")) + [repo / "README.md"]:
+        for path in list((repo / "package").rglob("*")) + list((repo / "gnome/extension").rglob("*")) + [repo / "README.md"] + list((repo / "docs").glob("*.md")):
             if path.is_file() and path.suffix in {".qml", ".js", ".mjs", ".py", ".xml", ".md", ".svg", ".json", ".css"}:
                 self.assertNotRegex(path.read_text(errors="ignore"), r"(?i)clawd", str(path.relative_to(repo)))
 

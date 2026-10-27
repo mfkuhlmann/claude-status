@@ -561,7 +561,7 @@ Every build copies them there from the rest of the repository
 
 Releases and the check that keeps the repository publishable are described
 in the repository's
-[README](https://github.com/wzaielamri/talpy-den#development).
+[development notes](https://github.com/wzaielamri/talpy-den/blob/main/docs/development.md).
 
 ## Credits
 
