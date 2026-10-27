@@ -553,8 +553,8 @@ for (const lone of [true, false]) for (const mood of ['working', 'agents', 'need
         const tick = films ? 33.33 : 40;
         let f = null, p = null;
         if (films) { t.holeImage = () => ({});
-            f = lone ? new Films(t, { frameMs: tick, maxFrames: 32, sheets: 36, tweenMs: 0, restMs: 200, smooth: true })
-                     : new Films(t, { frameMs: 50, maxFrames: 32, sheets: 32, tweenMs: 200, tweens: 3, smooth: true }); }
+            f = lone ? new Films(t, { frameMs: tick, maxFrames: 32, sheets: 36, tweenMs: 0, restMs: 200, smooth: true, clockMs: tick })
+                     : new Films(t, { frameMs: 2 * tick, maxFrames: 32, sheets: 32, tweenMs: 200, tweens: 3, smooth: true, clockMs: tick }); }
         else { p = new Pictures(t, lone ? 1 : 5); p.pictures = !lone; }
         for (let i = 0; i < 120000 / tick; i++) {
             now += tick; t.tick(now);
@@ -598,6 +598,31 @@ console.log(JSON.stringify(out));""")
                 self.assertEqual(holds, [1], name)
             else:
                 self.assertGreater(max(holds), 2, name)   # (what it was: the test can tell)
+
+    def test_a_jittery_clock_shows_each_picture_as_long(self):
+        # The clock's ticks come a millisecond or two early or late: a
+        # picture of a move still shows for its whole number of frames (by
+        # time alone, one due right at a tick showed for 1 frame, then 3)
+        result = run_node(NULL_CANVAS + """
+let seed = 3;
+const jitter = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return (seed / 2147483648 - 0.5) * 4; };
+const out = {};
+for (const [name, move, frameMs] of [['typing', { arms: 'type' }, 33.3], ['bounce', { body: 'bounce' }, 33.3], ['wave', { arms: 'wave' }, 16.7]]) {
+    const t = new Talpa({ brain: false }); const start = 1e12; t.tick(start);
+    t.play({ steps: () => [Object.assign({ depth: 'half', eyes: 'happy', t: 9000 }, move)] });   // (no blinks: pictures of their own)
+    const f = new Films(t, { frameMs: frameMs, maxFrames: 32, sheets: 32, tweenMs: 200, clockMs: 1000 / 60 });
+    let sig = '', at = 0; const holds = {};
+    for (let i = 1; i < 400; i++) {
+        const now = start + i * 1000 / 60 + jitter(); t.tick(now); f.tick(now);
+        for (const s of f.sheets) if (s.paint) f.paint(s, ctx);
+        const was = sig; sig = f.front.index + '|' + f.front.key + '|' + f.liveAt;
+        if (i > 60 && sig !== was) holds[i - at] = (holds[i - at] || 0) + 1;
+        if (sig !== was) at = i;
+    }
+    out[name] = Object.keys(holds).map(Number);
+}
+console.log(JSON.stringify(out));""")
+        self.assertEqual(result, {"typing": [2], "bounce": [2], "wave": [2]})
 
     def test_nothing_shows_under_the_burrows_lip(self):
         # Talpa and what it holds are cut along the same edge the lip is drawn

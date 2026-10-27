@@ -704,12 +704,15 @@ export class Talpa {
     // frameMs apart and at most maxFrames a round (a move that swings back
     // shows the same ones on the way back); null during a big move. rest: no
     // quick move under way; every: ms from one picture to the next, a whole
-    // number of frames where it can (2 frames each, not 2, 2, 3: even steps).
-    still(frameMs, maxFrames) {
+    // number of the host's ticks (clockMs apart). ticksSince(id, ms), from
+    // the film: the ticks since the move (id) began, ms ago; a picture then
+    // shows for exactly its ticks, 2 each, not 2, 2, 3 (by time, a picture
+    // due right at a tick showed for 1 tick or 3 as the ticks jittered).
+    still(frameMs, maxFrames, clockMs, ticksSince) {
         if (this.big || this.now < this.landsAt || this.oneShot())
             return null;
         const st = this.st, moves = this.moves();
-        let frames = 1, frame = 0, round = 0;
+        let frames = 1, frame = 0, round = 0, every = Infinity;
         if (moves.length) {
             let quick = moves[0];
             for (const m of moves) {
@@ -719,13 +722,17 @@ export class Talpa {
             round = 2 * quick[1];
             const oneWay = ONE_WAY[st.arms] === 1 || ONE_WAY[st.body] === 1 || ONE_WAY[st.prop] === 1 || st.tunnel === '1';
             const tick = Math.max(1, frameMs);
-            const ticks = Math.ceil(round / (tick * (maxFrames || 12)));   // frames a picture shows
+            const clock = clockMs > 0 ? clockMs : tick;
+            const ticks = Math.ceil(round / (tick * (maxFrames || 12)));   // frameMs a picture shows
+            const q = Math.max(1, Math.round(ticks * tick / clock));        // the host's ticks a picture shows
+            every = q * clock;
             frames = Math.max(4, Math.round(round / (ticks * tick)));
             if (!oneWay)
                 frames += frames % 2;
             // (counted from when that move began, as it's drawn live)
             const ms = Math.max(0, this.now - (this.since[quick[0]] || 0));
-            frame = Math.floor((ms % round) * frames / round);
+            frame = ticksSince ? Math.floor(ticksSince(quick[0] + '@' + (this.since[quick[0]] || 0), ms) / q) % frames
+                               : Math.floor((ms + clock / 2) / every) % frames;
             if (!oneWay && frame > frames / 2)
                 frame = frames - frame;
         }
@@ -734,7 +741,7 @@ export class Talpa {
         const pose = KEYS.map(k => st[k]).join(',') + ',' + st.it + ',' + (st.gum || '') + (this.facingLeft ? ',L' : ',R');
         return { key: pose + '#' + look.join(',') + (blink ? ',blink' : '') + ',' + frame + '/' + frames, pose: pose, st: st,
                  look: look, blink: blink, phase: frame / frames, rest: !moves.length, left: this.facingLeft,
-                 every: moves.length ? round / frames : Infinity };
+                 every: every };
     }
 
     // Draws film picture d (still()), or one on its way there from picture

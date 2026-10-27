@@ -53,7 +53,7 @@ export class Talpa {
     draw(ctx: unknown, withoutParticles?: boolean): void;
     drawParticles(ctx: unknown, now: number): void;
     particles(now: number): 0 | 1 | 2;   // nothing flies about, only z's, quicker things
-    still(frameMs: number, maxFrames: number): Still | null;
+    still(frameMs: number, maxFrames: number, clockMs?: number): Still | null;
     drawFilm(ctx: unknown, d: Still, from: Still | null, p: number): void;
     // a picture instead of every frame: what it shows ("pose#details": fade over to a new pose), and the picture
     stillKey(): string;

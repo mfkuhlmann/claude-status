@@ -12,9 +12,10 @@ export interface FilmSheet {
 
 export class Films {
     constructor(talpa: Talpa, opts?: { sheets?: number; frameMs?: number; maxFrames?: number; restMs?: number; tweenMs?: number;
-                                        tweens?: number; slackMs?: number; smooth?: boolean });
+                                        tweens?: number; smooth?: boolean; clockMs?: number });
     on: boolean;        // false: drawn live (a pet you hold)
     frameMs: number;
+    clockMs: number;    // about how far apart the host's ticks come (measured from them once there are a few)
     readonly sheets: FilmSheet[];
     readonly front: FilmSheet;
     readonly fx: { readonly on: boolean; paint: boolean };   // what flies about: shown while on, drawn again when paint

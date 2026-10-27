@@ -40,6 +40,7 @@ Item {
     property var talpa: null
     property var film: null
     property int shownSheet: 0
+    property int wantedSheet: 0            // the film's front: it shows once its picture is painted
     signal travel(int ms)                  // it dug in: move it to its new spot within ms
     signal ready()                         // talpa exists
 
@@ -74,7 +75,8 @@ Item {
         talpa.tick(Date.now())
         // (pictures in between a frame apart)
         film = new F.Films(talpa, { sheets: sheets, frameMs: frameMs, maxFrames: maxFrames, tweenMs: tweenMs,
-                                    tweens: Math.max(3, Math.round(tweenMs / frameMs) - 1), restMs: restMs, smooth: smooth })
+                                    tweens: Math.max(3, Math.round(tweenMs / frameMs) - 1), restMs: restMs, smooth: smooth,
+                                    clockMs: root.petFrameMs })
         paintHoles()
         ready()
         frame(Date.now())
@@ -109,23 +111,34 @@ Item {
         film.on = !live
         film.tick(now)
         for (const s of film.sheets) {
-            if (s.paint && sheetItems.itemAt(s.index))
-                sheetItems.itemAt(s.index).requestPaint()   // (painted before the frame shows)
+            const item = sheetItems.itemAt(s.index)
+            if (s.paint && item) {
+                item.ready = false
+                item.requestPaint()
+            }
         }
-        // only the sheet in front shows
-        const front = film.front.index
-        if (front !== shownSheet) {
-            const was = sheetItems.itemAt(shownSheet)
-            if (was)
-                was.opacity = 0
-            shownSheet = front
-        }
-        const shown = sheetItems.itemAt(front)
-        if (shown)
-            shown.opacity = 1
+        wantedSheet = film.front.index
+        showWanted()
         if (film.fx.paint)
             flying.requestPaint()
         flying.visible = film.fx.on
+    }
+
+    // Only the sheet in front shows, once its picture is painted: a Canvas
+    // shows what it had until its new picture is ready (a frame later), so a
+    // sheet put in front while it was painted showed its old picture, or
+    // nothing, for a frame (pets blinking out and jumping between poses)
+    function showWanted() {
+        const item = sheetItems.itemAt(wantedSheet)
+        if (!item || (!item.ready && wantedSheet !== shownSheet))
+            return
+        if (wantedSheet !== shownSheet) {
+            const was = sheetItems.itemAt(shownSheet)
+            if (was)
+                was.opacity = 0
+            shownSheet = wantedSheet
+        }
+        item.opacity = 1
     }
 
     function begin(ctx) {
@@ -173,10 +186,16 @@ Item {
         model: view.sheets
         delegate: Canvas {
             required property int index
+            property bool ready: false     // its picture is the film's (see showWanted)
             anchors.fill: parent
             renderStrategy: Canvas.Cooperative
             opacity: index === 0 ? 1 : 0
             onPaint: view.paint(this, index)
+            onPainted: {
+                ready = true
+                if (index === view.wantedSheet)
+                    view.showWanted()
+            }
         }
     }
 

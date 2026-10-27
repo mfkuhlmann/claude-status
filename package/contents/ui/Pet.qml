@@ -440,11 +440,12 @@ Item {
         // until they've landed, and for a move too slow for a picture every
         // tick (it would step). The big Talpa: a picture every frame of the
         // clock, live until a new pose has settled, breathing at rest. A
-        // chat's pet: smaller, so at most 20 pictures a second on the desktop
-        // (30 in the popup), pictures in between poses, still at rest.
+        // chat's pet: smaller, so a picture every other tick (30 a second in
+        // the popup, 15 on the desktop: even steps, each picture as long),
+        // pictures in between poses, still at rest.
         live: pet.landing
         sheets: pet.lone ? 36 : 32
-        frameMs: pet.lone ? root.petFrameMs : Math.max(root.petFrameMs, root.onDesktop ? 50 : 33.3)
+        frameMs: pet.lone ? root.petFrameMs : 2 * root.petFrameMs
         maxFrames: 32
         tweenMs: pet.lone ? 0 : 200
         restMs: pet.lone ? 200 : 0
