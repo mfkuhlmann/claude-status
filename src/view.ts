@@ -339,6 +339,19 @@ export class ViewHost implements vscode.WebviewViewProvider, vscode.Disposable {
         );
         break;
       }
+      case "projects":
+        void this.dash.projects().then(({ data, error }) =>
+          webview.postMessage({ type: "projects", data: data ?? null, error: error ?? "" } satisfies HostMessage),
+        );
+        break;
+      case "newChatIn": {
+        // (a folder the projects list named, on an account of this computer's)
+        const state = this.dash.state();
+        const group = state.status?.groups.find((g) => (g.profileKeys ?? []).includes(m.profileDir)) ?? state.status?.groups[0];
+        if (group && typeof m.path === "string" && m.path.startsWith("/"))
+          void this.actions.newChat(group.id, undefined, undefined, undefined, { path: m.path, short: m.path.replace(/^\/home\/[^/]+/, "~") });
+        break;
+      }
       case "perms":
         void this.dash.perms().then(({ data, error }) =>
           webview.postMessage({ type: "perms", data: data ?? null, error: error ?? "" } satisfies HostMessage),

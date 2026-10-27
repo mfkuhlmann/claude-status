@@ -15,10 +15,10 @@ import { cacheDir, extraConfigDirs, settings, statusArgs, configDirArgs, viewSet
 import { LiveWatch } from "./live";
 import type { Notifier } from "./notify";
 import { currentRemoteHost } from "./remoteHost";
-import { demoPerms, demoState, demoWeek } from "./shared/demo";
+import { demoPerms, demoProjects, demoState, demoWeek } from "./shared/demo";
 import { allGroups, chatsNeedingYou, keptChat, limitReset, liveFromRows, queuedWhat, shareUsage, toLocalClock, trackKey, withLive, type ChatSpot } from "./shared/model";
 import { chatRef } from "./notify";
-import type { ClaudeCodeInfo, DigestCard, HostState, LiveView, PermsData, PetEventKind, QueuedTask, Status, ViewState, WeekRecap, WeekSpan } from "./shared/types";
+import type { ClaudeCodeInfo, DigestCard, HostState, LiveView, PermsData, PetEventKind, ProjectsData, QueuedTask, Status, ViewState, WeekRecap, WeekSpan } from "./shared/types";
 import type { WeekRuleAsk } from "./shared/week";
 import { mergeChanges, TransitionTracker, type Changes, type PetEvent } from "./transitions";
 
@@ -602,6 +602,12 @@ export class Dashboard implements vscode.Disposable {
 
   // The Permissions tab: the permissions you gave and the prompts of the
   // last 7 days (this computer's)
+  async projects(): Promise<{ data?: ProjectsData; error?: string }> {
+    if (this.demoPhase !== null) return { data: demoProjects(Date.now()) };
+    const currency = vscode.workspace.getConfiguration("claudeStatus").get<string>("recapCurrency") || "USD";
+    return this.backend.projects([...(currency !== "USD" ? ["--currency", currency] : []), ...configDirArgs()]);
+  }
+
   async perms(): Promise<{ data?: PermsData; error?: string }> {
     if (this.demoPhase !== null) return { data: demoPerms(Date.now()) };
     const hosts = this.shownHosts().filter((name) => {

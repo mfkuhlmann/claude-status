@@ -41,10 +41,10 @@ export function Header(props: {
       </h1>
       {/* Your chats now, your last 7 days with Claude (WeekView.tsx), or the permissions you gave (PermsView.tsx) */}
       <div class="tabs" role="tablist">
-        {(["chats", "week", "perms"] as const).map((t) => (
+        {(["chats", "week", "perms", "projects"] as const).map((t) => (
           <button key={t} type="button" role="tab" aria-selected={tab === t} class={"tab-btn" + (tab === t ? " on" : "")}
             onClick={() => setTab(t)}>
-            {t === "chats" ? "Chats" : t === "week" ? "Recap" : "Permissions"}
+            {t === "chats" ? "Chats" : t === "week" ? "Recap" : t === "perms" ? "Permissions" : "Projects"}
           </button>
         ))}
       </div>

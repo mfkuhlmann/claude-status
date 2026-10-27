@@ -10,6 +10,12 @@
   open burrow is drawn once and copied into each picture, which halves what
   a picture costs. A pet you pick up trails your mouse on a spring, swings
   as you move it and wobbles when you let go.
+- **Projects:** a new **Projects** tab with each project you chatted in
+  (its git repository, else its folder), the newest first: its chats at
+  work now, Claude's last recap of it, how long Claude worked on it and what
+  that cost (the last 7 days and everything kept), its latest chats (click
+  one to bring it up), its plans and memories, and **+** for a new chat
+  there (on the account of its newest chat, with that folder first).
 - **Share your week as a picture:** the share button in the Recap makes a
   card of the period shown (a day, the 7 days or everything): Talpa, how
   long Claude worked and how long you did, your prompts and chats, Claude's

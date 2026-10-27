@@ -738,6 +738,27 @@ export interface PermsData {
 // What the Recap tab shows: a day, the last 7 days (or 7 before), or everything kept
 export type WeekSpan = "day" | "week" | "all";
 
+// The Projects tab (week.py --projects): each project (a git repository, else
+// a folder), newest first, with its chats newest first
+export interface ProjectsData {
+  ok: true;
+  generatedAt: number;
+  projects: ProjectRow[];
+  currency?: { code: string; rate: number; date?: string; error?: string };
+}
+
+export interface ProjectRow {
+  name: string;
+  path: string;
+  short: string;
+  workedMs: number;
+  weekMs: number; // the last 7 days
+  cost: number;
+  lastAt: number;
+  chatCount: number;
+  chats: { id: string; name: string; profileDir: string; cwd: string; lastAt: number; workedMs: number; cost: number }[];
+}
+
 export interface WeekLane {
   key: string;
   id: string;
@@ -871,6 +892,8 @@ export type WebviewMessage =
   | { type: "weekRule"; allow: boolean; kind: string; value: string; project: string; id: string; host?: string } // allow a rule the tab offers, or take one back (on an SSH host shown, if host)
   | { type: "weekRevoke"; id: string; host?: string } // take a permission you gave out of its file
   | { type: "perms" } // the Permissions tab wants what it shows
+  | { type: "projects" } // the Projects tab wants its projects (week.py --projects)
+  | { type: "newChatIn"; path: string; profileDir: string } // + of a project: a new chat there, on the account of its newest chat
   | { type: "copy"; text: string }; // a tip's command, to the clipboard
 
 // extension -> webview
@@ -883,4 +906,5 @@ export type HostMessage =
   | { type: "week"; back: number; account: string; span: WeekSpan; recap: WeekRecap | null; error: string }
   | { type: "weekRule"; id: string; host: string; ok: boolean; message: string }
   | { type: "weekRevoke"; id: string; host: string; ok: boolean; message: string }
-  | { type: "perms"; data: PermsData | null; error: string };
+  | { type: "perms"; data: PermsData | null; error: string }
+  | { type: "projects"; data: ProjectsData | null; error: string };

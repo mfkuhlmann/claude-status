@@ -26,6 +26,7 @@ export const weekAnswer = createStore<Extract<HostMessage, { type: "week" }> | n
 export const weekRuleAnswer = createStore<Extract<HostMessage, { type: "weekRule" }> | null>(null);
 export const weekRevokeAnswer = createStore<Extract<HostMessage, { type: "weekRevoke" }> | null>(null);
 export const permsAnswer = createStore<Extract<HostMessage, { type: "perms" }> | null>(null);
+export const projectsAnswer = createStore<Extract<HostMessage, { type: "projects" }> | null>(null);
 
 // One chat's live view: a row re-renders when its own view changes, not at
 // every other chat's step

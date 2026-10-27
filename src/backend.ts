@@ -6,7 +6,7 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { isComparison, type Comparison } from "./changes";
-import type { FoundChat, FoundMemory, FoundPlan, FoundProject, PermsData, Status, WeekRecap } from "./shared/types";
+import type { ProjectsData, FoundChat, FoundMemory, FoundPlan, FoundProject, PermsData, Status, WeekRecap } from "./shared/types";
 
 export const REMOTE_MARK = "@@claude-status@@";
 const KILL_GRACE_MS = 3000;
@@ -211,6 +211,13 @@ export class Backend {
   // The Monday recap (week.py --monday-recap): due once a week for whichever copy asks first
   async mondayRecap(args: string[]): Promise<Record<string, any> | null> {
     return this.json(["week.py", "--monday-recap", ...args], 180000);
+  }
+
+  // The Projects tab's data (week.py --projects)
+  async projects(args: string[]): Promise<{ data?: ProjectsData; error?: string }> {
+    const r = await this.json(["week.py", "--projects", ...args], 180000);
+    if (r?.ok && Array.isArray(r.projects)) return { data: r as ProjectsData };
+    return { error: String(r?.error ?? r?.message ?? "the helper gave no answer") };
   }
 
   // The Permissions tab's data (week.py --permissions)

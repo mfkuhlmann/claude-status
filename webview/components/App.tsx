@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { editorTab } from "../env";
 import { pets } from "../pets";
 import { FocusView } from "./FocusView";
+import { ProjectsView } from "./ProjectsView";
 import type { HeroInput } from "../pets/api";
 import { chatRefOf, contextFullText, groupKeyOf } from "../util/chat";
 import { useStore } from "../util/store";
@@ -29,7 +30,7 @@ import { PermsView } from "./PermsView";
 import { WeekView } from "./WeekView";
 
 const appClass = "app" + (editorTab ? " tab" : "");
-const TABS = ["chats", "week", "perms"];
+const TABS = ["chats", "week", "perms", "projects"];
 
 // A shadow under the sticky top once the list scrolls under it
 function useScrolled(): boolean {
@@ -74,6 +75,7 @@ export function App() {
   const { tab, focus } = useStore(uiState);
   const week = tab === "week";
   const perms = tab === "perms";
+  const projectsTab = tab === "projects";
   // A tab slides in from the side it's on (Chats | Recap | Permissions)
   const lastTab = useRef(tab);
   const tabFrom = useRef(0);
@@ -118,14 +120,20 @@ export function App() {
             unavailable={!state.status && !!state.errorText}
             heroShown={state.settings.showPet}
           />
-          {state.settings.showPet && !week && !perms ? <HeroStage input={hero} /> : null}
-          {!week && !perms ? <Ticker groups={groups} /> : null}
+          {state.settings.showPet && !week && !perms && !projectsTab ? <HeroStage input={hero} /> : null}
+          {!week && !perms && !projectsTab ? <Ticker groups={groups} /> : null}
         </div>
         {week ? (
           <main key="week" {...tabIn}>
             <Guarded what="the week">
               <WeekView hosts={state.hosts.filter((h) => h.ok && !!h.result).map((h) => h.name)}
                 currency={state.settings.recapCurrency ?? "USD"} />
+            </Guarded>
+          </main>
+        ) : projectsTab ? (
+          <main key="projects" {...tabIn}>
+            <Guarded what="the projects">
+              <ProjectsView />
             </Guarded>
           </main>
         ) : perms ? (

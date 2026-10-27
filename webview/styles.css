@@ -3346,3 +3346,82 @@ body.vscode-light .pane {
   margin-bottom: 6px;
   border-radius: 10px;
 }
+
+/* The Projects tab (ProjectsView.tsx) */
+.project {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--vscode-widget-border, color-mix(in srgb, var(--cs-fg) 12%, transparent));
+}
+
+.project-head {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.project-name {
+  flex: 1;
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.project-name .chevron {
+  flex: none;
+  transition: transform 0.15s;
+}
+
+.project-name .chevron.open {
+  transform: rotate(90deg);
+}
+
+.project-numbers {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.project-title {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.project-meta {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.project-name .chevron {
+  margin-top: 2px;
+}
+
+.project-details {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 4px 0 0 18px;
+}
+
+.project-recap {
+  margin: 2px 0;
+  font-style: italic;
+  opacity: 0.85;
+}
+
+.project-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}

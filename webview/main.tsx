@@ -6,7 +6,7 @@ import type { HostMessage } from "../src/shared/types";
 import { App } from "./components/App";
 import { isDark, post } from "./env";
 import { pets } from "./pets";
-import { hostVisible, liveViews, pageVisible, permsAnswer, petColorsVersion, viewState, weekAnswer, weekRevokeAnswer, weekRuleAnswer } from "./util/stores";
+import { hostVisible, liveViews, pageVisible, permsAnswer, projectsAnswer, petColorsVersion, viewState, weekAnswer, weekRevokeAnswer, weekRuleAnswer } from "./util/stores";
 
 // Listen before saying "ready": the first state comes right after it
 window.addEventListener("message", (event: MessageEvent) => {
@@ -40,6 +40,9 @@ window.addEventListener("message", (event: MessageEvent) => {
       break;
     case "perms":
       permsAnswer.set(msg);
+      break;
+    case "projects":
+      projectsAnswer.set(msg);
       break;
   }
 });

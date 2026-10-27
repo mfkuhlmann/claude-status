@@ -2,7 +2,7 @@
 // Claude Code) and for the webview's dev harness. Nothing here is real: the
 // accounts, folders, hosts and chats are invented, times are relative to now.
 
-import type { WeekLane, Agent, ChatStats, Group, HostState, PermsData, Session, Status, UsageStats, ViewState, WeekChat, WeekDay, WeekRecap, WeekSpan } from "./types";
+import type { ProjectsData, WeekLane, Agent, ChatStats, Group, HostState, PermsData, Session, Status, UsageStats, ViewState, WeekChat, WeekDay, WeekRecap, WeekSpan } from "./types";
 
 const MIN = 60000;
 const HOUR = 60 * MIN;
@@ -584,6 +584,27 @@ export function demoPerms(now: number): PermsData {
         granted: [{ id: "1b2c3d4e5f6a", kind: "flag", value: "skipDangerousModePermissionPrompt", folder: "",
           title: "Bypass permissions mode starts without its warning", place: "every chat of team", where: "~/.claude/settings.json",
           shared: false, added: false, change: "sets skipDangerousModePermissionPrompt to false in ~/.claude/settings.json" }] },
+    ],
+  };
+}
+
+
+// The Projects tab: the demo's chats by project
+export function demoProjects(now: number): ProjectsData {
+  const h = 3_600_000;
+  const chat = (id: string, name: string, cwd: string, ago: number, workedMs: number, cost: number) =>
+    ({ id, name, profileDir: ".claude", cwd, lastAt: now - ago, workedMs, cost });
+  return {
+    ok: true, generatedAt: now,
+    projects: [
+      { name: "webapp", path: "/home/alice/projects/webapp", short: "~/projects/webapp", workedMs: 31 * h, weekMs: 9 * h, cost: 201.4,
+        lastAt: now - 0.2 * h, chatCount: 14,
+        chats: [chat("demo-1", "Fix the date parser", "/home/alice/projects/webapp", 0.2 * h, 1.8 * h, 12.4),
+                chat("demo-6", "Nightly dependency check", "/home/alice/projects/webapp", 3 * h, 0.3 * h, 1.1)] },
+      { name: "api-server", path: "/home/alice/projects/api-server", short: "~/projects/api-server", workedMs: 12 * h, weekMs: 2.5 * h, cost: 93.6,
+        lastAt: now - 0.5 * h, chatCount: 6, chats: [chat("demo-2", "Release notes for 2.0", "/home/alice/projects/api-server", 0.5 * h, 0.9 * h, 5.2)] },
+      { name: "notes", path: "/home/alice/notes", short: "~/notes", workedMs: 3 * h, weekMs: 0, cost: 34.6, lastAt: now - 50 * h, chatCount: 3,
+        chats: [chat("demo-9", "Sort the meeting notes", "/home/alice/notes", 50 * h, 0.6 * h, 2.3)] },
     ],
   };
 }

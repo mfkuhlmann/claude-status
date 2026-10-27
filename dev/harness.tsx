@@ -2,9 +2,9 @@
 // "ready", then a new one every few seconds with the story moved on.
 
 import "../webview/main";
-import { demoPerms, demoState, demoWeek } from "../src/shared/demo";
+import { demoPerms, demoProjects, demoState, demoWeek } from "../src/shared/demo";
 import type { HostMessage } from "../src/shared/types";
-import { setFocus, toggleStarred, uiState } from "../webview/util/ui";
+import { setFocus, setTab, toggleStarred, uiState } from "../webview/util/ui";
 
 const params = new URLSearchParams(location.search);
 let phase = Number(params.get("phase")) || 0;
@@ -110,6 +110,8 @@ setTimeout(() => {
   const span = params.get("span") === "day" || params.get("span") === "all" ? (params.get("span") as "day" | "all") : "week";
   if (params.get("week") === "1") send({ type: "week", back: 0, account: "", span, recap: demoWeek(Date.now(), 0, "", span), error: "" });
   if (params.get("perms") === "1") send({ type: "perms", data: demoPerms(Date.now()), error: "" });
+  // ?tab=projects: that tab
+  if (params.get("tab") === "projects") setTab("projects");
   // ?focus=1: the focus view
   if (params.get("focus") === "1") setFocus(true);
   // ?scroll=N: to see the top stay put over the list
@@ -128,6 +130,7 @@ setTimeout(() => send({ type: "petEvent", kind: "done", text: "Fix the date pars
 window.addEventListener("harness-post", (event) => {
   const m = (event as CustomEvent).detail as { type: string; back?: number; account?: string; span?: "day" | "week" | "all" };
   if (m.type === "perms") send({ type: "perms", data: demoPerms(Date.now()), error: "" });
+  if (m.type === "projects") send({ type: "projects", data: demoProjects(Date.now()), error: "" });
   if (m.type !== "week") return;
   const back = m.back ?? 0;
   const account = m.account ?? "";
