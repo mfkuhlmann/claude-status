@@ -80,6 +80,52 @@ class PaneFixture(Fixture):
                 for s in g["sessions"]}
 
 
+class CompleteTests(PaneFixture):
+    """What the reply box offers as you type (pane.py --complete)."""
+
+    def test_commands_skills_files_and_past_prompts(self):
+        t = self.now - 100
+        self.chat(prompt("fix it", t, cwd=str(self.folder)))
+        work = self.home / ".claude-work"
+        write(work / "commands/ship.md", "---\ndescription: Ship the release\n---\nDo it.")
+        write(work / "commands/git/sync.md", "# Pull and rebase\nsteps")
+        write(work / "skills/notes/SKILL.md", "---\nname: notes\ndescription: Keep notes\n---\n")
+        write(self.folder / ".claude/commands/test.md", "Run the tests")
+        write(self.folder / ".claude/commands/review.md", "Our own review")   # (the project's, over Claude's)
+        write(self.folder / "src/app.py", "x")
+        write(self.folder / "node_modules/dep/index.js", "x")
+        write(work / "history.jsonl", lines(
+            {"display": "old one", "project": str(self.folder), "timestamp": t - 50},
+            {"display": "elsewhere", "project": str(self.home / "other"), "timestamp": t - 40},
+            {"display": "fix it", "project": str(self.folder), "timestamp": t - 30},
+            {"display": "old one", "project": str(self.folder), "timestamp": t - 20}))
+        with mock.patch.dict(os.environ, {"PATH": "/nonexistent"}):   # (no git: a walk)
+            got = self.cli("--complete", SID, "--profile", ".claude-work")
+        self.assertTrue(got["ok"], got)
+        names = {c["name"]: c for c in got["commands"]}
+        self.assertEqual(names["/ship"]["about"], "Ship the release")
+        self.assertEqual(names["/git:sync"]["about"], "Pull and rebase")
+        self.assertEqual(names["/notes"]["kind"], "your skill")
+        self.assertEqual(names["/test"]["kind"], "project")
+        self.assertEqual(names["/review"], {"name": "/review", "about": "Our own review", "kind": "project"})
+        self.assertEqual(names["/compact"]["kind"], "Claude")
+        self.assertIn(os.path.join("src", "app.py"), got["files"])
+        self.assertFalse(any("node_modules" in f for f in got["files"]))
+        self.assertEqual(got["history"], ["old one", "fix it"])
+
+    def test_a_git_projects_files_leave_out_whats_ignored(self):
+        if not shutil.which("git"):
+            self.skipTest("git isn't installed")
+        t = self.now - 100
+        self.chat(prompt("go", t, cwd=str(self.folder)))
+        subprocess.run(["git", "init", "-q", str(self.folder)], check=True)
+        write(self.folder / ".gitignore", "secret.txt\n")
+        write(self.folder / "secret.txt", "x")
+        write(self.folder / "lib/util.py", "x")
+        got = self.cli("--complete", SID, "--profile", ".claude-work")
+        self.assertEqual(sorted(got["files"]), [".gitignore", "lib/util.py"])
+
+
 class ConversationTests(PaneFixture):
     def test_items(self):
         t = self.now - 100

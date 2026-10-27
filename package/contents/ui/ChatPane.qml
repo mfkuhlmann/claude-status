@@ -167,6 +167,10 @@ Window {
     }
 
     function reset() {
+        offers = null
+        offersAt = 0
+        suggestions = []
+        historyAt = -1
         items.clear()
         stamp = ""
         limit = 120
@@ -193,6 +197,7 @@ Window {
         function onPaneDraftChanged() {   // (a reply from a notification, for a terminal that takes no text)
             if (root.paneDraft) {
                 replyBox.text = root.paneDraft
+                replyBox.cursorPosition = replyBox.text.length
                 pane.askHow = true
                 root.paneDraft = ""
             }
@@ -357,7 +362,94 @@ Window {
             keepEnd()   // (the working line comes or goes)
     }
 
+    // ---------------------------------------------------------------- what the box offers
+    //
+    // As you type (pane.py --complete, read once a chat, again after a minute):
+    // / at the start: Claude's commands, yours and the project's, and skills; @:
+    // the project's files; ↑ / ↓ in an empty box (or on its first / last line):
+    // your past prompts in its folder. Tab or Enter takes the one marked, Esc
+    // closes the list.
+    property var offers: null          // {commands, files, history}
+    property real offersAt: 0
+    property var suggestions: []       // [{text, about, insert}]
+    property int suggestion: 0
+    property int tokenStart: -1
+    property string dismissed: ""      // (the word Esc closed the list for)
+    property int historyAt: -1
+    property string historyDraft: ""
+
+    function loadOffers() {
+        if (!chatId || Date.now() - offersAt < 60000)
+            return
+        offersAt = Date.now()
+        run("complete", "--complete " + root.shellQuote(chatId) + paneArgs())
+    }
+
+    function suggest() {
+        const before = replyBox.text.slice(0, replyBox.cursorPosition)
+        const command = /^\/([^\s]*)$/.exec(before)
+        const file = /(^|\s)@("?)([^\s"]*)$/.exec(before)
+        const token = command ? before : file ? before.slice(before.length - file[0].length + file[1].length) : ""
+        if (!token || token === dismissed || !offers) {
+            if (token && !offers)
+                loadOffers()
+            suggestions = []
+            return
+        }
+        loadOffers()
+        const q = (command ? command[1] : file[3]).toLowerCase()
+        let found
+        if (command) {
+            found = offers.commands.filter(c => c.name.toLowerCase().indexOf(q) >= 0)
+                .sort((a, b) => (a.name.toLowerCase().startsWith("/" + q) ? 0 : 1) - (b.name.toLowerCase().startsWith("/" + q) ? 0 : 1))
+                .map(c => ({ text: c.name, about: c.about + (c.kind === "Claude" ? "" : " · " + c.kind), insert: c.name + " " }))
+        } else {
+            const rank = f => {
+                const base = f.slice(f.lastIndexOf("/") + 1).toLowerCase()
+                return base.startsWith(q) ? 0 : base.indexOf(q) >= 0 ? 1 : 2
+            }
+            found = offers.files.filter(f => f.toLowerCase().indexOf(q) >= 0).slice(0, 400)
+                .sort((a, b) => rank(a) - rank(b) || a.length - b.length)
+                .map(f => ({ text: "@" + f, about: "", insert: (/\s/.test(f) ? "@\"" + f + "\"" : "@" + f) + " " }))
+        }
+        tokenStart = before.length - token.length
+        suggestions = found.slice(0, 8)
+        suggestion = 0
+    }
+
+    function takeSuggestion(i) {
+        const s = suggestions[i]
+        if (!s)
+            return
+        const at = replyBox.cursorPosition
+        replyBox.remove(tokenStart, at)
+        replyBox.insert(tokenStart, s.insert)
+        suggestions = []
+    }
+
+    // ↑ / ↓: your past prompts there, newest first (what you were typing comes back after the last)
+    function historyStep(step) {
+        const list = offers ? offers.history : []
+        if (!list.length)
+            return false
+        if (historyAt < 0)
+            historyDraft = replyBox.text
+        const next = Math.max(-1, Math.min(list.length - 1, historyAt + step))
+        if (next === historyAt)
+            return true
+        historyAt = next
+        replyBox.text = next < 0 ? historyDraft : list[next]
+        replyBox.cursorPosition = replyBox.text.length
+        return true
+    }
+
     function handle(kind, result) {
+        if (kind === "complete") {
+            if (result.ok)
+                offers = { commands: result.commands || [], files: result.files || [], history: result.history || [] }
+            Qt.callLater(suggest)
+            return
+        }
         if (kind === "conversation") {
             loading = false
             if (loadAgain) {
@@ -1137,6 +1229,67 @@ Window {
                         onClicked: root.unqueue(pane.queued)
                     }
                 }
+                // What it offers for what you're typing (/ commands, @ files)
+                Rectangle {
+                    visible: pane.suggestions.length > 0 && replyBox.activeFocus
+                    Layout.fillWidth: true
+                    Layout.leftMargin: pane.gutter
+                    implicitHeight: offerList.implicitHeight + 2
+                    radius: Kirigami.Units.cornerRadius
+                    color: pane.mix(pane.textColor, 0.06)
+                    border.width: 1
+                    border.color: pane.borderColor
+
+                    Column {
+                        id: offerList
+                        x: 1
+                        y: 1
+                        width: parent.width - 2
+                        Repeater {
+                            model: pane.suggestions.length
+                            delegate: Rectangle {
+                                required property int index
+                                readonly property var offer: pane.suggestions[index] || { text: "", about: "" }
+                                width: offerList.width
+                                height: offerRow.implicitHeight + Kirigami.Units.smallSpacing
+                                radius: Kirigami.Units.cornerRadius
+                                color: index === pane.suggestion ? Qt.rgba(pane.youColor.r, pane.youColor.g, pane.youColor.b, 0.22) : "transparent"
+                                RowLayout {
+                                    id: offerRow
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    anchors.leftMargin: Kirigami.Units.smallSpacing
+                                    anchors.rightMargin: Kirigami.Units.smallSpacing
+                                    PlasmaComponents3.Label {
+                                        textFormat: Text.PlainText
+                                        text: offer.text
+                                        font.family: pane.monoFamily
+                                        font.pointSize: pane.pt * 0.95
+                                        color: index === pane.suggestion ? pane.youColor : pane.textColor
+                                        elide: Text.ElideMiddle
+                                        Layout.maximumWidth: offerList.width * 0.6
+                                    }
+                                    PlasmaComponents3.Label {
+                                        textFormat: Text.PlainText
+                                        Layout.fillWidth: true
+                                        text: offer.about
+                                        color: pane.mutedColor
+                                        font.pointSize: pane.pt * 0.85
+                                        elide: Text.ElideRight
+                                    }
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: {
+                                        pane.takeSuggestion(index)
+                                        replyBox.forceActiveFocus()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 // a box like Claude's prompt: › and what you type, framed (your accent while you type)
                 Rectangle {
                     Layout.fillWidth: true
@@ -1177,7 +1330,41 @@ Window {
                             // terminal that takes no text from outside, Enter asks how first.
                             // Ctrl+V with no text on the clipboard: its picture (an SSH host's
                             // chat asks to copy it there).
+                            onTextChanged: {
+                                if (pane.historyAt >= 0 && text !== (pane.offers ? pane.offers.history[pane.historyAt] : ""))
+                                    pane.historyAt = -1   // (typed into a past prompt: it's yours now)
+                                pane.suggest()
+                            }
+                            onCursorPositionChanged: pane.suggest()
+                            onActiveFocusChanged: if (activeFocus) pane.loadOffers()
                             Keys.onPressed: event => {
+                                if (pane.suggestions.length) {
+                                    if (event.key === Qt.Key_Down || event.key === Qt.Key_Up) {
+                                        const n = pane.suggestions.length
+                                        pane.suggestion = (pane.suggestion + (event.key === Qt.Key_Down ? 1 : n - 1)) % n
+                                        event.accepted = true
+                                        return
+                                    }
+                                    if (event.key === Qt.Key_Tab || event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                                        pane.takeSuggestion(pane.suggestion)
+                                        event.accepted = true
+                                        return
+                                    }
+                                    if (event.key === Qt.Key_Escape) {
+                                        pane.dismissed = text.slice(pane.tokenStart, cursorPosition)
+                                        pane.suggestions = []
+                                        event.accepted = true
+                                        return
+                                    }
+                                }
+                                if ((event.key === Qt.Key_Up && text.lastIndexOf("\n", cursorPosition - 1) < 0)
+                                        || (event.key === Qt.Key_Down && pane.historyAt >= 0 && text.indexOf("\n", cursorPosition) < 0)) {
+                                    if (event.modifiers === Qt.NoModifier && (text === "" || pane.historyAt >= 0 || event.key === Qt.Key_Down)
+                                            && pane.historyStep(event.key === Qt.Key_Up ? 1 : -1)) {
+                                        event.accepted = true
+                                        return
+                                    }
+                                }
                                 if (event.matches(StandardKey.Paste) && !canPaste) {
                                     event.accepted = true
                                     root.pasteImage(pane.host, "pane")

@@ -41,6 +41,10 @@ its permission prompt and its review.
   --live on|off|status
         live mode: the live hook (live_hook.py) in each Claude profile's
         settings.json, so the widget shows each step of each chat as it happens
+  --complete CHAT [--profile P]
+        what the reply box offers as you type: / commands (Claude's own, yours
+        and the project's) and skills, the project's files for @, and your
+        past prompts in its folder (newest first) for ↑
   --oldest allow|deny [--osd]
         answer the oldest prompt a chat waits on (one the hook relayed; a plan:
         approve it, or keep planning), for a keyboard shortcut; --osd: say on
@@ -389,6 +393,156 @@ def answer_request(cache_root, request_id, decision, note="", answers=None):
     if inp is not None:
         return True, "Answered" if decision == "answer" else "Declined"
     return True, {"allow": "Allowed", "always": "Allowed, and from now on", "deny": "Denied"}[decision]
+
+
+# ---------------------------------------------------------------- what the reply box offers
+#
+# Claude's own commands (as of Claude Code 2.1.311, the ones that make sense
+# typed into a chat), your commands and skills (the profile's commands/ and
+# skills/), the project's (.claude/commands, .claude/skills), its files (git
+# ls-files, else a walk) and your past prompts there (history.jsonl).
+
+BUILTIN_COMMANDS = (
+    ("add-dir", "Add a new working directory"), ("agents", "Manage subagents"), ("branch", "Branch the conversation here"),
+    ("btw", "Ask a quick side question without interrupting"), ("clear", "Start a new session with empty context"),
+    ("compact", "Free up context by summarizing the conversation so far"), ("config", "Open settings"),
+    ("context", "Show how full the context is"), ("copy", "Copy Claude's last response"), ("cost", "Show what this session cost"),
+    ("doctor", "Check Claude Code's installation"), ("effort", "Set the effort level"), ("export", "Export the conversation"),
+    ("fork", "Copy this conversation into a new background session"), ("goal", "Set a goal Claude checks before stopping"),
+    ("help", "Show help and the commands"), ("hooks", "Show the hooks"), ("init", "Write a CLAUDE.md for this project"),
+    ("insights", "A report about your Claude Code sessions"), ("mcp", "Manage MCP servers"), ("memory", "Edit CLAUDE.md and memory"),
+    ("model", "Set the model"), ("permissions", "Manage what Claude may do without asking"),
+    ("plan", "Plan mode, or the session's plan"), ("pr-comments", "Get the comments of a pull request"),
+    ("recap", "A one-line recap of the session"), ("resume", "Resume another conversation"), ("review", "Review a pull request"),
+    ("rewind", "Go back to an earlier point"), ("security-review", "Review the pending changes for security"),
+    ("skills", "List the skills"), ("status", "Version, model, account and connections"),
+    ("subtask", "Send a subagent off with your full context"), ("todos", "Show the task list"), ("usage", "Show plan usage"),
+)
+COMPLETE_FILES_MAX = 20000
+COMPLETE_HISTORY_MAX = 200
+COMMAND_FILES_MAX = 500
+SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", ".mypy_cache", ".pytest_cache", "dist", "build", ".tox",
+             ".cache", "target", ".gradle", ".idea"}
+
+
+def front_matter(text):
+    """{key: value} of a Markdown file's front matter (--- … ---), and its first line of text after it."""
+    lines, meta, first = text.splitlines(), {}, ""
+    i = 0
+    if lines and lines[0].strip() == "---":
+        for i in range(1, len(lines)):
+            if lines[i].strip() == "---":
+                break
+            key, sep, value = lines[i].partition(":")
+            if sep and key.strip():
+                meta[key.strip().lower()] = value.strip().strip("'\"")
+        i += 1
+    for line in lines[i:]:
+        line = line.strip().lstrip("#").strip()
+        if line:
+            first = line
+            break
+    return meta, first
+
+
+def command_files(folder, scope):
+    """Commands in a commands/ folder: [{name, about, kind}] (a file in a subfolder: dir:name)."""
+    out = []
+    try:
+        files = sorted(folder.rglob("*.md"))[:COMMAND_FILES_MAX]
+    except OSError:
+        return out
+    for f in files:
+        try:
+            meta, first = front_matter(f.read_text(encoding="utf-8", errors="replace")[:4000])
+        except OSError:
+            continue
+        name = ":".join(f.relative_to(folder).with_suffix("").parts)
+        out.append({"name": "/" + name, "about": cs.short_text(meta.get("description") or first, 100), "kind": scope})
+    return out
+
+
+def skill_dirs(folder, scope):
+    """Skills in a skills/ folder (each its SKILL.md): [{name, about, kind}]."""
+    out = []
+    try:
+        dirs = sorted(d for d in folder.iterdir() if d.is_dir())[:COMMAND_FILES_MAX]
+    except OSError:
+        return out
+    for d in dirs:
+        try:
+            meta, first = front_matter((d / "SKILL.md").read_text(encoding="utf-8", errors="replace")[:4000])
+        except OSError:
+            continue
+        out.append({"name": "/" + (meta.get("name") or d.name), "about": cs.short_text(meta.get("description") or first, 100),
+                    "kind": scope + " skill"})
+    return out
+
+
+def project_files(cwd):
+    """The project's files, relative to cwd (git ls-files: tracked and new, not ignored; else a walk
+    that leaves out dependencies and build output), at most COMPLETE_FILES_MAX: (files, cut)."""
+    git = shutil.which("git")
+    if git and cwd:
+        try:
+            r = subprocess.run([git, "-C", cwd, "ls-files", "-co", "--exclude-standard", "-z"], stdout=subprocess.PIPE,
+                               stderr=subprocess.DEVNULL, timeout=10)
+            if r.returncode == 0:
+                files = [f for f in r.stdout.decode("utf-8", "replace").split("\0") if f]
+                return files[:COMPLETE_FILES_MAX], len(files) > COMPLETE_FILES_MAX
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    files = []
+    if not cwd or not os.path.isdir(cwd) or os.path.realpath(cwd) == str(Path.home()):
+        return files, False   # (not all of your home)
+    for top, dirs, names in os.walk(cwd):
+        dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS and not d.startswith("."))
+        rel = os.path.relpath(top, cwd)
+        for n in sorted(names):
+            files.append(n if rel == "." else os.path.join(rel, n))
+            if len(files) >= COMPLETE_FILES_MAX:
+                return files, True
+    return files, False
+
+
+def past_prompts(profile, cwd):
+    """Your prompts in that folder (or the one it's in: a chat that started
+    there and went into it), newest first, each once (history.jsonl)."""
+    out, seen = [], set()
+    for e in reversed(cs.history_tail(profile)):
+        text, project = e.get("display"), e.get("project")
+        if not isinstance(text, str) or not text.strip() or text in seen:
+            continue
+        if cwd and not (isinstance(project, str) and (cwd == project or cwd.startswith(project.rstrip("/") + "/"))):
+            continue
+        seen.add(text)
+        out.append(text)
+        if len(out) >= COMPLETE_HISTORY_MAX:
+            break
+    return out
+
+
+def completions(home, extra_dirs, chat_id, profile_key=None):
+    if not cs.valid_id(chat_id):
+        return {"ok": False, "message": f"Not a chat: {chat_id}"}
+    profile, path = find_transcript(home, extra_dirs, chat_id, profile_key)
+    if path is None:
+        return {"ok": False, "message": "That chat's transcript isn't there any more"}
+    _, cwd, _ = cs.read_chat_info(path, path.stat().st_size)
+    cwd = cwd or cs.chat_folder(path) or ""
+    commands = [{"name": "/" + n, "about": a, "kind": "Claude"} for n, a in BUILTIN_COMMANDS]
+    commands += command_files(profile.path / "commands", "yours") + skill_dirs(profile.path / "skills", "your")
+    if cwd:
+        commands += command_files(Path(cwd) / ".claude" / "commands", "project")
+        commands += skill_dirs(Path(cwd) / ".claude" / "skills", "project")
+    seen, unique = set(), []
+    for c in reversed(commands):   # (yours and the project's before Claude's of the same name)
+        if c["name"] not in seen:
+            seen.add(c["name"])
+            unique.append(c)
+    files, cut = project_files(cwd)
+    return {"ok": True, "cwd": cwd, "commands": sorted(unique, key=lambda c: c["name"]), "files": files, "filesCut": cut,
+            "history": past_prompts(profile, cwd)}
 
 
 # ---------------------------------------------------------------- keyboard answers
@@ -1177,7 +1331,7 @@ def main(argv=None):
     session, text, stamp, limit, files, config_dirs, answers = None, None, None, PANE_ITEMS, [], [], None
     after, off, remote, pretty, source = False, False, False, False, None
     actions = ("--conversation", "--send", "--answer", "--keys", "--review", "--undo", "--commit", "--reviewed",
-               "--relay", "--live", "--oldest", "--shortcuts")
+               "--relay", "--live", "--oldest", "--shortcuts", "--complete")
     osd = False
     while args:
         arg = args.pop(0)
@@ -1269,6 +1423,8 @@ def main(argv=None):
         elif action == "--answer":
             ok, said = answer_request(cache_root, target, decision, note, answers)
             result = {"ok": ok, "message": said}
+        elif action == "--complete":
+            result = completions(home, config_dirs, target, profile)
         elif action == "--oldest":
             ok, said = answer_oldest(cache_root, target)
             if osd:
