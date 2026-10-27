@@ -206,8 +206,13 @@ class Pane implements vscode.Disposable {
       }),
       vscode.workspace.onDidChangeConfiguration((e) => {
         if (e.affectsConfiguration("claudeStatus.chatTextScale")) this.post({ type: "textSize", scale: Pane.textScale() });
+        if (e.affectsConfiguration("claudeStatus.diffSideBySide")) this.post({ type: "diffLayout", split: Pane.sideBySide() });
       }),
     );
+  }
+
+  private static sideBySide(): boolean {
+    return vscode.workspace.getConfiguration("claudeStatus").get("diffSideBySide") !== false;
   }
 
   private static textScale(): number {
@@ -447,6 +452,19 @@ class Pane implements vscode.Disposable {
         if (typeof m.scale === "number" && Number.isFinite(m.scale))
           await vscode.workspace.getConfiguration("claudeStatus").update("chatTextScale", textScale(m.scale), vscode.ConfigurationTarget.Global);
         break;
+      case "diffLayout":
+        await vscode.workspace.getConfiguration("claudeStatus").update("diffSideBySide", m.split === true, vscode.ConfigurationTarget.Global);
+        break;
+      case "pickFiles": {
+        // + : VS Code's own file dialog, in the chat's folder; an SSH host's chat takes pictures
+        const folder = !this.host && this.chat.cwd ? vscode.Uri.file(this.chat.cwd) : undefined;
+        const picked = await vscode.window.showOpenDialog({
+          canSelectMany: true, openLabel: "Attach", defaultUri: folder, title: "Attach to your reply",
+          ...(this.host ? { filters: { Pictures: ["png", "jpg", "jpeg", "webp", "gif"] } } : {}),
+        });
+        this.post({ type: "picked", paths: (picked ?? []).filter((u) => u.scheme === "file").map((u) => u.fsPath) });
+        break;
+      }
     }
   }
 
@@ -512,7 +530,7 @@ class Pane implements vscode.Disposable {
     const { uri } = this.owner.ext;
     const nonce = crypto.randomBytes(16).toString("base64");
     const asset = (...p: string[]) => webview.asWebviewUri(vscode.Uri.joinPath(uri, ...p)).toString();
-    const config = JSON.stringify({ tab, local: !this.host, scale: Pane.textScale() });
+    const config = JSON.stringify({ tab, local: !this.host, scale: Pane.textScale(), split: Pane.sideBySide() });
     const csp = [
       "default-src 'none'",
       "base-uri 'none'",

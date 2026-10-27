@@ -1,24 +1,11 @@
 // What a chat waiting for a permission asks, with Allow once / Always allow /
 // Deny (with a note), or Claude's questions to answer: in its row and in its
-// chat tab; and the lines of a diff (+ green, - red).
+// chat tab (a change it asks for as CodeView.tsx draws it).
 
 import { useState } from "preact/hooks";
 import type { Answers, Decision, PermissionAsk, Question } from "../../src/shared/types";
 import { Markdown } from "../util/markdown";
-
-// The change a permission prompt asks for, or a file's diff: + green, - red
-export function Diff({ lines, max }: { lines: string[]; max?: number }) {
-  const shown = max && lines.length > max ? [...lines.slice(0, max), `… ${lines.length - max} more lines`] : lines;
-  return (
-    <pre class="pane-diff">
-      {shown.map((l, i) => (
-        <div key={i} class={l.startsWith("+") ? "add" : l.startsWith("-") ? "del" : l.startsWith("@@") ? "hunk" : ""}>
-          {l || " "}
-        </div>
-      ))}
-    </pre>
-  );
-}
+import { Diff } from "./CodeView";
 
 // What a waiting chat asks, with Allow once / Always allow / Deny (a note);
 // Claude's questions: each with its options, Send answers / Decline (a note)
@@ -68,7 +55,7 @@ export function AskBox({ ask, onAnswer, onWholePlan, busy = false, max = 12, com
           <button type="button" class="btn secondary" disabled={busy} onClick={() => setDenying(true)}>Keep planning…</button>
         </div>
       ) : null}
-      {ask.diff.length ? <Diff lines={ask.diff} max={max} /> : null}
+      {ask.diff.length ? <Diff lines={ask.diff} max={max} path={ask.file} /> : null}
       {questions.length ? (
         <QuestionForm
           key={ask.request ?? ask.line}

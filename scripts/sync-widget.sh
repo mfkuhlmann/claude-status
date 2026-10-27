@@ -21,12 +21,14 @@ commit=$(git -C "$src" rev-parse --verify "$rev^{commit}")
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
-git -C "$src" archive "$commit" package/contents/code package/contents/ui/talpa statusline-snippet.sh | tar -x -C "$work"
+git -C "$src" archive "$commit" package/contents/code package/contents/ui/talpa package/contents/ui/codeview.mjs \
+  package/contents/ui/codeview.d.mts statusline-snippet.sh | tar -x -C "$work"
 
-rm -rf "$here/vendor/code" "$here/vendor/pets" "$here/vendor/talpa"
+rm -rf "$here/vendor/code" "$here/vendor/pets" "$here/vendor/talpa" "$here/vendor/codeview.mjs" "$here/vendor/codeview.d.mts"
 mkdir -p "$here/vendor"
 cp -r "$work/package/contents/code" "$here/vendor/code"
 cp -r "$work/package/contents/ui/talpa" "$here/vendor/talpa"
+cp "$work/package/contents/ui/codeview.mjs" "$work/package/contents/ui/codeview.d.mts" "$here/vendor/"
 cp "$work/statusline-snippet.sh" "$here/vendor/statusline-snippet.sh"
 echo "$commit" > "$here/vendor/WIDGET_COMMIT"
 echo "vendor/ now holds the widget at ${commit:0:12}."

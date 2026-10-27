@@ -7,14 +7,15 @@
 import { render } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { droppedPaths, fileMention, picturesIn, PICTURE_TYPES, routeHint, suggestFor, type Offers, type Suggestion, testsText, TEXT_SCALES, withoutPicture, type Conversation, type PaneChat, type PaneHostMessage, type PaneItem, type PaneMessage, type ReviewAnswer } from "../src/shared/pane";
-import { AskBox, Diff } from "./components/AskBox";
+import { AskBox } from "./components/AskBox";
+import { Diff, Listing, ToolDetail } from "./components/CodeView";
 import type { Answers, Decision } from "../src/shared/types";
 import { Tag } from "./components/Tag";
 import { Markdown } from "./util/markdown";
 
 declare global {
   interface Window {
-    CLAUDE_CHAT: { tab: "chat" | "review" | "output"; local: boolean; scale?: number };
+    CLAUDE_CHAT: { tab: "chat" | "review" | "output"; local: boolean; scale?: number; split?: boolean };
   }
 }
 
@@ -38,14 +39,18 @@ function Spinner() {
   return <span class="pane-spin" aria-hidden="true">{SPIN[n % SPIN.length]}</span>;
 }
 
-// A tool call: ● Bash(npm test) in green, red, or (still going) blinking, and
-// under it ⎿ what came of it; click for what it ran and got
-function ToolLine({ item, open, onToggle, asking, going, gap }: { item: PaneItem; open: boolean; onToggle: () => void; asking: boolean; going: boolean; gap: string }) {
+// A tool call: ● Bash  npm test in green, red, or (still going) blinking,
+// under it ⎿ what came of it, and an edit's change (its first lines; open,
+// all of it); click for what it ran and got (CodeView.tsx)
+function ToolLine({ item, open, onToggle, asking, going, gap, split, onSplit }: {
+  item: PaneItem; open: boolean; onToggle: () => void; asking: boolean; going: boolean; gap: string; split: boolean; onSplit: (s: boolean) => void;
+}) {
   const name = item.name ?? "";
   const line = item.line ?? "";
   const args = name && line.startsWith(name + ": ") ? line.slice(name.length + 2) : "";
   const tone = item.status === "ok" ? "ok" : item.status === "error" ? "error" : asking ? "asking" : going ? "going" : "open";
   const summary = item.summary || (asking ? "Waiting for your answer" : "");
+  const diff = item.diff ?? [];
   return (
     <div class={`pane-item pane-tool ${tone} ${gap}`}>
       <button type="button" class="pane-tool-line" aria-expanded={open} title="Click for what it ran and what came back" onClick={onToggle}>
@@ -55,24 +60,17 @@ function ToolLine({ item, open, onToggle, asking, going, gap }: { item: PaneItem
         <span class="pane-tool-body">
           <span class="pane-tool-call">
             <strong>{args ? name : line}</strong>
-            {args ? (
-              <span class="pane-tool-args">
-                <span class="paren">(</span>
-                {args}
-                <span class="paren">)</span>
-              </span>
-            ) : null}
+            {args ? <span class="pane-tool-args">{args}</span> : null}
           </span>
           {summary ? <span class="pane-tool-summary">⎿&nbsp;&nbsp;{summary}</span> : null}
         </span>
       </button>
-      {open && (item.input || item.output) ? (
-        <pre class="pane-tool-detail">
-          {item.input}
-          {item.input && item.output ? "\n──\n" : ""}
-          {item.output}
-        </pre>
+      {diff.length ? (
+        <div class="pane-tool-diff">
+          <Diff lines={diff} path={args} max={open ? 0 : 6} split={split} onSplit={open ? onSplit : undefined} />
+        </div>
       ) : null}
+      {open && (item.input || item.output) && (!diff.length || item.status === "error") ? <ToolDetail item={item} path={args} /> : null}
     </div>
   );
 }
@@ -206,6 +204,14 @@ function ChatApp() {
     pending.current[id] = { at: reply.current?.selectionStart ?? text.length, url: "" };
     setSaving((n) => n + 1);
   };
+  // files by their paths (dropped from the Explorer, or picked with +)
+  const attachPaths = (paths: string[]) => {
+    for (const path of paths) {
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      pendingAt(id);
+      post({ type: "attach", id, path });
+    }
+  };
   const dropped = (e: DragEvent) => {
     e.preventDefault();
     setDragging(false);
@@ -213,11 +219,7 @@ function ChatApp() {
     if (!dt) return;
     const paths = droppedPaths(dt.getData("text/uri-list") || dt.getData("application/vnd.code.uri-list"));
     if (paths.length) {
-      for (const path of paths) {
-        const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-        pendingAt(id);
-        post({ type: "attach", id, path });
-      }
+      attachPaths(paths);
       return;
     }
     const files = Array.from(dt.files ?? []);
@@ -247,6 +249,13 @@ function ChatApp() {
     post({ type: "picture", id: p.id, mime: p.mime, data: p.data });
   };
 
+  // Changes side by side or one after the other: claudeStatus.diffSideBySide
+  const [split, setSplit] = useState(config.split !== false);
+  const sideBySide = (next: boolean) => {
+    setSplit(next);
+    post({ type: "diffLayout", split: next });
+  };
+
   // A− / A+ and Ctrl+wheel: the text size, kept in claudeStatus.chatTextScale
   const zoom = (step: number) => {
     const i = TEXT_SCALES.findIndex((v) => v >= scale - 0.001);
@@ -262,6 +271,8 @@ function ChatApp() {
       if (!m || typeof m !== "object") return;
       if (m.type === "chat") setChat(m.chat);
       else if (m.type === "textSize") setScale(m.scale);
+      else if (m.type === "diffLayout") setSplit(m.split);
+      else if (m.type === "picked") attachPaths(m.paths);
       else if (m.type === "picture") {
         const p = pending.current[m.id];
         delete pending.current[m.id];
@@ -493,6 +504,8 @@ function ChatApp() {
                   asking={!!chat?.permission && i === lastIndex && it.status === "open"}
                   going={!!chat?.busy && it.status === "open"}
                   onToggle={() => setOpen({ ...open, [it.key]: !open[it.key] })}
+                  split={split}
+                  onSplit={sideBySide}
                 />
               ) : (
                 <div key={it.key} class={`pane-item pane-note${it.error ? " bad" : ""} ${gap}`}>
@@ -625,6 +638,11 @@ function ChatApp() {
             {dictating === "recording" ? (
               <button type="button" class="btn secondary" title="Stop, don't write it down" onClick={() => post({ type: "dictate", action: "cancel" })}>×</button>
             ) : null}
+            <button type="button" class="btn secondary pane-attach"
+              title={chat?.host ? `Attach pictures (copied to ${chat.host})` : "Attach files: a picture goes in as one, another file is named for Claude to read. You can drop them on the tab too (hold Shift from the Explorer)."}
+              onClick={() => post({ type: "pickFiles" })}>
+              +
+            </button>
             <button type="button" class="btn secondary pane-shot" title="Screenshot: pick a region of the screen, its picture goes in your reply"
               onClick={screenshot}>
               Screenshot…
@@ -671,6 +689,11 @@ function ChatApp() {
                     {plural(review.files.length, "file")} changed since the chat started +{sums[0]} −{sums[1]}
                   </strong>
                   {tests ? <Tag text={tests.text} title={tests.title} active={tests.ok === true} warning={tests.ok === false} /> : null}
+                  <button type="button" class={`btn secondary small${split ? " on" : ""}`} aria-pressed={split}
+                    title="Each change as before | after where the tab is wide enough; else removed and added lines one after the other"
+                    onClick={() => sideBySide(!split)}>
+                    Side by side
+                  </button>
                 </div>
                 {review.files.map((f) => (
                   <div key={f.path} class="review-file">
@@ -685,7 +708,7 @@ function ChatApp() {
                       </button>
                       {f.added !== null ? <span class="add mono">+{f.added}</span> : null}
                       {f.removed !== null ? <span class="del mono">−{f.removed}</span> : null}
-                      {f.binary || f.unknown ? <span class="muted small">{f.unknown ? "no earlier version kept" : "binary"}</span> : null}
+                      {f.binary || f.unknown ? <span class="muted small">{f.binary ? "binary" : "no earlier version kept"}</span> : null}
                       {config.local ? (
                         <button type="button" class="btn secondary small" title="In VS Code's diff editor" onClick={() => post({ type: "diff", path: f.path })}>
                           Diff
@@ -704,7 +727,13 @@ function ChatApp() {
                         <button type="button" class="btn secondary small" onClick={() => setUndoAsk("")}>Cancel</button>
                       </div>
                     ) : null}
-                    {openFiles[f.path] ? <Diff lines={f.diff} /> : null}
+                    {openFiles[f.path] && f.diff.length ? <Diff lines={f.diff} path={f.path} split={split} onSplit={sideBySide} /> : null}
+                    {openFiles[f.path] && !f.diff.length && f.unknown && f.now?.length ? (
+                      <>
+                        <div class="muted small">No earlier version was kept, so this is how it is now:</div>
+                        <Listing lines={f.now} path={f.path} />
+                      </>
+                    ) : null}
                   </div>
                 ))}
               </>

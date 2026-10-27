@@ -2252,7 +2252,6 @@ body.vscode-high-contrast .top.scrolled {
 }
 
 .ask-command,
-.pane-diff,
 .pane-tool-detail {
   margin: 4px 0;
   padding: 4px 6px;
@@ -2265,16 +2264,175 @@ body.vscode-high-contrast .top.scrolled {
   overflow-x: auto;
 }
 
-.pane-diff > .add {
+/* Code and changes (CodeView.tsx): numbered lines, + and −, tinted rows,
+   changed words marked, syntax colors as GitHub's (light, dark) */
+.cv {
+  --cv-add: var(--vscode-diffEditor-insertedLineBackground, rgba(46, 160, 67, 0.18));
+  --cv-add-word: var(--vscode-diffEditor-insertedTextBackground, rgba(46, 160, 67, 0.4));
+  --cv-del: var(--vscode-diffEditor-removedLineBackground, rgba(248, 81, 73, 0.18));
+  --cv-del-word: var(--vscode-diffEditor-removedTextBackground, rgba(248, 81, 73, 0.4));
+  --cv-no: var(--vscode-editorLineNumber-foreground, #858585);
+  --cv-kw: #cf222e; --cv-lit: #0550ae; --cv-str: #0a3069; --cv-com: #6e7781; --cv-num: #0550ae; --cv-fn: #8250df; --cv-key: #116329;
+  position: relative;
+  margin: 4px 0 0;
+  padding: 4px 0;
+  border-radius: 6px;
+  background: var(--pane-block-bg, var(--vscode-textCodeBlock-background, var(--cs-hover)));
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.88em;
+  line-height: 1.45;
+  overflow-x: auto;
+}
+
+body.vscode-dark .cv,
+body.vscode-high-contrast .cv {
+  --cv-kw: #ff7b72; --cv-lit: #79c0ff; --cv-str: #a5d6ff; --cv-com: #8b949e; --cv-num: #79c0ff; --cv-fn: #d2a8ff; --cv-key: #7ee787;
+}
+
+.cv-row,
+.cv-half {
+  display: grid;
+  grid-template-columns: auto 1.4em 1fr;
+  align-items: start;
+}
+
+.cv-half,
+.cv-row.cv-plain {
+  grid-template-columns: auto 1fr;
+  min-width: 0;
+}
+
+.cv-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.cv-pair > .cv-half + .cv-half {
+  border-left: 1px solid var(--cs-border);
+}
+
+.cv-row.add,
+.cv-half.add {
+  background: var(--cv-add);
+}
+
+.cv-row.del,
+.cv-half.del {
+  background: var(--cv-del);
+}
+
+.cv-half.cv-empty {
+  background: repeating-linear-gradient(-45deg, transparent 0 4px, var(--cs-hover) 4px 8px);
+}
+
+.cv-no {
+  min-width: 3ch;
+  padding: 0 0.6em 0 0.5em;
+  color: var(--cv-no);
+  text-align: right;
+  user-select: none;
+}
+
+.cv-mark {
+  text-align: center;
+  user-select: none;
+}
+
+.cv-row.add .cv-mark {
   color: var(--cs-idle);
 }
 
-.pane-diff > .del {
+.cv-row.del .cv-mark {
   color: var(--cs-failed);
 }
 
-.pane-diff > .hunk {
-  color: var(--cs-working);
+.cv-code {
+  min-width: 0;
+  padding-right: 0.6em;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.add mark.cv-word {
+  background: var(--cv-add-word);
+  color: inherit;
+}
+
+.del mark.cv-word {
+  background: var(--cv-del-word);
+  color: inherit;
+}
+
+.cv-hunk {
+  padding: 1px 0.6em;
+  background: var(--cs-hover);
+  color: var(--cs-muted);
+}
+
+.cv-note {
+  padding: 0 0.6em;
+  color: var(--cs-muted);
+  font-style: italic;
+}
+
+.cv-kw { color: var(--cv-kw); }
+.cv-lit { color: var(--cv-lit); }
+.cv-str { color: var(--cv-str); }
+.cv-com { color: var(--cv-com); }
+.cv-num { color: var(--cv-num); }
+.cv-fn { color: var(--cv-fn); }
+.cv-key { color: var(--cv-key); }
+
+.cv-switch {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  display: none;
+  padding: 0 6px;
+  border: 1px solid var(--cs-border);
+  border-radius: 4px;
+  background: var(--cs-bg);
+  color: var(--cs-fg);
+  cursor: pointer;
+}
+
+.cv:hover > .cv-switch {
+  display: block;
+}
+
+.pane-tool-diff {
+  margin-left: var(--pane-gutter);
+}
+
+/* a tool call's details: the command, then what it printed, apart */
+.cv-detail {
+  white-space: normal;
+}
+
+.cv-detail .cv {
+  margin: 0;
+  background: none;
+}
+
+.cv-cmd,
+.cv-field,
+.cv-out {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.cv-prompt,
+.cv-key {
+  color: var(--cs-muted);
+}
+
+.cv-out {
+  margin-top: 6px;
+  color: var(--cs-muted);
+}
+
+.cv-out.bad {
+  color: var(--cs-failed);
 }
 
 .ask-buttons {
@@ -2643,13 +2801,12 @@ body.vscode-light .pane {
 }
 
 .pane-tool-args {
+  margin-left: 0.6em;
+  color: var(--vscode-textPreformat-foreground, var(--cs-link));
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: 0.92em;
 }
 
-.pane-tool-args .paren {
-  color: var(--cs-muted);
-}
 
 .pane-tool-summary {
   overflow: hidden;

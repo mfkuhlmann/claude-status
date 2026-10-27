@@ -703,21 +703,24 @@ export class Talpa {
     // stillKey) and where it is in a quick move's round, pictures at least
     // frameMs apart and at most maxFrames a round (a move that swings back
     // shows the same ones on the way back); null during a big move. rest: no
-    // quick move under way.
+    // quick move under way; every: ms from one picture to the next, a whole
+    // number of frames where it can (2 frames each, not 2, 2, 3: even steps).
     still(frameMs, maxFrames) {
         if (this.big || this.now < this.landsAt || this.oneShot())
             return null;
         const st = this.st, moves = this.moves();
-        let frames = 1, frame = 0;
+        let frames = 1, frame = 0, round = 0;
         if (moves.length) {
             let quick = moves[0];
             for (const m of moves) {
                 if (m[1] < quick[1])
                     quick = m;
             }
-            const round = 2 * quick[1];
+            round = 2 * quick[1];
             const oneWay = ONE_WAY[st.arms] === 1 || ONE_WAY[st.body] === 1 || ONE_WAY[st.prop] === 1 || st.tunnel === '1';
-            frames = Math.max(4, Math.min(maxFrames || 12, Math.round(round / Math.max(1, frameMs))));
+            const tick = Math.max(1, frameMs);
+            const ticks = Math.ceil(round / (tick * (maxFrames || 12)));   // frames a picture shows
+            frames = Math.max(4, Math.round(round / (ticks * tick)));
             if (!oneWay)
                 frames += frames % 2;
             // (counted from when that move began, as it's drawn live)
@@ -730,7 +733,8 @@ export class Talpa {
         const look = this.stillLook();
         const pose = KEYS.map(k => st[k]).join(',') + ',' + st.it + ',' + (st.gum || '') + (this.facingLeft ? ',L' : ',R');
         return { key: pose + '#' + look.join(',') + (blink ? ',blink' : '') + ',' + frame + '/' + frames, pose: pose, st: st,
-                 look: look, blink: blink, phase: frame / frames, rest: !moves.length, left: this.facingLeft };
+                 look: look, blink: blink, phase: frame / frames, rest: !moves.length, left: this.facingLeft,
+                 every: moves.length ? round / frames : Infinity };
     }
 
     // Draws film picture d (still()), or one on its way there from picture

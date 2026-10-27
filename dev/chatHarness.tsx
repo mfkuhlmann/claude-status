@@ -58,7 +58,7 @@ const chat: PaneChat = {
 const items: PaneItem[] = [
   { kind: "you", key: "u1", text: "Week 53 dates come out as week 1. Find out why and fix it, with a test.", at: now - 400_000 },
   { kind: "claude", key: "m1", text: "I'll look at how **week numbers** are computed in `src/parse.ts` first.", at: now - 390_000 },
-  { kind: "tool", key: "t1", name: "Read", line: "Read: parse.ts", status: "ok", input: "file_path: /home/alice/projects/webapp/src/parse.ts", output: "1\timport { isoWeek } from './dates';\n2\t…", summary: "84 lines", at: now - 380_000 },
+  { kind: "tool", key: "t1", name: "Read", line: "Read: parse.ts", status: "ok", input: "file_path: /home/alice/projects/webapp/src/parse.ts", output: "     1\timport { isoWeek } from './dates';\n     2\t\n     3\texport function parse(text: string) {\n     4\t  const date = new Date(text); // UTC\n     5\t  return { date, week: isoWeek(date) };\n     6\t}", summary: "6 lines", at: now - 380_000 },
   { kind: "tool", key: "t2", name: "Bash", line: "Bash: npm test -- parser", status: "error", input: "$ npm test -- parser", output: "FAIL src/parse.test.ts\n  ✕ week 53 of 2026 (4 ms)", summary: "FAIL src/parse.test.ts … +1 line", at: now - 300_000 },
   {
     kind: "claude",
@@ -66,7 +66,11 @@ const items: PaneItem[] = [
     text: "Found it: `isoWeek` caps weeks at 52.\n\n## What changes\n\n1. Use `weeksInYear(date)` instead of `52`\n2. Add a test for 2026-12-31\n\n```ts\nif (week > weeksInYear(date)) return 1;\n```\n\nSee [the ISO week rules](https://en.wikipedia.org/wiki/ISO_week_date).",
     at: now - 200_000,
   },
-  { kind: "tool", key: "t3", name: "Edit", line: "Edit: parse.ts", status: "ok", input: "/home/alice/projects/webapp/src/parse.ts\n-  if (week > 52) return 1;\n+  if (week > weeksInYear(date)) return 1;", output: "", summary: "1 line added, 1 removed", at: now - 100_000 },
+  { kind: "tool", key: "t3", name: "Edit", line: "Edit: parse.ts", status: "ok", input: "/home/alice/projects/webapp/src/parse.ts\n-  if (week > 52) return 1;\n+  if (week > weeksInYear(date)) return 1;", output: "", summary: "2 lines added, 1 removed", at: now - 100_000,
+    diff: ["@@ -10,5 +10,6 @@ export function isoWeek(date: Date)", "   const start = startOfIsoYear(date);", "   const week = Math.floor((date - start) / WEEK) + 1;",
+           "-  if (week > 52) return 1;", "+  if (week > weeksInYear(date)) return 1;", "+  // (a year has 53 weeks when it starts or ends on a Thursday)", "   return week;", " }"] },
+  { kind: "tool", key: "t5", name: "Write", line: "Write: parse.test.ts", status: "ok", input: "", output: "", summary: "5 lines", at: now - 95_000,
+    diff: ["@@ -0,0 +1,5 @@", "+import { parse } from './parse';", "+", "+test('week 53 of 2026', () => {", "+  expect(parse('2026-12-31').week).toBe(53);", "+});"] },
   { kind: "note", key: "n1", text: "Interrupted", at: now - 90_000 },
   { kind: "you", key: "u2", text: "Go on, and run the parser tests again.", at: now - 80_000 },
   { kind: "tool", key: "t4", name: "Bash", line: "Bash: npm test -- parser", status: "open", input: "$ npm test -- parser", output: "", at: now - 10_000 },
@@ -80,11 +84,17 @@ const review: ReviewAnswer = {
       diff: ["@@ -12,3 +12,3 @@", "   const week = isoWeek(date);", "-  if (week > 52) return 1;", "+  if (week > weeksInYear(date)) return 1;", "   return week;"] },
     { label: "src/parse.test.ts", path: "/home/alice/projects/webapp/src/parse.test.ts", added: 6, removed: 0, created: true, deleted: false, binary: false, unknown: false,
       diff: ["@@ -0,0 +1,6 @@", "+import { parse } from './parse';", "+", "+test('week 53 of 2026', () => {", "+  expect(parse('2026-12-31').week).toBe(53);", "+});", "+"] },
+    { label: "~/notes/dates.md", path: "/home/alice/notes/dates.md", added: null, removed: null, created: false, deleted: false, binary: false, unknown: true,
+      diff: [], now: ["# Dates", "", "- ISO weeks: week 1 holds the first Thursday", "- 2026 has 53 weeks"] },
   ],
   tests: { command: "npm test -- parser", ok: true, at: now - 30_000 },
   editedAt: now - 60_000,
   repos: ["/home/alice/projects/webapp"],
 };
+
+// ?open=1: every tool call unfolded (clicked once the conversation shows)
+if (params.get("open") === "1")
+  setTimeout(() => document.querySelectorAll<HTMLButtonElement>(".pane-tool-line").forEach((b, i) => setTimeout(() => b.click(), 60 * i)), 900);
 
 // what the page sends, answered as the extension would
 // ?type=TEXT: typed into the reply box (to see what it offers)

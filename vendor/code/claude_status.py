@@ -2097,6 +2097,13 @@ PLAN_TOOL = "ExitPlanMode"
 PLAN_CHARS = 60000  # of a plan, in the row
 
 
+def file_size(path):
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return 0
+
+
 def read_file(path):
     try:
         with open(path, "rb") as f:
@@ -2105,10 +2112,13 @@ def read_file(path):
         return None
 
 
+HUNK_LINE = re.compile(r"^@@ -(\d+)(,\d+)? \+(\d+)(,\d+)? @@")
+
+
 def edit_diff(name, inp, current, limit=DIFF_LINES):
     """The lines of a unified diff of the change an Edit, MultiEdit, Write or
-    NotebookEdit call asks for (current: the file's text now, for Write); the
-    first limit of them (None: all)."""
+    NotebookEdit call asks for (current: the file's text now, for Write and
+    for an Edit's line numbers); the first limit of them (None: all)."""
     import difflib
     if name == "Edit":
         old, new = inp.get("old_string"), inp.get("new_string")
@@ -2125,7 +2135,18 @@ def edit_diff(name, inp, current, limit=DIFF_LINES):
     out = []
     for old, new in pairs:
         diff = list(difflib.unified_diff(old.splitlines(), new.splitlines(), lineterm="", n=2))
-        out += diff[2:]
+        # The @@ lines at the file's line numbers: a Write's are; an Edit's
+        # are the change's own, moved to where its text is in the file
+        # (current), else left out ("@@ @@")
+        shift = 0 if name == "Write" else None
+        if name == "Edit" and current and old and old in current:
+            shift = current[:current.index(old)].count("\n")
+        for line in diff[2:]:
+            m = HUNK_LINE.match(line)
+            if m:
+                line = "@@ @@" if shift is None else "@@ -%d%s +%d%s @@" % (
+                    int(m.group(1)) + shift, m.group(2) or "", int(m.group(3)) + shift, m.group(4) or "")
+            out.append(line)
     return out[:limit]
 
 
@@ -2168,8 +2189,8 @@ def permission_view(tool, inp, cwd, suggestions=()):
     if isinstance(path, str) and path:
         view["file"] = file_label(path, cwd or "", Path.home())
         current = None
-        if tool == "Write":
-            data = read_file(path)
+        if tool in ("Write", "Edit"):
+            data = read_file(path) if tool == "Write" or file_size(path) < (2 << 20) else None
             current = data.decode("utf-8", "replace") if data is not None else ""
         view["diff"] = edit_diff(tool, inp, current)
     suggestions = [s for s in suggestions or () if isinstance(s, dict)]

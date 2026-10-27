@@ -16,6 +16,7 @@ export interface PaneItem {
   input?: string; // tool: what it ran or changed
   output?: string; // tool: what came back
   summary?: string; // tool: what came of it, in a line ("3 lines", "1 failed", …)
+  diff?: string[]; // tool: an edit's change (unified lines, @@ at the file's line numbers when known)
   error?: boolean; // note: an API error (a usage limit…)
   at: number | null;
 }
@@ -45,6 +46,7 @@ export interface ReviewFile {
   deleted: boolean;
   binary: boolean;
   unknown: boolean; // no earlier version is kept: it can't be undone
+  now?: string[]; // unknown: its first lines as they are now
 }
 
 export interface ReviewAnswer {
@@ -86,6 +88,8 @@ export type PaneHostMessage =
   | { type: "review"; answer: ReviewAnswer | null; error: string }
   | { type: "result"; kind: string; ok: boolean; message: string; ask?: boolean } // ask: its terminal takes no text: choose
   | { type: "textSize"; scale: number } // claudeStatus.chatTextScale
+  | { type: "diffLayout"; split: boolean } // claudeStatus.diffSideBySide
+  | { type: "picked"; paths: string[] } // files picked to attach (+), attached as dropped ones
   | { type: "picture"; id: string; path: string; error: string } // a pasted picture, saved (path: where the chat opens it)
   | { type: "file"; id: string; path: string } // a file dropped on the tab: named in the reply (@path)
   | { type: "offers"; offers: Offers } // what the reply box offers as you type (pane.py --complete)
@@ -110,6 +114,8 @@ export type PaneMessage =
   | { type: "moveToClaudeCode" } // Claude quits in its terminal, the chat reopens in a Claude Code tab (asks first)
   | { type: "copy"; text: string } // a code block of a reply, to the clipboard
   | { type: "textSize"; scale: number } // A− / A+: claudeStatus.chatTextScale
+  | { type: "diffLayout"; split: boolean } // side by side or one after the other: claudeStatus.diffSideBySide
+  | { type: "pickFiles" } // + : files to attach, from VS Code's file dialog (answered with "picked")
   | { type: "picture"; id: string; mime: string; data: string } // pasted in the reply (base64): saved, an SSH host's copied there
   | { type: "attach"; id: string; path: string } // a file dropped from VS Code's Explorer: a picture saved as one, a file named
   | { type: "screenshot"; id: string } // a region of the screen you pick, as a picture

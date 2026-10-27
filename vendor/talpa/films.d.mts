@@ -12,7 +12,7 @@ export interface FilmSheet {
 
 export class Films {
     constructor(talpa: Talpa, opts?: { sheets?: number; frameMs?: number; maxFrames?: number; restMs?: number; tweenMs?: number;
-                                        tweens?: number; slackMs?: number });
+                                        tweens?: number; slackMs?: number; smooth?: boolean });
     on: boolean;        // false: drawn live (a pet you hold)
     frameMs: number;
     readonly sheets: FilmSheet[];

@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **Changes you can read at a glance in a chat's tab:** each edit shows its
+  change right under it: line numbers, removed lines in red and added ones in
+  green, the words that changed marked brighter, and the file's syntax
+  colors. Folded, an edit shows the lines around its first change; click it
+  for all of it. Where the tab is wide enough a change shows **side by side**
+  (before | after); the switch in its corner, the Review tab's *Side by side*
+  button and `claudeStatus.diffSideBySide` set it. A change you're asked to
+  allow shows the same way.
+- **Tool calls that read well:** a call says what it did in code's font
+  (**Bash** `git status`), and unfolded it shows the command and what it
+  printed apart, a file it read as numbered lines in the file's colors, and
+  a search's settings by name.
+- **New files in the Review tab:** a file a chat made outside its folder
+  showed *no earlier version kept* and nothing else; now the chat's own Edit
+  and Write calls tell how it was (a new file shows all its lines as added),
+  and one still unknown shows its lines as they are now.
+- **Attach with +:** a **+** button by *Dictate* and *Screenshot…* opens VS
+  Code's file dialog in the chat's folder: a picture goes into your reply as
+  one, another file is named for Claude to read.
 - **Smooth pets:** the chats' pets went through four pictures a move and
   faded from pose to pose; now each pet plays its moves as they are, a
   picture each frame of the move, each drawn once and shown again round
