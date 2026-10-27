@@ -9,6 +9,7 @@ import { Accounts } from "./accounts";
 import { AccountSwitch } from "./accountSwitch";
 import { Actions } from "./actions";
 import { Backend } from "./backend";
+import { configDirArgs } from "./config";
 import { openChangesLink } from "./changes";
 import { ChatPanes } from "./chatPane";
 import { answerPermissionsHere, liveModeHere } from "./relay";
@@ -43,6 +44,29 @@ export function activate(context: vscode.ExtensionContext): void {
   actions = new Actions(backend, dash, terminals, log, account);
   const accounts = new Accounts(backend, dash, terminals, account, log);
   const view = new ViewHost(context.extensionUri, dash, actions);
+  // The Monday recap: once a week, the last 7 days in a few words; Open the
+  // Recap shows the view on its Recap tab (week.py marks the week: the widget
+  // and other windows don't show it again)
+  const mondayRecap = async (): Promise<void> => {
+    if (!notifier.isLeader() || !vscode.workspace.getConfiguration("claudeStatus").get<boolean>("mondayRecap", true)) return;
+    const r = await backend.mondayRecap(configDirArgs());
+    if (!r?.ok || !r.due) return;
+    const h = (ms: number) => Math.round(ms / 3600000);
+    const parts = [`Claude worked ${h(r.workedMs)} h over ${r.chats} chats; you, ${h(r.youMs)} h and ${r.prompts} prompts.`];
+    if (r.project) parts.push(`Most of it in ${r.project}.`);
+    if (r.workedBefore > 0) {
+      const change = Math.round(((r.workedMs - r.workedBefore) / r.workedBefore) * 100);
+      parts.push(change >= 0 ? `${change}% more than the week before.` : `${-change}% less than the week before.`);
+    }
+    const choice = await vscode.window.showInformationMessage(`Your week with Claude: ${parts.join(" ")}`, "Open the Recap");
+    if (choice === "Open the Recap") {
+      view.showTab("week");
+      await vscode.commands.executeCommand("claudeStatus.view.focus");
+    }
+  };
+  const mondayTimer = setInterval(() => void mondayRecap(), 30 * 60000);
+  const mondayFirst = setTimeout(() => void mondayRecap(), 60000);
+  context.subscriptions.push({ dispose: () => (clearInterval(mondayTimer), clearTimeout(mondayFirst)) });
   const a = actions;
   const review = new PlanReview(extraConfigDirs);
   a.planReview = review;

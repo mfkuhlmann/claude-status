@@ -208,6 +208,11 @@ export class Backend {
     return { recap: r as WeekRecap };
   }
 
+  // The Monday recap (week.py --monday-recap): due once a week for whichever copy asks first
+  async mondayRecap(args: string[]): Promise<Record<string, any> | null> {
+    return this.json(["week.py", "--monday-recap", ...args], 180000);
+  }
+
   // The Permissions tab's data (week.py --permissions)
   async perms(args: string[]): Promise<{ data?: PermsData; error?: string }> {
     const r = await this.json(["week.py", "--permissions", ...args], 180000);

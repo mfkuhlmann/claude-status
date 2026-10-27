@@ -124,6 +124,13 @@ export class ViewHost implements vscode.WebviewViewProvider, vscode.Disposable {
     return true;
   }
 
+  // A tab of the view (also for a page that loads after this: it asks when it's ready)
+  private shownTab: "chats" | "week" | "perms" | null = null;
+  showTab(tab: "chats" | "week" | "perms"): void {
+    this.shownTab = tab;
+    this.broadcast({ type: "showTab", tab });
+  }
+
   private broadcast(message: HostMessage): void {
     for (const w of this.webviews) void w.postMessage(message);
   }
@@ -152,6 +159,8 @@ export class ViewHost implements vscode.WebviewViewProvider, vscode.Disposable {
       case "ready":
         void webview.postMessage({ type: "state", state: this.dash.state() } satisfies HostMessage);
         void webview.postMessage({ type: "visible", visible: this.isVisible(webview) } satisfies HostMessage);
+        if (this.shownTab) void webview.postMessage({ type: "showTab", tab: this.shownTab } satisfies HostMessage);
+        this.shownTab = null;
         break;
       case "open":
         // (a click on a chat: its tab, unless clicks open the chat itself)

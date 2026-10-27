@@ -1,5 +1,6 @@
 // The webview's entry: draws the dashboard from what the extension sends.
 
+import { setTab } from "./util/ui";
 import { render } from "preact";
 import type { HostMessage } from "../src/shared/types";
 import { App } from "./components/App";
@@ -24,6 +25,9 @@ window.addEventListener("message", (event: MessageEvent) => {
       break;
     case "visible":
       hostVisible.set(!!msg.visible);
+      break;
+    case "showTab":
+      setTab(msg.tab);
       break;
     case "week":
       weekAnswer.set(msg);

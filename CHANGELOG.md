@@ -10,6 +10,12 @@
   open burrow is drawn once and copied into each picture, which halves what
   a picture costs. A pet you pick up trails your mouse on a spring, swings
   as you move it and wobbles when you let go.
+- **The Monday recap:** once a week (Monday from 9 o'clock, or the first
+  time VS Code runs after that), a notification sums up the last 7 days:
+  how long Claude worked over how many chats, your time and prompts, the
+  project most of it went to, and against the week before; **Open the
+  Recap** shows them. It comes once, here or in the Plasma widget
+  (`claudeStatus.mondayRecap` turns it off).
 - **A background session's screen:** the tab of a background session
   (`claude --bg`) has an **Output** tab: its terminal as Claude draws it
   right now (what `claude attach` would show), read again every 2 seconds

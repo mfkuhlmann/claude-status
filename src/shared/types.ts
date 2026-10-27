@@ -861,6 +861,7 @@ export type WebviewMessage =
 // extension -> webview
 export type HostMessage =
   | { type: "state"; state: ViewState }
+  | { type: "showTab"; tab: "chats" | "week" | "perms" } // (the Monday recap's Open the Recap)
   | { type: "petEvent"; kind: PetEventKind; text: string; key: string }
   | { type: "visible"; visible: boolean }
   | { type: "live"; live: Record<string, LiveView> }

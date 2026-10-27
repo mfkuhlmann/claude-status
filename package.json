@@ -576,6 +576,12 @@
           "markdownDescription": "Claude Code deletes chats after 30 days (its `cleanupPeriodDays` setting). The Recap tab's **Overall** keeps their numbers past that, in `~/.cache/claude-widget`: times, tokens, costs, folders and chat names. Off, it keeps only what Claude still has. One choice for the widget and this extension. **Claude Status: Delete the Recap's Saved History…** deletes it.",
           "order": 36
         },
+        "claudeStatus.mondayRecap": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "On Mondays (from 9 o'clock, or the first time VS Code runs after that), a notification sums up the last 7 days; **Open the Recap** shows them. It comes once a week, here or in the Plasma widget.",
+          "order": 37
+        },
         "claudeStatus.recapRules": {
           "type": "boolean",
           "default": true,
