@@ -3533,6 +3533,23 @@ PlasmoidItem {
         pasteFor[cmd] = { host: host || "", target: target || "task" }
         imagePaster.connectSource(cmd)
     }
+    // A region of the screen you pick (jump.py --screenshot), or files dropped
+    // on a box (jump.py --attach): a picture goes in as a pasted one does;
+    // any other file is named in the text (fileAttached), for this
+    // computer's chats only (it isn't on an SSH host)
+    signal fileAttached(string path, string target)
+    function takeScreenshot(host, target) {
+        const cmd = "python3 -I " + shellQuote(codeDir + "jump.py") + " --screenshot # " + Date.now()
+        pasteFor[cmd] = { host: host || "", target: target || "task" }
+        imagePaster.connectSource(cmd)
+    }
+    function attachFiles(paths, host, target) {
+        paths.forEach((path, i) => {
+            const cmd = "python3 -I " + shellQuote(codeDir + "jump.py") + " --attach " + shellQuote(path) + " # " + Date.now() + "." + i
+            pasteFor[cmd] = { host: host || "", target: target || "task" }
+            imagePaster.connectSource(cmd)
+        })
+    }
     function copyPicture() {
         const offer = pictureOffer
         pictureOffer = null
@@ -3548,11 +3565,22 @@ PlasmoidItem {
             const paste = root.pasteFor[source] || { host: "", target: "task" }
             delete root.pasteFor[source]
             const result = root.helperResult(data)
-            if (!result.ok || !result.path) {
-                root.actionError = result.message
-                actionErrorTimer.restart()
-                if (paste.target === "pane")
-                    root.paneNote(result.message)
+            if (result.ok && result.picture === false) {   // (a file, named where it is)
+                if (paste.host) {
+                    root.actionError = i18n("Only pictures go to %1's chat (copied there): that file is on this computer", paste.host)
+                    actionErrorTimer.restart()
+                    if (paste.target === "pane")
+                        root.paneNote(root.actionError)
+                } else {
+                    root.fileAttached(result.path, paste.target)
+                }
+            } else if (!result.ok || !result.path) {
+                if (result.message !== "No screenshot taken") {   // (you cancelled it)
+                    root.actionError = result.message
+                    actionErrorTimer.restart()
+                    if (paste.target === "pane")
+                        root.paneNote(result.message)
+                }
             } else if (paste.host) {
                 root.pictureOffer = { host: paste.host, path: result.path, target: paste.target }
             } else {

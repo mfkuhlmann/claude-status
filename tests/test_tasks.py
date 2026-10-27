@@ -895,6 +895,43 @@ class PictureTests(TaskFixture):
         self.assertEqual(self.paste()["message"], "To paste pictures, install xclip")
         self.assertFalse(cs.images_dir(self.home).exists())
 
+    def run_jump(self, args):
+        out = io.StringIO()
+        with mock.patch.object(jump.Path, "home", return_value=self.home), contextlib.redirect_stdout(out):
+            jump.main(args)
+        return json.loads(out.getvalue())
+
+    def test_a_region_screenshot_is_saved_as_a_picture(self):
+        # A stand-in Spectacle: writes its --output (cancelled: writes nothing)
+        tools = Path(tempfile.mkdtemp(dir=self.home))
+        write(tools / "spectacle", "#!/bin/sh\n[ -n \"$CANCEL\" ] && exit 0\n"
+              "while [ $# -gt 1 ]; do [ \"$1\" = --output ] && printf 'PNGDATA' > \"$2\"; shift; done\n")
+        (tools / "spectacle").chmod(0o755)
+        with mock.patch.dict(os.environ, {"PATH": f"{tools}:/usr/bin:/bin"}):
+            os.environ.pop("XDG_CACHE_HOME", None)
+            shot = self.run_jump(["--screenshot"])
+            self.assertTrue(shot["ok"], shot)
+            self.assertEqual(Path(shot["path"]).parent, cs.images_dir(self.home))
+            self.assertEqual(Path(shot["path"]).read_bytes(), b"PNGDATA")
+            with mock.patch.dict(os.environ, {"CANCEL": "1"}):
+                self.assertEqual(self.run_jump(["--screenshot"]), {"ok": False, "message": "No screenshot taken"})
+            self.assertEqual([p.name for p in cs.images_dir(self.home).iterdir()], [Path(shot["path"]).name])
+        with mock.patch.dict(os.environ, {"PATH": str(tools / "none")}):
+            self.assertIn("install Spectacle", self.run_jump(["--screenshot"])["message"])
+
+    def test_a_dropped_picture_is_copied_in_and_a_file_is_named(self):
+        os.environ.pop("XDG_CACHE_HOME", None)
+        picture, notes = self.home / "Pictures/cat.JPG", self.home / "notes.txt"
+        write(picture, "jpeg data")
+        write(notes, "notes")
+        dropped = self.run_jump(["--attach", str(picture)])
+        self.assertTrue(dropped["picture"], dropped)
+        self.assertTrue(dropped["path"].endswith(".jpg"))
+        self.assertEqual(Path(dropped["path"]).parent, cs.images_dir(self.home))
+        self.assertEqual(Path(dropped["path"]).read_text(), "jpeg data")
+        self.assertEqual(self.run_jump(["--attach", str(notes)]), {"ok": True, "message": "", "path": str(notes.resolve()), "picture": False})
+        self.assertFalse(self.run_jump(["--attach", str(self.home / "gone.png")])["ok"])
+
     def save(self, kind, data):
         out = io.StringIO()
         with mock.patch.object(jump.Path, "home", return_value=self.home), contextlib.redirect_stdout(out), \

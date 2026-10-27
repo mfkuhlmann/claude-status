@@ -204,6 +204,14 @@ Window {
             replyBox.insert(at, (at > 0 && replyBox.text.charAt(at - 1).trim() !== "" ? " " : "") + "[Image: " + path + "] ")
             replyBox.forceActiveFocus()
         }
+        function onFileAttached(path, target) {   // (a file dropped on the pane: named, as Claude's @ does)
+            if (target !== "pane")
+                return
+            const at = replyBox.cursorPosition
+            const named = /\s/.test(path) ? "@\"" + path + "\"" : "@" + path
+            replyBox.insert(at, (at > 0 && replyBox.text.charAt(at - 1).trim() !== "" ? " " : "") + named + " ")
+            replyBox.forceActiveFocus()
+        }
         function onPaneNote(message) {
             pane.info = message
             pane.infoBad = true
@@ -517,6 +525,41 @@ Window {
         color: Kirigami.Theme.backgroundColor
         Kirigami.Theme.colorSet: Kirigami.Theme.Window
         Kirigami.Theme.inherit: false
+        // Files and pictures dropped on the pane go in your reply (a picture as
+        // a pasted one, a file named with @), while the Chat tab shows
+        DropArea {
+            id: dropArea
+            anchors.fill: parent
+            z: 10
+            enabled: pane.tab === "chat"
+            keys: ["text/uri-list"]
+            onDropped: drop => {
+                const paths = (drop.urls || []).map(u => String(u)).filter(u => u.startsWith("file://"))
+                                               .map(u => decodeURIComponent(u.slice(7)))
+                if (paths.length) {
+                    root.attachFiles(paths, pane.host, "pane")
+                    drop.acceptProposedAction()
+                }
+            }
+            Rectangle {
+                anchors.fill: parent
+                anchors.margins: Kirigami.Units.smallSpacing
+                visible: dropArea.containsDrag
+                radius: Kirigami.Units.cornerRadius * 2
+                color: Qt.rgba(Kirigami.Theme.focusColor.r, Kirigami.Theme.focusColor.g, Kirigami.Theme.focusColor.b, 0.12)
+                border.width: 2
+                border.color: Kirigami.Theme.focusColor
+
+                PlasmaComponents3.Label {
+                    anchors.centerIn: parent
+                    textFormat: Text.PlainText
+                    text: pane.host ? i18n("Drop a picture: it's copied to %1 for your reply", pane.host)
+                                    : i18n("Drop to add it to your reply")
+                    font.pointSize: pane.pt * 1.2
+                }
+            }
+        }
+
         // It grows out of the chat's row in the popup (main.qml: placePane):
         // from the popup's side, at the row's height
         opacity: 0
@@ -1126,7 +1169,7 @@ Window {
                             id: replyBox
                             background: null
                             placeholderText: pane.permission ? i18n("It's asking you something: answer that first")
-                                                             : i18n("Reply to Claude… (Enter sends, Shift+Enter: new line, Ctrl+V: a picture too)")
+                                                             : i18n("Reply to Claude… (Enter sends, Shift+Enter: new line; Ctrl+V or drop: a picture or a file too)")
                             wrapMode: TextEdit.Wrap
                             font.pointSize: pane.pt
                             enabled: !(pane.permission && pane.route === "tmux")
@@ -1207,6 +1250,19 @@ Window {
                     Layout.fillWidth: true
                     spacing: Kirigami.Units.smallSpacing
 
+                    PlasmaComponents3.ToolButton {
+                        icon.name: "spectacle"
+                        text: i18n("Screenshot…")
+                        display: PlasmaComponents3.AbstractButton.IconOnly
+                        onClicked: root.takeScreenshot(pane.host, "pane")
+
+                        PlasmaCore.ToolTipArea {
+                            textFormat: Text.PlainText
+                            anchors.fill: parent
+                            mainText: i18n("Screenshot…")
+                            subText: i18n("Pick a region of the screen: its picture goes in your reply. Files and pictures can be dropped on the pane too.")
+                        }
+                    }
                     Item {
                         Layout.fillWidth: true
                     }
