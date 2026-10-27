@@ -481,8 +481,14 @@ Window {
         }
         if (kind === "logs") {
             outputError = result.ok ? "" : (result.message || i18n("Its output can't be read now"))
-            if (result.ok)
-                outputLines = result.lines || []
+            const text = result.ok ? (result.lines || []).join("\n") : ""
+            if (result.ok && text !== outputText) {   // (made again only when the screen changed)
+                const following = outputText === "" || outputAtEnd()
+                outputText = text
+                outputHtml = Code.termHtml(result.runs || (result.lines || []).map(l => [[l, 0]]), result.styles || [{}], termStyle)
+                if (following)
+                    Qt.callLater(outputToEnd)
+            }
             return
         }
         if (kind === "review") {
@@ -688,10 +694,22 @@ Window {
             loadOutput()
     }
 
-    // A background session's screen (the Output tab)
+    // A background session's screen (the Output tab): its terminal as Claude
+    // draws it, in its colors on a terminal's dark ground (a light theme too)
     readonly property string jobId: row && row.kind === "bg" && row.jobId && row.pid ? row.jobId : ""
-    property var outputLines: []
+    property string outputText: ""
+    property string outputHtml: ""
     property string outputError: ""
+    readonly property var termStyle: ({ mono: monoFamily, pt: pt, fg: "#e3e3e3", bg: "#1f2124" })
+    function outputAtEnd() {
+        const f = outputView.contentItem
+        return !f || f.contentY >= f.contentHeight - f.height - Kirigami.Units.gridUnit
+    }
+    function outputToEnd() {
+        const f = outputView.contentItem
+        if (f)
+            f.contentY = Math.max(0, f.contentHeight - f.height)
+    }
     function loadOutput() {
         if (jobId)
             run("logs", "--logs " + root.shellQuote(jobId) + paneArgs())
@@ -1673,25 +1691,71 @@ Window {
 
             // ---------------------------------------------------------------- Output
             // A background session's screen now (pane.py --logs: claude logs),
-            // as its terminal would show it, read again every 2 s while shown
-            PlasmaComponents3.ScrollView {
-                id: outputView
+            // its tool calls, diffs and spinner as its terminal shows them, in
+            // their colors, read again every 2 s while shown; it stays at the
+            // end as it changes, unless you scrolled up
+            ColumnLayout {
                 visible: pane.tab === "output"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                PlasmaComponents3.ScrollBar.horizontal.policy: PlasmaComponents3.ScrollBar.AsNeeded
+                spacing: Kirigami.Units.smallSpacing
 
-                TextEdit {
-                    text: pane.outputError || pane.outputLines.join("\n")
-                    textFormat: TextEdit.PlainText
-                    readOnly: true
-                    selectByMouse: true
-                    color: pane.outputError ? pane.mutedColor : Kirigami.Theme.textColor
-                    selectionColor: Kirigami.Theme.focusColor
-                    font.family: pane.monoFamily
-                    font.pointSize: pane.pt * 0.9
-                    leftPadding: pane.gutter
-                    topPadding: Kirigami.Units.smallSpacing
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.leftMargin: Kirigami.Units.smallSpacing
+
+                    Rectangle {
+                        implicitWidth: Kirigami.Units.smallSpacing * 1.5
+                        implicitHeight: implicitWidth
+                        radius: width / 2
+                        color: pane.outputError ? pane.mutedColor : Kirigami.Theme.positiveTextColor
+                    }
+                    PlasmaComponents3.Label {
+                        Layout.fillWidth: true
+                        textFormat: Text.PlainText
+                        text: pane.outputError || i18n("Its terminal right now, as Claude draws it in the background")
+                        color: pane.outputError ? Kirigami.Theme.neutralTextColor : pane.mutedColor
+                        font: Kirigami.Theme.smallFont
+                        elide: Text.ElideRight
+                    }
+                    PlasmaComponents3.ToolButton {
+                        icon.name: "go-bottom"
+                        display: PlasmaComponents3.AbstractButton.IconOnly
+                        text: i18n("To the end")
+                        onClicked: pane.outputToEnd()
+                    }
+                }
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    radius: Kirigami.Units.cornerRadius
+                    color: pane.termStyle.bg
+                    border.width: 1
+                    border.color: Qt.rgba(1, 1, 1, 0.08)
+
+                    PlasmaComponents3.ScrollView {
+                        id: outputView
+                        anchors.fill: parent
+                        anchors.margins: Kirigami.Units.largeSpacing * 0.75
+                        PlasmaComponents3.ScrollBar.horizontal.policy: PlasmaComponents3.ScrollBar.AsNeeded
+
+                        TextEdit {
+                            text: pane.outputHtml
+                            textFormat: TextEdit.RichText
+                            readOnly: true
+                            selectByMouse: true
+                            color: pane.termStyle.fg
+                            selectionColor: Kirigami.Theme.focusColor
+                            selectedTextColor: Kirigami.Theme.highlightedTextColor
+                        }
+                    }
+                    PlasmaComponents3.Label {
+                        anchors.centerIn: parent
+                        visible: pane.outputHtml === ""
+                        textFormat: Text.PlainText
+                        text: pane.outputError ? "" : i18n("Reading its screen…")
+                        color: "#9a9a9a"
+                    }
                 }
             }
 

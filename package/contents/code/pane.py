@@ -69,6 +69,7 @@ import shutil
 import subprocess
 import sys
 import time
+import unicodedata
 from pathlib import Path
 
 sys.dont_write_bytecode = True  # no __pycache__ inside the installed widget...
@@ -693,17 +694,108 @@ def completions(home, extra_dirs, chat_id, profile_key=None):
 # a grid and gives the lines that show, for the pane's Output tab. It only
 # asks the background service that runs (never starts one: claude would).
 
-ESCAPE = re.compile(r"\x1b(?:\[([0-9;?]*)([A-Za-z@`])|\]([^\x07\x1b]*)(?:\x07|\x1b\\)|([78])|[()][0-9A-Za-z]|.)")
+ESCAPE = re.compile(r"\x1b(?:\[([0-9;:?]*)([A-Za-z@`])|\]([^\x07\x1b]*)(?:\x07|\x1b\\)|([78])|[()][0-9A-Za-z]|.)")
+# The 16 colors of an xterm, and its 256 (6×6×6 and greys)
+ANSI_COLORS = ("#000000", "#cd3131", "#0dbc79", "#e5e510", "#2472c8", "#bc3fbc", "#11a8cd", "#e5e5e5",
+               "#666666", "#f14c4c", "#23d18b", "#f5f543", "#3b8eea", "#d670d6", "#29b8db", "#ffffff")
+PLAIN = (None, None, False, False, False, False, False)   # fg, bg, bold, dim, italic, underline, inverse
 
 
-def screen_of(stream, width=200, height=60):
-    """The lines a terminal shows after stream (a TUI's output), trailing
-    spaces and empty lines at the end left out."""
-    grid = [[" "] * width for _ in range(height)]
+def color_256(n):
+    if n < 16:
+        return ANSI_COLORS[n]
+    if n < 232:
+        n -= 16
+        return "#%02x%02x%02x" % tuple((0, 95, 135, 175, 215, 255)[v] for v in (n // 36, n // 6 % 6, n % 6))
+    return "#%02x%02x%02x" % ((8 + 10 * (n - 232),) * 3)
+
+
+def sgr(style, args):
+    """style after an SGR sequence (ESC [ args m)."""
+    fg, bg, bold, dim, italic, under, inverse = style
+    nums = [int(n) if n.isdigit() else 0 for n in (args or "0").replace(":", ";").split(";")]
+    i = 0
+    while i < len(nums):
+        n = nums[i]
+        if n == 0:
+            fg, bg, bold, dim, italic, under, inverse = PLAIN
+        elif n in (38, 48) and i + 2 < len(nums) + 1:
+            color = None
+            if i + 1 < len(nums) and nums[i + 1] == 2 and i + 4 < len(nums):
+                color = "#%02x%02x%02x" % tuple(max(0, min(255, v)) for v in nums[i + 2:i + 5])
+                i += 4
+            elif i + 1 < len(nums) and nums[i + 1] == 5 and i + 2 < len(nums):
+                color = color_256(max(0, min(255, nums[i + 2])))
+                i += 2
+            if n == 38:
+                fg = color
+            else:
+                bg = color
+        elif n == 1:
+            bold = True
+        elif n == 2:
+            dim = True
+        elif n == 3:
+            italic = True
+        elif n in (4, 21):
+            under = True
+        elif n == 7:
+            inverse = True
+        elif n == 22:
+            bold = dim = False
+        elif n == 23:
+            italic = False
+        elif n == 24:
+            under = False
+        elif n == 27:
+            inverse = False
+        elif 30 <= n <= 37:
+            fg = ANSI_COLORS[n - 30]
+        elif 90 <= n <= 97:
+            fg = ANSI_COLORS[n - 82]
+        elif n == 39:
+            fg = None
+        elif 40 <= n <= 47:
+            bg = ANSI_COLORS[n - 40]
+        elif 100 <= n <= 107:
+            bg = ANSI_COLORS[n - 92]
+        elif n == 49:
+            bg = None
+        i += 1
+    return (fg, bg, bold, dim, italic, under, inverse)
+
+
+def wide(ch):
+    return unicodedata.east_asian_width(ch) in ("W", "F")
+
+
+def screen_cells(stream, width=200, height=60):
+    """A terminal after stream (a TUI's output): its rows of [char, style]
+    cells, and whether each row was drawn whole in it (erased, or written
+    from its start): a stream that begins in the middle of a session also
+    has the odd number a TUI redrew in place on a row it drew earlier."""
+    blank = (" ", PLAIN)
+    grid = [[blank] * width for _ in range(height)]
+    whole = [False] * height
     row = col = 0
+    style = PLAIN
     saved = (0, 0)
     pos = 0
     text = stream.replace("\r\n", "\n")
+
+    def put(ch):
+        nonlocal col
+        if col <= 2:
+            whole[row] = True
+        if 0xE000 <= ord(ch) <= 0xF8FF or ord(ch) >= 0xF0000:
+            ch = " "   # (a Nerd Font's glyph, a status line's arrows: its colors stay, a clean edge)
+        two = wide(ch)
+        if col < width:
+            grid[row][col] = (ch, style)
+            if two and col + 1 < width:
+                grid[row][col + 1] = ("", style)   # (the second half of a wide character)
+        col += 2 if two else 1
+
     for m in ESCAPE.finditer(text):
         for ch in text[pos:m.start()]:
             if ch == "\r":
@@ -713,18 +805,19 @@ def screen_of(stream, width=200, height=60):
             elif ch == "\b":
                 col = max(0, col - 1)
             elif ch >= " ":
-                if col < width:
-                    grid[row][col] = ch
-                col += 1
+                put(ch)
         pos = m.end()
         args, op = m.group(1), m.group(2)
         if m.group(4) == "7":
             saved = (row, col)
         elif m.group(4) == "8":
             row, col = saved
+        elif op == "m":
+            style = sgr(style, args)
         elif op:
             nums = [int(n) if n.isdigit() else 0 for n in (args or "").replace("?", "").split(";")]
             n = nums[0] if nums and nums[0] else 1
+            erased = (" ", (None, style[1], False, False, False, False, False))   # (erased in the background color)
             if op == "A":
                 row = max(0, row - n)
             elif op == "B":
@@ -741,29 +834,71 @@ def screen_of(stream, width=200, height=60):
             elif op == "K":
                 mode = nums[0] if nums else 0
                 for c in (range(col, width) if mode == 0 else range(0, col + 1) if mode == 1 else range(width)):
-                    grid[row][c] = " "
+                    grid[row][c] = erased
+                if mode or col <= 2:
+                    whole[row] = True
             elif op == "J":
                 mode = nums[0] if nums else 0
                 rows = range(row + 1, height) if mode == 0 else range(0, row) if mode == 1 else range(height)
                 for r in rows:
-                    grid[r] = [" "] * width
+                    grid[r] = [erased] * width
+                    whole[r] = True
                 if mode == 0:
-                    grid[row][col:] = [" "] * (width - col)
+                    grid[row][col:] = [erased] * (width - col)
     for ch in text[pos:]:
         if ch >= " " and col < width:
-            grid[row][col] = ch
-            col += 1
-    lines, out = ["".join(r).rstrip() for r in grid], []
-    for line in lines:
-        if line or (out and out[-1]):   # (the empty part of the screen: one empty line)
-            out.append(line)
+            put(ch)
+    return grid, whole
+
+
+def screen_rows(grid, whole):
+    """The rows that show, as [[text, style], ...] runs (trailing plain
+    spaces left out); left out: a row not drawn whole that has no word in
+    it, the empty part of the screen (one empty row) and its end."""
+    out = []
+    for cells, drawn in zip(grid, whole):
+        end = len(cells)
+        while end and cells[end - 1][0] in (" ", "") and cells[end - 1][1][1] is None and not cells[end - 1][1][6]:
+            end -= 1
+        runs = []
+        for ch, st in cells[:end]:
+            if runs and runs[-1][1] == st:
+                runs[-1][0] += ch
+            else:
+                runs.append([ch, st])
+        if runs and not drawn and not re.search(r"[^\W\d_]{3}", "".join(t for t, _ in runs)):
+            continue   # (numbers a TUI redrew in place, without the words around them)
+        if runs or (out and out[-1]):
+            out.append(runs)
     while out and not out[-1]:
         out.pop()
     return out
 
 
+def screen_of(stream, width=200, height=60):
+    """The lines a terminal shows after stream (a TUI's output), as text."""
+    return ["".join(t for t, _ in runs) for runs in screen_rows(*screen_cells(stream, width, height))]
+
+
+def screen_view(stream, width=200, height=60):
+    """The screen with its colors, for the Output tab: {"lines": [text],
+    "runs": [[[text, style index], ...]], "styles": [{"fg", "bg" ("#rrggbb"
+    or null: the terminal's), "b", "d" (dim), "i", "u", "inv"}]}."""
+    rows = screen_rows(*screen_cells(stream, width, height))
+    styles, index, runs = [], {}, []
+    for row in rows:
+        line = []
+        for text, st in row:
+            if st not in index:
+                index[st] = len(styles)
+                styles.append({"fg": st[0], "bg": st[1], "b": st[2], "d": st[3], "i": st[4], "u": st[5], "inv": st[6]})
+            line.append([text, index[st]])
+        runs.append(line)
+    return {"lines": ["".join(t for t, _ in row) for row in rows], "runs": runs, "styles": styles}
+
+
 def job_screen(home, extra_dirs, job_id, profile_key=None):
-    """A background session's screen now (claude logs): {"ok", "lines"}."""
+    """A background session's screen now (claude logs): {"ok"} and screen_view's."""
     if not re.fullmatch(r"[0-9a-f]{8}", job_id or ""):
         return {"ok": False, "message": f"Not a background session: {job_id}"}
     profiles = [p for p in cs.discover_profiles(home, extra_dirs) if profile_key in (None, p.key)]
@@ -785,7 +920,7 @@ def job_screen(home, extra_dirs, job_id, profile_key=None):
         return {"ok": False, "message": f"claude logs didn't answer: {exc}"}
     if r.returncode != 0:
         return {"ok": False, "message": (r.stderr or r.stdout).decode(errors="replace").strip()[:300] or "claude logs failed"}
-    return {"ok": True, "lines": screen_of(r.stdout.decode("utf-8", "replace"))}
+    return dict(screen_view(r.stdout.decode("utf-8", "replace")), ok=True)
 
 
 # ---------------------------------------------------------------- keyboard answers

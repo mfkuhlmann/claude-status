@@ -1115,3 +1115,25 @@ console.log(JSON.stringify({ unified: H.diffHtml(lines, 'a.html', p, 0), folded:
                 self.assertNotIn(raw, html, name)
         self.assertIn("… 17 more", r["folded"])
         self.assertNotIn("ctx 10", r["folded"])
+
+
+class ScreenColorTests(unittest.TestCase):
+    def test_colors_and_rows_drawn_in_part(self):
+        e = "\x1b"
+        stream = (f"{e}[H\r{e}[38;2;80;200;80m●{e}[39m {e}[1mBash{e}[22m(ls)"
+                  f"\r{e}[1B{e}[48;2;2;40;0m 12 +x{e}[K{e}[49m"
+                  f"\r{e}[1B{e}[7mon{e}[27m {e}[2mdim{e}[22m {e}[31mred{e}[39m"
+                  f"{e}[5;30H91{e}[5;40H8"                       # (numbers redrawn in place, the words around them never drawn)
+                  f"{e}[6;20HYou've used 91% of your limit"           # (a note drawn mid-row: words, it stays)
+                  f"\r{e}[1Bx")
+        view = pane.screen_view(stream)
+        self.assertEqual(view["lines"][:3], ["● Bash(ls)", " 12 +x" + " " * 194, "on dim red"])
+        self.assertFalse([l for l in view["lines"] if l.strip() and re.fullmatch(r"[\d\s]+", l)])
+        self.assertIn("You've used 91% of your limit", view["lines"][-2])
+        self.assertEqual(view["lines"][-1], " x")          # (a Nerd Font glyph: a space, its colors kept)
+        style = lambda row, k: view["styles"][view["runs"][row][k][1]]
+        self.assertEqual((style(0, 0)["fg"], style(0, 2)["b"]), ("#50c850", True))
+        self.assertEqual(style(1, 0)["bg"], "#022800")    # (erased in the background color: the diff line's bar)
+        self.assertTrue(style(2, 0)["inv"])
+        self.assertTrue(style(2, 2)["d"])
+        self.assertEqual(style(2, 4)["fg"], "#cd3131")
