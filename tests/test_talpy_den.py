@@ -511,7 +511,6 @@ class TokenTests(Fixture):
 SHELLS = [s for s in ("sh", "dash", "bash", "zsh") if shutil.which(s)]
 
 
-@unittest.skipUnless(shutil.which("jq"), "the status-line snippet needs jq")
 class LegacyDirTests(unittest.TestCase):
     """The folders of the first name (claude-widget) move to talpy-den."""
 
@@ -556,6 +555,7 @@ class LegacyDirTests(unittest.TestCase):
         self.assertFalse((self.home / ".cache/talpy-den").exists())
 
 
+@unittest.skipUnless(shutil.which("jq"), "the status-line snippet needs jq")
 class SnippetTests(unittest.TestCase):
     def run_snippet(self, payload, cfg):
         """Runs the snippet in every shell here; all must do the same."""
