@@ -374,8 +374,24 @@ class LimitTests(Fixture):
         # a status line newer than the cache wins
         self.snapshot(".claude-personal", "new", {"rate_limits": {
             "five_hour": {"used_percentage": 40, "resets_at": self.now + 3600}}}, age=60)
+        five, seven = self.group(self.collect(with_tokens=False), "personal")["limits"]["windows"]
+        self.assertEqual((five["pct"], seven["reset"]), (40.0, True))  # (the cache's week, over by now)
+
+    def test_a_weekly_window_missing_after_its_reset_shows_as_reset(self):
+        # Claude Code leaves the weekly window out until the new week has usage
+        self.snapshot(".claude-personal", "before", {"rate_limits": {
+            "five_hour": {"used_percentage": 17, "resets_at": self.now - 3600},
+            "seven_day": {"used_percentage": 99, "resets_at": self.now - 600}}}, age=7200)
+        self.snapshot(".claude-personal", "after", {"rate_limits": {
+            "five_hour": {"used_percentage": 5, "resets_at": self.now + 3600}}}, age=60)
+        five, seven = self.group(self.collect(with_tokens=False), "personal")["limits"]["windows"]
+        self.assertEqual((five["key"], five["pct"], five["reset"]), ("five_hour", 5.0, False))
+        self.assertEqual((seven["key"], seven["pct"], seven["reset"]), ("seven_day", 0.0, True))
+        # one that hasn't reset yet isn't made up
+        self.snapshot(".claude-personal", "before", {"rate_limits": {
+            "seven_day": {"used_percentage": 99, "resets_at": self.now + 600}}}, age=7200)
         (five,) = self.group(self.collect(with_tokens=False), "personal")["limits"]["windows"]
-        self.assertEqual(five["pct"], 40.0)
+        self.assertEqual(five["key"], "five_hour")
 
     def test_a_usage_cache_of_another_account_is_left_out(self):
         self.usage_cache(fetched_ago=60, account="someone-else")
@@ -1135,6 +1151,15 @@ class SharedCopiesTests(Fixture):
         self.assertEqual([(c["sessionId"], c["profile"], c["state"], c["stoppedHere"]) for c in here],
                          [("chat1", "personal", "working", True)])
         self.assertEqual(self.group(r, "personal")["sharedHere"], [])
+
+    def test_job_waiting_at_a_limit_left_out_while_the_chat_runs_elsewhere(self):
+        write(self.home / ".claude-personal/sessions/50.json", session("chat1", status="busy"))
+        write(self.home / ".claude-work/jobs/chat1/state.json",
+              {"state": "blocked", "tempo": "blocked", "sessionId": "chat1", "updatedAt": iso(self.now - 600)})
+        r = self.collect(with_tokens=False)
+        rows = [(g["name"], s["sessionId"]) for g in r["groups"] for s in g["sessions"] if s["sessionId"] == "chat1"]
+        self.assertEqual(rows, [("personal", "chat1")])
+        self.assertEqual([c["sessionId"] for c in self.group(r, "work")["sharedHere"]], ["chat1"])
 
     def test_record_left_behind_when_kept_only_on_another_account(self):
         # A background chat of personal, shared, then kept only on work: the
