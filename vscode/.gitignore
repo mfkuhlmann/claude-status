@@ -1,0 +1,37 @@
+# Dependencies and build output
+node_modules/
+dist/
+out/
+*.vsix
+.vscode-test/
+*.map
+*.tsbuildinfo
+
+# Python bytecode (contains absolute paths of the machine that ran it)
+__pycache__/
+*.py[cod]
+
+# Editors and local tooling (launch.json/tasks.json are generic and shared)
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
+.idea/
+*~
+.*.swp
+.env
+.env.*
+
+# Screenshots and logs taken from real use show real chats: only demo-mode
+# images under docs/ belong in the repository
+/*.png
+/*.gif
+*.log
+
+# Claude Code config/state of any profile, and local-only instructions
+.claude/
+.claude-*/
+.claude.json
+CLAUDE.local.md
+
+# Dev harness bundles
+dev/out/

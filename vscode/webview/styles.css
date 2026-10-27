@@ -1,0 +1,3622 @@
+/* Talpy Den webview. Colors come from the VS Code theme, like the widget
+   followed the Plasma theme; --cs-* are the roles used everywhere. */
+
+@import "./pets/pets.css";
+
+:root {
+  --cs-gu: 16px; /* the widget's Kirigami gridUnit, scaled to VS Code's 13px text */
+  --cs-space: 6px;
+  /* orange, as Plasma's and GNOME's "needs you" (VS Code's warning color is yellow) */
+  --cs-waiting: var(--vscode-charts-orange, #d18616);
+  --cs-working: var(--vscode-focusBorder, #0078d4);
+  --cs-idle: var(--vscode-testing-iconPassed, var(--vscode-charts-green, #388a34));
+  --cs-failed: var(--vscode-charts-red, var(--vscode-errorForeground, #f14c4c));
+  --cs-muted: var(--vscode-descriptionForeground, #8b8b8b);
+  --cs-disabled: var(--vscode-disabledForeground, #8b8b8b80);
+  --cs-usage-high: var(--cs-failed);
+  --cs-usage-medium: var(--cs-waiting);
+  --cs-usage-low: var(--cs-working);
+  --cs-border: var(--vscode-widget-border, var(--vscode-panel-border, #8882));
+  --cs-hover: var(--vscode-list-hoverBackground, #8881);
+  --cs-tag-bg: var(--vscode-badge-background, #8883);
+  --cs-tag-fg: var(--vscode-badge-foreground, inherit);
+  --cs-link: var(--vscode-textLink-foreground, #3794ff);
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  color: var(--vscode-foreground);
+  background: transparent;
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size, 13px);
+  line-height: 1.4;
+  overflow-x: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Layout. The page's own background shows through the sticky top, so it gets
+   the background of the place the view sits in. */
+
+:root {
+  --cs-bg: var(--vscode-sideBar-background, var(--vscode-editor-background, transparent));
+  --cs-pad: 10px;
+  --cs-fg: var(--vscode-foreground, #888);
+  --cs-track: color-mix(in srgb, var(--cs-fg) 15%, transparent);
+  --cs-tag-border: color-mix(in srgb, var(--cs-fg) 30%, transparent);
+  --cs-positive: var(--cs-idle);
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+code {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.95em;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: var(--vscode-textCodeBlock-background, var(--cs-hover));
+}
+
+.app {
+  padding-bottom: 12px;
+  container: cs / inline-size;
+}
+
+/* An editor tab is wide: keep the list readable in the middle */
+.app.tab {
+  --cs-bg: var(--vscode-editor-background, transparent);
+  max-width: 640px;
+  margin: 0 auto;
+  padding-bottom: 24px;
+}
+
+.top {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--cs-bg);
+}
+
+.top.scrolled {
+  box-shadow: 0 6px 6px -6px var(--vscode-scrollbar-shadow, #0006);
+}
+
+.content {
+  padding: 0 var(--cs-pad);
+}
+
+.small {
+  font-size: 0.85em;
+}
+
+.muted {
+  color: var(--cs-muted);
+}
+
+.nowrap {
+  white-space: nowrap;
+  flex: none;
+}
+
+.spacer {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.empty {
+  padding: 18px 8px 8px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ---------------------------------------------------------------------------
+   Header: the ✳ in the overall state's color, and the summary */
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--cs-space);
+  min-height: 22px;
+  padding: 5px var(--cs-pad);
+}
+
+.app.tab .header {
+  padding-top: 10px;
+  padding-bottom: 8px;
+}
+
+.summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--cs-muted);
+}
+
+.summary {
+  text-align: right;
+}
+
+.header-actions {
+  display: flex;
+  flex: none;
+  gap: 2px;
+}
+
+.talpy-icon {
+  flex: none;
+  display: block;
+  width: 16px;
+  height: 16px;
+  color: var(--ov, var(--cs-disabled));
+}
+
+.ov-waiting {
+  --ov: var(--cs-waiting);
+}
+
+.ov-working {
+  --ov: var(--cs-working);
+}
+
+.ov-idle {
+  --ov: var(--cs-idle);
+}
+
+.ov-none {
+  --ov: var(--cs-disabled);
+}
+
+.hero {
+  padding: 0 var(--cs-pad);
+}
+
+/* The line under the big Talpy: what the working chats do right now */
+.ticker {
+  display: flex;
+  gap: 6px;
+  width: calc(100% - 2 * var(--cs-pad));
+  margin: 4px var(--cs-pad) 2px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.92em;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  animation: ticker-in 220ms ease-out;
+}
+
+.ticker-name {
+  flex: 0 1 auto;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.7;
+}
+
+.ticker-text {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--cs-working);
+}
+
+.ticker:hover .ticker-text {
+  text-decoration: underline;
+}
+
+@keyframes ticker-in {
+  from {
+    opacity: 0.15;
+    transform: translateY(3px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ticker {
+    animation: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Messages */
+
+.msg {
+  margin: 6px 0;
+  padding: 5px 8px;
+  border-left: 3px solid var(--cs-border);
+  border-radius: 3px;
+  overflow-wrap: anywhere;
+}
+
+.msg.error {
+  color: var(--cs-failed);
+  border-left-color: var(--cs-failed);
+  background: color-mix(in srgb, var(--cs-failed) 8%, transparent);
+}
+
+.msg.info {
+  border-left-color: var(--cs-positive);
+  background: color-mix(in srgb, var(--cs-positive) 8%, transparent);
+}
+
+.msg.muted {
+  color: var(--cs-muted);
+}
+
+.msg.banner {
+  border-left-color: var(--cs-link);
+  background: color-mix(in srgb, var(--cs-link) 10%, transparent);
+}
+
+/* While you were away: what happened meanwhile */
+.msg.digest {
+  border-left-color: var(--cs-working);
+  background: color-mix(in srgb, var(--cs-working) 8%, transparent);
+}
+
+.digest-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.digest-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.digest-line {
+  font-size: 0.9em;
+}
+
+.msg.digest .link {
+  margin-top: 2px;
+  color: var(--cs-link);
+}
+
+/* ---------------------------------------------------------------------------
+   Buttons */
+
+.icon-btn {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 3px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.icon-btn:hover {
+  background: var(--vscode-toolbar-hoverBackground, var(--cs-hover));
+}
+
+.icon-btn:active {
+  background: var(--vscode-toolbar-activeBackground, var(--vscode-toolbar-hoverBackground, var(--cs-hover)));
+}
+
+.icon-btn .count {
+  font-size: 0.85em;
+  padding-right: 2px;
+}
+
+.icon {
+  display: block;
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+
+.link {
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+button:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #0078d4);
+  outline-offset: -1px;
+}
+
+.link:focus-visible {
+  outline-offset: 1px;
+  border-radius: 2px;
+}
+
+.tag {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  padding: 0 5px;
+  border: 1px solid var(--cs-tag-border);
+  border-radius: 4px;
+  background: transparent;
+  font-size: 0.8em;
+  line-height: 1.45;
+  white-space: nowrap;
+  opacity: 0.9;
+}
+
+.tag.active {
+  border-color: var(--cs-working);
+}
+
+.tag.warning {
+  border-color: var(--cs-failed);
+  color: var(--cs-failed);
+  opacity: 1;
+}
+
+.tag.clickable {
+  cursor: pointer;
+}
+
+.tag.clickable:hover,
+.tag[aria-pressed="true"] {
+  background: var(--cs-hover);
+}
+
+/* A task list's progress: the tag fills up as tasks get done */
+.tag.progress,
+.tag.progress.clickable:hover,
+.tag.progress[aria-pressed="true"] {
+  background:
+    linear-gradient(to right, color-mix(in srgb, var(--cs-working) 30%, transparent) var(--fill), transparent var(--fill)),
+    var(--tag-under, transparent);
+}
+
+.tag.progress.clickable:hover,
+.tag.progress[aria-pressed="true"] {
+  --tag-under: var(--cs-hover);
+}
+
+.badge {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: var(--cs-tag-bg);
+  color: var(--cs-tag-fg);
+  font-size: 0.8em;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------------------
+   Bars: plan usage and context fill, colored by how full they are */
+
+.meter {
+  position: relative;
+  display: block;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--cs-track);
+  overflow: hidden;
+}
+
+.meter > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--lvl);
+  transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1), left 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Where your pace leads by the reset, and where an even pace would be by now */
+.meter > .meter-ahead {
+  position: absolute;
+  top: 0;
+  border-radius: 0 3px 3px 0;
+  opacity: 0.35;
+}
+
+.meter > .meter-even {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 0;
+  background: color-mix(in srgb, var(--cs-fg) 60%, transparent);
+}
+
+.lvl-high {
+  --lvl: var(--cs-usage-high);
+}
+
+.lvl-medium {
+  --lvl: var(--cs-usage-medium);
+}
+
+.lvl-low {
+  --lvl: var(--cs-usage-low);
+}
+
+/* ---------------------------------------------------------------------------
+   An account */
+
+.group {
+  padding: 10px 0 8px;
+}
+
+.group + .group {
+  border-top: 1px solid var(--cs-border);
+}
+
+.group-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 22px;
+}
+
+.group-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 1.25em; /* (as the Recap tab's section titles) */
+  font-weight: 700;
+}
+
+/* When the numbers are from: a hint while you look at the account */
+.usage-age {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 120ms;
+}
+
+.group:hover .usage-age,
+.group:focus-within .usage-age {
+  opacity: 1;
+}
+
+.group-head .usage-age + .nowrap {
+  margin-left: 6px;
+}
+
+/* The account's pet stage folds open when it gets chats (0fr → 1fr animates
+   to the stage's own height, whatever the pets make it) */
+.stage-fold {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 260ms ease-in-out;
+}
+
+.stage-fold.open {
+  grid-template-rows: 1fr;
+}
+
+.stage-clip {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Clipped only while it folds open: once open, a pet's speech bubble may
+   reach past the stage */
+.stage-fold.open .stage-clip {
+  overflow: visible;
+  animation: cs-clip 260ms;
+}
+
+@keyframes cs-clip {
+  from,
+  to {
+    overflow: hidden;
+  }
+}
+
+.usage {
+  display: grid;
+  grid-template-columns: auto minmax(40px, 1fr) auto minmax(0, auto);
+  align-items: center;
+  column-gap: 6px;
+  row-gap: 1px;
+  margin: 4px 0 2px;
+}
+
+.usage-label {
+  max-width: 6em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-meter {
+  height: 8px;
+  border-radius: 4px;
+}
+
+.usage-pct {
+  min-width: 2.4em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-reset {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.85em;
+  color: var(--cs-muted);
+}
+
+/* "At this pace: full in 1h 20m (resets in 2h)" under its bar */
+.usage-warning {
+  grid-column: 2 / -1;
+  min-width: 0;
+  margin-bottom: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.85em;
+  color: var(--cs-waiting);
+}
+
+.no-usage {
+  margin: 4px 0 2px;
+}
+
+.no-usage .link {
+  color: var(--cs-link);
+}
+
+.logged-out {
+  margin: 4px 0 2px;
+}
+
+.logged-out .link {
+  color: var(--cs-link);
+}
+
+.tokens {
+  margin: 2px 0 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The token line unfolds the account's last days */
+.stats-toggle {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.stats-toggle:hover .token-line {
+  text-decoration: underline;
+}
+
+.stats-toggle .icon {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--cs-muted);
+  transition: transform 120ms;
+}
+
+.stats-toggle .icon.open {
+  transform: rotate(90deg);
+}
+
+.token-line {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stats {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 2px 0 6px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--cs-fg) 5%, transparent);
+}
+
+/* Tokens per day: today's bar in the accent color */
+.stats-chart {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  height: 64px;
+}
+
+.stats-day {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.stats-bar-area {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: flex-end;
+  border-bottom: 1px solid var(--cs-track);
+}
+
+.stats-bar {
+  width: 100%;
+  border-radius: 2px 2px 0 0;
+  background: color-mix(in srgb, var(--cs-fg) 35%, transparent);
+}
+
+.stats-day.today .stats-bar {
+  background: var(--cs-working);
+}
+
+.stats-day:hover .stats-bar {
+  background: color-mix(in srgb, var(--cs-working) 70%, transparent);
+}
+
+.stats-weekday {
+  overflow: visible;
+  font-size: 0.85em;
+  line-height: 1.4;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.stats-sum {
+  overflow-wrap: anywhere;
+}
+
+.stats-projects {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stats-project {
+  display: grid;
+  grid-template-columns: minmax(0, 7em) minmax(2em, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.stats-project-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stats-project-meter {
+  height: 5px;
+  border-radius: 3px;
+  background: var(--cs-track);
+}
+
+.stats-project-meter span {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--cs-working);
+}
+
+.stats-project-numbers {
+  white-space: nowrap;
+}
+
+.no-sessions {
+  padding: 2px 0;
+}
+
+/* ---------------------------------------------------------------------------
+   A chat */
+
+.sessions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+}
+
+.st-waiting {
+  --st: var(--cs-waiting);
+}
+
+.st-working {
+  --st: var(--cs-working);
+}
+
+.st-idle,
+.st-done {
+  --st: var(--cs-idle);
+}
+
+.st-failed {
+  --st: var(--cs-failed);
+}
+
+/* A usage limit (or an expired login) stopped it: red until the limit resets */
+.session.stopped {
+  --st: var(--cs-failed);
+}
+
+.session.stopped > .session-main .state-text,
+.session.freed > .session-main .state-text {
+  font-weight: 600;
+}
+
+.pk-stopped {
+  color: var(--cs-failed);
+}
+
+.session.freed .pk-stopped {
+  color: var(--cs-idle);
+}
+
+/* Tasks waiting for the usage limit */
+.queued {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+}
+
+.queued-item {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+.queued-what {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queued-actions {
+  display: flex;
+}
+
+.queued-item.failed .queued-when,
+.queued-error {
+  color: var(--cs-failed);
+}
+
+.queued-when,
+.queued-error {
+  flex-basis: 100%;
+  padding-left: 1.5em;
+}
+
+/* Continue on another account, under a chat a usage limit stopped */
+.handover {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 12px;
+  margin-top: 1px;
+}
+
+.session {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  margin: 0 -4px;
+  padding: 3px 4px;
+  border-radius: 4px;
+}
+
+.session:hover {
+  background: var(--cs-hover);
+}
+
+.pet-bar {
+  flex: none;
+  width: 6px;
+  border-radius: 3px;
+}
+
+.state-dot {
+  flex: none;
+  align-self: flex-start;
+  width: 10px;
+  height: 10px;
+  margin-top: calc((1.4em - 10px) / 2);
+  border-radius: 50%;
+  background: var(--st);
+}
+
+.session-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Name, tags and state; narrow, the state moves to a line of its own */
+.session-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 6px;
+  min-width: 0;
+}
+
+.session-line.small {
+  flex-wrap: nowrap;
+}
+
+.session-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.state-text {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: calc(var(--cs-gu) * 11);
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--st);
+}
+
+.st-waiting > .session-main .state-text {
+  font-weight: 600;
+}
+
+.folder {
+  flex: 1 1 0;
+}
+
+.ctx-meter {
+  flex: none;
+  width: calc(var(--cs-gu) * 2.5);
+  height: 5px;
+}
+
+.session-detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.85;
+}
+
+/* The peek line: what it's doing, needs or said last; click it for more */
+.peek-line {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 0.85em;
+  text-align: left;
+  cursor: pointer;
+}
+
+.peek-line:hover {
+  text-decoration: underline;
+}
+
+.pk-activity {
+  color: var(--cs-working);
+  opacity: 1;
+}
+
+.pk-reply {
+  color: var(--cs-muted);
+  opacity: 1;
+}
+
+/* Unfolded: your last prompt, Claude's reply, the tasks, the changed files */
+.peek {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 3px 0 4px;
+  padding: 5px 7px;
+  border-left: 2px solid var(--cs-tag-border);
+  border-radius: 0 4px 4px 0;
+  background: color-mix(in srgb, var(--cs-fg) 5%, transparent);
+}
+
+.peek-msg {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.peek-who {
+  flex: none;
+  min-width: 3.4em;
+  font-weight: 600;
+  color: var(--cs-muted);
+}
+
+.peek-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.peek-reply {
+  max-height: calc(1.4em * 12);
+  overflow-y: auto;
+}
+
+.peek-tasks {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.task {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.task-mark {
+  flex: none;
+  width: 1em;
+  text-align: center;
+  color: var(--cs-muted);
+}
+
+.task-in_progress .task-mark,
+.task-in_progress .task-subject {
+  color: var(--cs-working);
+}
+
+.task-completed .task-mark {
+  color: var(--cs-idle);
+}
+
+.task-completed .task-subject {
+  color: var(--cs-muted);
+  text-decoration: line-through;
+}
+
+.task-subject {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.peek-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.peek-actions .link {
+  color: var(--cs-link);
+}
+
+.peek-recap {
+  overflow-wrap: anywhere;
+}
+
+.peek-actions .link:disabled {
+  color: var(--cs-disabled);
+  cursor: default;
+  text-decoration: none;
+}
+
+/* Cut in the middle (Elided.tsx): the full text keeps the width, the cut one
+   is drawn over it */
+.elided {
+  position: relative;
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.elided-full {
+  visibility: hidden;
+}
+
+.elided-shown {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Row buttons show on hover or keyboard focus, over the row's right end so
+   the row keeps its width for the name */
+.row-actions {
+  position: absolute;
+  top: 1px;
+  right: 2px;
+  display: flex;
+  padding-left: 4px;
+  border-radius: 4px;
+  background: linear-gradient(var(--cs-hover), var(--cs-hover)), var(--cs-bg);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.session:hover > .row-actions,
+.session:has(:focus-visible) > .row-actions,
+.recent-item:hover > .row-actions,
+.recent-item:has(:focus-visible) > .row-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Subagents */
+.agents {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 3px 0 2px;
+  padding: 0;
+  list-style: none;
+  font-size: 0.85em;
+}
+
+.agent {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+}
+
+.agent-branch {
+  flex: none;
+  opacity: 0.4;
+}
+
+.agent-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-top: calc((1.4em - 7px) / 2);
+  border-radius: 50%;
+  background: var(--cs-disabled);
+}
+
+.ag-running .agent-dot {
+  background: var(--cs-working);
+}
+
+.ag-done .agent-dot {
+  background: var(--cs-idle);
+}
+
+.ag-failed .agent-dot {
+  background: var(--cs-failed);
+}
+
+.agent-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* An agent's lines: click them to unfold it */
+.agent-head {
+  display: block;
+  width: calc(100% + 4px);
+  min-width: 0;
+  padding: 0 2px;
+  margin: 0 -2px;
+  border: none;
+  border-radius: 3px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.agent-head:hover {
+  background: var(--cs-hover);
+}
+
+.agent-line {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.agent-line .icon {
+  width: 12px;
+  height: 12px;
+  margin-top: calc((1.4em - 12px) / 2);
+  color: var(--cs-muted);
+  transition: transform 120ms;
+}
+
+.agent-line .icon.open {
+  transform: rotate(90deg);
+}
+
+.agent-desc,
+.agent-type,
+.agent-activity {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-desc {
+  flex: 1 1 auto;
+}
+
+.agent-type {
+  flex: 0 1 auto;
+  max-width: 40%;
+  color: var(--cs-muted);
+}
+
+.agent-status {
+  flex: none;
+  white-space: nowrap;
+  color: var(--cs-muted);
+}
+
+.agent-activity {
+  display: block;
+  color: var(--cs-muted);
+}
+
+/* Unfolded: its task, numbers, last steps and report */
+.agent-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 2px 0 4px;
+  padding: 4px 7px;
+  border-left: 2px solid var(--cs-tag-border);
+  border-radius: 0 4px 4px 0;
+  background: color-mix(in srgb, var(--cs-fg) 5%, transparent);
+}
+
+.agent-label {
+  font-weight: 600;
+}
+
+.agent-task,
+.agent-report {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.agent-task {
+  -webkit-line-clamp: 4;
+}
+
+.agent-report {
+  -webkit-line-clamp: 12;
+}
+
+.agent-steps {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent-steps li {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-steps .current {
+  font-weight: 600;
+}
+
+/* Shared chats in use on another account: a line pointing there */
+.shared-line {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  padding: 2px 0 2px 3px;
+}
+
+.shared-glyph {
+  flex: none;
+  color: var(--st);
+}
+
+.shared-name {
+  flex: 0 1 auto;
+  min-width: 2em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.85;
+}
+
+.shared-where {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: calc(var(--cs-gu) * 12);
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Recent chats */
+.recent {
+  margin-top: 4px;
+}
+
+.recent-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 4px 1px 0;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--cs-muted);
+  cursor: pointer;
+}
+
+.recent-toggle:hover {
+  color: var(--cs-fg);
+}
+
+.recent-toggle .icon {
+  width: 14px;
+  height: 14px;
+  transition: transform 120ms;
+}
+
+.recent-toggle .icon.open {
+  transform: rotate(90deg);
+}
+
+/* Where they reopen: Terminal | Claude Code tab */
+.open-in {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 2px 0 2px 16px;
+}
+
+.open-in-half {
+  color: inherit;
+  font-family: inherit;
+}
+
+.open-in-half[aria-pressed="true"] {
+  border-color: var(--vscode-focusBorder, #0078d4);
+  background: var(--cs-hover);
+}
+
+.open-in-half.unavailable,
+.recent-item.unavailable .recent-name {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.recent-item.unavailable .recent-name:hover {
+  text-decoration: none;
+}
+
+.open-in-why {
+  margin: 0 0 2px 16px;
+}
+
+.recent-list {
+  margin: 0;
+  padding: 0 0 0 16px;
+  list-style: none;
+}
+
+.recent-item {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  margin: 0 -4px;
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+
+.recent-item:hover {
+  background: var(--cs-hover);
+}
+
+.recent-name {
+  flex: 1 1 auto;
+  min-width: 3em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-folder {
+  flex: 0 1 auto;
+  max-width: calc(var(--cs-gu) * 10);
+}
+
+.recent-item > .row-actions {
+  top: 0;
+}
+
+/* A chat or plan you starred: its star, always shown (click: unstarred) */
+.star-mark {
+  flex: none;
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  color: var(--vscode-charts-yellow, #cca700);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* The starred ones, unfolded: a step further in */
+.starred-toggle {
+  display: flex;
+  margin-left: 12px;
+}
+
+.recent-list.starred-list {
+  margin-left: 12px;
+}
+
+/* ---------------------------------------------------------------------------
+   An SSH host */
+
+/* set off from this computer's accounts, and from the host before */
+.host {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--cs-border);
+}
+
+.host-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+}
+
+/* The name wins over the other bits of the head */
+.host-name {
+  flex: 0 0 auto;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 1.4em; /* (above its accounts' titles) */
+  font-weight: 700;
+}
+
+.host-machine,
+.host-updated {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.host-machine {
+  max-width: calc(var(--cs-gu) * 6);
+}
+
+/* A failed check keeps the last answer, dimmed under the error */
+.host.stale .host-groups {
+  opacity: 0.5;
+}
+
+.host-groups .group:first-child {
+  padding-top: 6px;
+}
+
+.host-empty {
+  padding: 4px 0;
+}
+
+.spinner {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--cs-track);
+  border-top-color: var(--cs-working);
+  border-radius: 50%;
+  animation: cs-spin 0.8s linear infinite;
+}
+
+@keyframes cs-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   High contrast themes draw borders instead of shades */
+
+body.vscode-high-contrast .session:hover,
+body.vscode-high-contrast .recent-item:hover {
+  outline: 1px dashed var(--vscode-contrastActiveBorder, var(--vscode-focusBorder));
+  outline-offset: -1px;
+}
+
+body.vscode-high-contrast .meter {
+  box-shadow: inset 0 0 0 1px var(--vscode-contrastBorder, transparent);
+}
+
+body.vscode-high-contrast .badge {
+  border: 1px solid var(--vscode-contrastBorder, transparent);
+}
+
+body.vscode-high-contrast .tag {
+  border-color: var(--vscode-contrastBorder, currentColor);
+  opacity: 1;
+}
+
+body.vscode-high-contrast .top.scrolled {
+  box-shadow: none;
+  border-bottom: 1px solid var(--vscode-contrastBorder, transparent);
+}
+
+/* ---------------------------------------------------------------------------
+   A narrow sidebar: leave out what's said elsewhere (the host's name is in
+   its head; when it was checked is in its refresh button's tooltip) */
+
+@container cs (max-width: 300px) {
+  .group-host,
+  .host-updated {
+    display: none;
+  }
+}
+
+/* a subagent that ended on an API error (e.g. a usage limit) */
+.agent-status.failed {
+  color: var(--cs-failed);
+}
+
+/* ---------------------------------------------------------------------------
+   Tabs: your chats now, or your last 7 days (the Recap tab) */
+
+.tabs {
+  display: flex;
+  flex: none;
+  gap: 2px;
+}
+
+.tab-btn {
+  white-space: nowrap;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  padding: 1px 6px;
+  background: transparent;
+  color: var(--cs-muted);
+  cursor: pointer;
+}
+
+.tab-btn:hover {
+  color: var(--cs-fg);
+}
+
+.tab-btn.on {
+  color: var(--cs-fg);
+  border-bottom-color: var(--cs-working);
+}
+
+/* ---------------------------------------------------------------------------
+   The Recap tab. One hue for Claude's work (darker where several chats ran at
+   once), the text color for you, orange (as for a chat that needs you) for
+   Claude waiting on your answer. */
+
+.week {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-bottom: 12px;
+}
+
+.week.busy {
+  opacity: 0.6; /* what it said before, while it reads again */
+}
+
+/* a day, 7 days or everything kept */
+.week-spans {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+}
+
+.week-period {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-top: 2px;
+}
+
+.week-span {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: center;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.icon-btn.flip .icon {
+  transform: rotate(180deg);
+}
+
+.icon-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+  background: transparent;
+}
+
+.week-accounts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.chip {
+  border: 1px solid var(--cs-tag-border);
+  border-radius: 10px;
+  padding: 0 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.chip:hover {
+  background: var(--cs-hover);
+}
+
+.chip.on {
+  border-color: var(--cs-working);
+  background: color-mix(in srgb, var(--cs-working) 18%, transparent);
+}
+
+.chip.code {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.85em;
+  border-radius: 4px;
+  padding: 0 5px;
+}
+
+.week-tiles {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px 12px;
+}
+
+.week {
+  container-type: inline-size;
+}
+
+/* a narrower one: three, then two by two in a narrow sidebar */
+@container (max-width: 520px) {
+  .week-tiles {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@container (max-width: 400px) {
+  .week-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.week-tile {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.week-tile-label,
+.week-tile-delta {
+  font-size: 0.85em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.week-tile-value {
+  font-size: 1.55em;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+/* each section set off from the one before by a line, its title big and bold */
+.week-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--cs-border);
+}
+
+.week-section h2 {
+  margin: 0 0 2px;
+  font-size: 1.25em;
+  font-weight: 700;
+}
+
+.week-heading {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+.week-heading h2 {
+  flex: 1 1 auto;
+}
+
+.week-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.week-legend > span {
+  white-space: nowrap;
+}
+
+.swatch {
+  display: inline-block;
+  width: 12px;
+  height: 6px;
+  border-radius: 1px;
+  margin-left: 4px;
+}
+
+.swatch.you,
+.week-you {
+  background: color-mix(in srgb, var(--cs-fg) 45%, transparent);
+}
+
+.swatch.work,
+.week-work {
+  background: var(--cs-working);
+}
+
+.swatch.wait,
+.week-wait {
+  background: var(--cs-waiting);
+}
+
+.week-row {
+  display: grid;
+  grid-template-columns: 3.4em minmax(0, 1fr) 3.9em 3.9em;
+  gap: 6px;
+  align-items: center;
+}
+
+.week-row.today .week-day {
+  font-weight: 600;
+}
+
+.week-day,
+.week-num {
+  white-space: nowrap;
+}
+
+.week-num {
+  text-align: right;
+}
+
+.week-hours {
+  position: relative;
+  height: 1.2em;
+}
+
+.week-hours span {
+  position: absolute;
+  transform: translateX(-50%);
+}
+
+.week-hours span:first-child {
+  transform: none;
+}
+
+.week-hours span:last-child {
+  transform: translateX(-100%);
+}
+
+.week-track {
+  position: relative;
+  height: 16px;
+  border-bottom: 1px solid var(--cs-track);
+  /* the quarters of the day */
+  background: linear-gradient(to right, transparent calc(25% - 0.5px), var(--cs-track) calc(25% - 0.5px),
+      var(--cs-track) calc(25% + 0.5px), transparent calc(25% + 0.5px), transparent calc(50% - 0.5px),
+      var(--cs-track) calc(50% - 0.5px), var(--cs-track) calc(50% + 0.5px), transparent calc(50% + 0.5px),
+      transparent calc(75% - 0.5px), var(--cs-track) calc(75% - 0.5px), var(--cs-track) calc(75% + 0.5px),
+      transparent calc(75% + 0.5px));
+}
+
+.week-you,
+.week-work,
+.week-wait {
+  position: absolute;
+  border-radius: 1px;
+}
+
+.week-you {
+  top: 1px;
+  height: 4px;
+}
+
+.week-work,
+.week-wait {
+  top: 7px;
+  height: 8px;
+}
+
+.week-work {
+  opacity: 0.55;
+}
+
+.week-work.two {
+  opacity: 0.8;
+}
+
+.week-work.many {
+  opacity: 1;
+}
+
+.week-wait {
+  opacity: 0.8;
+}
+
+.week-now,
+.week-cross {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--cs-fg);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.week-readout {
+  padding-left: calc(3.4em + 6px);
+  min-height: 1.4em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* One grid for a list's rows: their bars start and end at the same place,
+   however long each one's value */
+.week-bars {
+  display: grid;
+  grid-template-columns: minmax(0, 8em) minmax(2em, 1fr) auto;
+  gap: 3px 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.week-bars li {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+}
+
+.week-bar-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.week-bar-meter {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--cs-track);
+}
+
+.week-bar-meter span {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--cs-fg) 40%, transparent);
+}
+
+.week-bar-meter.work span {
+  background: var(--cs-working);
+}
+
+.week-bar-value {
+  white-space: nowrap;
+}
+
+.week-chats {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.week-chat {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, auto) auto;
+  gap: 8px;
+  align-items: baseline;
+  width: 100%;
+  padding: 3px 4px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.week-chat:hover:not(:disabled) {
+  background: var(--cs-hover);
+}
+
+.week-chat:disabled {
+  cursor: default;
+}
+
+.week-chat-name,
+.week-chat-folder {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.week-chat-folder {
+  max-width: 12em;
+}
+
+.week-chat-value {
+  white-space: nowrap;
+}
+
+.week-tips {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.week-tip {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.week-tip-text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.week-tip-pct {
+  flex: none;
+  padding-top: 1px;
+}
+
+.week-tip .chip {
+  flex: none;
+}
+
+.week-foot {
+  white-space: pre-line;
+}
+
+/* the last 5 weeks under a tile, these 7 days last */
+.week-trend {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 12px;
+  margin-top: 3px;
+}
+
+.week-trend span {
+  width: 7px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--cs-fg) 45%, transparent);
+}
+
+.week-trend span.now {
+  background: var(--cs-working);
+}
+
+.week-trend span.gone {
+  height: 4px;
+  border-radius: 2px;
+  opacity: 0.3;
+}
+
+.swatch.limit,
+.week-limit {
+  background: var(--cs-failed);
+}
+
+.swatch.limit {
+  width: 2px;
+  height: 12px;
+}
+
+.week-limit {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  pointer-events: none;
+}
+
+/* a day or a project: click for its chats */
+.week-row.opens,
+.week-bars li.opens {
+  cursor: pointer;
+}
+
+.week-row.open .week-day,
+.week-bars li.open .week-bar-name {
+  font-weight: 600;
+}
+
+.week-bar-name .icon {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 2px;
+  vertical-align: -2px;
+  opacity: 0.6;
+}
+
+.week-bar-name .icon.turn {
+  transform: rotate(90deg);
+}
+
+.week-bars li.week-sub {
+  display: block;
+}
+
+.week-chat.sub {
+  padding-left: calc(3.4em + 10px);
+  font-size: 0.92em;
+}
+
+.week-sub .week-chat.sub {
+  padding-left: 18px;
+}
+
+.week-more {
+  display: block;
+  padding-left: 22px;
+}
+
+/* a plan window filling up, from its start to its reset */
+.week-fill {
+  width: 100%;
+  height: 18px;
+  border-radius: 2px;
+  background: var(--cs-track);
+}
+
+.week-fill .line {
+  fill: none;
+  stroke: var(--cs-usage-low);
+  stroke-width: 1.5px;
+}
+
+.week-fill .area {
+  fill: color-mix(in srgb, var(--cs-usage-low) 30%, transparent);
+}
+
+.week-fill.mid .line {
+  stroke: var(--cs-usage-medium);
+}
+
+.week-fill.mid .area {
+  fill: color-mix(in srgb, var(--cs-usage-medium) 30%, transparent);
+}
+
+.week-fill.high .line {
+  stroke: var(--cs-usage-high);
+}
+
+.week-fill.high .area {
+  fill: color-mix(in srgb, var(--cs-usage-high) 30%, transparent);
+}
+
+.week-bar-value.over {
+  color: var(--cs-usage-high);
+}
+
+/* rules for the permission prompts you answered */
+.week-rules {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.week-rule {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.week-rule-text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.week-rule > .chip,
+.week-rule > span:last-child {
+  flex: none;
+}
+
+.week-rule-ask {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.week-rule-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.week-section .error {
+  color: var(--cs-failed);
+}
+
+/* ---------------------------------------------------------------------------
+   The chat tab (webview/chat.tsx) and what a waiting chat asks (AskBox, also
+   in its row): VS Code's own button and input colors. */
+
+.btn {
+  padding: 3px 10px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 2px;
+  background: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #fff);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--vscode-button-hoverBackground, #1177bb);
+}
+
+.btn.secondary {
+  background: var(--vscode-button-secondaryBackground, color-mix(in srgb, var(--cs-fg) 14%, transparent));
+  color: var(--vscode-button-secondaryForeground, inherit);
+}
+
+.btn.secondary:hover:not(:disabled) {
+  background: var(--vscode-button-secondaryHoverBackground, color-mix(in srgb, var(--cs-fg) 22%, transparent));
+}
+
+.btn.small {
+  padding: 1px 6px;
+  font-size: 0.85em;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.mono {
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.bad {
+  color: var(--cs-failed);
+}
+
+.add {
+  color: var(--cs-idle);
+}
+
+.del {
+  color: var(--cs-failed);
+}
+
+.ask-box {
+  margin: 6px 0 4px;
+  padding: 6px 8px;
+  border: 1px solid var(--cs-waiting);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--cs-waiting) 8%, transparent);
+}
+
+.ask-title {
+  font-weight: 600;
+}
+
+.ask-command,
+.pane-tool-detail {
+  margin: 4px 0;
+  padding: 4px 6px;
+  border-radius: 3px;
+  background: var(--vscode-textCodeBlock-background, var(--cs-hover));
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.9em;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+}
+
+/* Code and changes (CodeView.tsx): numbered lines, + and −, tinted rows,
+   changed words marked, syntax colors as GitHub's (light, dark) */
+.cv {
+  --cv-add: var(--vscode-diffEditor-insertedLineBackground, rgba(46, 160, 67, 0.18));
+  --cv-add-word: var(--vscode-diffEditor-insertedTextBackground, rgba(46, 160, 67, 0.4));
+  --cv-del: var(--vscode-diffEditor-removedLineBackground, rgba(248, 81, 73, 0.18));
+  --cv-del-word: var(--vscode-diffEditor-removedTextBackground, rgba(248, 81, 73, 0.4));
+  --cv-no: var(--vscode-editorLineNumber-foreground, #858585);
+  --cv-kw: #cf222e; --cv-lit: #0550ae; --cv-str: #0a3069; --cv-com: #6e7781; --cv-num: #0550ae; --cv-fn: #8250df; --cv-key: #116329;
+  position: relative;
+  margin: 4px 0 0;
+  padding: 4px 0;
+  border-radius: 6px;
+  background: var(--pane-block-bg, var(--vscode-textCodeBlock-background, var(--cs-hover)));
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.88em;
+  line-height: 1.45;
+  overflow-x: auto;
+}
+
+body.vscode-dark .cv,
+body.vscode-high-contrast .cv {
+  --cv-kw: #ff7b72; --cv-lit: #79c0ff; --cv-str: #a5d6ff; --cv-com: #8b949e; --cv-num: #79c0ff; --cv-fn: #d2a8ff; --cv-key: #7ee787;
+}
+
+.cv-row,
+.cv-half {
+  display: grid;
+  grid-template-columns: auto 1.4em 1fr;
+  align-items: start;
+}
+
+.cv-half,
+.cv-row.cv-plain {
+  grid-template-columns: auto 1fr;
+  min-width: 0;
+}
+
+.cv-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.cv-pair > .cv-half + .cv-half {
+  border-left: 1px solid var(--cs-border);
+}
+
+.cv-row.add,
+.cv-half.add {
+  background: var(--cv-add);
+}
+
+.cv-row.del,
+.cv-half.del {
+  background: var(--cv-del);
+}
+
+.cv-half.cv-empty {
+  background: repeating-linear-gradient(-45deg, transparent 0 4px, var(--cs-hover) 4px 8px);
+}
+
+.cv-no {
+  min-width: 3ch;
+  padding: 0 0.6em 0 0.5em;
+  color: var(--cv-no);
+  text-align: right;
+  user-select: none;
+}
+
+.cv-mark {
+  text-align: center;
+  user-select: none;
+}
+
+.cv-row.add .cv-mark {
+  color: var(--cs-idle);
+}
+
+.cv-row.del .cv-mark {
+  color: var(--cs-failed);
+}
+
+.cv-code {
+  min-width: 0;
+  padding-right: 0.6em;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.add mark.cv-word {
+  background: var(--cv-add-word);
+  color: inherit;
+}
+
+.del mark.cv-word {
+  background: var(--cv-del-word);
+  color: inherit;
+}
+
+.cv-hunk {
+  padding: 1px 0.6em;
+  background: var(--cs-hover);
+  color: var(--cs-muted);
+}
+
+.cv-note {
+  padding: 0 0.6em;
+  color: var(--cs-muted);
+  font-style: italic;
+}
+
+.cv-kw { color: var(--cv-kw); }
+.cv-lit { color: var(--cv-lit); }
+.cv-str { color: var(--cv-str); }
+.cv-com { color: var(--cv-com); }
+.cv-num { color: var(--cv-num); }
+.cv-fn { color: var(--cv-fn); }
+.cv-key { color: var(--cv-key); }
+
+.cv-switch {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  display: none;
+  padding: 0 6px;
+  border: 1px solid var(--cs-border);
+  border-radius: 4px;
+  background: var(--cs-bg);
+  color: var(--cs-fg);
+  cursor: pointer;
+}
+
+.cv:hover > .cv-switch {
+  display: block;
+}
+
+.pane-tool-diff {
+  margin-left: var(--pane-gutter);
+}
+
+/* a tool call's details: the command, then what it printed, apart */
+.cv-detail {
+  white-space: normal;
+}
+
+.cv-detail .cv {
+  margin: 0;
+  background: none;
+}
+
+.cv-cmd,
+.cv-field,
+.cv-out {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.cv-prompt,
+.cv-key {
+  color: var(--cs-muted);
+}
+
+.cv-out {
+  margin-top: 6px;
+  color: var(--cs-muted);
+}
+
+.cv-out.bad {
+  color: var(--cs-failed);
+}
+
+.ask-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-top: 4px;
+}
+
+/* Claude's questions (AskBox: QuestionForm) */
+.ask-question {
+  margin-top: 6px;
+}
+
+.ask-question-header {
+  font-size: 0.85em;
+}
+
+.ask-question-text {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.ask-option {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  margin: 2px 0;
+  cursor: pointer;
+}
+
+.ask-option > input {
+  margin: 2px 0 0;
+}
+
+.ask-option-desc {
+  display: block;
+  font-size: 0.9em;
+}
+
+.ask-note.ask-own {
+  display: block;
+  width: 100%;
+  margin-top: 2px;
+}
+
+/* In the chat tab, what it asks takes at most half the height: the conversation stays in sight */
+body.chat-page .ask-box {
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.ask-note,
+.pane-reply {
+  flex: 1 1 12em;
+  box-sizing: border-box;
+  padding: 3px 6px;
+  border: 1px solid var(--vscode-input-border, var(--cs-border));
+  border-radius: 2px;
+  background: var(--vscode-input-background, transparent);
+  color: var(--vscode-input-foreground, inherit);
+  font: inherit;
+}
+
+body.chat-page {
+  background: var(--vscode-editor-background, transparent);
+}
+
+/* The chat tab, drawn the way Claude's terminal draws a chat: its orange for
+   Claude's dots, headings and the working line, your accent for you, inline
+   code in the blue its terminal uses */
+.pane {
+  --pane-claude: #d97757;
+  --pane-code: #b1b9f9;
+  --pane-you: var(--cs-working);
+  --pane-gutter: 1.6em;
+  --pane-block-bg: color-mix(in srgb, #000 22%, var(--cs-bg));
+  --pane-code-bg: color-mix(in srgb, var(--cs-fg) 11%, transparent);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100vh;
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 12px 16px;
+  font-size: calc(var(--vscode-font-size, 13px) * var(--pane-scale, 1.15));
+  line-height: 1.55;
+}
+
+body.vscode-light .pane {
+  --pane-claude: #c15f3c;
+  --pane-code: #5769f7;
+  --pane-block-bg: color-mix(in srgb, var(--cs-fg) 5%, var(--cs-bg));
+}
+
+.pane > :not(.pane-list) {
+  flex-shrink: 0;
+}
+
+.pane-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.pane-head .state-dot {
+  align-self: center;
+  margin-top: 0;
+}
+
+.pane-name {
+  flex: 1 1 10em;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 1.3em;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* What it's doing, in a pill of its state's color */
+.pane-state {
+  padding: 1px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--cs-muted) 18%, transparent);
+  font-size: 0.85em;
+  white-space: nowrap;
+}
+
+.pane-state.st-working {
+  background: color-mix(in srgb, var(--cs-working) 22%, transparent);
+}
+
+.pane-state.st-waiting {
+  background: color-mix(in srgb, var(--cs-waiting) 22%, transparent);
+  color: var(--cs-waiting);
+  font-weight: 600;
+}
+
+.pane-state.st-idle,
+.pane-state.st-done {
+  background: color-mix(in srgb, var(--cs-idle) 20%, transparent);
+}
+
+.pane-state.st-failed {
+  background: color-mix(in srgb, var(--cs-failed) 20%, transparent);
+}
+
+.pane-sizes {
+  display: flex;
+}
+
+.pane-size {
+  padding: 0 6px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--cs-muted);
+  font-size: 0.8em;
+  cursor: pointer;
+}
+
+.pane-size.big {
+  font-size: 1em;
+}
+
+.pane-size:hover:not(:disabled) {
+  background: var(--vscode-toolbar-hoverBackground, var(--cs-hover));
+  color: inherit;
+}
+
+.pane-size:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.pane-folder {
+  margin-top: -6px;
+  padding-left: calc(8px + 8px);
+  overflow: hidden;
+  color: var(--cs-muted);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.82em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pane-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--cs-border);
+}
+
+.pane-tabs button {
+  padding: 6px 14px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--cs-muted);
+  cursor: pointer;
+}
+
+.pane-tabs button:hover {
+  color: inherit;
+}
+
+.pane-tabs button.on {
+  border-bottom-color: var(--pane-claude);
+  color: inherit;
+  font-weight: 700;
+}
+
+.pane-info {
+  color: var(--cs-idle);
+}
+
+.pane-info.bad {
+  color: var(--cs-failed);
+}
+
+.pane-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 4px 6px 8px 0;
+}
+
+.pane-more {
+  align-self: center;
+  margin-bottom: 8px;
+}
+
+.center {
+  text-align: center;
+}
+
+/* One item: a gutter with its dot or ›, then what it says */
+.pane-item {
+  display: flex;
+  align-items: flex-start;
+  margin-top: 0.8em;
+}
+
+.pane-item.first {
+  margin-top: 0;
+}
+
+.pane-item.turn {
+  margin-top: 1.7em;
+}
+
+.pane-item.close {
+  margin-top: 0.25em;
+}
+
+.pane-gutter {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--pane-gutter);
+  height: 1.55em;
+  font-weight: 700;
+}
+
+.pane-dot {
+  width: 0.5em;
+  height: 0.5em;
+  border-radius: 50%;
+  background: var(--cs-muted);
+}
+
+.pane-claude .pane-dot {
+  background: var(--pane-claude);
+}
+
+.pane-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  word-break: break-word;
+}
+
+/* Yours: a band in your accent */
+.pane-you {
+  padding: 6px 12px 6px 0;
+  border-left: 3px solid var(--pane-you);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--pane-you) 13%, transparent);
+}
+
+.pane-you .pane-gutter {
+  width: calc(var(--pane-gutter) - 3px);
+  color: var(--pane-you);
+}
+
+.pane-you-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* A tool call */
+.pane-tool {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.pane-tool-line {
+  display: flex;
+  align-items: flex-start;
+  width: 100%;
+  padding: 1px 0;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.pane-tool-line:hover {
+  background: var(--cs-hover);
+}
+
+.pane-tool.ok .pane-dot {
+  background: var(--cs-idle);
+}
+
+.pane-tool.error .pane-dot {
+  background: var(--cs-failed);
+}
+
+.pane-tool.asking .pane-dot {
+  background: var(--cs-waiting);
+  animation: pane-blink 1.2s ease-in-out infinite;
+}
+
+.pane-tool.going .pane-dot {
+  animation: pane-blink 1.2s ease-in-out infinite;
+}
+
+@keyframes pane-blink {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.pane-tool-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.pane-tool-call {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  word-break: break-all;
+}
+
+.pane-tool-args {
+  margin-left: 0.6em;
+  color: var(--vscode-textPreformat-foreground, var(--cs-link));
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.92em;
+}
+
+
+.pane-tool-summary {
+  overflow: hidden;
+  color: var(--cs-muted);
+  font-size: 0.92em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pane-tool.error .pane-tool-summary {
+  color: var(--cs-failed);
+}
+
+.pane-tool.asking .pane-tool-summary {
+  color: var(--cs-waiting);
+}
+
+.pane-tool-detail {
+  margin: 4px 0 2px var(--pane-gutter);
+  padding: 8px 10px;
+  border: 1px solid var(--cs-border);
+  border-radius: 6px;
+  background: var(--pane-block-bg);
+}
+
+/* A note: ── Interrupted ── */
+.pane-note {
+  align-items: center;
+  gap: 12px;
+  color: var(--cs-muted);
+  font-size: 0.9em;
+  font-style: italic;
+  text-align: center;
+}
+
+.pane-note::before,
+.pane-note::after {
+  content: "";
+  flex: 1 1 0;
+  border-top: 1px solid var(--cs-border);
+}
+
+.pane-note > span {
+  max-width: 75%;
+}
+
+.pane-note.bad {
+  color: var(--cs-failed);
+}
+
+.pane-note.bad::before,
+.pane-note.bad::after {
+  border-color: var(--cs-failed);
+}
+
+/* While it works: ✻ what it's doing, in Claude's color */
+.pane-working {
+  margin-top: 0.8em;
+  color: var(--pane-claude);
+}
+
+.pane-spin {
+  font-weight: 700;
+}
+
+/* Claude's Markdown */
+.md {
+  line-height: 1.6;
+}
+
+.md > * + * {
+  margin-top: 0.7em;
+}
+
+.md p,
+.md ul,
+.md ol,
+.md blockquote {
+  margin: 0;
+}
+
+.md ul,
+.md ol {
+  padding-left: 1.5em;
+}
+
+.md li + li {
+  margin-top: 0.2em;
+}
+
+.md li::marker {
+  color: var(--pane-claude, inherit);
+}
+
+.md-heading {
+  margin: 0;
+  color: var(--pane-claude, inherit);
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.md > * + .md-heading {
+  margin-top: 1.1em;
+}
+
+.md-h1 {
+  font-size: 1.5em;
+}
+
+.md-h2 {
+  font-size: 1.3em;
+}
+
+.md-h3 {
+  font-size: 1.15em;
+}
+
+.md-h4,
+.md-h5,
+.md-h6 {
+  color: inherit;
+  font-size: 1.05em;
+}
+
+.md code {
+  padding: 0 0.35em;
+  border-radius: 4px;
+  background: var(--pane-code-bg, var(--vscode-textCodeBlock-background));
+  color: var(--pane-code, inherit);
+  font-size: 0.88em;
+}
+
+.md-codeblock {
+  overflow: hidden;
+  border: 1px solid var(--cs-border);
+  border-radius: 6px;
+  background: var(--pane-block-bg, var(--vscode-textCodeBlock-background));
+}
+
+.md-code-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 1.4em;
+  padding: 3px 6px 0 10px;
+  color: var(--cs-muted);
+  font-size: 0.78em;
+}
+
+.md-copy {
+  padding: 0 6px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--cs-muted);
+  cursor: pointer;
+}
+
+.md-copy:hover {
+  background: var(--cs-hover);
+  color: inherit;
+}
+
+.md-code {
+  margin: 0;
+  padding: 4px 12px 10px;
+  overflow-x: auto;
+  line-height: 1.45;
+}
+
+.md-code code {
+  padding: 0;
+  background: none;
+  color: inherit;
+  font-size: 0.92em;
+}
+
+.md blockquote {
+  padding-left: 10px;
+  border-left: 3px solid var(--pane-claude, var(--cs-border));
+  color: var(--cs-muted);
+}
+
+.md hr {
+  border: none;
+  border-top: 1px solid var(--cs-border);
+}
+
+.md-table {
+  overflow-x: auto;
+}
+
+.md-table table {
+  border-collapse: collapse;
+}
+
+.md-table th,
+.md-table td {
+  padding: 4px 10px;
+  border: 1px solid var(--cs-border);
+  text-align: left;
+}
+
+.md-table th {
+  background: var(--pane-code-bg, var(--cs-hover));
+}
+
+.md a {
+  color: var(--cs-link);
+}
+
+/* Your reply: a box like Claude's prompt, › and what you type */
+.pane-queued {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--cs-working);
+}
+
+.pane-queued span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pane-replybox {
+  display: flex;
+  align-items: flex-start;
+  border: 1px solid var(--vscode-input-border, var(--cs-border));
+  border-radius: 8px;
+  background: var(--vscode-input-background, transparent);
+}
+
+.pane-replybox:focus-within {
+  border-color: var(--pane-you);
+  box-shadow: 0 0 0 1px var(--pane-you);
+}
+
+.pane-prompt {
+  flex: none;
+  width: var(--pane-gutter);
+  padding-top: 6px;
+  color: var(--cs-muted);
+  font-weight: 700;
+  text-align: center;
+}
+
+.pane-replybox:focus-within .pane-prompt {
+  color: var(--pane-you);
+}
+
+.pane .pane-reply {
+  flex: 1 1 auto;
+  min-height: 3.6em;
+  padding: 6px 10px 6px 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+/* The pictures your reply names: small, × takes one out */
+.pane-pictures {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-left: var(--pane-gutter);
+}
+
+.pane-picture {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 3em;
+  height: 3.2em;
+  border: 1px solid var(--cs-border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.pane-picture img {
+  height: 100%;
+  max-width: 10em;
+  object-fit: contain;
+}
+
+.pane-picture-name {
+  padding: 0 6px;
+  color: var(--cs-muted);
+  font-size: 0.8em;
+}
+
+.pane-picture-x {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 1.3em;
+  height: 1.3em;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--cs-bg) 85%, transparent);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.pane-picture-x:hover {
+  color: var(--cs-failed);
+}
+
+.pane-offer img {
+  height: 2.4em;
+  border-radius: 3px;
+}
+
+.pane-hint {
+  color: var(--cs-muted);
+  font-size: 0.82em;
+}
+
+.pane-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.pane-buttons .spacer {
+  flex: 1 1 auto;
+}
+
+.review-head,
+.review-line,
+.confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.review-head strong {
+  flex: 1 1 auto;
+}
+
+.pane-fold {
+  flex: none;
+  width: 1.1em;
+  color: var(--cs-muted);
+}
+
+.pane-tool-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.92em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-line .pane-tool-line {
+  flex: 1 1 12em;
+  width: auto;
+  min-width: 0;
+}
+
+.confirm {
+  margin: 4px 0;
+  color: var(--cs-waiting);
+}
+
+.confirm span {
+  flex: 1 1 14em;
+}
+
+.commit-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+/* ---------------------------------------------------------------------------
+   Motion: rows slide (util/motion.ts), a tab slides in from its side, the
+   chat tab grows open */
+
+.sessions {
+  position: relative;
+}
+
+.content.tab-in {
+  animation: cs-tab-in 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes cs-tab-in {
+  from {
+    transform: translateX(var(--tab-from, 0));
+    opacity: 0.35;
+  }
+}
+
+.pane-grow {
+  transform-origin: left center;
+  animation: cs-grow 320ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes cs-grow {
+  from {
+    transform: scale(0.96);
+    opacity: 0;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   The focus view (FocusView.tsx): what needs you, then a line a working chat */
+
+.icon-btn.on {
+  color: var(--vscode-focusBorder, #0078d4);
+  background: color-mix(in srgb, var(--vscode-focusBorder, #0078d4) 18%, transparent);
+}
+
+.focus {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.focus-title {
+  margin: 8px 0 2px;
+  font-size: 1em;
+  font-weight: 600;
+}
+
+.focus-title.needs {
+  color: var(--cs-waiting);
+}
+
+.focus-title.calm {
+  color: var(--vscode-testing-iconPassed, #73c991);
+}
+
+.focus-line {
+  display: grid;
+  grid-template-columns: 3px 8px minmax(0, max-content) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 4px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.focus-line:hover {
+  background: var(--vscode-list-hoverBackground, color-mix(in srgb, var(--cs-fg) 8%, transparent));
+}
+
+.focus-line .pet-bar {
+  width: 3px;
+  align-self: stretch;
+  border-radius: 1.5px;
+}
+
+.focus-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--vscode-focusBorder, #0078d4);
+}
+
+.focus-line.finished .focus-dot {
+  background: var(--vscode-testing-iconPassed, #73c991);
+}
+
+.focus-name {
+  overflow: hidden;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  max-width: 14em;
+}
+
+.focus-what {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  opacity: 0.8;
+}
+
+.focus-rest {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--vscode-widget-border, color-mix(in srgb, var(--cs-fg) 15%, transparent));
+}
+
+.focus-all {
+  display: block;
+  margin: 8px auto 0;
+  padding: 3px 12px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 2px;
+  background: var(--vscode-button-secondaryBackground, color-mix(in srgb, var(--cs-fg) 12%, transparent));
+  color: var(--vscode-button-secondaryForeground, inherit);
+  font: inherit;
+  cursor: pointer;
+}
+
+/* A plan to approve (AskBox.tsx): its start in a row, all of it in the chat tab */
+.ask-plan {
+  margin: 4px 0;
+  padding: 4px 8px;
+  border: 1px solid var(--vscode-widget-border, color-mix(in srgb, var(--cs-fg) 15%, transparent));
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--cs-fg) 4%, transparent);
+  overflow-wrap: anywhere;
+}
+
+.ask-plan.compact {
+  max-height: 11em;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, black 75%, transparent);
+  mask-image: linear-gradient(to bottom, black 75%, transparent);
+}
+
+/* Dropping files on the reply (chat.tsx) */
+.pane-replybox.dropping {
+  outline: 2px dashed var(--vscode-focusBorder, #0078d4);
+  outline-offset: 2px;
+}
+
+.pane-shot {
+  margin-right: auto;
+}
+
+.pane-mic.on {
+  color: var(--vscode-errorForeground, #f85149);
+  border-color: var(--vscode-errorForeground, #f85149);
+}
+
+/* What the reply box offers as you type (chat.tsx): / commands, @ files */
+.pane-offers {
+  margin: 0 0 4px;
+  padding: 2px;
+  list-style: none;
+  border: 1px solid var(--vscode-widget-border, color-mix(in srgb, var(--cs-fg) 15%, transparent));
+  border-radius: 4px;
+  background: var(--vscode-editorSuggestWidget-background, color-mix(in srgb, var(--cs-fg) 6%, transparent));
+}
+
+.pane-offers li {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 2px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.pane-offers li code {
+  flex: none;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pane-offers li span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pane-offers li.on {
+  background: var(--vscode-editorSuggestWidget-selectedBackground, var(--vscode-list-activeSelectionBackground, rgba(0, 120, 212, 0.3)));
+  color: var(--vscode-editorSuggestWidget-selectedForeground, inherit);
+}
+
+/* A background session's screen (the Output tab) */
+/* The Output tab: a background session's terminal, in its colors on a dark
+   ground (CodeView.tsx TermScreen) */
+.term-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.term-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--cs-muted);
+  font-size: 0.85em;
+}
+
+.term-note {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.term-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--cs-idle);
+}
+
+.term-dot.off {
+  background: var(--cs-muted);
+}
+
+.term-card {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  background: #1f2124;
+  color: #e3e3e3;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: calc(var(--vscode-editor-font-size, 13px) * 0.92);
+  line-height: 1.35;
+}
+
+.term-row {
+  min-height: 1.35em;
+  white-space: pre;
+}
+
+.term-wait {
+  color: #9a9a9a;
+}
+
+/* The Day view, chat by chat (WeekView.tsx Lanes) */
+.week-lanes {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.week-lanes li {
+  display: grid;
+  grid-template-columns: minmax(6em, 12em) 1fr;
+  gap: 6px;
+  align-items: center;
+  margin: 2px 0;
+}
+
+.week-lane-name {
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.week-lane-name:disabled {
+  cursor: default;
+}
+
+.week-lane {
+  position: relative;
+  height: 10px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--cs-fg) 7%, transparent);
+}
+
+.week-lane i,
+.week-lanes-legend i {
+  display: inline-block;
+  border-radius: 2px;
+}
+
+.week-lane i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+
+.week-lanes-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.week-lanes-legend i {
+  width: 9px;
+  height: 9px;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
+.lane-w {
+  background: var(--vscode-focusBorder, #0078d4);
+}
+
+.lane-y {
+  background: var(--cs-waiting, #d18616);
+}
+
+.lane-p {
+  background: color-mix(in srgb, var(--cs-fg) 30%, transparent);
+}
+
+.week-lanes-times {
+  display: flex;
+  justify-content: space-between;
+  margin-left: calc(min(12em, 30%) + 6px);
+}
+
+/* The Recap's card to share (WeekView.tsx ShareCard) */
+.week-share {
+  margin: 8px 0;
+  padding: 10px;
+  border: 1px solid var(--vscode-widget-border, color-mix(in srgb, var(--cs-fg) 15%, transparent));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--cs-fg) 4%, transparent);
+}
+
+.week-share-card {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-bottom: 6px;
+  border-radius: 10px;
+}
+
+/* The Projects tab (ProjectsView.tsx) */
+.project {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--vscode-widget-border, color-mix(in srgb, var(--cs-fg) 12%, transparent));
+}
+
+.project-head {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.project-name {
+  flex: 1;
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.project-name .chevron {
+  flex: none;
+  transition: transform 0.15s;
+}
+
+.project-name .chevron.open {
+  transform: rotate(90deg);
+}
+
+.project-numbers {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.project-title {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.project-meta {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.project-name .chevron {
+  margin-top: 2px;
+}
+
+.project-details {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 4px 0 0 18px;
+}
+
+.project-recap {
+  margin: 2px 0;
+  font-style: italic;
+  opacity: 0.85;
+}
+
+.project-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
