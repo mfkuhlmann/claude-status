@@ -185,8 +185,8 @@ export class Pet {
     this.film = new Films(
       this.talpa,
       this.lone
-        ? { frameMs: 16.7, maxFrames: 32, sheets: 36, tweenMs: 0, restMs: 200, slackMs: 8, smooth: true }
-        : { frameMs: 33.3, maxFrames: 32, sheets: 32, tweenMs: 200, tweens: 5, slackMs: 8, smooth: true },
+        ? { frameMs: 16.7, maxFrames: 32, sheets: 36, tweenMs: 0, restMs: 200, smooth: true, clockMs: 1000 / 60 }
+        : { frameMs: 33.3, maxFrames: 32, sheets: 32, tweenMs: 200, tweens: 5, smooth: true, clockMs: 1000 / 60 },
     );
     this.sheets = div("cs-pet-sheets");
     this.view = document.createElement("canvas");

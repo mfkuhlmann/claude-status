@@ -9,13 +9,17 @@
 // smooth: a move too slow for a picture every frame (fewer than maxFrames a
 // round) is drawn live instead of stepping from picture to picture.
 //
-//   const film = new Films(talpa, { sheets: 12, frameMs: 33 });
+//   const film = new Films(talpa, { sheets: 12, frameMs: 33, clockMs: 16.67 });
+//   (clockMs: about how far apart the host's ticks come, the screen's frame
+//   or two; the film measures them from then on. It counts its ticks: a
+//   picture, one in between and what's drawn live each show for a whole
+//   number of them, the same every time, whenever a tick comes.)
 //   every tick: talpa.tick(now); const changed = film.tick(now); then
 //   - each sheet s with s.paint set: clear it and draw it with
-//     film.paint(s, ctx), ctx at the box's transform as for talpa.draw,
-//     before the next frame shows (a QML Canvas paints before the frame,
-//     an HTML canvas at once);
-//   - show film.front, no other sheet;
+//     film.paint(s, ctx), ctx at the box's transform as for talpa.draw;
+//   - show film.front, no other sheet, once it's drawn (an HTML canvas at
+//     once; a QML Canvas shows its new picture a frame later: until then
+//     keep the sheet shown before);
 //   - film.fx: if fx.paint, clear what flies about and draw it with
 //     film.paintFx(ctx); show it over Talpa while fx.on.
 //
@@ -32,9 +36,13 @@ export class Films {
         this.frameMs = opts.frameMs || 33;       // a quick move's pictures at least this far apart; live ones too
         this.maxFrames = opts.maxFrames || 12;   // and at most this many a round
         this.restMs = opts.restMs || 0;          // at rest: drawn live (breathing, the lamp's glow) at most this often; 0: one picture
-        this.tweenMs = opts.tweenMs === undefined ? 150 : opts.tweenMs;   // a new pose: on its way there this long (0: live until settled)
-        this.tweens = opts.tweens || 3;          // in that many pictures
-        this.slackMs = opts.slackMs === undefined ? 5 : opts.slackMs;   // how much early a tick may come and still draw
+        this.tweenMs = opts.tweenMs === undefined ? 150 : opts.tweenMs;   // a new pose: on its way there (0: live until settled)
+        this.tweens = opts.tweens || 3;          // in that many pictures, a tick each (then it's there)
+        this.clockMs = opts.clockMs || 0;        // the host's ticks, about this far apart (0: unknown, frameMs)
+        this.count = 0;                          // ticks so far
+        this.gaps = [];                          // between the last ticks (ms), for clock()
+        this.lastAt = null;
+        this.move = { id: '', at: 0 };           // the quick move under way, from tick at
         this.smooth = !!opts.smooth;            // a move whose pictures would show for more than a frame: drawn live
         this.sheets = [];
         for (let i = 0; i < Math.max(2, opts.sheets || 8); i++)
@@ -42,7 +50,7 @@ export class Films {
         this.front = this.sheets[0];
         this.shown = null;                       // the film's picture shown last (talpa.still()), null while live
         this.tween = null;                       // a pose on its way: { from, at }
-        this.liveAt = -1e9;
+        this.liveAt = -1e9;                      // (ticks, as fx.at and tween.at)
         this.fx = { on: false, paint: false, at: -1e9 };
     }
 
@@ -60,11 +68,40 @@ export class Films {
         this.tween = null;
     }
 
+    // How far apart the ticks come: clockMs, unless they come at another
+    // pace (the median of the last ones), and how many make ms
+    clock() {
+        const hint = this.clockMs || this.frameMs;
+        if (this.gaps.length < 5)
+            return hint;
+        const sorted = this.gaps.slice().sort((a, b) => a - b);
+        const median = sorted[sorted.length >> 1];
+        return Math.abs(median - hint) < hint / 4 ? hint : median;
+    }
+
+    ticksFor(ms) {
+        return Math.max(1, Math.round(ms / this.clock()));
+    }
+
+    // (for Talpa.still: ticks since move id began, ms ago, counted from then on)
+    ticksSince(id, ms) {
+        if (this.move.id !== id)
+            this.move = { id: id, at: this.count - Math.round(ms / this.clock()) };
+        return this.count - this.move.at;
+    }
+
     // Returns true when what shows changed
     tick(now) {
         const t = this.talpa;
+        this.count++;
+        if (this.lastAt !== null && now - this.lastAt > 0 && now - this.lastAt < 250) {
+            this.gaps.push(now - this.lastAt);
+            if (this.gaps.length > 15)
+                this.gaps.shift();
+        }
+        this.lastAt = now;
         let changed = this.tickFx(now);
-        const d = this.on ? t.still(this.frameMs, this.maxFrames) : null;
+        const d = this.on ? t.still(this.frameMs, this.maxFrames, this.clock(), (id, ms) => this.ticksSince(id, ms)) : null;
         let every = 0;   // drawn live this often
         if (!d)
             every = this.on ? this.frameMs : Math.max(this.frameMs, t.frameMs >= 200 ? 2 * this.frameMs : this.frameMs);
@@ -81,15 +118,17 @@ export class Films {
         }
         let pic = { key: d.key, d: d, from: null, p: 1 };
         // a new pose: on its way there through pictures in between
+        // (a picture each frameMs, in whole ticks)
+        const steps = () => Math.floor((this.count - this.tween.at) / this.ticksFor(this.frameMs));
         let was = this.shown;
-        if (this.tween && now - this.tween.at >= this.tweenMs) {
+        if (this.tween && steps() >= this.tweens) {
             this.tween = null;
             was = this.shown = d;   // (there)
         }
         if (!this.tween && was && was.pose !== d.pose && was.left === d.left && this.tweenMs > 0 && moved(was, d))
-            this.tween = { from: was, at: now };
+            this.tween = { from: was, at: this.count };
         if (this.tween) {
-            const k = Math.min(this.tweens, 1 + Math.floor((now - this.tween.at) * this.tweens / this.tweenMs));
+            const k = Math.min(this.tweens, 1 + steps());
             const from = this.tween.from;
             pic = { key: from.key + '>' + d.key + '@' + k, d: d, from: from, p: k / (this.tweens + 1) };
         } else {
@@ -109,8 +148,8 @@ export class Films {
         }
         let changed = s !== this.front;
         this.toFront(s, now);
-        if (now - this.liveAt >= every - this.slackMs) {
-            this.liveAt = now;
+        if (this.count - this.liveAt >= this.ticksFor(every)) {
+            this.liveAt = this.count;
             s.paint = true;
             changed = true;
         }
@@ -163,10 +202,10 @@ export class Films {
             return true;
         }
         const every = flying === 1 ? Math.max(this.frameMs, 200) : this.frameMs;
-        const changed = !fx.on || now - fx.at >= every - this.slackMs;
+        const changed = !fx.on || this.count - fx.at >= this.ticksFor(every);
         fx.on = true;
         if (changed) {
-            fx.at = now;
+            fx.at = this.count;
             fx.paint = true;
         }
         return changed;

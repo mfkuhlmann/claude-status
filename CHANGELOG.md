@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Pets move in even steps:** each picture of a pet's move shows for the same
+  number of frames (counted, not timed), so a frame that comes a little early
+  or late no longer makes one picture show for a frame and the next for three.
 - **Changes you can read at a glance in a chat's tab:** each edit shows its
   change right under it: line numbers, removed lines in red and added ones in
   green, the words that changed marked brighter, and the file's syntax
