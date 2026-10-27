@@ -31,6 +31,7 @@
 - **Motion in the list:** a chat that moves up or down the list (it needs you, it finished) slides to its new place instead of jumping, a new chat fades in, and rows glide aside when something above them opens; the usage bars and their numbers glide to a new value; a tab slides in from the side it's on; the chat pane grows out of the chat's row. Plasma's animation speed setting applies (instant turns it off) (Plasma).
 - **More for Talpy to do:** it blows soap bubbles, grows a flower and smells it, eats a cookie (bites and crumbs), takes a selfie, hops like a bunny, boogies, and cheers *yay!* when a chat finishes; petting it may get heart eyes, a wink or a blown kiss; asleep it dreams with a bubble at its nose, watches a shooting star or a firefly. On the Plasma widget and in the VS Code extension.
 - **What the chats do now, under the big Talpy:** one line with the step a working chat does right now, taking turns between the chats at work (a chat that did something new goes first). Click it for that chat's pane. On the Plasma widget and in the VS Code extension.
+- **The VS Code extension lives here too:** its code moved into this repository (`vscode/`), and each release now has all three: the Plasma widget's `.plasmoid`, the GNOME extension's `.zip` and the VS Code extension's `.vsix`, with one version. The extension's backend is the widget's own, taken at each build, so the two can't drift apart.
 
 ## 1.15.2 (2026-10-26)
 

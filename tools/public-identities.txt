@@ -1,0 +1,9 @@
+# Email addresses that may appear in this repository and its commits: they are
+# meant to be public. Anything else that looks like an email is reported.
+wadhah.amri@gmail.com
+# The GNOME extension's id (and its first one, before the rename) looks like an
+# email address, and so does the name of its zip
+talpy-den@wzaielamri.github.io
+talpy-den@wzaielamri.github.io.shell-extension.zip
+claude-status@wzaielamri.github.io
+claude-status@wzaielamri.github.io.shell-extension.zip

@@ -1,0 +1,71 @@
+// The webview's entry: draws the dashboard from what the extension sends.
+
+import { setTab } from "./util/ui";
+import { render } from "preact";
+import type { HostMessage } from "../src/shared/types";
+import { App } from "./components/App";
+import { isDark, post } from "./env";
+import { pets } from "./pets";
+import { hostVisible, liveViews, pageVisible, permsAnswer, projectsAnswer, petColorsVersion, viewState, weekAnswer, weekRevokeAnswer, weekRuleAnswer } from "./util/stores";
+
+// Listen before saying "ready": the first state comes right after it
+window.addEventListener("message", (event: MessageEvent) => {
+  const msg = event.data as HostMessage | null;
+  if (!msg || typeof msg !== "object") return;
+  switch (msg.type) {
+    case "state":
+      liveViews.set(msg.state.live ?? {});
+      viewState.set(msg.state);
+      break;
+    case "live":
+      liveViews.set(msg.live ?? {});
+      break;
+    case "petEvent":
+      pets.dispatchPetEvent(msg.kind, msg.text, msg.key);
+      break;
+    case "visible":
+      hostVisible.set(!!msg.visible);
+      break;
+    case "showTab":
+      setTab(msg.tab);
+      break;
+    case "week":
+      weekAnswer.set(msg);
+      break;
+    case "weekRule":
+      weekRuleAnswer.set(msg);
+      break;
+    case "weekRevoke":
+      weekRevokeAnswer.set(msg);
+      break;
+    case "perms":
+      permsAnswer.set(msg);
+      break;
+    case "projects":
+      projectsAnswer.set(msg);
+      break;
+  }
+});
+
+document.addEventListener("visibilitychange", () => pageVisible.set(document.visibilityState !== "hidden"));
+pets.onColorsChanged(() => petColorsVersion.set(petColorsVersion.get() + 1));
+
+function start(): void {
+  // VS Code swaps the body's theme class when the theme changes
+  let dark = isDark();
+  pets.setDark(dark);
+  new MutationObserver(() => {
+    if (isDark() === dark) return;
+    dark = isDark();
+    pets.setDark(dark);
+  }).observe(document.body, { attributes: true, attributeFilter: ["class"] });
+
+  const root = document.createElement("div");
+  root.id = "root";
+  document.body.appendChild(root);
+  render(<App />, root);
+  post({ type: "ready" });
+}
+
+if (document.body) start();
+else document.addEventListener("DOMContentLoaded", start, { once: true });

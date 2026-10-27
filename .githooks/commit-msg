@@ -1,0 +1,3 @@
+#!/bin/sh
+# Same check for the commit message.
+exec python3 tools/check_public.py --message "$1"
