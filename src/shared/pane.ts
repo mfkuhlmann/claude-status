@@ -99,10 +99,13 @@ export type PaneHostMessage =
   | { type: "picture"; id: string; path: string; error: string } // a pasted picture, saved (path: where the chat opens it)
   | { type: "file"; id: string; path: string } // a file dropped on the tab: named in the reply (@path)
   | { type: "offers"; offers: Offers } // what the reply box offers as you type (pane.py --complete)
-  // dictating: "recording", "writing", "model" (downloading one), "" (done: text written down, or
-  // why not); offerModel: whisper.cpp is there but no speech model (the tab asks before one comes)
+  // dictating: "recording", "writing", "model" (downloading one), "setup" (setting it up), "" (done:
+  // text written down, or why not); offerModel: whisper is there but no speech model (engine: which
+  // one), offerSetup: nothing writes it down yet (setupMb: what setting up downloads); the tab asks
+  // before either
   | { type: "output"; lines: string[]; runs?: TermRun[][]; styles?: TermStyle[]; error: string } // a background session's screen (pane.py --logs)
-  | { type: "dictation"; state: "" | "recording" | "writing" | "model"; text?: string; message?: string; offerModel?: boolean };
+  | { type: "dictation"; state: "" | "recording" | "writing" | "model" | "setup"; text?: string; message?: string; offerModel?: boolean;
+      engine?: string; offerSetup?: boolean; setupMb?: number };
 
 // tab -> extension
 export type PaneMessage =
@@ -127,7 +130,7 @@ export type PaneMessage =
   | { type: "screenshot"; id: string } // a region of the screen you pick, as a picture
   | { type: "complete" } // what the reply box offers (answered with "offers")
   | { type: "logs" } // a background session's screen now (answered with "output")
-  | { type: "dictate"; action: "toggle" | "cancel" | "getModel" }; // the microphone (answered with "dictation")
+  | { type: "dictate"; action: "toggle" | "cancel" | "getModel" | "setup" }; // the microphone (answered with "dictation")
 
 // What the reply box offers as you type (pane.py --complete): / at the start
 // Claude's commands, yours and the project's, and skills; @ the project's

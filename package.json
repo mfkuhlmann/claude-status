@@ -137,6 +137,11 @@
         "category": "Claude Status"
       },
       {
+        "command": "claudeStatus.dictationModels",
+        "title": "Dictation Models…",
+        "category": "Claude Status"
+      },
+      {
         "command": "claudeStatus.switchAccount",
         "title": "Default Claude Account…",
         "category": "Claude Status",
@@ -379,7 +384,7 @@
         "claudeStatus.dictateLanguage": {
           "type": "string",
           "default": "auto",
-          "markdownDescription": "The language you dictate replies in, as a code (`en`, `de`, `fr`…), or `auto` to let whisper.cpp tell. Dictating (the microphone in a chat's tab) needs [whisper.cpp](https://github.com/ggml-org/whisper.cpp) on this computer; what you say never leaves it.",
+          "markdownDescription": "The language you dictate replies in, as a code (`en`, `de`, `fr`…), or `auto` to let whisper tell. Dictating (the microphone in a chat's tab) runs on this computer: the first click offers to set it up (faster-whisper, no sudo), and **Claude Status: Dictation Models…** downloads, deletes or picks the speech model. What you say never leaves the computer.",
           "order": 7
         },
         "claudeStatus.openIn": {

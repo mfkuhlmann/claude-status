@@ -294,7 +294,7 @@ test("the reply box offers commands at the start and files after @, best first",
   assert.deepEqual(suggestFor("/comp", null).items, []);
 });
 
-test("the microphone: recorded, then written down; a missing model is offered; Remote windows can't", async () => {
+test("the microphone: recorded, then written down; a missing model or setup is offered; Remote windows can't", async () => {
   const calls: string[][] = [];
   let status: Record<string, unknown> = { ok: true, tool: "/usr/bin/whisper-cli", model: "/m.bin" };
   const backend = {
@@ -316,8 +316,14 @@ test("the microphone: recorded, then written down; a missing model is offered; R
   assert.deepEqual(calls.map((c) => c[0]), ["--status", "--start", "--stop"]);
   assert.equal(calls[1][1], calls[2][1]); // (the same recording)
   assert.ok(calls[2].includes("--language"));
-  status = { ok: false, tool: "/usr/bin/whisper-cli", model: null };
-  assert.deepEqual(await say("toggle"), { type: "dictation", state: "", offerModel: true });
-  status = { ok: false, tool: null, model: null, missing: ["whisper.cpp"] };
-  assert.equal(((await say("toggle")) as { message?: string }).message, "To dictate, install whisper.cpp.");
+  status = { ok: false, engine: "whisper.cpp", tool: "/usr/bin/whisper-cli", model: null, recorder: "pw-record" };
+  assert.deepEqual(await say("toggle"), { type: "dictation", state: "", offerModel: true, engine: "whisper.cpp" });
+  // nothing writes it down: setting it up is offered, then done when you say so
+  status = { ok: false, engine: null, tool: null, model: null, recorder: "pw-record", canSetup: true, setupMb: 612, missing: [] };
+  assert.deepEqual(await say("toggle"), { type: "dictation", state: "", offerSetup: true, setupMb: 612 });
+  calls.length = 0;
+  assert.deepEqual(await say("setup"), { type: "dictation", state: "", message: "" });
+  assert.deepEqual(calls, [["--setup"]]);
+  status = { ok: false, engine: null, tool: null, model: null, recorder: null, canSetup: true, missing: ["a recorder (pw-record, from PipeWire)"] };
+  assert.equal(((await say("toggle")) as { message?: string }).message, "To dictate, install a recorder (pw-record, from PipeWire).");
 });

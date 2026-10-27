@@ -12,6 +12,7 @@ import { Backend } from "./backend";
 import { configDirArgs } from "./config";
 import { openChangesLink } from "./changes";
 import { ChatPanes } from "./chatPane";
+import { dictationModels } from "./dictation";
 import { answerPermissionsHere, liveModeHere } from "./relay";
 import { extraConfigDirs, settings } from "./config";
 import { markdownLinkFile, openAgentRunFile } from "./agentRun";
@@ -163,6 +164,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("claudeStatus.showLog", () => log.show()),
     vscode.commands.registerCommand("claudeStatus.answerPermissions", () => answerPermissionsHere(backend, dash)),
     vscode.commands.registerCommand("claudeStatus.liveMode", () => liveModeHere(backend, dash)),
+    vscode.commands.registerCommand("claudeStatus.dictationModels", () => dictationModels(backend)),
     panes,
   );
   statusBar.update(dash.state());

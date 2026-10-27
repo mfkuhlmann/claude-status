@@ -86,7 +86,12 @@ export const window = {
   showInformationMessage: async (m: string) => void recorded.messages.push(m),
   showWarningMessage: async (m: string) => void recorded.messages.push(m),
   showErrorMessage: async (m: string) => void recorded.messages.push(m),
+  withProgress: async <T>(_o: unknown, task: (p: { report(): void }) => Promise<T>) => task({ report() {} }),
 };
+
+export enum ProgressLocation {
+  Notification = 15,
+}
 
 export const commands = {
   registerCommand: (id: string, fn: (...args: unknown[]) => unknown) => {

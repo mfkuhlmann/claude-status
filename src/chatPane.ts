@@ -470,11 +470,12 @@ class Pane implements vscode.Disposable {
     }
   }
 
-  // The microphone: record, then whisper.cpp writes it down on this computer
-  // (dictate.py); only when this window runs here (else the microphone would be the remote's)
+  // The microphone: record, then whisper (whisper.cpp, or the faster-whisper dictate.py sets up)
+  // writes it down on this computer; only when this window runs here (else the microphone would be
+  // the remote's)
   private recording = "";
   private lastJob = ""; // (the background session the Output tab reads)
-  private async dictate(action: "toggle" | "cancel" | "getModel"): Promise<void> {
+  private async dictate(action: "toggle" | "cancel" | "getModel" | "setup"): Promise<void> {
     const { backend } = this.owner.ext;
     const tell = (m: Omit<Extract<import("./shared/pane").PaneHostMessage, { type: "dictation" }>, "type">) => this.post({ type: "dictation", ...m });
     if (vscode.env.remoteName) {
@@ -489,6 +490,10 @@ class Pane implements vscode.Disposable {
       tell({ state: "model" });
       const r = await backend.dictate(["--get-model", "base"], 900000);
       tell({ state: "", message: String(r.message ?? "") });
+    } else if (action === "setup") {
+      tell({ state: "setup" });
+      const r = await backend.dictate(["--setup"], 3600000);
+      tell({ state: "", message: String(r.message ?? "") });
     } else if (this.recording) {
       const id = this.recording;
       this.recording = "";
@@ -499,7 +504,8 @@ class Pane implements vscode.Disposable {
     } else {
       const st = await backend.dictate(["--status"]);
       if (!st.ok) {
-        if (st.tool && !st.model) tell({ state: "", offerModel: true });
+        if (st.recorder && st.canSetup) tell({ state: "", offerSetup: true, setupMb: Number(st.setupMb) || 612 });
+        else if (st.recorder && st.tool && !st.model) tell({ state: "", offerModel: true, engine: String(st.engine ?? "whisper") });
         else tell({ state: "", message: `To dictate, install ${(Array.isArray(st.missing) ? st.missing : []).join(" and ")}.` });
         return;
       }

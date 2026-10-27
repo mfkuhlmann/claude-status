@@ -192,10 +192,11 @@ function ChatApp() {
     return true;
   };
 
-  // The microphone: record, then whisper.cpp writes it down on this computer
-  const [dictating, setDictating] = useState<"" | "recording" | "writing" | "model">("");
+  // The microphone: record, then whisper writes it down on this computer
+  const [dictating, setDictating] = useState<"" | "recording" | "writing" | "model" | "setup">("");
   const [recordedAt, setRecordedAt] = useState(0);
-  const [offerModel, setOfferModel] = useState(false);
+  const [offerModel, setOfferModel] = useState(""); // (the engine that needs one)
+  const [offerSetup, setOfferSetup] = useState(0); // (MB it downloads)
   const [, tickRecording] = useState(0);
   useEffect(() => {
     if (dictating !== "recording") return undefined;
@@ -302,7 +303,8 @@ function ChatApp() {
       else if (m.type === "dictation") {
         setDictating(m.state);
         if (m.state === "recording") setRecordedAt(Date.now());
-        if (m.offerModel) setOfferModel(true);
+        if (m.offerModel) setOfferModel(m.engine || "whisper");
+        if (m.offerSetup) setOfferSetup(m.setupMb || 612);
         if (m.text) {
           const said = m.text;
           const box = reply.current;
@@ -640,21 +642,29 @@ function ChatApp() {
             </div>
           ) : null}
           {saving ? <div class="pane-hint">{chat?.host ? `Copying the picture to ${chat.host}…` : "Adding it to your reply…"}</div> : null}
+          {offerSetup ? (
+            <div class="pane-hint ask-buttons">
+              <span>Set up dictation? It installs faster-whisper, speech to text that runs on this computer, and its base speech model: about {offerSetup} MB from pypi.org and huggingface.co into ~/.local/share/claude-widget/whisper, no sudo needed; a few minutes. What you say never leaves the computer. Other models: Claude Status: Dictation Models.</span>
+              <button type="button" class="btn" onClick={() => { setOfferSetup(0); post({ type: "dictate", action: "setup" }); }}>Set up</button>
+              <button type="button" class="btn secondary" onClick={() => setOfferSetup(0)}>Not now</button>
+            </div>
+          ) : null}
           {offerModel ? (
             <div class="pane-hint ask-buttons">
-              <span>To dictate, whisper.cpp needs a speech model: download its base model (142 MB) from huggingface.co? It's kept in ~/.local/share/claude-widget/whisper; what you say never leaves the computer.</span>
-              <button type="button" class="btn" onClick={() => { setOfferModel(false); post({ type: "dictate", action: "getModel" }); }}>Download</button>
-              <button type="button" class="btn secondary" onClick={() => setOfferModel(false)}>Not now</button>
+              <span>To dictate, {offerModel} needs a speech model: download its base model (142 MB) from huggingface.co? It's kept in ~/.local/share/claude-widget/whisper; what you say never leaves the computer. Other models: Claude Status: Dictation Models.</span>
+              <button type="button" class="btn" onClick={() => { setOfferModel(""); post({ type: "dictate", action: "getModel" }); }}>Download</button>
+              <button type="button" class="btn secondary" onClick={() => setOfferModel("")}>Not now</button>
             </div>
           ) : null}
           <div class="pane-hint">{chat ? routeHint(chat.route, chat.state !== "done" || !!chat.busy, "", chat.host) : ""}</div>
           <div class="pane-buttons">
             <button type="button" class={"btn secondary pane-mic" + (dictating === "recording" ? " on" : "")}
-              disabled={dictating === "writing" || dictating === "model"}
-              title="Dictate: say your reply, click again to stop, and it's written down where you're typing. On this computer only (whisper.cpp): what you say doesn't leave it."
+              disabled={dictating === "writing" || dictating === "model" || dictating === "setup"}
+              title="Dictate: say your reply, click again to stop, and it's written down where you're typing. On this computer only (whisper): what you say doesn't leave it. The speech model: Claude Status: Dictation Models."
               onClick={() => post({ type: "dictate", action: "toggle" })}>
               {dictating === "recording" ? `■ Stop: write it down · ${Math.max(1, Math.round((Date.now() - recordedAt) / 1000))}s`
-                : dictating === "writing" ? "Writing it down…" : dictating === "model" ? "Downloading the speech model…" : "Dictate"}
+                : dictating === "writing" ? "Writing it down…" : dictating === "model" ? "Downloading the speech model…"
+                : dictating === "setup" ? "Setting up dictation (a few minutes)…" : "Dictate"}
             </button>
             {dictating === "recording" ? (
               <button type="button" class="btn secondary" title="Stop, don't write it down" onClick={() => post({ type: "dictate", action: "cancel" })}>×</button>

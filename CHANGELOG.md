@@ -65,12 +65,18 @@
   right now (what `claude attach` would show), read again every 2 seconds
   while you look at it, from its background service (never started for it).
 - **Dictate a reply:** **Dictate** in a chat's tab records what you say;
-  click it again and whisper.cpp writes it down where you're typing (×
-  drops it). It runs on this computer only (not in a Remote window): what
-  you say never leaves it, and the recording is deleted once written down.
-  It needs whisper.cpp (Fedora: `sudo dnf install whisper-cpp`) and a
-  speech model, which the tab offers to download once (142 MB, from
-  huggingface.co); `claudeStatus.dictateLanguage` (auto by default).
+  click it again and whisper writes it down where you're typing (× drops
+  it). It runs on this computer only (not in a Remote window): what you say
+  never leaves it, and the recording is deleted once written down. The first
+  click offers to set dictation up: faster-whisper (from pypi.org, in a
+  Python environment of its own) and its base speech model (from
+  huggingface.co), about 610 MB in `~/.local/share/claude-widget/whisper`,
+  no sudo and no compiler needed. If whisper.cpp's `whisper-cli` is on your
+  PATH it's used instead. **Claude Status: Dictation Models…** lists the
+  speech models (tiny to large-v3-turbo, with their sizes and what each is
+  like) to download, delete or use (by default the best one downloaded), and
+  removes faster-whisper again; one choice for the extension and the Plasma
+  widget. `claudeStatus.dictateLanguage` (auto by default).
 - **A reply box that helps:** in a chat's tab, `/` at the start offers
   Claude's commands, your own and the project's commands and skills (with
   what each does); `@` offers the project's files; ↑ and ↓ go through what
