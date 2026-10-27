@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **Enter on a chat in a terminal copies your reply:** for a chat whose
+  terminal takes no text from outside, the first Enter in the chat tab
+  changed nothing you could see (it only got ready to ask), and the next
+  one, or an Enter on a reply from a notification, made Claude in that
+  terminal quit and the chat go on in the background. Enter now puts your
+  reply on the clipboard and opens the chat's terminal, to paste it there;
+  Claude there never quits on an Enter. **Send, go on in the background**
+  still moves it to the background.
+
 ## 1.16.0
 
 - **Now Talpy Den:** the extension is called **Talpy Den** and the pet

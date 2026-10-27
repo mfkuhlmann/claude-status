@@ -402,7 +402,7 @@ function ChatApp() {
     if (el && follow.current) el.scrollTop = el.scrollHeight;
   }, [items, chat?.activity]);
 
-  const send = (how: "auto" | "background" | "copy", afterTurn: boolean) => {
+  const send = (how: "auto" | "background" | "copy" | "enter", afterTurn: boolean) => {
     if (!text.trim()) return;
     post({ type: "send", text, how, afterTurn });
   };
@@ -613,10 +613,11 @@ function ChatApp() {
                 return;
               }
               // Enter sends, as in Claude's own prompt (Shift+Enter: a new line). For a
-              // terminal that takes no text from outside, the first Enter asks how.
+              // terminal that takes no text from outside, Enter copies it and opens its
+              // terminal: Claude there never quits on an Enter.
               if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
                 e.preventDefault();
-                send(askHow ? "background" : "auto", false);
+                send("enter", false);
               }
             }}
           />
