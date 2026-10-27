@@ -168,11 +168,20 @@ PlasmoidItem {
     // 60 a second in the popup (it's open for a while), 30 on the desktop
     // (always there: every picture is a new frame of the whole desktop)
     readonly property real petFrameMs: onDesktop ? 33.3 : 16.7
-    Timer {
-        interval: root.petFrameMs
-        repeat: true
+    // In step with the screen: a frame animation ticks as each frame is made
+    // (a timer of its own drifted against the screen and showed about one
+    // frame in 18 twice), every frame or every other one (half a frame of
+    // slack, so a frame that comes a little early still counts)
+    FrameAnimation {
         running: root.dashboardShown && !root.coveredByWindow && Plasmoid.configuration.showPet
-        onTriggered: root.petFrame(Date.now())
+        property real last: 0
+        onTriggered: {
+            const now = Date.now()
+            if (now - last < root.petFrameMs - 8)
+                return
+            last = now
+            root.petFrame(now)
+        }
     }
     // Motion in the list: where each chat's row was drawn last (SessionRow.qml
     // slides a row from there when its chat moves up or down, and fades in one

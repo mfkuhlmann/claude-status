@@ -437,16 +437,18 @@ Item {
         travels: pet.lone
         tint: pet.lone ? "transparent" : pet.tint
         // Both are films (TalpaView.qml), drawn live while you hold them and
-        // until they've landed. The big Talpa: as smooth as the clock goes,
-        // live until a new pose has settled, breathing at rest. A chat's pet:
-        // smaller, so at most 20 pictures a second on the desktop (30 in the
-        // popup), pictures in between poses, still at rest.
+        // until they've landed, and for a move too slow for a picture every
+        // tick (it would step). The big Talpa: a picture every frame of the
+        // clock, live until a new pose has settled, breathing at rest. A
+        // chat's pet: smaller, so at most 20 pictures a second on the desktop
+        // (30 in the popup), pictures in between poses, still at rest.
         live: pet.landing
-        sheets: pet.lone ? 26 : 20
+        sheets: pet.lone ? 36 : 32
         frameMs: pet.lone ? root.petFrameMs : Math.max(root.petFrameMs, root.onDesktop ? 50 : 33.3)
-        maxFrames: pet.lone ? 24 : 16
+        maxFrames: 32
         tweenMs: pet.lone ? 0 : 200
         restMs: pet.lone ? 200 : 0
+        smooth: true
         onReady: pet.start()
         onTravel: ms => {
             let to = pet.travelTo

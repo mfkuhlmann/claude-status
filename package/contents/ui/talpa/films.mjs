@@ -6,6 +6,8 @@
 // drawn live; what flies about (dirt, hearts, z's) is drawn on a sheet of its
 // own over it, only while there is any. pictures.mjs did the same with four
 // pictures a move and a fade between poses (GNOME still does).
+// smooth: a move too slow for a picture every frame (fewer than maxFrames a
+// round) is drawn live instead of stepping from picture to picture.
 //
 //   const film = new Films(talpa, { sheets: 12, frameMs: 33 });
 //   every tick: talpa.tick(now); const changed = film.tick(now); then
@@ -33,6 +35,7 @@ export class Films {
         this.tweenMs = opts.tweenMs === undefined ? 150 : opts.tweenMs;   // a new pose: on its way there this long (0: live until settled)
         this.tweens = opts.tweens || 3;          // in that many pictures
         this.slackMs = opts.slackMs === undefined ? 5 : opts.slackMs;   // how much early a tick may come and still draw
+        this.smooth = !!opts.smooth;            // a move whose pictures would show for more than a frame: drawn live
         this.sheets = [];
         for (let i = 0; i < Math.max(2, opts.sheets || 8); i++)
             this.sheets.push({ index: i, key: '~', paint: false, usedAt: 0, d: null, from: null, p: 1 });
@@ -66,6 +69,8 @@ export class Films {
         if (!d)
             every = this.on ? this.frameMs : Math.max(this.frameMs, t.frameMs >= 200 ? 2 * this.frameMs : this.frameMs);
         else if (this.tweenMs <= 0 && !t.settled)
+            every = this.frameMs;
+        else if (this.smooth && !d.rest && d.every > 1.5 * this.frameMs)
             every = this.frameMs;
         else if (d.rest && this.restMs > 0 && !this.tween)
             every = t.frameMs >= 200 ? this.restMs : t.frameMs >= 80 ? 2 * this.frameMs : this.frameMs;

@@ -26,12 +26,14 @@ Item {
     property bool live: false              // drawn live, not from pictures (a pet you hold)
     // The film (see films.mjs): pictures at least frameMs apart, at most
     // maxFrames a move, kept on `sheets` canvases; tweenMs 0: a new pose is
-    // drawn live until it has settled, restMs: at rest it's drawn live that often
+    // drawn live until it has settled, restMs: at rest it's drawn live that
+    // often; smooth: a move too slow for a picture every frame is drawn live
     property int sheets: 16
     property real frameMs: 33
     property int maxFrames: 12
     property int tweenMs: 200
     property int restMs: 0
+    property bool smooth: false
     readonly property real boxX: box * 0.3
     readonly property real boxY: box * 0.45
     readonly property real floorY: boxY + box * T.FLOOR / T.BOX   // the floor, from the canvas top
@@ -70,7 +72,9 @@ Item {
         talpa.facingLeft = facingLeft
         talpa.onTravel = ms => view.travel(ms)
         talpa.tick(Date.now())
-        film = new F.Films(talpa, { sheets: sheets, frameMs: frameMs, maxFrames: maxFrames, tweenMs: tweenMs, tweens: 4, restMs: restMs })
+        // (pictures in between a frame apart)
+        film = new F.Films(talpa, { sheets: sheets, frameMs: frameMs, maxFrames: maxFrames, tweenMs: tweenMs,
+                                    tweens: Math.max(3, Math.round(tweenMs / frameMs) - 1), restMs: restMs, smooth: smooth })
         paintHoles()
         ready()
         frame(Date.now())

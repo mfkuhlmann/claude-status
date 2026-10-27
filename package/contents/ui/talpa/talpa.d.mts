@@ -26,6 +26,7 @@ export interface Still {
     readonly phase: number;
     readonly rest: boolean;
     readonly left: boolean;
+    readonly every: number;   // ms from one picture of its move to the next (Infinity at rest)
 }
 
 export class Talpa {

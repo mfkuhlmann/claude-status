@@ -539,7 +539,9 @@ console.log(JSON.stringify({ drawn: drawn, copied: copied, side: side, images: i
     def test_films_cost_the_desktop_about_what_pictures_did(self):
         # Four desktop dashboards (2026-10-23): what the pets draw a second
         # (canvas calls) mustn't grow; the big Talpa draws much less than
-        # live, and a chat's pet at most a little more than with pictures
+        # live, and a chat's pet at most a little more than with pictures.
+        # (Slow moves are drawn live since 2026-10-27, so they don't step: a
+        # mood full of them, out of steam at a limit, costs a bit more.)
         result = run_node(CALL_COUNTER + """
 let seed = 7;
 Math.random = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
@@ -551,8 +553,8 @@ for (const lone of [true, false]) for (const mood of ['working', 'agents', 'need
         const tick = films ? 33.33 : 40;
         let f = null, p = null;
         if (films) { t.holeImage = () => ({});
-            f = lone ? new Films(t, { frameMs: tick, maxFrames: 24, sheets: 26, tweenMs: 0, restMs: 200 })
-                     : new Films(t, { frameMs: 50, maxFrames: 16, sheets: 20, tweenMs: 200, tweens: 4 }); }
+            f = lone ? new Films(t, { frameMs: tick, maxFrames: 32, sheets: 36, tweenMs: 0, restMs: 200, smooth: true })
+                     : new Films(t, { frameMs: 50, maxFrames: 32, sheets: 32, tweenMs: 200, tweens: 3, smooth: true }); }
         else { p = new Pictures(t, lone ? 1 : 5); p.pictures = !lone; }
         for (let i = 0; i < 120000 / tick; i++) {
             now += tick; t.tick(now);
@@ -565,7 +567,37 @@ for (const lone of [true, false]) for (const mood of ['working', 'agents', 'need
 }
 console.log(JSON.stringify(out));""")
         for name, ratio in result.items():
-            self.assertLess(ratio, 0.75 if name.startswith("hero") else 1.9, name)
+            self.assertLess(ratio, 0.85 if name.startswith("hero") else 1.9, name)
+        hero = [ratio for name, ratio in result.items() if name.startswith("hero")]
+        self.assertLess(sum(hero) / len(hero), 0.6)
+
+    def test_a_slow_move_doesnt_step(self):
+        # A nod or a float has more pictures a round than a film keeps: they
+        # showed for 3 ticks each (6 a second in the popup, it looked like
+        # lag). Smooth films draw such a move live, a new picture every tick;
+        # a quicker one keeps a picture per tick, the same number of ticks each
+        result = run_node(NULL_CANVAS + """
+const out = {};
+for (const smooth of [true, false]) for (const body of ['nod', 'float', 'sway']) {
+    const t = new Talpa({ brain: false }); let now = 1e12; t.tick(now);
+    t.play({ steps: () => [{ depth: 'half', body: body, t: 8000 }] });
+    const f = new Films(t, { frameMs: 33.3, maxFrames: 32, sheets: 32, tweenMs: 200, smooth: smooth });
+    let sig = '', at = 0, holds = {};
+    for (let i = 0; i < 150; i++) {
+        now += 100 / 3; t.tick(now); f.tick(now);
+        for (const s of f.sheets) if (s.paint) f.paint(s, ctx);
+        const was = sig; sig = f.front.index + '|' + f.front.key + '|' + f.liveAt;
+        if (i > 30 && sig !== was) { holds[i - at] = (holds[i - at] || 0) + 1; }
+        if (sig !== was) at = i;
+    }
+    out[body + (smooth ? ' smooth' : '')] = Object.keys(holds).map(Number);
+}
+console.log(JSON.stringify(out));""")
+        for name, holds in result.items():
+            if name.endswith("smooth") or name.startswith("sway"):
+                self.assertEqual(holds, [1], name)
+            else:
+                self.assertGreater(max(holds), 2, name)   # (what it was: the test can tell)
 
     def test_nothing_shows_under_the_burrows_lip(self):
         # Talpa and what it holds are cut along the same edge the lip is drawn
