@@ -1,9 +1,12 @@
 import QtQuick
 import QtQuick.Layouts
+import QtQuick.Controls as QQC2
+import QtCore
 import org.kde.plasma.components as PlasmaComponents3
 import org.kde.plasma.core as PlasmaCore
 import org.kde.plasma.extras as PlasmaExtras
 import org.kde.kirigami as Kirigami
+import "hub"
 
 // The Recap tab (main.qml: loadWeek, week.py): your last 7 days with Claude.
 // How long you were at it and how long Claude worked, a day per row on a
@@ -381,6 +384,20 @@ PlasmaComponents3.ScrollView {
                     textFormat: Text.PlainText
                     anchors.fill: parent
                     mainText: parent.text
+                }
+            }
+            PlasmaComponents3.ToolButton {
+                icon.name: "document-share"
+                display: PlasmaComponents3.AbstractButton.IconOnly
+                text: i18n("Share as a picture…")
+                enabled: view.hasData
+                onClicked: view.share()
+
+                PlasmaCore.ToolTipArea {
+                    textFormat: Text.PlainText
+                    anchors.fill: parent
+                    mainText: parent.text
+                    subText: i18n("These days as a card with Talpa: save it or copy it, with your projects' names or without.")
                 }
             }
         }
@@ -1469,5 +1486,101 @@ PlasmaComponents3.ScrollView {
             }
         }
     }
+    }
+
+    function share() {
+        sharing.open()
+    }
+
+    // The Recap as a card to share (RecapCard.qml): saved in your Pictures
+    // folder, or copied (jump.py --copy-image), at twice its size
+    QQC2.Popup {
+        id: sharing
+        parent: QQC2.Overlay.overlay
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(parent ? parent.width - Kirigami.Units.gridUnit : 600, 600 + Kirigami.Units.largeSpacing * 2)
+        padding: Kirigami.Units.largeSpacing
+        property string said: ""
+        onOpened: said = ""
+
+        function fileName() {
+            const r = view.recap
+            return "claude-" + (r && r.span ? r.span : "week") + "-" + (r ? r.to : "recap") + ".png"
+        }
+        function localPath(url) {
+            return decodeURIComponent(String(url).replace(/^file:\/\//, ""))
+        }
+        function save() {
+            const folder = localPath(StandardPaths.writableLocation(StandardPaths.PicturesLocation))
+            const path = folder + "/" + fileName()
+            shareCard.grabToImage(result => {
+                sharing.said = result.saveToFile(path) ? i18n("Saved: %1", path) : i18n("Couldn't save it in %1", folder)
+            }, Qt.size(1200, 630))
+        }
+        function copy() {
+            const path = localPath(StandardPaths.writableLocation(StandardPaths.TempLocation)) + "/" + fileName()
+            shareCard.grabToImage(result => {
+                if (!result.saveToFile(path)) {
+                    sharing.said = i18n("Couldn't copy it")
+                    return
+                }
+                copier.connectSource("python3 -I " + root.shellQuote(root.codeDir + "jump.py") + " --copy-image " + root.shellQuote(path)
+                                     + " # " + Date.now())
+            }, Qt.size(1200, 630))
+        }
+        Exec {
+            id: copier
+            onNewData: (source, data) => {
+                disconnectSource(source)
+                sharing.said = root.helperResult(data).message || ""
+            }
+        }
+
+        contentItem: ColumnLayout {
+            spacing: Kirigami.Units.smallSpacing
+
+            Item {
+                Layout.fillWidth: true
+                Layout.preferredHeight: shareCard.height * shareCard.scale
+                RecapCard {
+                    id: shareCard
+                    recap: view.recap
+                    names: nameProjects.checked
+                    scale: Math.min(1, parent.width / width)
+                    transformOrigin: Item.TopLeft
+                }
+            }
+            PlasmaComponents3.CheckBox {
+                id: nameProjects
+                text: i18n("Name the projects on it")
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                PlasmaComponents3.Label {
+                    textFormat: Text.PlainText
+                    Layout.fillWidth: true
+                    text: sharing.said
+                    wrapMode: Text.Wrap
+                    font: Kirigami.Theme.smallFont
+                    opacity: 0.8
+                }
+                PlasmaComponents3.Button {
+                    icon.name: "document-save"
+                    text: i18n("Save")
+                    onClicked: sharing.save()
+                }
+                PlasmaComponents3.Button {
+                    icon.name: "edit-copy"
+                    text: i18n("Copy")
+                    onClicked: sharing.copy()
+                }
+                PlasmaComponents3.Button {
+                    icon.name: "dialog-close"
+                    text: i18n("Close")
+                    onClicked: sharing.close()
+                }
+            }
+        }
     }
 }

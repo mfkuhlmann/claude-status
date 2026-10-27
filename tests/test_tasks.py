@@ -932,6 +932,21 @@ class PictureTests(TaskFixture):
         self.assertEqual(self.run_jump(["--attach", str(notes)]), {"ok": True, "message": "", "path": str(notes.resolve()), "picture": False})
         self.assertFalse(self.run_jump(["--attach", str(self.home / "gone.png")])["ok"])
 
+    def test_a_card_is_copied_to_the_clipboard_as_a_picture(self):
+        tools = Path(tempfile.mkdtemp(dir=self.home))
+        got = self.home / "clip.bin"
+        write(tools / "wl-copy", f"#!/bin/sh\necho \"$*\" > {got}.args\ncat > {got}\n")
+        (tools / "wl-copy").chmod(0o755)
+        card = self.home / "card.png"
+        card.write_bytes(b"\x89PNG card")
+        with mock.patch.dict(os.environ, {"PATH": f"{tools}:/usr/bin:/bin", "WAYLAND_DISPLAY": "wayland-0"}):
+            self.assertEqual(self.run_jump(["--copy-image", str(card)]), {"ok": True, "message": "Copied: paste it anywhere"})
+            deadline = time.time() + 5
+            while time.time() < deadline and not (got.exists() and got.read_bytes()):
+                time.sleep(0.05)
+        self.assertEqual(got.read_bytes(), b"\x89PNG card")
+        self.assertEqual(Path(str(got) + ".args").read_text().strip(), "--type image/png")
+
     def save(self, kind, data):
         out = io.StringIO()
         with mock.patch.object(jump.Path, "home", return_value=self.home), contextlib.redirect_stdout(out), \

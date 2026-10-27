@@ -28,6 +28,7 @@ a new chat (used by the Claude Status widget).
     python3 -I jump.py --save-image TYPE         (save a picture, base64 on stdin, of TYPE image/png, …)
     python3 -I jump.py --screenshot              (a region of the screen you pick, saved as a picture)
     python3 -I jump.py --attach PATH             (a dropped file: a picture is copied in as one, else named as is)
+    python3 -I jump.py --copy-image PATH         (a PNG to the clipboard: wl-copy, else xclip)
     python3 -I jump.py --agent-run AGENT_ID --chat CHAT_ID [--profile PROFILE] [--no-open]
                                                  (a subagent's whole run, as a Markdown file)
 
@@ -1106,6 +1107,29 @@ def screenshot(home):
     if not picture:
         return False, "No screenshot taken", {}
     return save_picture(home, picture, "image/png")
+
+
+def copy_image(home, path):
+    """A PNG (the Recap's card) to the clipboard: (ok, message, {})."""
+    try:
+        data = Path(path).read_bytes()
+    except OSError as exc:
+        return False, f"Couldn't read {path}: {exc.strerror or exc}", {}
+    if os.environ.get("WAYLAND_DISPLAY") and shutil.which("wl-copy"):
+        cmd = ["wl-copy", "--type", "image/png"]
+    elif shutil.which("xclip"):
+        cmd = ["xclip", "-selection", "clipboard", "-t", "image/png", "-i"]
+    else:
+        return False, "To copy pictures, install wl-clipboard (or xclip)", {}
+    try:
+        # (wl-copy and xclip stay to serve the clipboard: they go on in the background)
+        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                start_new_session=True)
+        proc.stdin.write(data)
+        proc.stdin.close()
+    except OSError as exc:
+        return False, f"Couldn't copy it: {exc}", {}
+    return True, "Copied: paste it anywhere", {}
 
 
 PICTURE_FILES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif"}
@@ -2299,6 +2323,8 @@ def main(argv=None):
             action, session_id = paste_image, "-"
         elif arg == "--save-image" and args:
             action, image_type, session_id = save_image, args.pop(0), "-"
+        elif arg == "--copy-image" and args:
+            action, attach_path, session_id = copy_image, args.pop(0), "-"
         elif arg == "--screenshot":
             action, session_id = screenshot, "-"
         elif arg == "--attach" and args:
@@ -2432,6 +2458,8 @@ def main(argv=None):
             ok, message, extra_out = save_image(Path.home(), image_type, sys.stdin.read())
         elif action is screenshot:
             ok, message, extra_out = screenshot(Path.home())
+        elif action is copy_image:
+            ok, message, extra_out = copy_image(Path.home(), attach_path)
         elif action is attach_file:
             ok, message, extra_out = attach_file(Path.home(), attach_path)
         elif action is show_agent_run:
