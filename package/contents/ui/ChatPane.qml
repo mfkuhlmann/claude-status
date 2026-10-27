@@ -42,7 +42,10 @@ Window {
     minimumWidth: Kirigami.Units.gridUnit * 22
     minimumHeight: Kirigami.Units.gridUnit * 18
     color: Kirigami.Theme.backgroundColor
-    onClosing: root.closePane()
+    onClosing: {
+        cancelDictation()
+        root.closePane()
+    }
 
     // ---------------------------------------------------------------- how it looks
 
@@ -525,6 +528,83 @@ Window {
         id: infoTimer
         interval: 12000
         onTriggered: pane.info = ""
+    }
+
+    // ---------------------------------------------------------------- dictating
+    //
+    // The microphone button: record, then whisper.cpp writes it down here
+    // (dictate.py; nothing leaves the computer) and it goes in at the cursor
+    property string dictating: ""        // "", "recording", "writing", "model" (a model being downloaded)
+    property string dictateId: ""
+    property real dictateSince: 0
+    property var dictateState: null      // dictate.py --status
+    property bool offerModel: false      // (asks before it downloads one)
+
+    function dictateRun(args) {
+        dictateExec.connectSource("python3 -I " + root.shellQuote(root.codeDir + "dictate.py") + " " + args + " # " + Date.now())
+    }
+    function dictate() {
+        if (dictating === "recording") {
+            dictating = "writing"
+            dictateRun("--stop " + dictateId + " --language " + root.shellQuote(Plasmoid.configuration.dictateLanguage || "auto"))
+        } else if (dictating === "") {
+            dictateRun("--status")
+        }
+    }
+    function cancelDictation() {
+        if (dictating === "recording")
+            dictateRun("--cancel " + dictateId)
+        dictating = ""
+    }
+    function noteDictation(message, bad) {
+        pane.info = message
+        pane.infoBad = bad
+        infoTimer.restart()
+    }
+    Exec {
+        id: dictateExec
+        onNewData: (source, data) => {
+            disconnectSource(source)
+            const result = root.helperResult(data)
+            if (source.indexOf(" --status") >= 0) {
+                pane.dictateState = result
+                if (result.ok) {
+                    pane.dictateId = "r" + Date.now()
+                    pane.dictating = "recording"
+                    pane.dictateSince = Date.now()
+                    pane.recordedMs = 0
+                    pane.dictateRun("--start " + pane.dictateId)
+                } else if (result.tool && !result.model) {
+                    pane.offerModel = true
+                } else {
+                    pane.noteDictation(i18n("To dictate, install %1.", (result.missing || []).join(i18n(" and "))), true)
+                }
+            } else if (source.indexOf(" --start ") >= 0) {
+                if (!result.ok) {
+                    pane.dictating = ""
+                    pane.noteDictation(result.message, true)
+                }
+            } else if (source.indexOf(" --stop ") >= 0) {
+                pane.dictating = ""
+                if (result.ok && result.text) {
+                    const at = replyBox.cursorPosition
+                    replyBox.insert(at, (at > 0 && replyBox.text.charAt(at - 1).trim() !== "" ? " " : "") + result.text + " ")
+                    replyBox.forceActiveFocus()
+                } else {
+                    pane.noteDictation(result.message, true)
+                }
+            } else if (source.indexOf(" --get-model ") >= 0) {
+                pane.dictating = ""
+                pane.noteDictation(result.message, !result.ok)
+            }
+        }
+    }
+    property real recordedMs: 0          // (the time on the button while it records)
+    Timer {
+        interval: 1000
+        repeat: true
+        running: pane.dictating === "recording"
+        onTriggered: pane.recordedMs = Date.now() - pane.dictateSince
     }
 
     // ---------------------------------------------------------------- replying
@@ -1425,6 +1505,19 @@ Window {
                     text: i18n("Copying the picture to %1…", pane.host)
                     color: pane.mutedColor
                 }
+                // whisper.cpp is there but no speech model: one is downloaded once you say so
+                ConfirmLine {
+                    Layout.fillWidth: true
+                    visible: pane.offerModel
+                    text: i18n("To dictate, whisper.cpp needs a speech model: download its base model (142 MB) from huggingface.co? It's kept in ~/.local/share/claude-widget/whisper; what you say never leaves the computer.")
+                    confirmText: i18n("Download")
+                    onConfirmed: {
+                        pane.offerModel = false
+                        pane.dictating = "model"
+                        pane.dictateRun("--get-model base")
+                    }
+                    onCancelled: pane.offerModel = false
+                }
                 PlasmaComponents3.Label {
                     textFormat: Text.PlainText
                     Layout.fillWidth: true
@@ -1437,6 +1530,30 @@ Window {
                     Layout.fillWidth: true
                     spacing: Kirigami.Units.smallSpacing
 
+                    PlasmaComponents3.ToolButton {
+                        icon.name: pane.dictating === "recording" ? "media-playback-stop" : "audio-input-microphone"
+                        icon.color: pane.dictating === "recording" ? Kirigami.Theme.negativeTextColor : "transparent"
+                        enabled: pane.dictating === "" || pane.dictating === "recording"
+                        text: pane.dictating === "recording" ? i18n("Stop: write it down") + " · " + root.duration(Math.max(1000, pane.recordedMs))
+                              : pane.dictating === "writing" ? i18n("Writing it down…")
+                              : pane.dictating === "model" ? i18n("Downloading the speech model…") : i18n("Dictate")
+                        display: pane.dictating === "" ? PlasmaComponents3.AbstractButton.IconOnly : PlasmaComponents3.AbstractButton.TextBesideIcon
+                        onClicked: pane.dictate()
+
+                        PlasmaCore.ToolTipArea {
+                            textFormat: Text.PlainText
+                            anchors.fill: parent
+                            mainText: i18n("Dictate")
+                            subText: i18n("Say your reply: click again to stop, and it's written down where you're typing. On this computer only (whisper.cpp): what you say doesn't leave it.")
+                        }
+                    }
+                    PlasmaComponents3.ToolButton {
+                        visible: pane.dictating === "recording"
+                        icon.name: "dialog-cancel"
+                        display: PlasmaComponents3.AbstractButton.IconOnly
+                        text: i18n("Stop, don't write it down")
+                        onClicked: pane.cancelDictation()
+                    }
                     PlasmaComponents3.ToolButton {
                         icon.name: "spectacle"
                         text: i18n("Screenshot…")

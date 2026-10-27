@@ -27,6 +27,7 @@ KCM.SimpleKCM {
     property alias cfg_notifyDone: notifyDone.checked
     property alias cfg_notifyDoneMinSeconds: notifyDoneMinSeconds.value
     property alias cfg_clickOpensPane: clickOpensPane.checked
+    property alias cfg_dictateLanguage: dictateLanguage.text
     property alias cfg_awayDigest: awayDigest.checked
     property alias cfg_awayMinutes: awayMinutes.value
     property alias cfg_shortcutGoesToChat: shortcutGoesToChat.checked
@@ -68,6 +69,7 @@ KCM.SimpleKCM {
     property bool cfg_notifyDoneDefault
     property int cfg_notifyDoneMinSecondsDefault
     property bool cfg_clickOpensPaneDefault
+    property string cfg_dictateLanguageDefault
     property bool cfg_awayDigestDefault
     property int cfg_awayMinutesDefault
     property bool cfg_shortcutGoesToChatDefault
@@ -401,6 +403,14 @@ KCM.SimpleKCM {
             opacity: 0.7
             text: (page.keysMessage ? page.keysMessage + "\n" : "")
                   + i18n("Two global shortcuts answer the chat that has waited longest for a permission, from anywhere: Allow once (a plan: Approve) or Deny (a plan: Keep planning); a note on screen says what was answered. They take \"Answer permission prompts from the widget\"; Claude's questions are answered in the panel. Pick other keys in System Settings → Shortcuts → Claude Status. Applies at once.")
+        }
+
+        QQC2.TextField {
+            id: dictateLanguage
+            Kirigami.FormData.label: i18n("Dictation language:")
+            placeholderText: "auto"
+            QQC2.ToolTip.visible: hovered
+            QQC2.ToolTip.text: i18n("The language you dictate replies in, as a code (en, de, fr…), or auto to let whisper.cpp tell. Dictating needs whisper.cpp; it runs on this computer only.")
         }
 
         QQC2.CheckBox {
