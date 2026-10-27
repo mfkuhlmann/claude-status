@@ -791,6 +791,41 @@ class SendTests(PaneFixture):
         with mock.patch.object(pane, "copy_to_clipboard", return_value=True):
             self.assertEqual(self.send("copy")["how"], "copy")
 
+    def test_enter_copies_for_a_terminal(self):
+        # Enter in the pane: Claude in a terminal that takes no text never quits on it
+        self.live()
+        with mock.patch.object(pane, "copy_to_clipboard", return_value=True) as copy, \
+                mock.patch.object(cs, "stop_chat") as stopped:
+            answer = self.cli("--send", SID, "--profile", ".claude-work", "--text", " and the docs ", "--how", "enter")
+        self.assertEqual(answer, {"ok": True, "how": "copy", "copied": True, "text": "",
+                                  "message": "Its terminal takes no text from outside, so your message is "
+                                             "in the clipboard: paste it there"})
+        copy.assert_called_once_with("and the docs")
+        stopped.assert_not_called()
+        with mock.patch.object(pane, "copy_to_clipboard", return_value=False):
+            answer = self.cli("--send", SID, "--profile", ".claude-work", "--text", "and the docs", "--how", "enter")
+        self.assertEqual((answer["copied"], answer["text"], answer["message"]),
+                         (False, "and the docs", "Couldn't use the clipboard here"))
+        # a finished chat goes on in the background, as with auto
+        (self.home / ".claude-work/sessions/30.json").unlink()
+        with mock.patch.object(pane, "copy_to_clipboard") as copy:
+            self.assertEqual(self.send("enter")["how"], "background")
+        copy.assert_not_called()
+        self.assertEqual(self.calls(), [["--bg", "--resume", SID, "and the docs"]])
+
+    def test_enter_copies_here_for_a_hosts_terminal(self):
+        asked = {"ok": True, "how": "ask", "message": "Its terminal takes no text from outside"}
+        with mock.patch("remote.host_answer", return_value=asked) as host, \
+                mock.patch.object(pane, "copy_to_clipboard", return_value=True) as copy:
+            answer = self.cli("--send", SID, "--host", "lab", "--text", "and the docs", "--how", "enter")
+        self.assertEqual(host.call_args[0][1], ["--send", SID, "--text", "and the docs", "--how", "enter"])
+        self.assertEqual(answer["how"], "copy")
+        copy.assert_called_once_with("and the docs")  # (this computer's clipboard)
+        with mock.patch("remote.host_answer", return_value={"ok": True, "how": "typed", "message": "Sent"}), \
+                mock.patch.object(pane, "copy_to_clipboard") as copy:
+            self.assertEqual(self.cli("--send", SID, "--host", "lab", "--text", "x", "--how", "enter")["how"], "typed")
+        copy.assert_not_called()
+
     def test_after_the_turn(self):
         answer = self.cli("--send", SID, "--profile", ".claude-work", "--text", "next: docs", "--after-turn",
                           "--how", "background", "--session", SID, "--name", "Fix it")

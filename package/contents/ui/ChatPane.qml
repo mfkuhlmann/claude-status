@@ -510,8 +510,13 @@ Window {
             }
             if (result.how === "vscode" && result.link)
                 Qt.openUrlExternally(result.link)
-            if (result.how === "copy")
+            if (result.how === "copy") {
+                if (!result.copied) {   // (your message stays in the box)
+                    infoBad = true
+                    return
+                }
                 root.openRow(row || chat, host)
+            }
             replyBox.text = ""
             askHow = false
         }
@@ -649,7 +654,7 @@ Window {
         if (route === "vscode")
             return i18n("Goes into the chat's input in VS Code: press Enter there.") + where
         if (route === "terminal")
-            return i18n("Its terminal takes no text from outside: send it, and Claude there quits and the chat goes on in the background, or copy it and open its tab.") + where
+            return i18n("Its terminal takes no text from outside: Enter copies your message and opens its tab, to paste it there. Send, go on in the background: Claude there quits and the chat goes on in the background.") + where
         if (row && row.pid && row.kind === "bg")
             return i18n("Its background session stops, then goes on with your message.") + where
         return i18n("The chat goes on in the background with your message.") + where
@@ -1485,7 +1490,8 @@ Window {
                             font.pointSize: pane.pt
                             enabled: !(pane.permission && pane.route === "tmux")
                             // Enter sends, as in Claude's own prompt (Shift+Enter: a new line). For a
-                            // terminal that takes no text from outside, Enter asks how first.
+                            // terminal that takes no text from outside, Enter copies it and opens its
+                            // tab (pane.py how enter): Claude there never quits on an Enter.
                             // Ctrl+V with no text on the clipboard: its picture (an SSH host's
                             // chat asks to copy it there).
                             onTextChanged: {
@@ -1535,7 +1541,7 @@ Window {
                                         remove(selectionStart, selectionEnd)
                                     insert(cursorPosition, "\n")
                                 } else if (preeditText === "") {   // (not while an input method composes)
-                                    pane.send(pane.askHow ? "background" : "auto", false)
+                                    pane.send("enter", false)
                                 } else {
                                     return
                                 }

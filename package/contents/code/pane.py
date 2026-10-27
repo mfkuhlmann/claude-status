@@ -10,13 +10,15 @@ its permission prompt and its review.
         (a usage limit, an interruption); the newest N items. STAMP: the
         "stamp" of the last answer; while the transcript is as it was then,
         the answer is only {"ok", "unchanged"}.
-  --send CHAT --profile P --text T [--session ID] [--how auto|background|copy] [--after-turn] [--name N]
+  --send CHAT --profile P --text T [--session ID] [--how auto|background|copy|enter] [--after-turn] [--name N]
         your message to the chat, the way it can take one (send):
         typed into its tmux pane; put in the input of its VS Code tab; or
         Claude goes on with it in the background (claude --bg --resume),
         after a background session that has it stops. A chat in a terminal
         that takes no text from outside asks first (how background: it goes
         on in the background; copy: the message goes to the clipboard).
+        How enter (Enter in the pane): auto, but a terminal that takes no
+        text gets the copy (Claude there never quits on an Enter).
         --after-turn: queued, it's sent once the chat's turn ends.
   --answer REQUEST --decision allow|always|deny|answer|approve|approve-edits|keep [--note T] [--answers JSON]
         answer a permission request the hook relayed (permission_hook.py);
@@ -1168,7 +1170,7 @@ def answer_with_keys(entry, decision, note=""):
 
 # ---------------------------------------------------------------- sending a message
 
-HOWS = ("auto", "background", "copy")
+HOWS = ("auto", "background", "copy", "enter")
 
 
 def vscode_prompt_link(session_id, text):
@@ -1202,10 +1204,7 @@ def send(home, extra_dirs, profile_key, chat_id, text, session_id=None, how="aut
     if path is None:
         return {"ok": False, "message": "That chat's transcript isn't there any more"}
     if how == "copy":
-        copied = copy_to_clipboard(text)
-        return {"ok": True, "how": "copy", "copied": copied, "text": "" if copied else text,
-                "message": "Your message is in the clipboard: paste it into the chat" if copied
-                else "Couldn't use the clipboard here"}
+        return copy_answer(text)
     entry = None
     for sid in (session_id, chat_id):
         if cs.valid_id(sid or ""):
@@ -1264,6 +1263,18 @@ def send_later(home, extra_dirs, profile_key, chat_id, text, session_id=None, ho
             cs.change_queue(cache_root, take=old["id"])
     cs.change_queue(cache_root, add=entry)
     return True, "It's sent when this turn ends"
+
+
+ENTER_COPIES = "Its terminal takes no text from outside, so "
+
+
+def copy_answer(text, why=""):
+    """Your message on the clipboard, for you to paste into the chat (why: what comes first)."""
+    copied = copy_to_clipboard(text)
+    said = why + "your message is in the clipboard: paste it there" if why \
+        else "Your message is in the clipboard: paste it into the chat"
+    return {"ok": True, "how": "copy", "copied": copied, "text": "" if copied else text,
+            "message": said if copied else "Couldn't use the clipboard here"}
 
 
 def copy_to_clipboard(text):
@@ -1832,10 +1843,7 @@ def main(argv=None):
             mark_reviewed(cache_root, target, host, on=not off)
             return emit({"ok": True, "message": "Marked reviewed" if not off else "Not marked reviewed"})
         if host and action == "--send" and how == "copy":  # (the clipboard is this computer's)
-            copied = copy_to_clipboard((text or "").strip())
-            return emit({"ok": True, "how": "copy", "copied": copied, "text": "" if copied else text,
-                         "message": "Your message is in the clipboard: paste it into the chat" if copied
-                         else "Couldn't use the clipboard here"})
+            return emit(copy_answer((text or "").strip()))
         if host and action == "--send" and after:  # (queued here: the widget here sends it then)
             ok, said = send_later(home, config_dirs, profile, target, text, session, how, host, name)
             return emit({"ok": ok, "message": said})
@@ -1846,6 +1854,8 @@ def main(argv=None):
             answer = forward(host, rest)
             if action == "--review" and answer.get("ok"):
                 answer["reviewedAt"] = cs.load_reviewed(cache_root).get(cs.review_key(target, host))
+            if action == "--send" and how == "enter" and answer.get("how") == "ask":
+                answer = copy_answer((text or "").strip(), ENTER_COPIES)  # (here, as above)
             return emit(answer)
         if action == "--conversation":
             result = chat_conversation(home, config_dirs, target, profile, limit, stamp)
@@ -1855,6 +1865,8 @@ def main(argv=None):
                 result = {"ok": ok, "message": said}
             else:
                 result = send(home, config_dirs, profile, target, text, session, how)
+                if how == "enter" and result.get("how") == "ask":
+                    result = copy_answer((text or "").strip(), ENTER_COPIES)
         elif action == "--answer":
             ok, said = answer_request(cache_root, target, decision, note, answers)
             result = {"ok": ok, "message": said}
