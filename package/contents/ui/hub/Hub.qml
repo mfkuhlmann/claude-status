@@ -25,6 +25,12 @@ QtObject {
     property var lastStart: ({})     // command -> ms
     property var lastOutput: ({})    // command -> {stdout, stderr}
     property var again: ({})         // command -> true: run it again once it's done (something changed meanwhile)
+    // A check whose answer never came (plasmashell lost it) is given up after
+    // this long and run again; else it would count as still running for good,
+    // and the widget would show what it saw last until plasmashell restarts.
+    // (live.py waits up to 50 s by itself.)
+    readonly property int staleMs: 60000
+    readonly property int liveStaleMs: 120000
 
     signal output(string command, string stdout, string stderr)
     signal started(string command)   // (an SSH host shows "connecting…" meanwhile)
@@ -81,6 +87,7 @@ QtObject {
     property var liveWanted: ({})     // copy id -> its live.py command
     property string liveCommand: ""   // the one that runs: the longest-running copy's
     property bool liveRunning: false
+    property real liveStartedAt: 0
     property bool liveHealthy: false
     property int liveFailures: 0
 
@@ -111,6 +118,7 @@ QtObject {
         if (!liveCommand || liveRunning || liveRetry.running || !instanceName)
             return
         liveRunning = true
+        liveStartedAt = Date.now()
         liveRunner.connectSource(liveCommand + " --as " + shellQuote(instanceName))
     }
 
@@ -127,6 +135,7 @@ QtObject {
     }
 
     property Exec liveRunner: Exec {
+        staleMs: hub.liveStaleMs
         onNewData: (source, data) => {
             disconnectSource(source)
             hub.liveRunning = false
@@ -209,9 +218,12 @@ QtObject {
     function run(command, urgent) {
         for (const line in running) {
             if (running[line] === command) {
-                if (urgent)
-                    again[command] = true
-                return   // a still-running check: don't stack another
+                if (Date.now() - (lastStart[command] || 0) < staleMs) {
+                    if (urgent)
+                        again[command] = true
+                    return   // a still-running check: don't stack another
+                }
+                delete running[line]   // (no answer for too long: it's given up)
             }
         }
         const named = wantsOf(command).some(w => w.named)
@@ -219,13 +231,22 @@ QtObject {
                            : command
         running[line] = command
         lastStart[command] = Date.now()
-        started(command)
-        poller.connectSource(line)
+        try {
+            started(command)
+            poller.connectSource(line)
+        } catch (e) {
+            delete running[line]   // (it never started: not a check to wait for)
+            console.warn("Claude Status: a check didn't start: " + e)
+        }
     }
 
     property Timer ticker: Timer {
         repeat: true
         onTriggered: {
+            if (hub.liveRunning && Date.now() - hub.liveStartedAt > hub.liveStaleMs) {
+                hub.liveRunning = false   // (its watcher never answered: the next one starts)
+                hub.runLive()
+            }
             const due = {}
             for (const id in hub.copies)
                 for (const key in hub.copies[id].wants)
@@ -238,6 +259,7 @@ QtObject {
     }
 
     property Exec poller: Exec {
+        staleMs: hub.staleMs
         onNewData: (source, data) => {
             disconnectSource(source)
             const command = hub.running[source]
