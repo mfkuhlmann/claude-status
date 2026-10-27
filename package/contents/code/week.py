@@ -1076,6 +1076,41 @@ def clipped(intervals, start, end):
     return [[max(s, start), min(e, end)] + list(rest) for s, e, *rest in intervals if e > start and s < end]
 
 
+LANES_MAX = 24
+
+
+def day_lanes(chats, lo, hi, home):
+    """The Day view's lanes: one for each chat that did something in [lo, hi)
+    (oldest first), its stretches [from, to, kind]: w = Claude worked, y =
+    waited for you (a permission, a question), p = paused (asleep, a usage
+    limit); between its turns it was your turn. With how long it worked and
+    waited."""
+    lanes = []
+    for c in chats:
+        parts = []
+        for turn in c["turns"]:
+            s, e, _, gaps = turn[:4]
+            if e < lo or s >= hi:
+                continue
+            for a, b in minus([s, e], gaps):
+                parts.append([a, b, "w"])
+            parts += [[f, t, kind] for f, t, kind in gaps]
+        parts = [[max(a, lo), min(b, hi), k] for a, b, k in parts if b > lo and a < hi and min(b, hi) - max(a, lo) >= 1000]
+        if not parts:
+            continue
+        parts.sort()
+        lanes.append({"key": c["key"], "id": c["id"], "host": c["host"], "name": chat_label(c) or c["id"][:8],
+                      "profileDir": c["profiles"][0] if c.get("profiles") else "",
+                      "project": project_name(c["folder"], home) if c.get("folder") else "",
+                      "parts": parts, "workedMs": sum(b - a for a, b, k in parts if k == "w"),
+                      "waitedMs": sum(b - a for a, b, k in parts if k == "y")})
+    lanes.sort(key=lambda l: l["parts"][0][0])
+    if len(lanes) > LANES_MAX:   # (the busiest, in the order they began)
+        keep = {id(l) for l in sorted(lanes, key=lambda l: -(l["workedMs"] + l["waitedMs"]))[:LANES_MAX]}
+        lanes = [l for l in lanes if id(l) in keep]
+    return lanes
+
+
 def minus(span, holes):
     """span [start, end] without the holes: the stretches left."""
     out, at = [], span[0]
@@ -1345,6 +1380,7 @@ def recap(sources, back, account, now_ms, home, usage=None, added=(), span="week
         "prompts": permission_prompts(chats, w0, w1, home, added),
         "tips": tips(chats, w0, w1, total, parts["waits"]),
         "prices": {"asOf": PRICES_AS_OF, "guessed": sorted(guessed)},
+        "lanes": day_lanes(chats, w0, w1, home) if span == "day" else [],
         "sources": [{"host": s.get("host") or "", "ok": s.get("ok", True), "error": s.get("error") or ""}
                     for s in sources],
     }

@@ -1004,3 +1004,24 @@ class MondayRecapTests(unittest.TestCase):
         self.assertIsNone(week.monday_due(cache, monday + 14 * 86400 - 3 * 3600))   # (Monday 7:00)
         self.assertEqual(week.monday_due(cache, monday + 16 * 86400), "2026-W46")   # (off on Monday: Wednesday)
         self.assertEqual(json.loads((cache / week.MONDAY_FILE).read_text())["week"], "2026-W46")
+
+
+class LaneTests(unittest.TestCase):
+    """The Day view's lanes (week.day_lanes): each chat's day, worked, waited for you, paused."""
+
+    def test_a_chats_day_in_stretches(self):
+        h = 3_600_000
+        chats = [
+            {"key": "|a", "id": "a" * 8, "host": "", "name": "fix parser", "folder": "", "profiles": [".claude"],
+             "turns": [[1 * h, 3 * h, 0, [[2 * h, 2 * h + 600_000, "y"]], {}], [5 * h, 6 * h, 0, [[5 * h, 5 * h + 1800_000, "p"]], {}]]},
+            {"key": "|b", "id": "b" * 8, "host": "lab", "name": "train", "folder": "", "profiles": [],
+             "turns": [[-2 * h, 30 * 60_000, 0, [], {}]]},
+            {"key": "|c", "id": "c" * 8, "host": "", "name": "old", "folder": "", "profiles": [], "turns": [[-5 * h, -4 * h, 0, [], {}]]},
+        ]
+        lanes = week.day_lanes(chats, 0, 24 * h, Path("/home/x"))
+        self.assertEqual([l["id"] for l in lanes], ["b" * 8, "a" * 8])     # (in the order they began; none for c)
+        self.assertEqual(lanes[0]["parts"], [[0, 30 * 60_000, "w"]])        # (clipped to the day)
+        a = lanes[1]
+        self.assertEqual([p[2] for p in a["parts"]], ["w", "y", "w", "p", "w"])
+        self.assertEqual(a["waitedMs"], 600_000)
+        self.assertEqual(a["workedMs"], 2 * h - 600_000 + h - 1800_000)

@@ -24,6 +24,7 @@ PlasmaComponents3.ScrollView {
     readonly property var projects: recap ? recap.projects : []
     readonly property var models: recap ? recap.models : []
     readonly property var chats: recap ? recap.chats : []
+    readonly property var lanes: recap && recap.lanes ? recap.lanes : []   // (the Day view: chat by chat)
     readonly property var tips: recap ? recap.tips : []
     readonly property var trend: recap && recap.trend ? recap.trend : []
     readonly property var plan: recap && recap.plan ? recap.plan : []
@@ -1067,6 +1068,122 @@ PlasmaComponents3.ScrollView {
                         font: Kirigami.Theme.smallFont
                         opacity: 0.6
                     }
+                }
+            }
+        }
+
+        // The day, chat by chat (week.py: day_lanes): when each chat worked,
+        // waited for you (a permission, a question) or was paused (asleep, a
+        // limit); between its turns it was your turn. A name opens its chat.
+        ColumnLayout {
+            id: lanesBox
+            Layout.fillWidth: true
+            visible: view.hasData && view.lanes.length > 0
+            spacing: Math.round(view.gu * 0.2)
+            readonly property real t0: view.lanes.length ? Math.min.apply(null, view.lanes.map(l => l.parts[0][0])) : 0
+            readonly property real t1: view.lanes.length ? Math.max.apply(null, view.lanes.map(l => l.parts[l.parts.length - 1][1])) : 1
+            readonly property real span: Math.max(60000, t1 - t0)
+            readonly property real nameWidth: Math.round(view.gu * 9)
+            function color(kind) {
+                return kind === "w" ? Kirigami.Theme.focusColor : kind === "y" ? Kirigami.Theme.neutralTextColor
+                                                                              : Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.3)
+            }
+
+            SectionTitle {
+                text: i18n("Chat by chat")
+            }
+            RowLayout {
+                spacing: Kirigami.Units.largeSpacing
+                Repeater {
+                    model: [["w", i18n("Claude worked")], ["y", i18n("Waited for you")], ["p", i18n("Paused (asleep, a limit)")]]
+                    delegate: RowLayout {
+                        required property var modelData
+                        spacing: Kirigami.Units.smallSpacing
+                        Rectangle {
+                            width: view.gu * 0.6
+                            height: width
+                            radius: 2
+                            color: lanesBox.color(modelData[0])
+                        }
+                        PlasmaComponents3.Label {
+                            textFormat: Text.PlainText
+                            text: modelData[1]
+                            font: Kirigami.Theme.smallFont
+                            opacity: 0.8
+                        }
+                    }
+                }
+            }
+            Repeater {
+                model: view.lanes.length
+                delegate: RowLayout {
+                    id: laneRow
+                    required property int index
+                    readonly property var lane: view.lanes[index] || ({ name: "", parts: [], workedMs: 0, waitedMs: 0, id: "", host: "" })
+                    Layout.fillWidth: true
+                    spacing: Kirigami.Units.smallSpacing
+
+                    PlasmaComponents3.Label {
+                        textFormat: Text.PlainText
+                        Layout.preferredWidth: lanesBox.nameWidth
+                        text: (laneRow.lane.host ? laneRow.lane.host + ": " : "") + laneRow.lane.name
+                        elide: Text.ElideRight
+                        font: Kirigami.Theme.smallFont
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.openChatById(laneRow.lane.id, laneRow.lane.profileDir || "", "", "", "", laneRow.lane.host || "")
+                        }
+                    }
+                    Item {
+                        id: track
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: Math.round(view.gu * 0.75)
+
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: 3
+                            color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.06)
+                        }
+                        Repeater {
+                            model: laneRow.lane.parts.length
+                            delegate: Rectangle {
+                                required property int index
+                                readonly property var part: laneRow.lane.parts[index] || [0, 0, "w"]
+                                x: (part[0] - lanesBox.t0) / lanesBox.span * track.width
+                                width: Math.max(1.5, (part[1] - part[0]) / lanesBox.span * track.width)
+                                height: track.height
+                                radius: 2
+                                color: lanesBox.color(part[2])
+                            }
+                        }
+                        PlasmaCore.ToolTipArea {
+                            textFormat: Text.PlainText
+                            anchors.fill: parent
+                            mainText: laneRow.lane.name
+                            subText: i18n("Claude worked %1, waited for you %2", view.hours(laneRow.lane.workedMs), view.hours(laneRow.lane.waitedMs))
+                                     + (laneRow.lane.project ? "\n" + laneRow.lane.project : "")
+                        }
+                    }
+                }
+            }
+            RowLayout {
+                Layout.leftMargin: lanesBox.nameWidth + Kirigami.Units.smallSpacing
+                PlasmaComponents3.Label {
+                    textFormat: Text.PlainText
+                    text: Qt.formatTime(new Date(lanesBox.t0), "hh:mm")
+                    font: Kirigami.Theme.smallFont
+                    opacity: 0.6
+                }
+                Item {
+                    Layout.fillWidth: true
+                }
+                PlasmaComponents3.Label {
+                    textFormat: Text.PlainText
+                    text: Qt.formatTime(new Date(lanesBox.t1), "hh:mm")
+                    font: Kirigami.Theme.smallFont
+                    opacity: 0.6
                 }
             }
         }
