@@ -422,6 +422,13 @@ class Pane implements vscode.Disposable {
                     error: there.path ? "" : `Couldn't copy the picture to ${this.host}: ${there.message}` });
         break;
       }
+      case "complete": {
+        const r = await backend.pane(["--complete", this.chatId, ...(this.chat.profileDir ? ["--profile", this.chat.profileDir] : []),
+          ...(this.host ? ["--host", this.host] : configDirArgs())], this.host ? 60000 : 20000);
+        if (r.ok) this.post({ type: "offers", offers: { commands: Array.isArray(r.commands) ? r.commands : [],
+          files: Array.isArray(r.files) ? r.files : [], history: Array.isArray(r.history) ? r.history : [] } });
+        break;
+      }
       case "textSize":
         if (typeof m.scale === "number" && Number.isFinite(m.scale))
           await vscode.workspace.getConfiguration("claudeStatus").update("chatTextScale", textScale(m.scale), vscode.ConfigurationTarget.Global);

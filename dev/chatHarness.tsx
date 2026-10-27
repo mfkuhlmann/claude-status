@@ -87,6 +87,18 @@ const review: ReviewAnswer = {
 };
 
 // what the page sends, answered as the extension would
+// ?type=TEXT: typed into the reply box (to see what it offers)
+const typed = params.get("type");
+if (typed)
+  setTimeout(() => {
+    const box = document.querySelector<HTMLTextAreaElement>(".pane-reply");
+    if (!box) return;
+    box.focus();
+    box.value = typed;
+    box.setSelectionRange(typed.length, typed.length);
+    box.dispatchEvent(new Event("input", { bubbles: true }));
+  }, 300);
+
 window.addEventListener("harness-post", (e: Event) => {
   const m = (e as CustomEvent).detail as { type: string };
   if (m.type === "ready") {
@@ -97,6 +109,14 @@ window.addEventListener("harness-post", (e: Event) => {
     setTimeout(() => send({ type: "picture", id, path: `/home/alice/.cache/claude-widget/images/20261026-1015${id.slice(-2)}.png`, error: "" }), 200);
   } else if (m.type === "review") {
     send({ type: "review", answer: review, error: "" });
+  } else if (m.type === "complete") {
+    send({ type: "offers", offers: {
+      commands: [{ name: "/compact", about: "Free up context by summarizing the conversation so far", kind: "Claude" },
+                 { name: "/context", about: "Show how full the context is", kind: "Claude" },
+                 { name: "/release", about: "Cut a release", kind: "project" }],
+      files: ["src/parser.ts", "src/parse_date.ts", "tests/parser.test.ts", "README.md"],
+      history: ["Fix the date parser", "Run the tests again"],
+    } });
   }
 });
 

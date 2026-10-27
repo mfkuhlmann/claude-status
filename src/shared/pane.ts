@@ -86,7 +86,8 @@ export type PaneHostMessage =
   | { type: "result"; kind: string; ok: boolean; message: string; ask?: boolean } // ask: its terminal takes no text: choose
   | { type: "textSize"; scale: number } // claudeStatus.chatTextScale
   | { type: "picture"; id: string; path: string; error: string } // a pasted picture, saved (path: where the chat opens it)
-  | { type: "file"; id: string; path: string }; // a file dropped on the tab: named in the reply (@path)
+  | { type: "file"; id: string; path: string } // a file dropped on the tab: named in the reply (@path)
+  | { type: "offers"; offers: Offers }; // what the reply box offers as you type (pane.py --complete)
 
 // tab -> extension
 export type PaneMessage =
@@ -106,7 +107,50 @@ export type PaneMessage =
   | { type: "textSize"; scale: number } // A− / A+: claudeStatus.chatTextScale
   | { type: "picture"; id: string; mime: string; data: string } // pasted in the reply (base64): saved, an SSH host's copied there
   | { type: "attach"; id: string; path: string } // a file dropped from VS Code's Explorer: a picture saved as one, a file named
-  | { type: "screenshot"; id: string }; // a region of the screen you pick, as a picture
+  | { type: "screenshot"; id: string } // a region of the screen you pick, as a picture
+  | { type: "complete" }; // what the reply box offers (answered with "offers")
+
+// What the reply box offers as you type (pane.py --complete): / at the start
+// Claude's commands, yours and the project's, and skills; @ the project's
+// files; ↑ / ↓ your past prompts in its folder (newest first)
+export interface Offers {
+  commands: { name: string; about: string; kind: string }[];
+  files: string[];
+  history: string[];
+}
+
+export interface Suggestion {
+  text: string;
+  about: string;
+  insert: string;
+}
+
+// For the text before the cursor: where the word being completed starts and
+// what fits it (at most 8: commands that start with it first, files whose
+// name starts with it first, then shorter paths); none for a word you closed
+// the list for (dismissed)
+export function suggestFor(before: string, offers: Offers | null, dismissed = ""): { start: number; items: Suggestion[]; token: string } {
+  const command = /^\/([^\s]*)$/.exec(before);
+  const file = /(^|\s)@("?)([^\s"]*)$/.exec(before);
+  const token = command ? before : file ? before.slice(before.length - file[0].length + file[1].length) : "";
+  if (!token || token === dismissed || !offers) return { start: -1, items: [], token };
+  const q = (command ? command[1] : file![3]).toLowerCase();
+  let items: Suggestion[];
+  if (command) {
+    const starts = (n: string) => (n.toLowerCase().startsWith("/" + q) ? 0 : 1);
+    items = offers.commands.filter((c) => c.name.toLowerCase().includes(q)).sort((a, b) => starts(a.name) - starts(b.name))
+      .map((c) => ({ text: c.name, about: c.about + (c.kind === "Claude" ? "" : ` · ${c.kind}`), insert: c.name + " " }));
+  } else {
+    const rank = (f: string) => {
+      const base = f.slice(f.lastIndexOf("/") + 1).toLowerCase();
+      return base.startsWith(q) ? 0 : base.includes(q) ? 1 : 2;
+    };
+    items = offers.files.filter((f) => f.toLowerCase().includes(q)).slice(0, 400)
+      .sort((a, b) => rank(a) - rank(b) || a.length - b.length)
+      .map((f) => ({ text: "@" + f, about: "", insert: fileMention(f) + " " }));
+  }
+  return { start: before.length - token.length, items: items.slice(0, 8), token };
+}
 
 // A file named in a reply as Claude's prompt names one (@path; quoted with spaces)
 export function fileMention(path: string): string {

@@ -272,3 +272,24 @@ test("a file dropped on a reply is named as Claude's prompt names it; a drop's l
     ["/home/me/a b.txt", "/tmp/c.png"]);
   assert.deepEqual(droppedPaths(""), []);
 });
+
+test("the reply box offers commands at the start and files after @, best first", async () => {
+  const { suggestFor } = await import("../src/shared/pane");
+  const offers = {
+    commands: [{ name: "/compact", about: "Free up context", kind: "Claude" }, { name: "/ship", about: "Ship it", kind: "yours" },
+               { name: "/git:compare", about: "Compare", kind: "project" }],
+    files: ["src/parser/compiler.ts", "docs/compiling.md", "comp.py", "tests/my notes.txt"],
+    history: [],
+  };
+  const c = suggestFor("/comp", offers);
+  assert.deepEqual(c.items.map((i) => i.text), ["/compact", "/git:compare"]);
+  assert.equal(c.items[1].about, "Compare · project");
+  assert.equal(c.start, 0);
+  assert.deepEqual(suggestFor("fix /comp", offers).items, []); // (a command only at the start)
+  const f = suggestFor("look at @comp", offers);
+  assert.deepEqual(f.items.map((i) => i.text), ["@comp.py", "@docs/compiling.md", "@src/parser/compiler.ts"]); // (names that start with it, shorter paths first)
+  assert.equal(f.start, "look at ".length);
+  assert.equal(suggestFor("see @notes", offers).items[0].insert, '@"tests/my notes.txt" ');
+  assert.deepEqual(suggestFor("look at @comp", offers, "@comp").items, []); // (Esc closed it for that word)
+  assert.deepEqual(suggestFor("/comp", null).items, []);
+});

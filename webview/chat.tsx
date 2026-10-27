@@ -6,7 +6,7 @@
 
 import { render } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { droppedPaths, fileMention, picturesIn, PICTURE_TYPES, routeHint, testsText, TEXT_SCALES, withoutPicture, type Conversation, type PaneChat, type PaneHostMessage, type PaneItem, type PaneMessage, type ReviewAnswer } from "../src/shared/pane";
+import { droppedPaths, fileMention, picturesIn, PICTURE_TYPES, routeHint, suggestFor, type Offers, type Suggestion, testsText, TEXT_SCALES, withoutPicture, type Conversation, type PaneChat, type PaneHostMessage, type PaneItem, type PaneMessage, type ReviewAnswer } from "../src/shared/pane";
 import { AskBox, Diff } from "./components/AskBox";
 import type { Answers, Decision } from "../src/shared/types";
 import { Tag } from "./components/Tag";
@@ -134,6 +134,46 @@ function ChatApp() {
     };
     reader.readAsDataURL(file);
   };
+  // What the box offers as you type (/ commands and skills, @ files) and ↑ / ↓
+  // through your past prompts there (pane.py --complete, asked again after a minute)
+  const [offers, setOffers] = useState<Offers | null>(null);
+  const offersAt = useRef(0);
+  const [cursor, setCursor] = useState(0);
+  const [dismissed, setDismissed] = useState("");
+  const [offerAt, setOfferAt] = useState(0);
+  const historyAt = useRef(-1);
+  const historyDraft = useRef("");
+  const askOffers = () => {
+    if (Date.now() - offersAt.current < 60000) return;
+    offersAt.current = Date.now();
+    post({ type: "complete" });
+  };
+  const offered = suggestFor(text.slice(0, cursor), offers, dismissed);
+  useEffect(() => {
+    if (offered.token && Date.now() - offersAt.current >= 60000) askOffers();
+  }, [offered.token]);
+  useEffect(() => setOfferAt(0), [offered.token, offered.items.length]);
+  const take = (sug: Suggestion) => {
+    const next = text.slice(0, offered.start) + sug.insert + text.slice(cursor);
+    const at = offered.start + sug.insert.length;
+    setText(next);
+    setCursor(at);
+    requestAnimationFrame(() => reply.current?.setSelectionRange(at, at));
+  };
+  const historyStep = (step: number): boolean => {
+    const list = offers?.history ?? [];
+    if (!list.length) return false;
+    if (historyAt.current < 0) historyDraft.current = text;
+    const next = Math.max(-1, Math.min(list.length - 1, historyAt.current + step));
+    if (next === historyAt.current) return true;
+    historyAt.current = next;
+    const value = next < 0 ? historyDraft.current : list[next];
+    setText(value);
+    setCursor(value.length);
+    requestAnimationFrame(() => reply.current?.setSelectionRange(value.length, value.length));
+    return true;
+  };
+
   // Dropped on the tab: files from VS Code's Explorer (held Shift) by their
   // paths (a picture goes in as one, a file is named), pictures from
   // elsewhere as pasted ones; the screenshot button: a region you pick
@@ -213,6 +253,7 @@ function ChatApp() {
           reply.current?.focus();
         }
       }
+      else if (m.type === "offers") setOffers(m.offers);
       else if (m.type === "file") {
         const p = pending.current[m.id];
         delete pending.current[m.id];
@@ -425,6 +466,17 @@ function ChatApp() {
               <button type="button" class="btn secondary small" onClick={() => post({ type: "unqueue" })}>Cancel</button>
             </div>
           ) : null}
+          {offered.items.length ? (
+            <ul class="pane-offers" role="listbox">
+              {offered.items.map((o, i) => (
+                <li key={o.text} role="option" aria-selected={i === offerAt} class={i === offerAt ? "on" : ""}
+                  onMouseDown={(e) => { e.preventDefault(); take(o); }}>
+                  <code>{o.text}</code>
+                  {o.about ? <span class="muted">{o.about}</span> : null}
+                </li>
+              ))}
+            </ul>
+          ) : null}
           <div class={"pane-replybox" + (dragging ? " dropping" : "")}
             onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
             onDragLeave={() => setDragging(false)}
@@ -436,9 +488,44 @@ function ChatApp() {
             ref={reply}
             placeholder={chat?.permission ? "It's asking you something: answer that first" : "Reply to Claude… (Enter sends, Shift+Enter: new line; Ctrl+V or drop with Shift: a picture or a file too)"}
             value={text}
-            onInput={(e) => setText((e.target as HTMLTextAreaElement).value)}
+            onInput={(e) => {
+              const box = e.target as HTMLTextAreaElement;
+              setText(box.value);
+              setCursor(box.selectionStart);
+              historyAt.current = -1;
+            }}
+            onSelect={(e) => setCursor((e.target as HTMLTextAreaElement).selectionStart)}
+            onFocus={askOffers}
             onPaste={pasted}
             onKeyDown={(e) => {
+              const box = e.target as HTMLTextAreaElement;
+              if (offered.items.length) {
+                if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                  e.preventDefault();
+                  const n = offered.items.length;
+                  setOfferAt((i) => (i + (e.key === "ArrowDown" ? 1 : n - 1)) % n);
+                  return;
+                }
+                if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey && !e.isComposing)) {
+                  e.preventDefault();
+                  take(offered.items[Math.min(offerAt, offered.items.length - 1)]);
+                  return;
+                }
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  setDismissed(offered.token);
+                  return;
+                }
+              }
+              const firstLine = box.value.lastIndexOf("\n", box.selectionStart - 1) < 0;
+              const lastLine = box.value.indexOf("\n", box.selectionStart) < 0;
+              if (!e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey
+                  && ((e.key === "ArrowUp" && firstLine && (box.value === "" || historyAt.current >= 0))
+                      || (e.key === "ArrowDown" && lastLine && historyAt.current >= 0))
+                  && historyStep(e.key === "ArrowUp" ? 1 : -1)) {
+                e.preventDefault();
+                return;
+              }
               // Enter sends, as in Claude's own prompt (Shift+Enter: a new line). For a
               // terminal that takes no text from outside, the first Enter asks how.
               if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {

@@ -3191,3 +3191,41 @@ body.vscode-light .pane {
 .pane-shot {
   margin-right: auto;
 }
+
+/* What the reply box offers as you type (chat.tsx): / commands, @ files */
+.pane-offers {
+  margin: 0 0 4px;
+  padding: 2px;
+  list-style: none;
+  border: 1px solid var(--vscode-widget-border, color-mix(in srgb, var(--cs-fg) 15%, transparent));
+  border-radius: 4px;
+  background: var(--vscode-editorSuggestWidget-background, color-mix(in srgb, var(--cs-fg) 6%, transparent));
+}
+
+.pane-offers li {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 2px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.pane-offers li code {
+  flex: none;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pane-offers li span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pane-offers li.on {
+  background: var(--vscode-editorSuggestWidget-selectedBackground, var(--vscode-list-activeSelectionBackground, rgba(0, 120, 212, 0.3)));
+  color: var(--vscode-editorSuggestWidget-selectedForeground, inherit);
+}

@@ -10,6 +10,11 @@
   open burrow is drawn once and copied into each picture, which halves what
   a picture costs. A pet you pick up trails your mouse on a spring, swings
   as you move it and wobbles when you let go.
+- **A reply box that helps:** in a chat's tab, `/` at the start offers
+  Claude's commands, your own and the project's commands and skills (with
+  what each does); `@` offers the project's files; ↑ and ↓ go through what
+  you asked in that folder before. ↑ / ↓ pick, Tab or Enter takes one, Esc
+  closes the list.
 - **Drop files and screenshots on a chat:** in a chat's tab, drop files
   from VS Code's Explorer on the reply (hold Shift while dragging, as for
   any web page in VS Code): a picture goes in as a pasted one, any other
