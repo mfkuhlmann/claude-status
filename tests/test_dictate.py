@@ -84,24 +84,132 @@ class DictateTests(unittest.TestCase):
         self.assertNotIn("-m ", self.log.read_text())
         self.assertEqual(list((self.home / "cache/claude-widget/dictation").iterdir()), [])
 
-    def test_what_is_missing_is_said(self):
+    def test_nothing_to_write_with_offers_the_setup(self):
         self.tool("pw-record", FAKE_RECORDER)
         got = self.run_it("--status", model=False)
         self.assertFalse(got["ok"])
-        self.assertIsNone(got["tool"])
+        self.assertIsNone(got["engine"])
         self.assertIsNone(got["model"])
-        self.assertIn("whisper-cli", got["missing"][0])
-        self.assertNotIn("sudo dnf install", got["missing"][0])
-        self.assertEqual([m["name"] for m in got["models"]], ["base", "small", "base.en"])
-        # a model downloaded before is found where the widget keeps them
+        self.assertTrue(got["canSetup"])
+        self.assertEqual(got["missing"], [])
+        self.assertEqual([m["name"] for m in got["models"]], ["tiny", "base", "base.en", "small", "medium", "large-v3-turbo"])
+        self.assertFalse(any(m["installed"] for m in got["models"]))
+        self.assertEqual(self.run_it("--get-model", "base"), {"ok": False, "message": "Set up dictation first"})
+
+    def test_whisper_cpp_models_found_chosen_and_deleted(self):
+        self.tool("pw-record", FAKE_RECORDER)
+        self.tool("whisper-cli", FAKE_WHISPER)
+        # one downloaded by the widget, one whisper.cpp keeps (not the widget's to delete)
         folder = self.home / "data/claude-widget/whisper"
         folder.mkdir(parents=True)
-        (folder / "ggml-small.bin").write_bytes(b"m")
-        self.assertEqual(self.run_it("--status", model=False)["model"], str(folder / "ggml-small.bin"))
+        (folder / "ggml-base.bin").write_bytes(b"m")
+        theirs = self.home / ".local/share/whisper.cpp/models"
+        theirs.mkdir(parents=True)
+        (theirs / "ggml-small.bin").write_bytes(b"m")
+        got = self.run_it("--status", model=False)
+        self.assertEqual((got["engine"], got["modelName"], got["chosen"]), ("whisper.cpp", "small", "auto"))
+        installed = {m["name"]: m["deletable"] for m in got["models"] if m["installed"]}
+        self.assertEqual(installed, {"base": True, "small": False})
+        self.assertTrue(self.run_it("--use-model", "base", model=False)["ok"])
+        self.assertEqual(self.run_it("--status", model=False)["model"], str(folder / "ggml-base.bin"))
+        self.assertFalse(self.run_it("--delete-model", "small", model=False)["ok"])
+        self.assertTrue(self.run_it("--delete-model", "base", model=False)["ok"])
+        got = self.run_it("--status", model=False)
+        self.assertEqual((got["modelName"], got["chosen"]), ("small", "auto"))
 
     def test_odd_ids_and_models_are_refused(self):
         self.assertEqual(self.run_it("--start", "../x"), {"ok": False, "message": "Not a recording: ../x"})
         self.assertEqual(self.run_it("--get-model", "huge"), {"ok": False, "message": "Not a model: huge"})
+        self.assertEqual(self.run_it("--use-model", "huge"), {"ok": False, "message": "Not a model: huge"})
+
+
+# faster-whisper's Python as dictate.py runs it (-I -c SCRIPT ARGS…): writes
+# down, or "downloads" a model into the folder it's given
+FAKE_FW_PYTHON = """#!{python}
+import os, sys
+script, args = sys.argv[3], sys.argv[4:]
+open({log!r}, "a").write(" ".join(args) + " offline=" + os.environ.get("HF_HUB_OFFLINE", "") + "\\n")
+if "download_model" in script:
+    os.makedirs(os.path.join(args[1], ".cache"), exist_ok=True)
+    open(os.path.join(args[1], "model.bin"), "w").write("m")
+else:
+    print("Make the parser accept ISO weeks.")
+    print("Then run the tests.")
+"""
+
+
+class FasterWhisperTests(DictateTests):
+    """Set up: its environment (a stand-in Python) in the widget's folder."""
+    def setUp(self):
+        super().setUp()
+        self.whisper = self.home / "data/claude-widget/whisper"
+        python = self.whisper / "venv/bin/python"
+        python.parent.mkdir(parents=True)
+        python.write_text(FAKE_FW_PYTHON.format(python=sys.executable, log=str(self.log)))
+        python.chmod(0o755)
+        (self.whisper / "venv/.ready").write_text("faster-whisper")
+        self.tool("pw-record", FAKE_RECORDER)
+
+    def fw_model(self, name):
+        (self.whisper / "models" / name).mkdir(parents=True)
+        (self.whisper / "models" / name / "model.bin").write_bytes(b"m")
+
+    def test_recorded_then_written_down_offline(self):
+        self.fw_model("base")
+        got = self.run_it("--status", model=False)
+        self.assertTrue(got["ok"])
+        self.assertEqual((got["engine"], got["modelName"], got["setUp"]), ("faster-whisper", "base", True))
+        self.run_it("--start", "r1")
+        time.sleep(0.3)
+        got = self.run_it("--stop", "r1", "--language", "de", model=False)
+        self.assertEqual(got, {"ok": True, "text": "Make the parser accept ISO weeks. Then run the tests.", "message": ""})
+        line = self.log.read_text().splitlines()[-1]
+        self.assertTrue(line.startswith(str(self.whisper / "models/base") + " "), line)
+        self.assertIn(" de ", line)
+        self.assertTrue(line.endswith("offline=1"))   # (nothing over the network)
+        self.assertEqual(list((self.home / "cache/claude-widget/dictation").iterdir()), [])
+
+    def test_models_downloaded_chosen_and_deleted(self):
+        self.fw_model("base")
+        got = self.run_it("--get-model", "small", model=False)
+        self.assertTrue(got["ok"], got)
+        self.assertEqual(sorted(p.name for p in (self.whisper / "models").iterdir()), ["base", "small"])
+        self.assertFalse((self.whisper / "models/small/.cache").exists())
+        got = self.run_it("--status", model=False)
+        self.assertEqual((got["modelName"], got["chosen"]), ("small", "small"))   # (the one downloaded is used)
+        self.assertTrue(all(m["deletable"] for m in got["models"] if m["installed"]))
+        self.assertEqual(self.run_it("--use-model", "medium", model=False),
+                         {"ok": False, "message": "The medium model isn't downloaded"})
+        self.assertTrue(self.run_it("--use-model", "base", model=False)["ok"])
+        self.assertEqual(self.run_it("--status", model=False)["modelName"], "base")
+        self.assertTrue(self.run_it("--delete-model", "base", model=False)["ok"])
+        got = self.run_it("--status", model=False)
+        self.assertEqual((got["modelName"], got["chosen"]), ("small", "auto"))
+        self.assertTrue(self.run_it("--remove-setup", model=False)["ok"])
+        got = self.run_it("--status", model=False)
+        self.assertEqual((got["engine"], got["setUp"], got["canSetup"]), (None, False, True))
+        self.assertEqual(sorted(p.name for p in self.whisper.iterdir()), [".busy"])
+
+    def test_setup_once_set_up_only_brings_the_model(self):
+        got = self.run_it("--setup", model=False)
+        self.assertTrue(got["ok"], got)
+        self.assertTrue((self.whisper / "models/base/model.bin").is_file())
+        self.assertEqual(self.log.read_text().count("base "), 1)
+
+    def test_one_download_at_a_time(self):
+        import fcntl
+        self.whisper.mkdir(parents=True, exist_ok=True)
+        with open(self.whisper / ".busy", "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            got = self.run_it("--get-model", "tiny", model=False)
+        self.assertEqual(got, {"ok": False, "message": "Dictation is being set up or a model downloaded already"})
+        self.assertFalse((self.whisper / "models/tiny").exists())
+
+    # (whisper.cpp's own tests, without whisper.cpp here)
+    test_recorded_then_written_down_and_the_recording_goes = None
+    test_cancelled_nothing_is_written_down = None
+    test_nothing_to_write_with_offers_the_setup = None
+    test_whisper_cpp_models_found_chosen_and_deleted = None
 
 
 if __name__ == "__main__":

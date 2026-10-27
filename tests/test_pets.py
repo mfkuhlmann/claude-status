@@ -1009,7 +1009,8 @@ class SettingsPageTests(unittest.TestCase):
             self.assertIn(f'"{flag}"', host_actions, flag)
         general = (ROOT / "ui/configGeneral.qml").read_text()
         for flag in sorted(set(re.findall(r"--[a-z-]+", general))):
-            self.assertTrue(any(f'"{flag}"' in main_of(name) for name in ("jump.py", "notify_sound.py", "week.py", "pane.py")),
+            self.assertTrue(any(f'"{flag}"' in main_of(name) for name in ("jump.py", "notify_sound.py", "week.py", "pane.py",
+                                                                         "dictate.py")),
                             flag)
 
     def test_every_setting_the_ui_reads_exists(self):

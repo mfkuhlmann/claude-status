@@ -548,13 +548,15 @@ Window {
 
     // ---------------------------------------------------------------- dictating
     //
-    // The microphone button: record, then whisper.cpp writes it down here
-    // (dictate.py; nothing leaves the computer) and it goes in at the cursor
-    property string dictating: ""        // "", "recording", "writing", "model" (a model being downloaded)
+    // The microphone button: record, then whisper (whisper.cpp, or the
+    // faster-whisper the widget sets up) writes it down here (dictate.py;
+    // nothing leaves the computer) and it goes in at the cursor
+    property string dictating: ""        // "", "recording", "writing", "model" (a model being downloaded), "setup"
     property string dictateId: ""
     property real dictateSince: 0
     property var dictateState: null      // dictate.py --status
     property bool offerModel: false      // (asks before it downloads one)
+    property bool offerSetup: false      // (asks before it sets dictation up)
 
     function dictateRun(args) {
         dictateExec.connectSource("python3 -I " + root.shellQuote(root.codeDir + "dictate.py") + " " + args + " # " + Date.now())
@@ -590,7 +592,9 @@ Window {
                     pane.dictateSince = Date.now()
                     pane.recordedMs = 0
                     pane.dictateRun("--start " + pane.dictateId)
-                } else if (result.tool && !result.model) {
+                } else if (result.recorder && result.canSetup) {
+                    pane.offerSetup = true
+                } else if (result.recorder && result.tool && !result.model) {
                     pane.offerModel = true
                 } else {
                     pane.noteDictation(i18n("To dictate, install %1.", (result.missing || []).join(i18n(" and "))), true)
@@ -609,7 +613,7 @@ Window {
                 } else {
                     pane.noteDictation(result.message, true)
                 }
-            } else if (source.indexOf(" --get-model ") >= 0) {
+            } else if (source.indexOf(" --get-model ") >= 0 || source.indexOf(" --setup") >= 0) {
                 pane.dictating = ""
                 pane.noteDictation(result.message, !result.ok)
             }
@@ -1579,11 +1583,26 @@ Window {
                     text: i18n("Copying the picture to %1…", pane.host)
                     color: pane.mutedColor
                 }
-                // whisper.cpp is there but no speech model: one is downloaded once you say so
+                // Nothing to write it down with: dictation is set up once you say so
+                ConfirmLine {
+                    Layout.fillWidth: true
+                    visible: pane.offerSetup
+                    text: i18n("Set up dictation? It installs faster-whisper, speech to text that runs on this computer, and its base speech model: about %1 MB from pypi.org and huggingface.co into ~/.local/share/claude-widget/whisper, no sudo needed; a few minutes. What you say never leaves the computer. Other models: in the settings.",
+                               pane.dictateState ? pane.dictateState.setupMb : 612)
+                    confirmText: i18n("Set up")
+                    onConfirmed: {
+                        pane.offerSetup = false
+                        pane.dictating = "setup"
+                        pane.dictateRun("--setup")
+                    }
+                    onCancelled: pane.offerSetup = false
+                }
+                // whisper is there but no speech model: one is downloaded once you say so
                 ConfirmLine {
                     Layout.fillWidth: true
                     visible: pane.offerModel
-                    text: i18n("To dictate, whisper.cpp needs a speech model: download its base model (142 MB) from huggingface.co? It's kept in ~/.local/share/claude-widget/whisper; what you say never leaves the computer.")
+                    text: i18n("To dictate, %1 needs a speech model: download its base model (142 MB) from huggingface.co? It's kept in ~/.local/share/claude-widget/whisper; what you say never leaves the computer. Other models: in the settings.",
+                               pane.dictateState && pane.dictateState.engine ? pane.dictateState.engine : "whisper")
                     confirmText: i18n("Download")
                     onConfirmed: {
                         pane.offerModel = false
@@ -1610,7 +1629,8 @@ Window {
                         enabled: pane.dictating === "" || pane.dictating === "recording"
                         text: pane.dictating === "recording" ? i18n("Stop: write it down") + " · " + root.duration(Math.max(1000, pane.recordedMs))
                               : pane.dictating === "writing" ? i18n("Writing it down…")
-                              : pane.dictating === "model" ? i18n("Downloading the speech model…") : i18n("Dictate")
+                              : pane.dictating === "model" ? i18n("Downloading the speech model…")
+                              : pane.dictating === "setup" ? i18n("Setting up dictation (a few minutes)…") : i18n("Dictate")
                         display: pane.dictating === "" ? PlasmaComponents3.AbstractButton.IconOnly : PlasmaComponents3.AbstractButton.TextBesideIcon
                         onClicked: pane.dictate()
 
@@ -1618,7 +1638,7 @@ Window {
                             textFormat: Text.PlainText
                             anchors.fill: parent
                             mainText: i18n("Dictate")
-                            subText: i18n("Say your reply: click again to stop, and it's written down where you're typing. On this computer only (whisper.cpp): what you say doesn't leave it.")
+                            subText: i18n("Say your reply: click again to stop, and it's written down where you're typing. On this computer only (whisper): what you say doesn't leave it. The speech model: in the settings.")
                         }
                     }
                     PlasmaComponents3.ToolButton {

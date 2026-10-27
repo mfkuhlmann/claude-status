@@ -257,6 +257,49 @@ KCM.SimpleKCM {
         }
     }
 
+    // Dictation (dictate.py --status, --setup, --get-model, --use-model,
+    // --delete-model, --remove-setup): faster-whisper and the speech models
+    // in ~/.local/share/claude-widget/whisper, one choice for every copy of the
+    // widget and the VS Code extension, so it changes at once (not with Apply)
+    property var dictation: null      // its --status
+    property string dictationBusy: "" // what runs: "setup", "get", "delete", "use", "remove"
+    property string dictationModel: ""   // (the model that's downloaded or deleted)
+    property string dictationMessage: ""
+    property bool removeAsking: false
+
+    Exec {
+        id: dictateHelper
+        onNewData: (source, data) => {
+            disconnectSource(source)
+            let result = null
+            try {
+                result = JSON.parse(data["stdout"])
+            } catch (e) {
+                page.dictationBusy = ""
+                page.dictationMessage = i18n("Couldn't ask about dictation")
+                return
+            }
+            if (result.models !== undefined) {
+                page.dictation = result
+            } else {
+                page.dictationBusy = ""
+                page.dictationMessage = result.message || ""
+                page.runDictate(["--status"])
+            }
+        }
+    }
+
+    function runDictate(args) {
+        const q = s => "'" + String(s).replace(/'/g, "'\\''") + "'"
+        if (args[0] !== "--status") {
+            dictationBusy = {"--setup": "setup", "--get-model": "get", "--delete-model": "delete", "--use-model": "use",
+                             "--remove-setup": "remove"}[args[0]] || ""
+            dictationModel = args[1] || ""
+            dictationMessage = ""
+        }
+        dictateHelper.connectSource("python3 -I " + q(codeDir + "dictate.py") + " " + args.map(q).join(" ") + " # " + Date.now())
+    }
+
     function runKeys(args) {
         const q = s => "'" + String(s).replace(/'/g, "'\\''") + "'"
         keysHelper.connectSource("python3 -I " + q(codeDir + "pane.py") + " --shortcuts " + args.map(q).join(" ") + " # " + Date.now())
@@ -283,6 +326,7 @@ KCM.SimpleKCM {
         runRelay(["status"])
         runLive(["status"])
         runKeys(["status"])
+        runDictate(["--status"])
     }
 
     function play(sound) {
@@ -414,7 +458,145 @@ KCM.SimpleKCM {
             Kirigami.FormData.label: i18n("Dictation language:")
             placeholderText: "auto"
             QQC2.ToolTip.visible: hovered
-            QQC2.ToolTip.text: i18n("The language you dictate replies in, as a code (en, de, fr…), or auto to let whisper.cpp tell. Dictating needs whisper.cpp; it runs on this computer only.")
+            QQC2.ToolTip.text: i18n("The language you dictate replies in, as a code (en, de, fr…), or auto to let whisper tell. Dictating runs on this computer only.")
+        }
+
+        // Dictation: what writes it down, set up here, and its speech models
+        QQC2.Label {
+            Kirigami.FormData.label: i18n("Dictation:")
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 20
+            wrapMode: Text.Wrap
+            text: {
+                const d = page.dictation
+                if (page.dictationBusy === "setup")
+                    return i18n("Setting up dictation (a few minutes)…")
+                if (page.dictationBusy === "get")
+                    return i18n("Downloading the %1 model…", page.dictationModel)
+                if (page.dictationBusy === "remove")
+                    return i18n("Deleting faster-whisper…")
+                if (!d)
+                    return i18n("Asking…")
+                if (!d.engine)
+                    return d.canSetup ? i18n("Not set up. Dictating needs faster-whisper, speech to text that runs on this computer; set up here, no sudo needed.")
+                                      : i18n("To dictate, install %1.", d.missing.join(i18n(" and ")))
+                let line = d.engine === "whisper.cpp" ? i18n("Written down by whisper.cpp (%1).", d.tool)
+                                                      : i18n("Written down by faster-whisper, set up in ~/.local/share/claude-widget/whisper.")
+                line += " " + (!d.modelName ? i18n("No speech model yet: download one below.")
+                               : d.chosen === "auto" ? i18n("It uses the %1 model (the best one downloaded).", d.modelName)
+                               : i18n("It uses the %1 model.", d.modelName))
+                if (!d.recorder)
+                    line += " " + i18n("To record, install %1.", d.missing.join(i18n(" and ")))
+                return line
+            }
+        }
+
+        QQC2.Button {
+            visible: page.dictation !== null && page.dictation.canSetup
+            enabled: page.dictationBusy === ""
+            icon.name: "download"
+            text: i18n("Set Up Dictation (about %1 MB)", page.dictation ? page.dictation.setupMb : 0)
+            onClicked: page.runDictate(["--setup"])
+            QQC2.ToolTip.visible: hovered
+            QQC2.ToolTip.text: i18n("Installs faster-whisper from pypi.org into its own Python environment and downloads the base speech model from huggingface.co, all in ~/.local/share/claude-widget/whisper. What you say never leaves the computer.")
+        }
+
+        // The speech models: pick the one used, download or delete them
+        ColumnLayout {
+            visible: page.dictation !== null && !!page.dictation.engine
+            spacing: 0
+
+            QQC2.ButtonGroup {
+                id: modelGroup
+            }
+            Repeater {
+                model: page.dictation && page.dictation.engine ? page.dictation.models : []
+
+                RowLayout {
+                    required property var modelData
+                    spacing: Kirigami.Units.smallSpacing
+
+                    QQC2.RadioButton {
+                        QQC2.ButtonGroup.group: modelGroup
+                        Layout.preferredWidth: Kirigami.Units.gridUnit * 10
+                        text: modelData.name + " · " + i18n("%1 MB", modelData.mb)
+                        checked: modelData.used
+                        enabled: modelData.installed && page.dictationBusy === ""
+                        onToggled: page.runDictate(["--use-model", modelData.name])
+                    }
+                    QQC2.Label {
+                        Layout.preferredWidth: Kirigami.Units.gridUnit * 12
+                        wrapMode: Text.Wrap
+                        font: Kirigami.Theme.smallFont
+                        opacity: 0.7
+                        text: modelData.note
+                    }
+                    QQC2.Button {
+                        visible: !modelData.installed || modelData.deletable
+                        enabled: page.dictationBusy === ""
+                        icon.name: modelData.installed ? "edit-delete" : "download"
+                        text: modelData.installed ? i18n("Delete") : i18n("Download")
+                        onClicked: page.runDictate([modelData.installed ? "--delete-model" : "--get-model", modelData.name])
+                        QQC2.ToolTip.visible: hovered
+                        QQC2.ToolTip.text: modelData.installed ? i18n("Delete the %1 model; download it again any time", modelData.name)
+                                                               : i18n("Download the %1 model (%2 MB, from huggingface.co) and use it", modelData.name, modelData.mb)
+                    }
+                    QQC2.Label {
+                        visible: modelData.installed && !modelData.deletable
+                        font: Kirigami.Theme.smallFont
+                        opacity: 0.7
+                        text: i18n("whisper.cpp's own")
+                    }
+                }
+            }
+        }
+
+        QQC2.Button {
+            visible: page.dictation !== null && !!page.dictation.engine && page.dictation.chosen !== "auto"
+            enabled: page.dictationBusy === ""
+            flat: true
+            text: i18n("Use the Best One Downloaded")
+            onClicked: page.runDictate(["--use-model", "auto"])
+        }
+
+        RowLayout {
+            visible: page.dictation !== null && page.dictation.setUp
+            spacing: Kirigami.Units.smallSpacing
+
+            QQC2.Button {
+                visible: !page.removeAsking
+                enabled: page.dictationBusy === ""
+                icon.name: "edit-delete"
+                text: i18n("Remove faster-whisper…")
+                onClicked: page.removeAsking = true
+            }
+            QQC2.Label {
+                visible: page.removeAsking
+                Layout.maximumWidth: Kirigami.Units.gridUnit * 14
+                wrapMode: Text.Wrap
+                text: i18n("Delete faster-whisper and its speech models? Dictating needs setting up again then.")
+            }
+            QQC2.Button {
+                visible: page.removeAsking
+                icon.name: "edit-delete"
+                text: i18n("Delete")
+                onClicked: {
+                    page.removeAsking = false
+                    page.runDictate(["--remove-setup"])
+                }
+            }
+            QQC2.Button {
+                visible: page.removeAsking
+                text: i18n("Cancel")
+                onClicked: page.removeAsking = false
+            }
+        }
+
+        QQC2.Label {
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 20
+            visible: page.dictationMessage !== ""
+            wrapMode: Text.Wrap
+            font: Kirigami.Theme.smallFont
+            text: page.dictationMessage
         }
 
         QQC2.CheckBox {
