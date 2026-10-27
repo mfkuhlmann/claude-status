@@ -1298,10 +1298,11 @@ class SharedCopiesTests(Fixture):
 
 
 class OldPythonTests(unittest.TestCase):
-    """talpy_den.py, sharing.py, accounts.py, week.py and the live hook also run on SSH hosts, whose python3 may be as old as 3.7."""
+    """talpy_den.py, sharing.py, accounts.py, week.py and the live hook also run on SSH hosts, whose python3 may be as old as 3.7
+    (and dictate.py's tests run on the CI's Python 3.7 too)."""
 
     def test_no_syntax_or_calls_newer_than_37(self):
-        for name in ("talpy_den.py", "sharing.py", "accounts.py", "week.py", "live_hook.py", "live.py"):
+        for name in ("talpy_den.py", "sharing.py", "accounts.py", "week.py", "live_hook.py", "live.py", "dictate.py"):
             source = (ROOT / "package/contents/code" / name).read_text()
             # no := or f"{x=}" (3.7 itself parses only what it supports)
             tree = ast.parse(source, feature_version=(3, 7)) if sys.version_info >= (3, 8) else ast.parse(source)
